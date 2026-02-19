@@ -19,6 +19,7 @@ const initialSearch = {
   domesticTrackingNo: "",
   status: "",
   transportMode: "",
+  warehouseId: "",
 };
 
 const warehouseOptions = [
@@ -133,7 +134,8 @@ export default function ClientHomePage() {
             (item.domesticTrackingNo ?? "").toLowerCase().includes(search.domesticTrackingNo.toLowerCase()),
         )
         .filter((item) => !search.status || (item.currentStatus ?? "").toLowerCase() === search.status.toLowerCase())
-        .filter((item) => !search.transportMode || item.transportMode === search.transportMode);
+        .filter((item) => !search.transportMode || item.transportMode === search.transportMode)
+        .filter((item) => !search.warehouseId || item.warehouseId === search.warehouseId);
       setQueriedOrders(result);
       setHasQueried(true);
     } catch (error) {
@@ -390,6 +392,18 @@ export default function ClientHomePage() {
                 <option value="">运输方式（全部）</option>
                 <option value="sea">海运</option>
                 <option value="land">陆运</option>
+              </select>
+              <select
+                value={search.warehouseId}
+                onChange={(e) => setSearch((v) => ({ ...v, warehouseId: e.target.value }))}
+                style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}
+              >
+                <option value="">仓库（全部）</option>
+                {warehouseOptions.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))}
               </select>
             </div>
 
