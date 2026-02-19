@@ -38,6 +38,7 @@ export default function ClientHomePage() {
   const [pendingPrealerts, setPendingPrealerts] = useState<OrderItem[]>([]);
   const [prealertsCollapsed, setPrealertsCollapsed] = useState(true);
   const [showAllPrealerts, setShowAllPrealerts] = useState(false);
+  const [queryPanelCollapsed, setQueryPanelCollapsed] = useState(false);
   const [openLogisticsByOrder, setOpenLogisticsByOrder] = useState<Record<string, boolean>>({});
   const [search, setSearch] = useState(initialSearch);
   const [aiQuestion, setAiQuestion] = useState("");
@@ -52,7 +53,6 @@ export default function ClientHomePage() {
     volumeM3: "",
     domesticTrackingNo: "",
     transportMode: "" as "" | "sea" | "land",
-    shipDate: "",
   });
 
   const refreshMainData = async () => {
@@ -80,8 +80,8 @@ export default function ClientHomePage() {
     setLoading(true);
     setMessage("");
     try {
-      if (!form.warehouseId || !form.itemName.trim() || !form.transportMode || !form.shipDate) {
-        setMessage("请填写仓库、品名、运输方式、发货日期。");
+      if (!form.warehouseId || !form.itemName.trim() || !form.transportMode) {
+        setMessage("请填写仓库、品名、运输方式。");
         setLoading(false);
         return;
       }
@@ -94,7 +94,6 @@ export default function ClientHomePage() {
         volumeM3: form.volumeM3 ? Number(form.volumeM3) : undefined,
         domesticTrackingNo: form.domesticTrackingNo.trim() || undefined,
         transportMode: form.transportMode as "sea" | "land",
-        shipDate: form.shipDate,
       });
       setToast("预报单提交成功");
       setMessage(`预报单创建成功：${result.prealertId}`);
@@ -110,14 +109,6 @@ export default function ClientHomePage() {
   const runOrderQuery = async () => {
     if (!queryMode) {
       setMessage("请先选择“订单在途”或“订单已完成”。");
-      return;
-    }
-
-    const hasAnyCondition = Object.values(search).some((value) => value.trim() !== "");
-    if (!hasAnyCondition) {
-      setMessage("请先选择至少一个搜索条件，再执行查询。");
-      setHasQueried(false);
-      setQueriedOrders([]);
       return;
     }
 
@@ -325,9 +316,27 @@ export default function ClientHomePage() {
 
       <section className="client-query-section">
         <div className="section-label section-label-query">查询区</div>
-        <h2 style={{ marginTop: 0, fontSize: 20 }}>我的订单查询</h2>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <h2 style={{ margin: 0, fontSize: 20 }}>我的订单查询</h2>
+          <button
+            type="button"
+            onClick={() => setQueryPanelCollapsed((v) => !v)}
+            style={{
+              border: "1px solid #d1d5db",
+              borderRadius: 8,
+              padding: "6px 10px",
+              color: "#374151",
+              background: "#fff",
+              fontWeight: 600,
+            }}
+          >
+            {queryPanelCollapsed ? "展开" : "折叠"}
+          </button>
+        </div>
 
-        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        {!queryPanelCollapsed ? (
+          <>
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
           <button
             type="button"
             onClick={() => changeQueryMode("unfinished")}
@@ -354,7 +363,7 @@ export default function ClientHomePage() {
           >
             订单已完成
           </button>
-        </div>
+            </div>
 
         {!queryMode ? (
           <EmptyStateCard title="订单已折叠" description="请先点击“订单在途”或“订单已完成”，再展开搜索框进行查询。" />
@@ -373,13 +382,15 @@ export default function ClientHomePage() {
                 placeholder="订单号"
                 style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}
               />
-              <input
-                type="date"
-                value={search.arrivedDate}
-                onChange={(e) => setSearch((v) => ({ ...v, arrivedDate: e.target.value }))}
-                placeholder="到仓日期"
-                style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}
-              />
+              <div style={{ display: "grid", gap: 4 }}>
+                <input
+                  type="date"
+                  value={search.arrivedDate}
+                  onChange={(e) => setSearch((v) => ({ ...v, arrivedDate: e.target.value }))}
+                  style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}
+                />
+                <div style={{ fontSize: 12, color: "#64748b" }}>说明：该日期为到仓日期</div>
+              </div>
               <input
                 value={search.domesticTrackingNo}
                 onChange={(e) => setSearch((v) => ({ ...v, domesticTrackingNo: e.target.value }))}
@@ -448,7 +459,7 @@ export default function ClientHomePage() {
           </>
         )}
 
-        {hasQueried && queriedOrders.map((item, idx) => (
+            {hasQueried && queriedOrders.map((item, idx) => (
           <article key={item.id} className="order-card">
             <div className="order-head">
               <div className="order-title">#{idx + 1} 订单 {item.id}</div>
@@ -496,7 +507,7 @@ export default function ClientHomePage() {
                 <div className="order-field-value">{item.volumeM3 ?? "-"}</div>
               </div>
               <div className="order-field">
-                <div className="order-field-label">到仓日期</div>
+                <div className="order-field-label">日期（到仓日期）</div>
                 <div className="order-field-value">{item.shipDate ?? item.createdAt.slice(0, 10)}</div>
               </div>
               <div className="order-field">
@@ -562,7 +573,9 @@ export default function ClientHomePage() {
               </div>
             ) : null}
           </article>
-        ))}
+            ))}
+          </>
+        ) : null}
       </section>
 
       <div className="section-divider" aria-hidden />
@@ -638,13 +651,6 @@ export default function ClientHomePage() {
             <option value="sea">海运</option>
             <option value="land">陆运</option>
           </select>
-          <input
-            type="date"
-            value={form.shipDate}
-            onChange={(e) => setForm((v) => ({ ...v, shipDate: e.target.value }))}
-            placeholder="发货日期"
-            style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}
-          />
           <button
             type="button"
             disabled={loading}

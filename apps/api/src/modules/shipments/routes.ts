@@ -99,9 +99,11 @@ export function registerShipmentRoutes(app: MinimalHttpApp, db: DatabaseSync): v
         SELECT
           s.id, s.tracking_no, s.batch_no, s.current_status, s.warehouse_id, s.updated_at,
           s.domestic_tracking_no, s.package_count, s.weight_kg, s.volume_m3,
-          o.item_name, o.product_quantity, o.created_at
+          o.client_id, o.item_name, o.product_quantity, o.created_at,
+          u.name AS client_name
         FROM shipments s
         LEFT JOIN orders o ON o.id = s.order_id
+        LEFT JOIN users u ON u.id = o.client_id
         WHERE s.company_id = ?
         ORDER BY s.updated_at DESC
       `)
@@ -116,6 +118,8 @@ export function registerShipmentRoutes(app: MinimalHttpApp, db: DatabaseSync): v
       package_count: number | null;
       weight_kg: number | null;
       volume_m3: number | null;
+      client_id: string | null;
+      client_name: string | null;
       item_name: string | null;
       product_quantity: number | null;
       created_at: string | null;
@@ -125,6 +129,8 @@ export function registerShipmentRoutes(app: MinimalHttpApp, db: DatabaseSync): v
       id: r.id,
       trackingNo: r.tracking_no,
       batchNo: r.batch_no,
+      clientId: r.client_id ?? undefined,
+      clientName: r.client_name ?? undefined,
       itemName: r.item_name ?? undefined,
       domesticTrackingNo: r.domestic_tracking_no ?? undefined,
       packageCount: r.package_count ?? undefined,

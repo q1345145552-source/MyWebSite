@@ -1,9 +1,9 @@
 "use client";
 
 import { type ReactNode, useEffect, useMemo, useState } from "react";
+import * as XLSX from "xlsx";
 import EmptyStateCard from "../../modules/layout/EmptyStateCard";
 import RoleShell from "../../modules/layout/RoleShell";
-import StepGuide from "../../modules/layout/StepGuide";
 import Toast from "../../modules/layout/Toast";
 import {
   approveStaffPrealert,
@@ -47,6 +47,7 @@ export default function StaffHomePage() {
     warehouseId: "",
   });
   const [prealertPanelCollapsed, setPrealertPanelCollapsed] = useState(false);
+  const [shipmentListCollapsed, setShipmentListCollapsed] = useState(false);
   const [clientSearchKeyword, setClientSearchKeyword] = useState("");
   const [shipments, setShipments] = useState<ShipmentItem[]>([]);
   const [prealerts, setPrealerts] = useState<OrderItem[]>([]);
@@ -65,6 +66,20 @@ export default function StaffHomePage() {
   const [statusEditDraft, setStatusEditDraft] = useState({
     toStatus: "",
     remark: "",
+  });
+  const [shipmentSearch, setShipmentSearch] = useState({
+    batchNo: "",
+    clientName: "",
+    itemName: "",
+    trackingNo: "",
+    domesticTrackingNo: "",
+    packageCount: "",
+    productQuantity: "",
+    weightKg: "",
+    volumeM3: "",
+    arrivedAt: "",
+    warehouseId: "",
+    logisticsStatus: "",
   });
   const [form, setForm] = useState({
     clientId: "u_client_001",
@@ -516,6 +531,61 @@ export default function StaffHomePage() {
     });
   }, [shipments, statusHasSearched, statusSearch]);
 
+  const searchedBatchNo = useMemo(() => statusSearch.batchNo.trim(), [statusSearch.batchNo]);
+  const exactBatchNo = useMemo(() => {
+    if (!searchedBatchNo) return "";
+    const exact = filteredStatusShipments.find(
+      (item) => (item.batchNo ?? "").trim().toLowerCase() === searchedBatchNo.toLowerCase(),
+    );
+    return (exact?.batchNo ?? "").trim();
+  }, [filteredStatusShipments, searchedBatchNo]);
+  const batchNoForBulkEdit = exactBatchNo || searchedBatchNo;
+  const canSubmitBatchEdit = Boolean(statusEditDraft.toStatus.trim()) && Boolean(statusEditDraft.remark.trim());
+
+  const filteredShipmentList = useMemo(() => {
+    const batchNoKeyword = shipmentSearch.batchNo.trim().toLowerCase();
+    const clientNameKeyword = shipmentSearch.clientName.trim().toLowerCase();
+    const itemNameKeyword = shipmentSearch.itemName.trim().toLowerCase();
+    const trackingNoKeyword = shipmentSearch.trackingNo.trim().toLowerCase();
+    const domesticTrackingKeyword = shipmentSearch.domesticTrackingNo.trim().toLowerCase();
+    const packageCountKeyword = shipmentSearch.packageCount.trim();
+    const productQuantityKeyword = shipmentSearch.productQuantity.trim();
+    const weightKgKeyword = shipmentSearch.weightKg.trim();
+    const volumeM3Keyword = shipmentSearch.volumeM3.trim();
+    const arrivedAtKeyword = shipmentSearch.arrivedAt.trim();
+    const warehouseKeyword = shipmentSearch.warehouseId.trim();
+    const logisticsStatusKeyword = shipmentSearch.logisticsStatus.trim();
+
+    return shipments.filter((item) => {
+      const batchNo = (item.batchNo ?? "").toLowerCase();
+      const clientName = `${item.clientName ?? ""} ${item.clientId ?? ""}`.toLowerCase();
+      const itemName = (item.itemName ?? "").toLowerCase();
+      const trackingNo = (item.trackingNo ?? "").toLowerCase();
+      const domesticTrackingNo = (item.domesticTrackingNo ?? "").toLowerCase();
+      const packageCount = item.packageCount == null ? "" : String(item.packageCount);
+      const productQuantity = item.productQuantity == null ? "" : String(item.productQuantity);
+      const weightKg = item.weightKg == null ? "" : String(item.weightKg);
+      const volumeM3 = item.volumeM3 == null ? "" : String(item.volumeM3);
+      const arrivedAt = item.arrivedAt ? item.arrivedAt.slice(0, 10) : "";
+      const warehouseId = (item.warehouseId ?? "").toLowerCase();
+      const logisticsStatus = toLogisticsStatus(item.currentStatus);
+
+      if (batchNoKeyword && !batchNo.includes(batchNoKeyword)) return false;
+      if (clientNameKeyword && !clientName.includes(clientNameKeyword)) return false;
+      if (itemNameKeyword && !itemName.includes(itemNameKeyword)) return false;
+      if (trackingNoKeyword && !trackingNo.includes(trackingNoKeyword)) return false;
+      if (domesticTrackingKeyword && !domesticTrackingNo.includes(domesticTrackingKeyword)) return false;
+      if (packageCountKeyword && !packageCount.includes(packageCountKeyword)) return false;
+      if (productQuantityKeyword && !productQuantity.includes(productQuantityKeyword)) return false;
+      if (weightKgKeyword && !weightKg.includes(weightKgKeyword)) return false;
+      if (volumeM3Keyword && !volumeM3.includes(volumeM3Keyword)) return false;
+      if (arrivedAtKeyword && !arrivedAt.includes(arrivedAtKeyword)) return false;
+      if (warehouseKeyword && warehouseId !== warehouseKeyword.toLowerCase()) return false;
+      if (logisticsStatusKeyword && logisticsStatus !== logisticsStatusKeyword) return false;
+      return true;
+    });
+  }, [shipments, shipmentSearch]);
+
   const orderCreateInputStyle = {
     border: "1px solid #d1d5db",
     borderRadius: 8,
@@ -523,6 +593,35 @@ export default function StaffHomePage() {
     width: "100%",
     marginBottom: 8,
   } as const;
+
+  const exportShipmentsToExcel = () => {
+    if (filteredShipmentList.length === 0) {
+      setMessage("当前没有可导出的运单数据。");
+      return;
+    }
+    const rows = filteredShipmentList.map((item) => ({
+      客户名: item.clientName ?? item.clientId ?? "-",
+      柜号: item.batchNo ?? "-",
+      品名: item.itemName ?? "-",
+      湘泰运单号: item.trackingNo ?? "-",
+      国内单号: item.domesticTrackingNo ?? "-",
+      包裹数量: item.packageCount ?? "-",
+      产品数量: item.productQuantity ?? "-",
+      重量kg: item.weightKg ?? "-",
+      体积m3: item.volumeM3 ?? "-",
+      到仓日期: item.arrivedAt ? item.arrivedAt.slice(0, 10) : "-",
+      国内仓库: item.warehouseId ?? "-",
+      物流状态: toLogisticsStatus(item.currentStatus) || "-",
+      可编辑: item.canEdit ? "是" : "否",
+      更新时间: item.updatedAt ?? "-",
+    }));
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "运单列表");
+    const today = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(workbook, `运单列表_${today}.xlsx`);
+    setToast("导出Excel成功");
+  };
 
   return (
     <RoleShell allowedRole="staff" title="员工工作台">
@@ -927,7 +1026,10 @@ export default function StaffHomePage() {
           <input type="number" value={form.productQuantity} onChange={(e) => setForm((v) => ({ ...v, productQuantity: e.target.value }))} placeholder="产品数量（可不填）" style={orderCreateInputStyle} />
           <input type="number" step="0.01" value={form.weightKg} onChange={(e) => setForm((v) => ({ ...v, weightKg: e.target.value }))} placeholder="重量（kg）" style={orderCreateInputStyle} />
           <input type="number" step="0.001" value={form.volumeM3} onChange={(e) => setForm((v) => ({ ...v, volumeM3: e.target.value }))} placeholder="体积（m3）" style={orderCreateInputStyle} />
-          <input type="date" value={form.arrivedAt} onChange={(e) => setForm((v) => ({ ...v, arrivedAt: e.target.value }))} placeholder="到仓日期" style={orderCreateInputStyle} />
+          <div style={{ display: "grid", gap: 4 }}>
+            <input type="date" value={form.arrivedAt} onChange={(e) => setForm((v) => ({ ...v, arrivedAt: e.target.value }))} style={orderCreateInputStyle} />
+            <div style={{ fontSize: 12, color: "#64748b", marginTop: -6, marginBottom: 8 }}>说明：该日期为到仓日期</div>
+          </div>
         </div>
         <div style={{ marginTop: 10 }}>
           <button type="button" disabled={loading} onClick={() => void submitOrder()} style={{ border: "none", borderRadius: 8, padding: "8px 14px", color: "#fff", background: "#374151" }}>
@@ -996,25 +1098,39 @@ export default function StaffHomePage() {
           </button>
         </div>
         <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
-          {statusHasSearched && statusSearch.batchNo.trim() && filteredStatusShipments.length > 0 ? (
+          {statusHasSearched && searchedBatchNo && filteredStatusShipments.length > 0 ? (
             <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 10, background: "#f8fafc" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                 <div style={{ color: "#334155", fontWeight: 600 }}>
-                  当前柜号：{statusSearch.batchNo.trim()}（共 {filteredStatusShipments.length} 条）
+                  当前柜号：{batchNoForBulkEdit}（共 {filteredStatusShipments.length} 条）
                 </div>
                 <button
                   type="button"
-                  disabled={loading}
+                  disabled={loading || !exactBatchNo}
                   onClick={() => {
                     setEditingShipmentId(null);
-                    setEditingBatchNo(statusSearch.batchNo.trim());
+                    setEditingBatchNo(batchNoForBulkEdit);
                     setStatusEditDraft({ toStatus: "", remark: "" });
                   }}
-                  style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 12px", background: "#fff", fontWeight: 600, color: "#374151" }}
+                  style={{
+                    border: "1px solid #d1d5db",
+                    borderRadius: 8,
+                    padding: "6px 12px",
+                    background: "#fff",
+                    fontWeight: 600,
+                    color: "#374151",
+                    cursor: loading || !exactBatchNo ? "not-allowed" : "pointer",
+                    opacity: loading || !exactBatchNo ? 0.55 : 1,
+                  }}
                 >
                   按当前柜号批量状态修改
                 </button>
               </div>
+              {!exactBatchNo ? (
+                <div style={{ marginTop: 8, color: "#b45309", fontSize: 13 }}>
+                  提示：当前是模糊匹配，建议输入完整柜号后再执行批量修改。
+                </div>
+              ) : null}
               {editingBatchNo ? (
                 <div style={{ marginTop: 10, display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
                   <select
@@ -1041,7 +1157,15 @@ export default function StaffHomePage() {
                       type="button"
                       disabled={loading}
                       onClick={() => void submitBatchStatusUpdate(editingBatchNo)}
-                      style={{ border: "none", borderRadius: 8, padding: "8px 14px", color: "#fff", background: "#4b5563" }}
+                      style={{
+                        border: "none",
+                        borderRadius: 8,
+                        padding: "8px 14px",
+                        color: "#fff",
+                        background: "#4b5563",
+                        cursor: loading ? "not-allowed" : "pointer",
+                        opacity: loading ? 0.55 : 1,
+                      }}
                     >
                       确认批量修改
                     </button>
@@ -1057,6 +1181,11 @@ export default function StaffHomePage() {
                       取消
                     </button>
                   </div>
+                  {!canSubmitBatchEdit ? (
+                    <div style={{ color: "#b45309", fontSize: 13 }}>
+                      可直接点击“确认批量修改”，系统会提示你缺少的必填项。
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -1146,30 +1275,189 @@ export default function StaffHomePage() {
           boxShadow: "0 1px 3px rgba(15,23,42,0.06)",
         }}
       >
-        <h2 style={{ marginTop: 0, fontSize: 18, color: "#111827", marginBottom: 12 }}>运单列表</h2>
-        <StepGuide steps={["查看仓库范围数据", "确认状态是否可编辑", "继续流转下一节点"]} />
-        {shipments.length === 0 ? (
-          <EmptyStateCard title="暂无运单数据" description="先创建订单或等待系统分配运单后，这里会展示可操作记录。" />
-        ) : null}
-        {shipments.map((item) => (
-          <div key={item.id} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 12, marginBottom: 10, background: "#fff" }}>
-            <div style={{ fontWeight: 700, marginBottom: 6 }}>{item.id} / 状态：{item.currentStatus}</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 6 }}>
-              <InfoItem label="柜号" value={item.batchNo ?? "-"} />
-              <InfoItem label="品名" value={item.itemName ?? "-"} />
-              <InfoItem label="湘泰运单号" value={item.trackingNo ?? "-"} />
-              <InfoItem label="国内单号" value={item.domesticTrackingNo ?? "-"} />
-              <InfoItem label="包裹数量" value={String(item.packageCount ?? "-")} />
-              <InfoItem label="产品数量" value={String(item.productQuantity ?? "-")} />
-              <InfoItem label="重量" value={`${item.weightKg ?? "-"} kg`} />
-              <InfoItem label="体积" value={`${item.volumeM3 ?? "-"} m3`} />
-              <InfoItem label="到仓日期" value={item.arrivedAt ? item.arrivedAt.slice(0, 10) : "-"} />
-              <InfoItem label="仓库" value={item.warehouseId ?? "-"} />
-              <InfoItem label="可编辑" value={item.canEdit ? "是" : "否"} />
-              <InfoItem label="更新时间" value={item.updatedAt ?? "-"} />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <h2 style={{ margin: 0, fontSize: 18, color: "#111827" }}>运单列表</h2>
+          <button
+            type="button"
+            onClick={() => setShipmentListCollapsed((v) => !v)}
+            style={{
+              border: "1px solid #d1d5db",
+              borderRadius: 8,
+              padding: "6px 10px",
+              color: "#374151",
+              background: "#fff",
+              fontWeight: 600,
+            }}
+          >
+            {shipmentListCollapsed ? "展开" : "折叠"}
+          </button>
+        </div>
+        {!shipmentListCollapsed ? (
+          <>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                gap: 8,
+                marginBottom: 10,
+              }}
+            >
+              <input
+                value={shipmentSearch.batchNo}
+                onChange={(e) => setShipmentSearch((prev) => ({ ...prev, batchNo: e.target.value }))}
+                placeholder="柜号"
+                style={orderCreateInputStyle}
+              />
+              <input
+                value={shipmentSearch.clientName}
+                onChange={(e) => setShipmentSearch((prev) => ({ ...prev, clientName: e.target.value }))}
+                placeholder="客户名"
+                style={orderCreateInputStyle}
+              />
+              <input
+                value={shipmentSearch.itemName}
+                onChange={(e) => setShipmentSearch((prev) => ({ ...prev, itemName: e.target.value }))}
+                placeholder="品名"
+                style={orderCreateInputStyle}
+              />
+              <input
+                value={shipmentSearch.trackingNo}
+                onChange={(e) => setShipmentSearch((prev) => ({ ...prev, trackingNo: e.target.value }))}
+                placeholder="湘泰运单号"
+                style={orderCreateInputStyle}
+              />
+              <input
+                value={shipmentSearch.domesticTrackingNo}
+                onChange={(e) => setShipmentSearch((prev) => ({ ...prev, domesticTrackingNo: e.target.value }))}
+                placeholder="国内单号"
+                style={orderCreateInputStyle}
+              />
+              <input
+                value={shipmentSearch.packageCount}
+                onChange={(e) => setShipmentSearch((prev) => ({ ...prev, packageCount: e.target.value }))}
+                placeholder="包裹数量"
+                style={orderCreateInputStyle}
+              />
+              <input
+                value={shipmentSearch.productQuantity}
+                onChange={(e) => setShipmentSearch((prev) => ({ ...prev, productQuantity: e.target.value }))}
+                placeholder="产品数量"
+                style={orderCreateInputStyle}
+              />
+              <input
+                value={shipmentSearch.weightKg}
+                onChange={(e) => setShipmentSearch((prev) => ({ ...prev, weightKg: e.target.value }))}
+                placeholder="重量"
+                style={orderCreateInputStyle}
+              />
+              <input
+                value={shipmentSearch.volumeM3}
+                onChange={(e) => setShipmentSearch((prev) => ({ ...prev, volumeM3: e.target.value }))}
+                placeholder="体积"
+                style={orderCreateInputStyle}
+              />
+              <div style={{ display: "grid", gap: 4 }}>
+                <input
+                  type="date"
+                  value={shipmentSearch.arrivedAt}
+                  onChange={(e) => setShipmentSearch((prev) => ({ ...prev, arrivedAt: e.target.value }))}
+                  style={orderCreateInputStyle}
+                />
+                <div style={{ fontSize: 12, color: "#64748b", marginTop: -6, marginBottom: 8 }}>说明：该日期为到仓日期</div>
+              </div>
+              <select
+                value={shipmentSearch.warehouseId}
+                onChange={(e) => setShipmentSearch((prev) => ({ ...prev, warehouseId: e.target.value }))}
+                style={orderCreateInputStyle}
+              >
+                <option value="">国内仓库（全部）</option>
+                {warehouseOptions.map((warehouse) => (
+                  <option key={warehouse.id} value={warehouse.id}>
+                    {warehouse.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={shipmentSearch.logisticsStatus}
+                onChange={(e) => setShipmentSearch((prev) => ({ ...prev, logisticsStatus: e.target.value }))}
+                style={orderCreateInputStyle}
+              >
+                <option value="">物流状态（全部）</option>
+                {logisticsStatusOptions.map((status) => (
+                  <option key={status} value={status}>
+                    {status}
+                  </option>
+                ))}
+              </select>
             </div>
-          </div>
-        ))}
+            <div style={{ marginBottom: 12, display: "flex", gap: 8 }}>
+              <button
+                type="button"
+                onClick={() =>
+                  setShipmentSearch({
+                    batchNo: "",
+                    clientName: "",
+                    itemName: "",
+                    trackingNo: "",
+                    domesticTrackingNo: "",
+                    packageCount: "",
+                    productQuantity: "",
+                    weightKg: "",
+                    volumeM3: "",
+                    arrivedAt: "",
+                    warehouseId: "",
+                    logisticsStatus: "",
+                  })
+                }
+                style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 14px", background: "#fff" }}
+              >
+                清空筛选
+              </button>
+              <button
+                type="button"
+                onClick={exportShipmentsToExcel}
+                disabled={filteredShipmentList.length === 0}
+                style={{
+                  border: "none",
+                  borderRadius: 8,
+                  padding: "8px 14px",
+                  color: "#fff",
+                  background: filteredShipmentList.length === 0 ? "#94a3b8" : "#2563eb",
+                  cursor: filteredShipmentList.length === 0 ? "not-allowed" : "pointer",
+                }}
+              >
+                导出Excel
+              </button>
+            </div>
+            <div style={{ marginBottom: 10, color: "#475569", fontSize: 13 }}>
+              搜索结果数量：共 {filteredShipmentList.length} 条
+            </div>
+            {shipments.length === 0 ? (
+              <EmptyStateCard title="暂无运单数据" description="先创建订单或等待系统分配运单后，这里会展示可操作记录。" />
+            ) : filteredShipmentList.length === 0 ? (
+              <EmptyStateCard title="没有匹配结果" description="请调整搜索条件后重试。" />
+            ) : null}
+            {filteredShipmentList.map((item) => (
+              <div key={item.id} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 12, marginBottom: 10, background: "#fff" }}>
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>客户名：{item.clientName ?? item.clientId ?? "-"}</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 6 }}>
+                  <InfoItem label="柜号" value={item.batchNo ?? "-"} />
+                  <InfoItem label="品名" value={item.itemName ?? "-"} />
+                  <InfoItem label="湘泰运单号" value={item.trackingNo ?? "-"} />
+                  <InfoItem label="国内单号" value={item.domesticTrackingNo ?? "-"} />
+                  <InfoItem label="包裹数量" value={String(item.packageCount ?? "-")} />
+                  <InfoItem label="产品数量" value={String(item.productQuantity ?? "-")} />
+                  <InfoItem label="重量" value={`${item.weightKg ?? "-"} kg`} />
+                  <InfoItem label="体积" value={`${item.volumeM3 ?? "-"} m3`} />
+                  <InfoItem label="到仓日期" value={item.arrivedAt ? item.arrivedAt.slice(0, 10) : "-"} />
+                  <InfoItem label="仓库" value={item.warehouseId ?? "-"} />
+                  <InfoItem label="可编辑" value={item.canEdit ? "是" : "否"} />
+                  <InfoItem label="更新时间" value={item.updatedAt ?? "-"} />
+                </div>
+              </div>
+            ))}
+          </>
+        ) : null}
       </section>
 
       {message ? <p style={{ marginTop: 12, color: message.includes("失败") ? "#b91c1c" : "#065f46" }}>{message}</p> : null}

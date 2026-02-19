@@ -26,18 +26,13 @@ export function registerOrderRoutes(app: MinimalHttpApp, db: DatabaseSync): void
       return;
     }
 
-    const shipDateText = body.shipDate?.trim();
-    if (!shipDateText) {
-      fail(res, 400, "BAD_REQUEST", "shipDate is required");
-      return;
-    }
+    const now = new Date().toISOString();
+    const shipDateText = body.shipDate?.trim() || now.slice(0, 10);
     const shipDate = new Date(`${shipDateText}T00:00:00`);
     if (Number.isNaN(shipDate.getTime())) {
       fail(res, 400, "BAD_REQUEST", "invalid shipDate");
       return;
     }
-
-    const now = shipDate.toISOString();
     const weightKg = body.weightKg === undefined || body.weightKg === null ? null : Number(body.weightKg);
     const volumeM3 = body.volumeM3 === undefined || body.volumeM3 === null ? null : Number(body.volumeM3);
     const orderId = `o_${Date.now()}`;

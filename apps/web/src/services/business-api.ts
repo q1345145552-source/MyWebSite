@@ -26,7 +26,7 @@ export interface ClientPrealertPayload {
   packageUnit: "bag" | "box";
   weightKg?: number;
   volumeM3?: number;
-  shipDate: string;
+  shipDate?: string;
   domesticTrackingNo?: string;
   transportMode: "sea" | "land";
 }
@@ -35,6 +35,8 @@ export interface ShipmentItem {
   id: string;
   trackingNo: string;
   batchNo?: string;
+  clientId?: string;
+  clientName?: string;
   itemName?: string;
   domesticTrackingNo?: string;
   packageCount?: number;
