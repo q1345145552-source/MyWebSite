@@ -38,6 +38,7 @@ export default function ClientHomePage() {
   const [pendingPrealerts, setPendingPrealerts] = useState<OrderItem[]>([]);
   const [prealertsCollapsed, setPrealertsCollapsed] = useState(true);
   const [showAllPrealerts, setShowAllPrealerts] = useState(false);
+  const [openLogisticsByOrder, setOpenLogisticsByOrder] = useState<Record<string, boolean>>({});
   const [search, setSearch] = useState(initialSearch);
   const [aiQuestion, setAiQuestion] = useState("");
   const [aiAnswer, setAiAnswer] = useState("");
@@ -177,6 +178,13 @@ export default function ClientHomePage() {
       return "order-badge order-badge-sea";
     }
     return "order-badge";
+  };
+
+  const logisticsStatusText = (status?: string): string => {
+    const value = (status ?? "").toLowerCase();
+    if (value === "delivered" || value === "returned" || value === "cancelled") return "已到达";
+    if (value === "intransit" || value === "customsth" || value === "outfordelivery") return "途中";
+    return "已收货";
   };
 
   return (
@@ -491,7 +499,68 @@ export default function ClientHomePage() {
                 <div className="order-field-label">到仓日期</div>
                 <div className="order-field-value">{item.shipDate ?? item.createdAt.slice(0, 10)}</div>
               </div>
+              <div className="order-field">
+                <div className="order-field-label">物流状态</div>
+                <div className="order-field-value">
+                  {logisticsStatusText(item.currentStatus)}
+                  {(item.logisticsRecords?.length ?? 0) > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setOpenLogisticsByOrder((prev) => ({
+                          ...prev,
+                          [item.id]: !prev[item.id],
+                        }))
+                      }
+                      style={{
+                        marginLeft: 8,
+                        border: "1px solid #d1d5db",
+                        borderRadius: 8,
+                        padding: "2px 8px",
+                        background: "#fff",
+                        color: "#1d4ed8",
+                        cursor: "pointer",
+                        fontSize: 12,
+                      }}
+                    >
+                      {openLogisticsByOrder[item.id] ? "收起记录" : `查看记录（${item.logisticsRecords?.length ?? 0}）`}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
             </div>
+            {openLogisticsByOrder[item.id] && (item.logisticsRecords?.length ?? 0) > 0 ? (
+              <div
+                style={{
+                  marginTop: 10,
+                  border: "1px solid #e2e8f0",
+                  borderRadius: 8,
+                  background: "#f8fafc",
+                  padding: 10,
+                  display: "grid",
+                  gap: 8,
+                }}
+              >
+                {item.logisticsRecords?.map((record, index) => (
+                  <div
+                    key={`${item.id}-${record.changedAt}-${index}`}
+                    style={{
+                      border: "1px solid #e2e8f0",
+                      borderRadius: 8,
+                      padding: "8px 10px",
+                      background: "#fff",
+                      color: "#334155",
+                      fontSize: 13,
+                    }}
+                  >
+                    <div style={{ marginBottom: 4, fontWeight: 600 }}>
+                      时间：{new Date(record.changedAt).toLocaleString("zh-CN", { hour12: false })}
+                    </div>
+                    <div>物流信息：{record.remark}</div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </article>
         ))}
       </section>

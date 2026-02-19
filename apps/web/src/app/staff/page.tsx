@@ -36,6 +36,7 @@ export default function StaffHomePage() {
     { id: "wh_guangzhou_01", label: "广州" },
     { id: "wh_dongguan_01", label: "东莞" },
   ];
+  const logisticsStatusOptions = ["已收货", "途中", "已到达"] as const;
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [toast, setToast] = useState("");
@@ -54,33 +55,35 @@ export default function StaffHomePage() {
   const [prealertConfirmedDrafts, setPrealertConfirmedDrafts] = useState<Record<string, PrealertEditDraft>>({});
   const [editingPrealertId, setEditingPrealertId] = useState<string | null>(null);
   const [createStepDone, setCreateStepDone] = useState(false);
-  const [statusStepDone, setStatusStepDone] = useState(false);
+  const [statusSearch, setStatusSearch] = useState({
+    batchNo: "",
+    shipmentStatus: "",
+  });
+  const [statusHasSearched, setStatusHasSearched] = useState(false);
+  const [editingShipmentId, setEditingShipmentId] = useState<string | null>(null);
+  const [editingBatchNo, setEditingBatchNo] = useState<string | null>(null);
+  const [statusEditDraft, setStatusEditDraft] = useState({
+    toStatus: "",
+    remark: "",
+  });
   const [form, setForm] = useState({
     clientId: "u_client_001",
-    warehouseId: "wh_bkk_01",
-    batchNo: "CAB-2026-A01",
-    trackingNo: "XT00010001",
-    arrivedAt: new Date().toISOString().slice(0, 10),
-    itemName: "耳机",
+    warehouseId: "wh_yiwu_01",
+    batchNo: "",
+    trackingNo: "",
+    arrivedAt: "",
+    itemName: "",
     productQuantity: "",
-    packageCount: "4",
-    volumeM3: "0.2",
-    weightKg: "18.5",
-    domesticOrderNo: "SF77889900",
+    packageCount: "",
+    volumeM3: "",
+    weightKg: "",
+    domesticOrderNo: "",
     packageUnit: "box" as "bag" | "box",
     transportMode: "land" as "sea" | "land",
     receiverNameTh: "Anan",
     receiverPhoneTh: "0820000000",
     receiverAddressTh: "Chiang Mai",
   });
-  const [statusForm, setStatusForm] = useState({
-    shipmentId: "s_001",
-    batchNo: "CAB-2026-A01",
-    updateByBatch: false,
-    toStatus: "customsTH",
-    remark: "staff update",
-  });
-
   const buildPrealertDraft = (item: OrderItem): PrealertEditDraft => ({
     warehouseId: item.warehouseId ?? "",
     itemName: item.itemName,
@@ -139,6 +142,21 @@ export default function StaffHomePage() {
       return "发货日期格式无效，请重新选择日期。";
     }
     return null;
+  };
+
+  const toLogisticsStatus = (status?: string): "" | "已收货" | "途中" | "已到达" => {
+    if (!status) return "";
+    const v = status.trim();
+    if (v === "delivered" || v === "returned" || v === "cancelled") return "已到达";
+    if (v === "inTransit" || v === "customsTH" || v === "outForDelivery") return "途中";
+    return "已收货";
+  };
+
+  const toSystemStatus = (logisticsStatus: string): string => {
+    if (logisticsStatus === "已收货") return "created";
+    if (logisticsStatus === "途中") return "inTransit";
+    if (logisticsStatus === "已到达") return "delivered";
+    return logisticsStatus;
   };
 
   const loadPageData = async () => {
@@ -260,18 +278,71 @@ export default function StaffHomePage() {
     }
   };
 
-  const submitStatusUpdate = async () => {
+  const submitStatusUpdate = async (shipmentId: string) => {
+    const toStatus = toSystemStatus(statusEditDraft.toStatus.trim());
+    const remark = statusEditDraft.remark.trim();
+    if (!toStatus) {
+      setMessage("请先选择物流状态。");
+      return;
+    }
+    if (!remark) {
+      setMessage("请先填写编辑信息。");
+      return;
+    }
     setLoading(true);
     setMessage("");
     try {
-      const result = await updateStaffShipmentStatus(statusForm);
-      setStatusStepDone(true);
+      const result = await updateStaffShipmentStatus({
+        shipmentId,
+        toStatus,
+        remark,
+      });
       setToast("运单状态更新成功");
       setMessage(
         result.mode === "batch"
           ? `批次 ${result.batchNo ?? "-"} 更新成功，共 ${result.updatedCount} 条 -> ${result.toStatus}`
           : `状态更新成功：${result.fromStatus ?? "-"} -> ${result.toStatus}`,
       );
+      setEditingShipmentId(null);
+      setStatusEditDraft({ toStatus: "", remark: "" });
+      await loadPageData();
+    } catch (error) {
+      const text = error instanceof Error ? error.message : "更新失败";
+      setMessage(`更新失败：${text}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const submitBatchStatusUpdate = async (batchNo: string) => {
+    const targetBatchNo = batchNo.trim();
+    const toStatus = toSystemStatus(statusEditDraft.toStatus.trim());
+    const remark = statusEditDraft.remark.trim();
+    if (!targetBatchNo) {
+      setMessage("请先输入柜号并搜索。");
+      return;
+    }
+    if (!toStatus) {
+      setMessage("请先选择物流状态。");
+      return;
+    }
+    if (!remark) {
+      setMessage("请先填写编辑信息。");
+      return;
+    }
+    setLoading(true);
+    setMessage("");
+    try {
+      const result = await updateStaffShipmentStatus({
+        batchNo: targetBatchNo,
+        updateByBatch: true,
+        toStatus,
+        remark,
+      });
+      setToast("批量状态更新成功");
+      setMessage(`批次 ${result.batchNo ?? targetBatchNo} 更新成功，共 ${result.updatedCount} 条 -> ${result.toStatus}`);
+      setEditingBatchNo(null);
+      setStatusEditDraft({ toStatus: "", remark: "" });
       await loadPageData();
     } catch (error) {
       const text = error instanceof Error ? error.message : "更新失败";
@@ -432,6 +503,19 @@ export default function StaffHomePage() {
       .filter((item) => !prealertSearch.transportMode || item.transportMode === prealertSearch.transportMode);
   }, [prealerts, prealertSearch]);
 
+  const filteredStatusShipments = useMemo(() => {
+    if (!statusHasSearched) return [];
+    const batchNoKeyword = statusSearch.batchNo.trim().toLowerCase();
+    const shipmentStatusKeyword = statusSearch.shipmentStatus.trim();
+    return shipments.filter((item) => {
+      const batchNo = (item.batchNo ?? "").toLowerCase();
+      const logisticsStatus = toLogisticsStatus(item.currentStatus);
+      const batchMatched = !batchNoKeyword || batchNo.includes(batchNoKeyword);
+      const statusMatched = !shipmentStatusKeyword || logisticsStatus === shipmentStatusKeyword;
+      return batchMatched && statusMatched;
+    });
+  }, [shipments, statusHasSearched, statusSearch]);
+
   const orderCreateInputStyle = {
     border: "1px solid #d1d5db",
     borderRadius: 8,
@@ -458,7 +542,7 @@ export default function StaffHomePage() {
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-          <h2 style={{ margin: 0, fontSize: 18, color: "#111827" }}>1. 客户预报单审核</h2>
+          <h2 style={{ margin: 0, fontSize: 18, color: "#111827" }}>客户预报单审核</h2>
           <button
             type="button"
             onClick={() => setPrealertPanelCollapsed((v) => !v)}
@@ -812,7 +896,7 @@ export default function StaffHomePage() {
           boxShadow: "0 1px 3px rgba(15,23,42,0.06)",
         }}
       >
-        <h2 style={{ marginTop: 0, fontSize: 18, color: "#111827", marginBottom: 12 }}>2. 创建订单（员工）</h2>
+        <h2 style={{ marginTop: 0, fontSize: 18, color: "#111827", marginBottom: 12 }}>创建订单（员工）</h2>
         <div style={{ display: "grid", gap: 0, maxWidth: 760 }}>
           <input
             value={clientSearchKeyword}
@@ -863,42 +947,192 @@ export default function StaffHomePage() {
           boxShadow: "0 1px 3px rgba(15,23,42,0.06)",
         }}
       >
-        <h2 style={{ marginTop: 0, fontSize: 18, color: "#111827", marginBottom: 12 }}>3. 更新订单状态（员工）</h2>
-        <StepGuide
-          steps={["选择单号或批次", "选择目标状态", "提交并记录痕迹"]}
-          completedSteps={statusStepDone ? [0, 1, 2] : []}
-        />
-        <div style={{ display: "grid", gap: 8, maxWidth: 900, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
-          <FieldCard label="更新模式">
-            <label style={{ color: "#475569", fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}>
-              <input
-                type="checkbox"
-                checked={statusForm.updateByBatch}
-                onChange={(e) => setStatusForm((v) => ({ ...v, updateByBatch: e.target.checked }))}
-              />
-              按柜号/批次同步更新
-            </label>
-          </FieldCard>
-          {statusForm.updateByBatch ? (
-            <FieldCard label="柜号/批次">
-              <input value={statusForm.batchNo} onChange={(e) => setStatusForm((v) => ({ ...v, batchNo: e.target.value }))} placeholder="例如 CAB-2026-A01" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", width: "100%" }} />
-            </FieldCard>
-          ) : (
-            <FieldCard label="运单ID">
-              <input value={statusForm.shipmentId} onChange={(e) => setStatusForm((v) => ({ ...v, shipmentId: e.target.value }))} placeholder="shipmentId" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", width: "100%" }} />
-            </FieldCard>
-          )}
-          <FieldCard label="目标状态">
-            <input value={statusForm.toStatus} onChange={(e) => setStatusForm((v) => ({ ...v, toStatus: e.target.value }))} placeholder="toStatus" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", width: "100%" }} />
-          </FieldCard>
-          <FieldCard label="备注">
-            <input value={statusForm.remark} onChange={(e) => setStatusForm((v) => ({ ...v, remark: e.target.value }))} placeholder="remark" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", width: "100%" }} />
-          </FieldCard>
+        <h2 style={{ marginTop: 0, fontSize: 18, color: "#111827", marginBottom: 12 }}>更新订单状态（员工）</h2>
+        <div style={{ display: "grid", gap: 8, maxWidth: 760, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
+          <input
+            value={statusSearch.batchNo}
+            onChange={(e) => setStatusSearch((v) => ({ ...v, batchNo: e.target.value }))}
+            placeholder="柜号"
+            style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", width: "100%" }}
+          />
+          <select
+            value={statusSearch.shipmentStatus}
+            onChange={(e) => setStatusSearch((v) => ({ ...v, shipmentStatus: e.target.value }))}
+            style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", width: "100%" }}
+          >
+            <option value="">物流状态（全部）</option>
+            {logisticsStatusOptions.map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
+          </select>
         </div>
-        <div style={{ marginTop: 10 }}>
-          <button type="button" disabled={loading} onClick={() => void submitStatusUpdate()} style={{ border: "none", borderRadius: 8, padding: "8px 14px", color: "#fff", background: "#4b5563" }}>
-            更新状态
+        <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => {
+              setStatusHasSearched(true);
+              setEditingShipmentId(null);
+              setEditingBatchNo(null);
+            }}
+            style={{ border: "none", borderRadius: 8, padding: "8px 14px", color: "#fff", background: "#4b5563" }}
+          >
+            搜索
           </button>
+          <button
+            type="button"
+            onClick={() => {
+              setStatusSearch({ batchNo: "", shipmentStatus: "" });
+              setStatusHasSearched(false);
+              setEditingShipmentId(null);
+              setEditingBatchNo(null);
+              setStatusEditDraft({ toStatus: "", remark: "" });
+            }}
+            style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 14px", background: "#fff" }}
+          >
+            清空
+          </button>
+        </div>
+        <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+          {statusHasSearched && statusSearch.batchNo.trim() && filteredStatusShipments.length > 0 ? (
+            <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 10, background: "#f8fafc" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                <div style={{ color: "#334155", fontWeight: 600 }}>
+                  当前柜号：{statusSearch.batchNo.trim()}（共 {filteredStatusShipments.length} 条）
+                </div>
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={() => {
+                    setEditingShipmentId(null);
+                    setEditingBatchNo(statusSearch.batchNo.trim());
+                    setStatusEditDraft({ toStatus: "", remark: "" });
+                  }}
+                  style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 12px", background: "#fff", fontWeight: 600, color: "#374151" }}
+                >
+                  按当前柜号批量状态修改
+                </button>
+              </div>
+              {editingBatchNo ? (
+                <div style={{ marginTop: 10, display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
+                  <select
+                    value={statusEditDraft.toStatus}
+                    onChange={(e) => setStatusEditDraft((v) => ({ ...v, toStatus: e.target.value }))}
+                    style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}
+                  >
+                    <option value="">选择物流状态</option>
+                    {logisticsStatusOptions.map((status) => (
+                      <option key={status} value={status}>
+                        {status}
+                      </option>
+                    ))}
+                  </select>
+                  <textarea
+                    value={statusEditDraft.remark}
+                    onChange={(e) => setStatusEditDraft((v) => ({ ...v, remark: e.target.value }))}
+                    placeholder="编辑信息（手动输入，必填）"
+                    rows={3}
+                    style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", resize: "vertical" }}
+                  />
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      type="button"
+                      disabled={loading}
+                      onClick={() => void submitBatchStatusUpdate(editingBatchNo)}
+                      style={{ border: "none", borderRadius: 8, padding: "8px 14px", color: "#fff", background: "#4b5563" }}
+                    >
+                      确认批量修改
+                    </button>
+                    <button
+                      type="button"
+                      disabled={loading}
+                      onClick={() => {
+                        setEditingBatchNo(null);
+                        setStatusEditDraft({ toStatus: "", remark: "" });
+                      }}
+                      style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 14px", background: "#fff" }}
+                    >
+                      取消
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          {!statusHasSearched ? (
+            <EmptyStateCard title="请先搜索" description="输入柜号和物流状态后点击“搜索”。" />
+          ) : filteredStatusShipments.length === 0 ? (
+            <EmptyStateCard title="无匹配结果" description="可调整柜号或物流状态后重新搜索。" />
+          ) : (
+            filteredStatusShipments.map((item) => (
+              <div key={item.id} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 10, background: "#fff" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                  <div style={{ display: "flex", gap: 14, color: "#374151", fontWeight: 600 }}>
+                    <span>柜号：{item.batchNo ?? "-"}</span>
+                    <span>物流状态：{toLogisticsStatus(item.currentStatus) || "-"}</span>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => {
+                      setEditingBatchNo(null);
+                      setEditingShipmentId(item.id);
+                      setStatusEditDraft({ toStatus: toLogisticsStatus(item.currentStatus), remark: "" });
+                    }}
+                    style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 12px", background: "#fff", fontWeight: 600, color: "#374151" }}
+                  >
+                    状态修改
+                  </button>
+                </div>
+                {editingShipmentId === item.id ? (
+                  <div style={{ marginTop: 10, display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
+                    <select
+                      value={statusEditDraft.toStatus}
+                      onChange={(e) => setStatusEditDraft((v) => ({ ...v, toStatus: e.target.value }))}
+                      style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}
+                    >
+                      <option value="">选择物流状态</option>
+                      {logisticsStatusOptions.map((status) => (
+                        <option key={status} value={status}>
+                          {status}
+                        </option>
+                      ))}
+                    </select>
+                    <textarea
+                      value={statusEditDraft.remark}
+                      onChange={(e) => setStatusEditDraft((v) => ({ ...v, remark: e.target.value }))}
+                      placeholder="编辑信息（手动输入，必填）"
+                      rows={3}
+                      style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", resize: "vertical" }}
+                    />
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button
+                        type="button"
+                        disabled={loading}
+                        onClick={() => void submitStatusUpdate(item.id)}
+                        style={{ border: "none", borderRadius: 8, padding: "8px 14px", color: "#fff", background: "#4b5563" }}
+                      >
+                        确认修改
+                      </button>
+                      <button
+                        type="button"
+                        disabled={loading}
+                        onClick={() => {
+                          setEditingShipmentId(null);
+                          setStatusEditDraft({ toStatus: "", remark: "" });
+                        }}
+                        style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 14px", background: "#fff" }}
+                      >
+                        取消
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ))
+          )}
         </div>
       </section>
 
@@ -912,7 +1146,7 @@ export default function StaffHomePage() {
           boxShadow: "0 1px 3px rgba(15,23,42,0.06)",
         }}
       >
-        <h2 style={{ marginTop: 0, fontSize: 18, color: "#111827", marginBottom: 12 }}>4. 运单列表</h2>
+        <h2 style={{ marginTop: 0, fontSize: 18, color: "#111827", marginBottom: 12 }}>运单列表</h2>
         <StepGuide steps={["查看仓库范围数据", "确认状态是否可编辑", "继续流转下一节点"]} />
         {shipments.length === 0 ? (
           <EmptyStateCard title="暂无运单数据" description="先创建订单或等待系统分配运单后，这里会展示可操作记录。" />

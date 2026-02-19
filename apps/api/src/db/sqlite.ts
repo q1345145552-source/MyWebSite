@@ -6,6 +6,10 @@ export interface DbContext {
   db: DatabaseSync;
 }
 
+const CURRENT_WAREHOUSE_IDS = ["wh_yiwu_01", "wh_guangzhou_01", "wh_dongguan_01"] as const;
+const DEFAULT_WAREHOUSE_ID = "wh_yiwu_01";
+const LEGACY_WAREHOUSE_IDS = ["wh_bkk_01", "wh_bkk_02"] as const;
+
 function dbFilePath(): string {
   const custom = process.env.SQLITE_PATH;
   if (custom?.trim()) return custom;
@@ -25,6 +29,8 @@ export function createDbContext(): DbContext {
   ensureSchema(db);
   ensureSeedData(db);
   ensureClientDemoOrders(db);
+  ensureWarehouseCompatibility(db);
+  ensureShipmentsForApprovedOrders(db);
   return { db };
 }
 
@@ -160,7 +166,7 @@ function ensureSeedData(db: DatabaseSync): void {
     "Staff One",
     "13000000002",
     "active",
-    JSON.stringify(["wh_bkk_01"]),
+    JSON.stringify(CURRENT_WAREHOUSE_IDS),
     now,
   );
   insertUser.run(
@@ -398,4 +404,102 @@ function ensureClientDemoOrders(db: DatabaseSync): void {
       createdAt,
     );
   }
+}
+
+function ensureWarehouseCompatibility(db: DatabaseSync): void {
+  const staffRows = db
+    .prepare("SELECT id, warehouse_ids FROM users WHERE role = 'staff'")
+    .all() as Array<{ id: string; warehouse_ids: string }>;
+
+  const updateUserWarehouses = db.prepare("UPDATE users SET warehouse_ids = ? WHERE id = ?");
+  for (const row of staffRows) {
+    let parsed: string[] = [];
+    try {
+      const value = JSON.parse(row.warehouse_ids);
+      parsed = Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+    } catch {
+      parsed = [];
+    }
+
+    const normalized = parsed.map((item) => item.trim()).filter(Boolean);
+    const mapped = normalized.flatMap((item) => {
+      if (LEGACY_WAREHOUSE_IDS.includes(item as (typeof LEGACY_WAREHOUSE_IDS)[number])) {
+        return [DEFAULT_WAREHOUSE_ID];
+      }
+      return [item];
+    });
+    const deduped = Array.from(new Set(mapped));
+    const validCurrent = deduped.filter((item) =>
+      CURRENT_WAREHOUSE_IDS.includes(item as (typeof CURRENT_WAREHOUSE_IDS)[number]),
+    );
+
+    if (validCurrent.length === 0) {
+      updateUserWarehouses.run(JSON.stringify(CURRENT_WAREHOUSE_IDS), row.id);
+      continue;
+    }
+    if (JSON.stringify(validCurrent) !== JSON.stringify(normalized)) {
+      updateUserWarehouses.run(JSON.stringify(validCurrent), row.id);
+    }
+  }
+
+  const updateOrderWarehouse = db.prepare("UPDATE orders SET warehouse_id = ? WHERE warehouse_id = ?");
+  const updateShipmentWarehouse = db.prepare("UPDATE shipments SET warehouse_id = ? WHERE warehouse_id = ?");
+  for (const legacyId of LEGACY_WAREHOUSE_IDS) {
+    updateOrderWarehouse.run(DEFAULT_WAREHOUSE_ID, legacyId);
+    updateShipmentWarehouse.run(DEFAULT_WAREHOUSE_ID, legacyId);
+  }
+}
+
+function ensureShipmentsForApprovedOrders(db: DatabaseSync): void {
+  const rows = db.prepare(`
+    SELECT
+      o.id, o.company_id, o.batch_no, o.warehouse_id, o.package_count, o.package_unit, o.transport_mode,
+      o.domestic_tracking_no, o.weight_kg, o.volume_m3, o.created_at, o.updated_at
+    FROM orders o
+    LEFT JOIN shipments s ON s.order_id = o.id AND s.company_id = o.company_id
+    WHERE o.approval_status = 'approved' AND s.id IS NULL
+  `).all() as Array<{
+    id: string;
+    company_id: string;
+    batch_no: string | null;
+    warehouse_id: string;
+    package_count: number;
+    package_unit: string;
+    transport_mode: string;
+    domestic_tracking_no: string | null;
+    weight_kg: number | null;
+    volume_m3: number | null;
+    created_at: string;
+    updated_at: string;
+  }>;
+  if (rows.length === 0) return;
+
+  const insertShipment = db.prepare(`
+    INSERT OR IGNORE INTO shipments (
+      id, company_id, order_id, tracking_no, batch_no, current_status, current_location, weight_kg, volume_m3,
+      package_count, package_unit, transport_mode, domestic_tracking_no, warehouse_id, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  rows.forEach((row, idx) => {
+    const now = new Date().toISOString();
+    insertShipment.run(
+      `s_sync_${Date.now()}_${idx}`,
+      row.company_id,
+      row.id,
+      `AUTO_${row.id}`,
+      row.batch_no,
+      "created",
+      null,
+      row.weight_kg,
+      row.volume_m3,
+      row.package_count,
+      row.package_unit,
+      row.transport_mode,
+      row.domestic_tracking_no,
+      row.warehouse_id,
+      row.created_at || now,
+      row.updated_at || now,
+    );
+  });
 }

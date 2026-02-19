@@ -56,6 +56,13 @@ export interface OrderItem {
   clientName?: string;
   warehouseId?: string;
   batchNo?: string;
+  latestRemark?: string;
+  logisticsRecords?: Array<{
+    remark: string;
+    changedAt: string;
+    fromStatus?: string;
+    toStatus?: string;
+  }>;
   itemName: string;
   transportMode: string;
   approvalStatus?: "pending" | "approved";

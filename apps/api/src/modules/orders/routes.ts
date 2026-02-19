@@ -193,10 +193,18 @@ export function registerOrderRoutes(app: MinimalHttpApp, db: DatabaseSync): void
     const rows = db
       .prepare(`
         SELECT
-          o.id, o.client_id, o.order_no, o.item_name, o.transport_mode, o.domestic_tracking_no,
+          o.id, o.client_id, o.warehouse_id, o.order_no, o.item_name, o.transport_mode, o.domestic_tracking_no,
           o.batch_no, o.approval_status,
           o.product_quantity, o.package_count, o.package_unit, o.weight_kg, o.volume_m3, o.ship_date, o.created_at, o.updated_at,
-          s.tracking_no, s.current_status
+          s.tracking_no, s.current_status,
+          (
+            SELECT sl.remark
+            FROM status_logs sl
+            JOIN shipments sx ON sx.id = sl.shipment_id
+            WHERE sx.order_id = o.id AND sl.company_id = o.company_id AND sl.remark IS NOT NULL AND sl.remark != ''
+            ORDER BY sl.changed_at DESC
+            LIMIT 1
+          ) as latest_remark
         FROM orders o
         LEFT JOIN shipments s ON s.order_id = o.id
         WHERE o.company_id = ? AND o.approval_status = 'approved'
@@ -205,6 +213,7 @@ export function registerOrderRoutes(app: MinimalHttpApp, db: DatabaseSync): void
       .all(auth.companyId) as Array<{
       id: string;
       client_id: string;
+      warehouse_id: string;
       order_no: string | null;
       item_name: string;
       transport_mode: string;
@@ -221,6 +230,7 @@ export function registerOrderRoutes(app: MinimalHttpApp, db: DatabaseSync): void
       updated_at: string;
       tracking_no: string | null;
       current_status: string | null;
+      latest_remark: string | null;
     }>;
 
     const filtered = rows
@@ -235,9 +245,27 @@ export function registerOrderRoutes(app: MinimalHttpApp, db: DatabaseSync): void
         if (statusGroup === "completed") return completed;
         if (statusGroup === "unfinished") return !completed;
         return true;
-      })
-      .map((row) => ({
+      });
+
+    const historyStmt = db.prepare(`
+      SELECT sl.remark, sl.changed_at, sl.from_status, sl.to_status
+      FROM status_logs sl
+      JOIN shipments s ON s.id = sl.shipment_id
+      WHERE s.order_id = ? AND sl.company_id = ? AND sl.remark IS NOT NULL AND sl.remark != ''
+      ORDER BY sl.changed_at DESC
+      LIMIT 20
+    `);
+
+    const items = filtered.map((row) => {
+      const logisticsRecords = historyStmt.all(row.id, auth.companyId) as Array<{
+        remark: string;
+        changed_at: string;
+        from_status: string;
+        to_status: string;
+      }>;
+      return {
         id: row.id,
+        warehouseId: row.warehouse_id,
         orderNo: row.order_no,
         itemName: row.item_name,
         transportMode: row.transport_mode,
@@ -252,15 +280,23 @@ export function registerOrderRoutes(app: MinimalHttpApp, db: DatabaseSync): void
         weightKg: row.weight_kg,
         volumeM3: row.volume_m3,
         shipDate: row.ship_date,
+        latestRemark: logisticsRecords[0]?.remark ?? row.latest_remark,
+        logisticsRecords: logisticsRecords.map((record) => ({
+          remark: record.remark,
+          changedAt: record.changed_at,
+          fromStatus: record.from_status,
+          toStatus: record.to_status,
+        })),
         createdAt: row.created_at,
         updatedAt: row.updated_at,
-      }));
+      };
+    });
 
     ok(res, {
-      items: filtered,
+      items,
       page: 1,
-      pageSize: filtered.length,
-      total: filtered.length,
+      pageSize: items.length,
+      total: items.length,
     });
   });
 
@@ -270,7 +306,7 @@ export function registerOrderRoutes(app: MinimalHttpApp, db: DatabaseSync): void
     const rows = db
       .prepare(`
         SELECT
-          id, client_id, order_no, item_name, transport_mode, domestic_tracking_no, batch_no, approval_status,
+          id, client_id, warehouse_id, order_no, item_name, transport_mode, domestic_tracking_no, batch_no, approval_status,
           product_quantity, package_count, package_unit, weight_kg, volume_m3, ship_date, created_at, updated_at
         FROM orders
         WHERE company_id = ? AND approval_status = 'pending'
@@ -279,6 +315,7 @@ export function registerOrderRoutes(app: MinimalHttpApp, db: DatabaseSync): void
       .all(auth.companyId) as Array<{
       id: string;
       client_id: string;
+      warehouse_id: string;
       order_no: string | null;
       item_name: string;
       transport_mode: string;
@@ -298,6 +335,7 @@ export function registerOrderRoutes(app: MinimalHttpApp, db: DatabaseSync): void
       .filter((row) => row.client_id === auth.userId)
       .map((row) => ({
         id: row.id,
+        warehouseId: row.warehouse_id,
         orderNo: row.order_no,
         itemName: row.item_name,
         transportMode: row.transport_mode,
@@ -516,6 +554,38 @@ export function registerOrderRoutes(app: MinimalHttpApp, db: DatabaseSync): void
       now,
       order.id,
     );
+
+    const existingShipment = db
+      .prepare("SELECT id FROM shipments WHERE order_id = ? AND company_id = ? LIMIT 1")
+      .get(order.id, auth.companyId) as { id: string } | undefined;
+    if (!existingShipment) {
+      const shipmentId = `s_${Date.now()}`;
+      const generatedTrackingNo = `AUTO_${order.id}`;
+      db.prepare(`
+        INSERT INTO shipments (
+          id, company_id, order_id, tracking_no, batch_no, current_status, current_location,
+          weight_kg, volume_m3, package_count, package_unit, transport_mode, domestic_tracking_no,
+          warehouse_id, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        shipmentId,
+        auth.companyId,
+        order.id,
+        generatedTrackingNo,
+        batchNo,
+        "created",
+        null,
+        weightKg,
+        volumeM3,
+        packageCount,
+        packageUnit,
+        transportMode,
+        domesticTrackingNo,
+        order.warehouse_id,
+        now,
+        now,
+      );
+    }
     ok(res, { orderId: order.id, batchNo, approvalStatus: "approved", approvedAt: now });
   });
 }
