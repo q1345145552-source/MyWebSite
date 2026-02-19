@@ -10,6 +10,7 @@ export function registerOrderRoutes(app: MinimalHttpApp, db: DatabaseSync): void
     if (!auth) return;
 
     const body = (req.body ?? {}) as {
+      warehouseId?: string;
       itemName?: string;
       packageCount?: number;
       packageUnit?: "bag" | "box";
@@ -20,7 +21,7 @@ export function registerOrderRoutes(app: MinimalHttpApp, db: DatabaseSync): void
       transportMode?: "sea" | "land";
     };
 
-    if (!body.itemName || !body.transportMode) {
+    if (!body.warehouseId?.trim() || !body.itemName || !body.transportMode) {
       fail(res, 400, "BAD_REQUEST", "missing required prealert fields");
       return;
     }
@@ -50,7 +51,7 @@ export function registerOrderRoutes(app: MinimalHttpApp, db: DatabaseSync): void
       orderId,
       auth.companyId,
       auth.userId,
-      "wh_bkk_01",
+      body.warehouseId.trim(),
       null,
       null,
       "pending",
@@ -327,15 +328,17 @@ export function registerOrderRoutes(app: MinimalHttpApp, db: DatabaseSync): void
     const rows = db
       .prepare(`
         SELECT
-          id, client_id, warehouse_id, order_no, item_name, transport_mode, domestic_tracking_no, batch_no, approval_status,
-          product_quantity, package_count, package_unit, weight_kg, volume_m3, ship_date, created_at, updated_at
-        FROM orders
-        WHERE company_id = ? AND approval_status = 'pending'
-        ORDER BY created_at DESC
+          o.id, o.client_id, u.name as client_name, o.warehouse_id, o.order_no, o.item_name, o.transport_mode, o.domestic_tracking_no, o.batch_no, o.approval_status,
+          o.product_quantity, o.package_count, o.package_unit, o.weight_kg, o.volume_m3, o.ship_date, o.created_at, o.updated_at
+        FROM orders o
+        LEFT JOIN users u ON u.id = o.client_id
+        WHERE o.company_id = ? AND o.approval_status = 'pending'
+        ORDER BY o.created_at DESC
       `)
       .all(auth.companyId) as Array<{
       id: string;
       client_id: string;
+      client_name: string | null;
       warehouse_id: string;
       order_no: string | null;
       item_name: string;
@@ -358,6 +361,7 @@ export function registerOrderRoutes(app: MinimalHttpApp, db: DatabaseSync): void
       .map((row) => ({
         id: row.id,
         clientId: row.client_id,
+        clientName: row.client_name,
         warehouseId: row.warehouse_id,
         orderNo: row.order_no,
         itemName: row.item_name,
@@ -380,16 +384,47 @@ export function registerOrderRoutes(app: MinimalHttpApp, db: DatabaseSync): void
   app.post("/staff/prealerts/approve", async (req, res) => {
     const auth = requireRole(req, res, ["staff", "admin"]);
     if (!auth) return;
-    const body = (req.body ?? {}) as { orderId?: string; batchNo?: string };
+    const body = (req.body ?? {}) as {
+      orderId?: string;
+      batchNo?: string;
+      itemName?: string;
+      packageCount?: number;
+      packageUnit?: "bag" | "box";
+      productQuantity?: number;
+      weightKg?: number;
+      volumeM3?: number;
+      domesticTrackingNo?: string;
+      transportMode?: "sea" | "land";
+      shipDate?: string;
+    };
     if (!body.orderId || !body.batchNo?.trim()) {
       fail(res, 400, "BAD_REQUEST", "orderId and batchNo are required");
       return;
     }
 
     const order = db
-      .prepare("SELECT id, warehouse_id, approval_status FROM orders WHERE id = ? AND company_id = ?")
+      .prepare(`
+        SELECT
+          id, warehouse_id, approval_status, item_name, product_quantity, package_count, package_unit,
+          weight_kg, volume_m3, domestic_tracking_no, transport_mode, ship_date
+        FROM orders
+        WHERE id = ? AND company_id = ?
+      `)
       .get(body.orderId, auth.companyId) as
-      | { id: string; warehouse_id: string; approval_status: string }
+      | {
+          id: string;
+          warehouse_id: string;
+          approval_status: string;
+          item_name: string;
+          product_quantity: number;
+          package_count: number;
+          package_unit: string;
+          weight_kg: number | null;
+          volume_m3: number | null;
+          domestic_tracking_no: string | null;
+          transport_mode: string;
+          ship_date: string | null;
+        }
       | undefined;
     if (!order) {
       fail(res, 404, "NOT_FOUND", "prealert order not found");
@@ -413,8 +448,71 @@ export function registerOrderRoutes(app: MinimalHttpApp, db: DatabaseSync): void
 
     const now = new Date().toISOString();
     const batchNo = body.batchNo.trim();
-    db.prepare("UPDATE orders SET approval_status = 'approved', batch_no = ?, updated_at = ? WHERE id = ?").run(
+    const itemName = body.itemName?.trim() || order.item_name;
+    const packageCount = body.packageCount === undefined ? order.package_count : Number(body.packageCount);
+    const productQuantity = body.productQuantity === undefined ? order.product_quantity : Number(body.productQuantity);
+    const packageUnit = body.packageUnit ?? (order.package_unit as "bag" | "box");
+    const weightKg = body.weightKg === undefined ? order.weight_kg : Number(body.weightKg);
+    const volumeM3 = body.volumeM3 === undefined ? order.volume_m3 : Number(body.volumeM3);
+    const domesticTrackingNo =
+      body.domesticTrackingNo === undefined ? order.domestic_tracking_no : body.domesticTrackingNo.trim() || null;
+    const transportMode = body.transportMode ?? (order.transport_mode as "sea" | "land");
+    const shipDate = body.shipDate === undefined ? (order.ship_date ?? now.slice(0, 10)) : body.shipDate.trim();
+
+    if (
+      Number.isNaN(packageCount) ||
+      Number.isNaN(productQuantity) ||
+      (weightKg !== null && Number.isNaN(weightKg)) ||
+      (volumeM3 !== null && Number.isNaN(volumeM3))
+    ) {
+      fail(res, 400, "BAD_REQUEST", "invalid numeric fields");
+      return;
+    }
+    if (packageUnit !== "bag" && packageUnit !== "box") {
+      fail(res, 400, "BAD_REQUEST", "invalid packageUnit");
+      return;
+    }
+    if (transportMode !== "sea" && transportMode !== "land") {
+      fail(res, 400, "BAD_REQUEST", "invalid transportMode");
+      return;
+    }
+    if (!shipDate) {
+      fail(res, 400, "BAD_REQUEST", "shipDate is required");
+      return;
+    }
+    const shipDateParsed = new Date(`${shipDate}T00:00:00`);
+    if (Number.isNaN(shipDateParsed.getTime())) {
+      fail(res, 400, "BAD_REQUEST", "invalid shipDate");
+      return;
+    }
+
+    db.prepare(`
+      UPDATE orders
+      SET
+        approval_status = 'approved',
+        batch_no = ?,
+        item_name = ?,
+        product_quantity = ?,
+        package_count = ?,
+        package_unit = ?,
+        weight_kg = ?,
+        volume_m3 = ?,
+        ship_date = ?,
+        domestic_tracking_no = ?,
+        transport_mode = ?,
+        updated_at = ?
+      WHERE id = ?
+    `).run(
       batchNo,
+      itemName,
+      productQuantity,
+      packageCount,
+      packageUnit,
+      weightKg,
+      volumeM3,
+      shipDate,
+      domesticTrackingNo,
+      transportMode,
       now,
       order.id,
     );

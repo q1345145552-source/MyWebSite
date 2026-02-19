@@ -21,6 +21,12 @@ const initialSearch = {
   transportMode: "",
 };
 
+const warehouseOptions = [
+  { id: "wh_yiwu_01", label: "义乌仓" },
+  { id: "wh_guangzhou_01", label: "广州仓" },
+  { id: "wh_dongguan_01", label: "东莞仓" },
+];
+
 export default function ClientHomePage() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -36,6 +42,7 @@ export default function ClientHomePage() {
   const [aiAnswer, setAiAnswer] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [form, setForm] = useState({
+    warehouseId: "",
     itemName: "",
     packageCount: "",
     packageUnit: "box" as "bag" | "box",
@@ -71,12 +78,13 @@ export default function ClientHomePage() {
     setLoading(true);
     setMessage("");
     try {
-      if (!form.itemName.trim() || !form.transportMode || !form.shipDate) {
-        setMessage("请填写品名、运输方式、发货日期。");
+      if (!form.warehouseId || !form.itemName.trim() || !form.transportMode || !form.shipDate) {
+        setMessage("请填写仓库、品名、运输方式、发货日期。");
         setLoading(false);
         return;
       }
       const result = await createClientPrealert({
+        warehouseId: form.warehouseId,
         itemName: form.itemName.trim(),
         packageCount: Number(form.packageCount || 0),
         packageUnit: form.packageUnit,
@@ -467,7 +475,7 @@ export default function ClientHomePage() {
               </div>
               <div className="order-field">
                 <div className="order-field-label">到仓日期</div>
-                <div className="order-field-value">{item.createdAt.slice(0, 10)}</div>
+                <div className="order-field-value">{item.shipDate ?? item.createdAt.slice(0, 10)}</div>
               </div>
             </div>
           </article>
@@ -483,6 +491,18 @@ export default function ClientHomePage() {
           批次号由员工审核时填写并回写，这里无需填写。
         </p>
         <div style={{ display: "grid", gap: 8, maxWidth: 760 }}>
+          <select
+            value={form.warehouseId}
+            onChange={(e) => setForm((v) => ({ ...v, warehouseId: e.target.value }))}
+            style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}
+          >
+            <option value="">请选择仓库（必填）</option>
+            {warehouseOptions.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.label}
+              </option>
+            ))}
+          </select>
           <input
             value={form.itemName}
             onChange={(e) => setForm((v) => ({ ...v, itemName: e.target.value }))}

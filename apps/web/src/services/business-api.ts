@@ -20,6 +20,7 @@ export interface StaffCreateOrderPayload {
 }
 
 export interface ClientPrealertPayload {
+  warehouseId: string;
   itemName: string;
   packageCount: number;
   packageUnit: "bag" | "box";
@@ -52,6 +53,7 @@ export interface OrderItem {
   id: string;
   orderNo?: string;
   clientId?: string;
+  clientName?: string;
   warehouseId?: string;
   batchNo?: string;
   itemName: string;
@@ -138,7 +140,20 @@ export async function fetchStaffPrealerts(): Promise<OrderItem[]> {
   return data.items;
 }
 
-export async function approveStaffPrealert(orderId: string, batchNo: string): Promise<{
+export async function approveStaffPrealert(payload: {
+  orderId: string;
+  batchNo: string;
+  warehouseId?: string;
+  itemName?: string;
+  packageCount?: number;
+  packageUnit?: "bag" | "box";
+  productQuantity?: number;
+  weightKg?: number;
+  volumeM3?: number;
+  domesticTrackingNo?: string;
+  transportMode?: "sea" | "land";
+  shipDate?: string;
+}): Promise<{
   orderId: string;
   batchNo: string;
   approvalStatus: "approved";
@@ -150,7 +165,7 @@ export async function approveStaffPrealert(orderId: string, batchNo: string): Pr
       "Content-Type": "application/json",
       ...authHeaders(),
     },
-    body: JSON.stringify({ orderId, batchNo }),
+    body: JSON.stringify(payload),
   });
   return parseApiResponse(response);
 }
