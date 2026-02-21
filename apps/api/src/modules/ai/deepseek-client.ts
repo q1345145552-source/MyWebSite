@@ -54,11 +54,14 @@ export class HttpDeepSeekClient implements DeepSeekClient {
       body: JSON.stringify(payload),
     });
 
+    const data = (await response.json()) as DeepSeekResponse & { error?: { message?: string } };
     if (!response.ok) {
-      throw new Error(`DeepSeek request failed: ${response.status}`);
+      const msg = data?.error?.message ?? data?.message ?? `HTTP ${response.status}`;
+      if (response.status === 401) throw new Error("DeepSeek API Key 无效或已过期，请检查 .env 中的 DEEPSEEK_API_KEY。");
+      if (response.status === 402) throw new Error("DeepSeek 账户余额不足或未开通计费，请到平台充值。");
+      throw new Error(`DeepSeek 请求失败：${msg}`);
     }
 
-    const data = (await response.json()) as DeepSeekResponse;
     return data.choices?.[0]?.message?.content?.trim() ?? "未获取到有效回复。";
   }
 }

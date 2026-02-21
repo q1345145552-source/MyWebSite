@@ -94,7 +94,7 @@ lsof -nP -iTCP:3001 -sTCP:LISTEN | awk 'NR>1 {print $2}' | xargs -r kill -9
 
 ### 2) AI 返回“未配置 API Key”
 
-说明后端进程没读到 `DEEPSEEK_API_KEY`。请在同一终端 `export` 后再启动后端。
+说明后端未读到 `DEEPSEEK_API_KEY`。请在项目根目录建 `.env` 并写 `DEEPSEEK_API_KEY=sk-xxx`，或在同一终端 `export DEEPSEEK_API_KEY="sk-xxx"` 后再启动后端。详见 [docs/deepseek-setup.md](docs/deepseek-setup.md)。
 
 ### 3) AI 返回 402
 

@@ -631,3 +631,26 @@ pre {
     transform: translateY(0);
   }
 }
+
+/* Hide calendar icon for the client query date input only. */
+.client-arrived-date-input::-webkit-calendar-picker-indicator {
+  display: none;
+  -webkit-appearance: none;
+}
+
+.client-arrived-date-input {
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.staff-arrived-date-input::-webkit-calendar-picker-indicator,
+.staff-shipment-date-input::-webkit-calendar-picker-indicator {
+  display: none;
+  -webkit-appearance: none;
+}
+
+.staff-arrived-date-input,
+.staff-shipment-date-input {
+  appearance: none;
+  -webkit-appearance: none;
+}

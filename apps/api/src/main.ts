@@ -38,6 +38,18 @@ app.listen(PORT, () => {
   // eslint-disable-next-line no-console
   console.log("[api] GET  /admin/dashboard/overview");
   // eslint-disable-next-line no-console
+  console.log("[api] GET  /admin/users?role=staff|client");
+  // eslint-disable-next-line no-console
+  console.log("[api] POST /admin/users (create staff)");
+  // eslint-disable-next-line no-console
+  console.log("[api] POST /admin/users/client (create client)");
+  // eslint-disable-next-line no-console
+  console.log("[api] DELETE /admin/users?id=xxx");
+  // eslint-disable-next-line no-console
+  console.log("[api] POST /admin/users/set-password");
+  // eslint-disable-next-line no-console
+  console.log("[api] GET  /admin/orders");
+  // eslint-disable-next-line no-console
   console.log("[api] POST /client/ai/chat");
   // eslint-disable-next-line no-console
   console.log("[api] GET  /client/ai/suggestions");

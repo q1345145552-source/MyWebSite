@@ -9,6 +9,7 @@ export interface DbContext {
 const CURRENT_WAREHOUSE_IDS = ["wh_yiwu_01", "wh_guangzhou_01", "wh_dongguan_01"] as const;
 const DEFAULT_WAREHOUSE_ID = "wh_yiwu_01";
 const LEGACY_WAREHOUSE_IDS = ["wh_bkk_01", "wh_bkk_02"] as const;
+const DEMO_STAFF_ACCOUNT_ID = "888888";
 
 function dbFilePath(): string {
   const custom = process.env.SQLITE_PATH;
@@ -28,6 +29,7 @@ export function createDbContext(): DbContext {
   db.exec("PRAGMA foreign_keys = ON;");
   ensureSchema(db);
   ensureSeedData(db);
+  ensurePresetStaffAccount(db);
   ensureClientDemoOrders(db);
   ensureWarehouseCompatibility(db);
   ensureShipmentsForApprovedOrders(db);
@@ -133,6 +135,15 @@ function ensureAdditionalColumns(db: DatabaseSync): void {
   if (!hasColumn(db, "orders", "ship_date")) {
     db.exec("ALTER TABLE orders ADD COLUMN ship_date TEXT;");
   }
+  if (!hasColumn(db, "users", "password_hash")) {
+    db.exec("ALTER TABLE users ADD COLUMN password_hash TEXT;");
+  }
+  if (!hasColumn(db, "users", "company_name")) {
+    db.exec("ALTER TABLE users ADD COLUMN company_name TEXT;");
+  }
+  if (!hasColumn(db, "users", "email")) {
+    db.exec("ALTER TABLE users ADD COLUMN email TEXT;");
+  }
 }
 
 function ensureSeedData(db: DatabaseSync): void {
@@ -221,6 +232,28 @@ function ensureSeedData(db: DatabaseSync): void {
     "SF12345678",
     "wh_bkk_01",
     now,
+    now,
+  );
+}
+
+function ensurePresetStaffAccount(db: DatabaseSync): void {
+  const existed = db.prepare("SELECT COUNT(1) as count FROM users WHERE id = ?").get(DEMO_STAFF_ACCOUNT_ID) as {
+    count: number;
+  };
+  if (existed.count > 0) return;
+
+  const now = nowIso();
+  db.prepare(`
+    INSERT INTO users (id, company_id, role, name, phone, status, warehouse_ids, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    DEMO_STAFF_ACCOUNT_ID,
+    "c_001",
+    "staff",
+    "Staff 888888",
+    "18888888888",
+    "active",
+    JSON.stringify(CURRENT_WAREHOUSE_IDS),
     now,
   );
 }

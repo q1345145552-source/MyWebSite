@@ -88,6 +88,40 @@ export interface AdminOverview {
   receivedVolumeM3Today: number;
 }
 
+export interface AdminUserItem {
+  id: string;
+  companyId: string;
+  role: string;
+  name: string;
+  phone: string;
+  status: string;
+  createdAt: string;
+  companyName?: string;
+  email?: string;
+}
+
+export interface AdminOrderItem {
+  id: string;
+  clientId: string;
+  clientName: string | null;
+  warehouseId: string;
+  orderNo: string | null;
+  itemName: string;
+  transportMode: string;
+  domesticTrackingNo: string | null;
+  batchNo: string | null;
+  approvalStatus: string;
+  productQuantity: number;
+  packageCount: number;
+  packageUnit: string;
+  weightKg: number | null;
+  volumeM3: number | null;
+  shipDate: string | null;
+  statusGroup: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export async function createStaffOrder(payload: StaffCreateOrderPayload): Promise<{
   orderId: string;
   createdAt: string;
@@ -228,6 +262,79 @@ export async function fetchAdminOverview(): Promise<AdminOverview> {
   const response = await fetch(`${apiBaseUrl()}/admin/dashboard/overview`, {
     method: "GET",
     headers: { ...authHeaders() },
+  });
+  return parseApiResponse(response);
+}
+
+export async function fetchAdminStaff(): Promise<AdminUserItem[]> {
+  const response = await fetch(`${apiBaseUrl()}/admin/users?role=staff`, {
+    method: "GET",
+    headers: { ...authHeaders() },
+  });
+  const data = await parseApiResponse<{ items: AdminUserItem[] }>(response);
+  return data.items;
+}
+
+export async function fetchAdminClients(): Promise<AdminUserItem[]> {
+  const response = await fetch(`${apiBaseUrl()}/admin/users?role=client`, {
+    method: "GET",
+    headers: { ...authHeaders() },
+  });
+  const data = await parseApiResponse<{ items: AdminUserItem[] }>(response);
+  return data.items;
+}
+
+export async function fetchAdminOrders(): Promise<AdminOrderItem[]> {
+  const response = await fetch(`${apiBaseUrl()}/admin/orders`, {
+    method: "GET",
+    headers: { ...authHeaders() },
+  });
+  const data = await parseApiResponse<{ items: AdminOrderItem[] }>(response);
+  return data.items;
+}
+
+export async function createAdminStaff(payload: {
+  id?: string;
+  name: string;
+  phone: string;
+  password?: string;
+}): Promise<{ id: string; name: string; phone: string; createdAt: string }> {
+  const response = await fetch(`${apiBaseUrl()}/admin/users`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(payload),
+  });
+  return parseApiResponse(response);
+}
+
+export async function deleteAdminStaff(userId: string): Promise<{ deleted: boolean; id: string }> {
+  const response = await fetch(`${apiBaseUrl()}/admin/users?id=${encodeURIComponent(userId)}`, {
+    method: "DELETE",
+    headers: { ...authHeaders() },
+  });
+  return parseApiResponse(response);
+}
+
+export async function setAdminStaffPassword(userId: string, password: string): Promise<{ updated: boolean; id: string }> {
+  const response = await fetch(`${apiBaseUrl()}/admin/users/set-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ id: userId, password }),
+  });
+  return parseApiResponse(response);
+}
+
+export async function createAdminClient(payload: {
+  id?: string;
+  name: string;
+  companyName?: string;
+  phone: string;
+  email?: string;
+}): Promise<{ id: string; name: string; companyName: string | null; phone: string; email: string | null; createdAt: string }> {
+  const response = await fetch(`${apiBaseUrl()}/admin/users/client`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(payload),
   });
   return parseApiResponse(response);
 }

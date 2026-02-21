@@ -14,7 +14,14 @@ export function authHeaders(): Record<string, string> {
 }
 
 export async function parseApiResponse<T>(response: Response): Promise<T> {
-  const payload = await response.json();
+  const text = await response.text();
+  let payload: { code?: string; message?: string; data?: T } | null = null;
+  try {
+    payload = text ? (JSON.parse(text) as { code?: string; message?: string; data?: T }) : null;
+  } catch {
+    if (!response.ok) throw new Error(`请求失败 ${response.status}${text ? `: ${text.slice(0, 150)}` : ""}`);
+    throw new Error("invalid response");
+  }
   if (!response.ok || payload?.code !== "OK") {
     throw new Error(payload?.message ?? "request failed");
   }

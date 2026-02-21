@@ -382,14 +382,29 @@ export default function ClientHomePage() {
                 placeholder="订单号"
                 style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}
               />
-              <div style={{ display: "grid", gap: 4 }}>
+              <div style={{ position: "relative", width: "100%" }}>
                 <input
                   type="date"
+                  className="client-arrived-date-input"
                   value={search.arrivedDate}
                   onChange={(e) => setSearch((v) => ({ ...v, arrivedDate: e.target.value }))}
-                  style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}
+                  style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 64px 8px 10px", width: "100%", boxSizing: "border-box" }}
                 />
-                <div style={{ fontSize: 12, color: "#64748b" }}>说明：该日期为到仓日期</div>
+                {!search.arrivedDate ? (
+                  <div
+                    style={{
+                      position: "absolute",
+                      right: 36,
+                      top: "50%",
+                      transform: "translateY(-50%)",
+                      fontSize: 12,
+                      color: "#94a3b8",
+                      pointerEvents: "none",
+                    }}
+                  >
+                    到仓日期
+                  </div>
+                ) : null}
               </div>
               <input
                 value={search.domesticTrackingNo}

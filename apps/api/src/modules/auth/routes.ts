@@ -1,6 +1,16 @@
+import crypto from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok } from "../core/http-utils";
+
+function hashPassword(password: string): string {
+  return crypto.createHash("sha256").update(password, "utf8").digest("hex");
+}
+
+function verifyPassword(password: string, passwordHash: string | null): boolean {
+  if (!passwordHash) return true;
+  return hashPassword(password) === passwordHash;
+}
 
 export function registerAuthRoutes(app: MinimalHttpApp, db: DatabaseSync): void {
   app.post("/auth/login", async (req, res) => {
@@ -11,20 +21,25 @@ export function registerAuthRoutes(app: MinimalHttpApp, db: DatabaseSync): void 
     }
 
     const queryById = db.prepare(
-      "SELECT id, company_id, role, name FROM users WHERE id = ? AND status = 'active'",
+      "SELECT id, company_id, role, name, password_hash FROM users WHERE id = ? AND status = 'active'",
     );
     const queryByRole = db.prepare(
-      "SELECT id, company_id, role, name FROM users WHERE role = ? AND status = 'active' LIMIT 1",
+      "SELECT id, company_id, role, name, password_hash FROM users WHERE role = ? AND status = 'active' LIMIT 1",
     );
-    const user =
-      (queryById.get(body.account.trim()) as
-        | { id: string; company_id: string; role: string; name: string }
-        | undefined) ??
-      (queryByRole.get((body.role ?? "client").trim()) as
-        | { id: string; company_id: string; role: string; name: string }
-        | undefined);
+    const rowById = queryById.get(body.account.trim()) as
+      | { id: string; company_id: string; role: string; name: string; password_hash: string | null }
+      | undefined;
+    const rowByRole = queryByRole.get((body.role ?? "client").trim()) as
+      | { id: string; company_id: string; role: string; name: string; password_hash: string | null }
+      | undefined;
+    const user = rowById ?? rowByRole;
 
     if (!user) {
+      fail(res, 401, "UNAUTHORIZED", "invalid credentials");
+      return;
+    }
+
+    if (!verifyPassword(body.password ?? "", user.password_hash)) {
       fail(res, 401, "UNAUTHORIZED", "invalid credentials");
       return;
     }

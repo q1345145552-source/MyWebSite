@@ -1356,14 +1356,30 @@ export default function StaffHomePage() {
                 placeholder="体积"
                 style={orderCreateInputStyle}
               />
-              <div style={{ display: "grid", gap: 4 }}>
+              <div style={{ position: "relative", width: "100%" }}>
                 <input
                   type="date"
+                  className="staff-shipment-date-input"
                   value={shipmentSearch.arrivedAt}
                   onChange={(e) => setShipmentSearch((prev) => ({ ...prev, arrivedAt: e.target.value }))}
-                  style={orderCreateInputStyle}
+                  style={{ ...orderCreateInputStyle, padding: "8px 64px 8px 10px", boxSizing: "border-box", marginBottom: 0 }}
                 />
-                <div style={{ fontSize: 12, color: "#64748b", marginTop: -6, marginBottom: 8 }}>说明：该日期为到仓日期</div>
+                {!shipmentSearch.arrivedAt ? (
+                  <div
+                    style={{
+                      position: "absolute",
+                      right: 10,
+                      top: "50%",
+                      transform: "translateY(-50%)",
+                      fontSize: 12,
+                      color: "#94a3b8",
+                      pointerEvents: "none",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    到仓日期
+                  </div>
+                ) : null}
               </div>
               <select
                 value={shipmentSearch.warehouseId}
