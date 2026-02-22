@@ -14,9 +14,9 @@ export default function RootPage() {
           background: "#f8fafc",
         }}
       >
-        <h1 className="biz-title" style={{ fontSize: 28, margin: 0 }}>中泰物流系统</h1>
+        <h1 className="biz-title" style={{ fontSize: 28, margin: 0 }}>湘泰物流系统</h1>
         <p className="biz-subtitle" style={{ margin: "8px 0 10px 0" }}>
-          单应用 RBAC 入口页。当前为模拟登录模式，可直接选择角色进入对应工作台。
+          单应用 RBAC 入口页。请先登录或注册，再进入对应工作台。
         </p>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
           {globalMenus.map((item) => (

@@ -36,7 +36,7 @@ export class HttpDeepSeekClient implements DeepSeekClient {
         {
           role: "system",
           content:
-            "你是物流客服助手。只能依据给定上下文回答，不允许编造。若信息不足，明确说明信息不足。",
+            "你是湘泰物流AI客服助手。只能依据给定上下文回答，不允许编造。若信息不足，明确说明信息不足。",
         },
         {
           role: "user",

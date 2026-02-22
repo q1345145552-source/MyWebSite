@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { URL } from "node:url";
+import { verifyAuthToken } from "./modules/auth/token";
 
 export interface HttpRequest {
   method: string;
@@ -31,12 +32,16 @@ export interface MinimalHttpApp {
 type RouteTable = Record<string, Handler>;
 
 function parseAuth(headers: IncomingMessage["headers"]): HttpRequest["auth"] {
-  const userId = typeof headers["x-user-id"] === "string" ? headers["x-user-id"] : "u_client_001";
-  const companyId =
-    typeof headers["x-company-id"] === "string" ? headers["x-company-id"] : "c_001";
-  const roleHeader = typeof headers["x-role"] === "string" ? headers["x-role"] : "client";
-  const role = roleHeader === "admin" || roleHeader === "staff" ? roleHeader : "client";
-  return { userId, companyId, role };
+  const authHeader = typeof headers.authorization === "string" ? headers.authorization.trim() : "";
+  const match = authHeader.match(/^Bearer\s+(.+)$/i);
+  if (!match?.[1]) return undefined;
+  const payload = verifyAuthToken(match[1].trim());
+  if (!payload) return undefined;
+  return {
+    userId: payload.userId,
+    companyId: payload.companyId,
+    role: payload.role,
+  };
 }
 
 function createJsonResponse(rawRes: ServerResponse): HttpResponse {

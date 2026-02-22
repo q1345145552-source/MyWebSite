@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import * as XLSX from "xlsx";
 import type { AiKnowledgeItem } from "../../../../../packages/shared-types/entities";
-import { DEFAULT_SESSIONS, getMockSession, type MockSession } from "../../auth/mock-session";
+import { DEFAULT_SESSIONS, getOptionalSession, type MockSession } from "../../auth/mock-session";
 import CountUpNumber from "../../modules/layout/CountUpNumber";
 import EmptyStateCard from "../../modules/layout/EmptyStateCard";
 import RoleShell from "../../modules/layout/RoleShell";
@@ -13,6 +13,10 @@ import {
   fetchAdminStaff,
   fetchAdminClients,
   fetchAdminOrders,
+  fetchAdminAiSessionMemory,
+  fetchAdminAiKnowledgeGaps,
+  clearAdminAiSessionMemory,
+  resolveAdminAiKnowledgeGap,
   createAdminStaff,
   createAdminClient,
   deleteAdminStaff,
@@ -20,6 +24,8 @@ import {
   type AdminOverview,
   type AdminUserItem,
   type AdminOrderItem,
+  type AdminAiSessionMemoryItem,
+  type AdminAiKnowledgeGapItem,
 } from "../../services/business-api";
 import {
   createKnowledgeItem,
@@ -32,6 +38,8 @@ const SECTION_IDS = [
   "staff",
   "clients",
   "orders",
+  "ai-memory",
+  "ai-knowledge-gaps",
   "knowledge-feed",
   "knowledge-list",
 ] as const;
@@ -41,6 +49,8 @@ const SECTION_LABELS: Record<(typeof SECTION_IDS)[number], string> = {
   staff: "员工管理",
   clients: "客户管理",
   orders: "订单数据管理",
+  "ai-memory": "AI会话记忆运维",
+  "ai-knowledge-gaps": "AI待补知识问题",
   "knowledge-feed": "AI知识投喂",
   "knowledge-list": "已投喂的知识列表",
 };
@@ -69,6 +79,9 @@ export default function AdminHomePage() {
   const [staffList, setStaffList] = useState<AdminUserItem[]>([]);
   const [clientList, setClientList] = useState<AdminUserItem[]>([]);
   const [orderList, setOrderList] = useState<AdminOrderItem[]>([]);
+  const [sessionMemoryList, setSessionMemoryList] = useState<AdminAiSessionMemoryItem[]>([]);
+  const [knowledgeGapList, setKnowledgeGapList] = useState<AdminAiKnowledgeGapItem[]>([]);
+  const [knowledgeGapStatus, setKnowledgeGapStatus] = useState<"open" | "resolved">("open");
   const [knowledgeItems, setKnowledgeItems] = useState<AiKnowledgeItem[]>([]);
   const [message, setMessage] = useState("");
   const [toast, setToast] = useState("");
@@ -80,6 +93,8 @@ export default function AdminHomePage() {
   const [clientForm, setClientForm] = useState({ id: "", name: "", companyName: "", phone: "", email: "" });
   const [settingPasswordFor, setSettingPasswordFor] = useState<string | null>(null);
   const [settingPasswordValue, setSettingPasswordValue] = useState("");
+  const [memoryFilterSessionId, setMemoryFilterSessionId] = useState("");
+  const [memoryFilterUserId, setMemoryFilterUserId] = useState("");
 
   const loadOverview = useCallback(async () => {
     const stats = await fetchAdminOverview();
@@ -101,6 +116,16 @@ export default function AdminHomePage() {
     setOrderList(list);
   }, []);
 
+  const loadSessionMemory = useCallback(async () => {
+    const data = await fetchAdminAiSessionMemory({ limit: 200 });
+    setSessionMemoryList(data.items);
+  }, []);
+
+  const loadKnowledgeGaps = useCallback(async () => {
+    const data = await fetchAdminAiKnowledgeGaps({ status: knowledgeGapStatus });
+    setKnowledgeGapList(data.items);
+  }, [knowledgeGapStatus]);
+
   const loadKnowledge = useCallback(async () => {
     const list = await fetchKnowledgeList(session.companyId);
     setKnowledgeItems(list);
@@ -116,6 +141,8 @@ export default function AdminHomePage() {
           loadStaff(),
           loadClients(),
           loadOrders(),
+          loadSessionMemory(),
+          loadKnowledgeGaps(),
           fetchKnowledgeList(currentSession.companyId).then(setKnowledgeItems),
         ]);
       } catch (error) {
@@ -125,11 +152,12 @@ export default function AdminHomePage() {
         setLoading(false);
       }
     },
-    [session, loadOverview, loadStaff, loadClients, loadOrders],
+    [session, loadOverview, loadStaff, loadClients, loadOrders, loadSessionMemory, loadKnowledgeGaps],
   );
 
   useEffect(() => {
-    const next = getMockSession();
+    const next = getOptionalSession();
+    if (!next) return;
     setSession(next);
     void loadAll(next);
   }, []);
@@ -146,6 +174,10 @@ export default function AdminHomePage() {
     const t = window.setTimeout(() => setToast(""), 2200);
     return () => window.clearTimeout(t);
   }, [toast]);
+
+  useEffect(() => {
+    void loadKnowledgeGaps();
+  }, [loadKnowledgeGaps]);
 
   const submitKnowledge = async () => {
     if (!title.trim() || !content.trim()) {
@@ -316,6 +348,41 @@ export default function AdminHomePage() {
 
   const scrollToSection = (id: string) => {
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  const clearSessionMemory = async () => {
+    if (!window.confirm("确定清理当前筛选条件下的 AI 会话记忆吗？")) return;
+    setLoading(true);
+    setMessage("");
+    try {
+      const result = await clearAdminAiSessionMemory({
+        sessionId: memoryFilterSessionId.trim() || undefined,
+        userId: memoryFilterUserId.trim() || undefined,
+      });
+      await loadSessionMemory();
+      setToast("会话记忆已清理");
+      setMessage(`已清理 ${result.removed} 条会话记忆。`);
+    } catch (error) {
+      const text = error instanceof Error ? error.message : "清理失败";
+      setMessage(`清理失败：${text}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resolveKnowledgeGap = async (id: string) => {
+    setLoading(true);
+    setMessage("");
+    try {
+      await resolveAdminAiKnowledgeGap({ id, companyId: session.companyId });
+      await loadKnowledgeGaps();
+      setToast("已标记为已处理");
+    } catch (error) {
+      const text = error instanceof Error ? error.message : "操作失败";
+      setMessage(`操作失败：${text}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -726,7 +793,148 @@ export default function AdminHomePage() {
         )}
       </section>
 
-      {/* 5. AI知识投喂 */}
+      {/* 5. AI会话记忆运维 */}
+      <section id="ai-memory" style={sectionStyle}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <h2 style={{ margin: 0, fontSize: 18 }}>{SECTION_LABELS["ai-memory"]}</h2>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => void loadSessionMemory()}
+              disabled={loading}
+              style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 12px", background: "#fff", cursor: "pointer" }}
+            >
+              刷新
+            </button>
+            <button
+              type="button"
+              onClick={() => void clearSessionMemory()}
+              disabled={loading}
+              style={{ border: "1px solid #dc2626", color: "#dc2626", borderRadius: 8, padding: "6px 12px", background: "#fef2f2", cursor: "pointer", fontWeight: 600 }}
+            >
+              一键清理
+            </button>
+          </div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8, marginBottom: 10 }}>
+          <input
+            value={memoryFilterSessionId}
+            onChange={(e) => setMemoryFilterSessionId(e.target.value)}
+            placeholder="按会话ID清理（选填）"
+            style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", width: "100%" }}
+          />
+          <input
+            value={memoryFilterUserId}
+            onChange={(e) => setMemoryFilterUserId(e.target.value)}
+            placeholder="按用户ID清理（选填）"
+            style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", width: "100%" }}
+          />
+        </div>
+        {sessionMemoryList.length === 0 ? (
+          <EmptyStateCard title="暂无会话记忆" description="当前没有可排查的 AI 会话记忆记录。" />
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: "2px solid #e2e8f0", textAlign: "left" }}>
+                  <th style={{ padding: "8px 6px" }}>会话ID</th>
+                  <th style={{ padding: "8px 6px" }}>用户ID</th>
+                  <th style={{ padding: "8px 6px" }}>意图</th>
+                  <th style={{ padding: "8px 6px" }}>品名</th>
+                  <th style={{ padding: "8px 6px" }}>状态</th>
+                  <th style={{ padding: "8px 6px" }}>时间范围</th>
+                  <th style={{ padding: "8px 6px" }}>指标</th>
+                  <th style={{ padding: "8px 6px" }}>更新时间</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sessionMemoryList.map((row) => (
+                  <tr key={row.key} style={{ borderBottom: "1px solid #e2e8f0" }}>
+                    <td style={{ padding: "8px 6px" }}>{row.sessionId}</td>
+                    <td style={{ padding: "8px 6px" }}>{row.userId}</td>
+                    <td style={{ padding: "8px 6px" }}>{row.intent ?? "-"}</td>
+                    <td style={{ padding: "8px 6px" }}>{row.itemName ?? "-"}</td>
+                    <td style={{ padding: "8px 6px" }}>{row.statusScope ?? "-"}</td>
+                    <td style={{ padding: "8px 6px" }}>{row.timeHint ?? "-"}</td>
+                    <td style={{ padding: "8px 6px" }}>{row.metric ?? "-"}</td>
+                    <td style={{ padding: "8px 6px", color: "#64748b" }}>{row.updatedAt.slice(0, 16)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {/* 6. AI待补知识问题 */}
+      <section id="ai-knowledge-gaps" style={sectionStyle}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <h2 style={{ margin: 0, fontSize: 18 }}>{SECTION_LABELS["ai-knowledge-gaps"]}</h2>
+          <div style={{ display: "flex", gap: 8 }}>
+            <select
+              value={knowledgeGapStatus}
+              onChange={(e) => setKnowledgeGapStatus(e.target.value as "open" | "resolved")}
+              style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 10px", background: "#fff" }}
+            >
+              <option value="open">仅看待处理</option>
+              <option value="resolved">仅看已处理</option>
+            </select>
+            <button
+              type="button"
+              onClick={() => void loadKnowledgeGaps()}
+              disabled={loading}
+              style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 12px", background: "#fff", cursor: "pointer" }}
+            >
+              刷新
+            </button>
+          </div>
+        </div>
+        {knowledgeGapList.length === 0 ? (
+          <EmptyStateCard title="暂无待补问题" description="当 AI 遇到知识不足时，会自动汇总到这里供管理员补知识。" />
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: "2px solid #e2e8f0", textAlign: "left" }}>
+                  <th style={{ padding: "8px 6px" }}>提问时间</th>
+                  <th style={{ padding: "8px 6px" }}>用户ID</th>
+                  <th style={{ padding: "8px 6px" }}>问题</th>
+                  <th style={{ padding: "8px 6px" }}>当时知识条数</th>
+                  <th style={{ padding: "8px 6px" }}>状态</th>
+                  <th style={{ padding: "8px 6px" }}>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {knowledgeGapList.map((item) => (
+                  <tr key={item.id} style={{ borderBottom: "1px solid #e2e8f0" }}>
+                    <td style={{ padding: "8px 6px", color: "#64748b" }}>{item.createdAt.slice(0, 16)}</td>
+                    <td style={{ padding: "8px 6px" }}>{item.userId}</td>
+                    <td style={{ padding: "8px 6px", whiteSpace: "pre-wrap" }}>{item.question}</td>
+                    <td style={{ padding: "8px 6px" }}>{item.knowledgeCountAtAsk}</td>
+                    <td style={{ padding: "8px 6px" }}>{item.status === "open" ? "待处理" : "已处理"}</td>
+                    <td style={{ padding: "8px 6px" }}>
+                      {item.status === "open" ? (
+                        <button
+                          type="button"
+                          onClick={() => void resolveKnowledgeGap(item.id)}
+                          disabled={loading}
+                          style={{ border: "1px solid #059669", color: "#059669", borderRadius: 8, padding: "6px 10px", background: "#ecfdf5", cursor: "pointer" }}
+                        >
+                          标记已处理
+                        </button>
+                      ) : (
+                        <span style={{ color: "#64748b" }}>{item.resolvedBy ? `已由 ${item.resolvedBy} 处理` : "已处理"}</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {/* 7. AI知识投喂 */}
       <section id="knowledge-feed" style={sectionStyle}>
         <h2 style={{ marginTop: 0, marginBottom: 12, fontSize: 18 }}>{SECTION_LABELS["knowledge-feed"]}</h2>
         <p style={{ color: "#64748b", marginBottom: 12, fontSize: 14 }}>
@@ -759,7 +967,7 @@ export default function AdminHomePage() {
         </div>
       </section>
 
-      {/* 6. 已投喂的知识列表 */}
+      {/* 8. 已投喂的知识列表 */}
       <section id="knowledge-list" style={sectionStyle}>
         <h2 style={{ marginTop: 0, marginBottom: 12, fontSize: 18 }}>{SECTION_LABELS["knowledge-list"]}</h2>
         {knowledgeItems.length === 0 ? (

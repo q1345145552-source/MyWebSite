@@ -18,13 +18,15 @@ registerShipmentRoutes(app, db.db);
 registerAdminRoutes(app, db.db);
 
 // AI routes
-registerClientAiRoutes(app);
+registerClientAiRoutes(app, db.db);
 
 app.listen(PORT, () => {
   // eslint-disable-next-line no-console
   console.log(`[api] running on http://localhost:${PORT}`);
   // eslint-disable-next-line no-console
   console.log("[api] POST /auth/login");
+  // eslint-disable-next-line no-console
+  console.log("[api] POST /auth/register");
   // eslint-disable-next-line no-console
   console.log("[api] POST /staff/orders");
   // eslint-disable-next-line no-console
@@ -55,6 +57,14 @@ app.listen(PORT, () => {
   console.log("[api] GET  /client/ai/suggestions");
   // eslint-disable-next-line no-console
   console.log("[api] GET  /admin/ai/audit-logs");
+  // eslint-disable-next-line no-console
+  console.log("[api] GET  /admin/ai/knowledge-gaps");
+  // eslint-disable-next-line no-console
+  console.log("[api] POST /admin/ai/knowledge-gaps/resolve");
+  // eslint-disable-next-line no-console
+  console.log("[api] GET  /admin/ai/session-memory");
+  // eslint-disable-next-line no-console
+  console.log("[api] DELETE /admin/ai/session-memory?sessionId=xxx|userId=xxx");
   // eslint-disable-next-line no-console
   console.log("[api] GET  /admin/system/status-labels");
   // eslint-disable-next-line no-console

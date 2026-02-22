@@ -28,6 +28,23 @@ const warehouseOptions = [
   { id: "wh_dongguan_01", label: "东莞仓" },
 ];
 
+const warehouseAddressMap: Record<string, string> = {
+  wh_yiwu_01: "浙江省金华市义乌市北苑街道 xx 路 88 号（义乌仓）",
+  wh_guangzhou_01: "广东省广州市白云区石井街道 xx 物流园 16 栋（广州仓）",
+  wh_dongguan_01: "广东省东莞市虎门镇 xx 工业区 9 号（东莞仓）",
+};
+
+type FreightTransportMode = "land" | "sea" | "express";
+type FreightCargoType = "normal" | "inspection" | "sensitive";
+
+const freightRateMap: Record<FreightTransportMode, Record<FreightCargoType, number>> = {
+  // 统一按“计费体积（立方米）× 单价（元/立方米）”计费
+  // 注：海运普货 540 元/立方米（按你提供的口径）
+  land: { normal: 680, inspection: 780, sensitive: 980 },
+  express: { normal: 980, inspection: 1180, sensitive: 1480 },
+  sea: { normal: 540, inspection: 680, sensitive: 880 },
+};
+
 export default function ClientHomePage() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -44,6 +61,14 @@ export default function ClientHomePage() {
   const [aiQuestion, setAiQuestion] = useState("");
   const [aiAnswer, setAiAnswer] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
+  const [freightForm, setFreightForm] = useState({
+    warehouseId: "",
+    transportMode: "land" as FreightTransportMode,
+    cargoType: "normal" as FreightCargoType,
+    weightKg: "",
+    volumeM3: "",
+    unitPriceOverride: "",
+  });
   const [form, setForm] = useState({
     warehouseId: "",
     itemName: "",
@@ -178,6 +203,34 @@ export default function ClientHomePage() {
     return "已收货";
   };
 
+  const freightWeight = Number(freightForm.weightKg || 0);
+  const freightVolume = Number(freightForm.volumeM3 || 0);
+  const safeWeight = Number.isNaN(freightWeight) ? 0 : Math.max(freightWeight, 0);
+  const safeVolume = Number.isNaN(freightVolume) ? 0 : Math.max(freightVolume, 0);
+  const defaultUnitPrice = freightRateMap[freightForm.transportMode][freightForm.cargoType];
+  const overrideUnitPriceRaw = freightForm.unitPriceOverride.trim();
+  const overrideUnitPrice = overrideUnitPriceRaw ? Number(overrideUnitPriceRaw) : undefined;
+  const unitPrice =
+    overrideUnitPrice !== undefined && !Number.isNaN(overrideUnitPrice) && overrideUnitPrice > 0
+      ? overrideUnitPrice
+      : defaultUnitPrice;
+  const convertedVolumeByWeight = safeWeight / 500;
+  const chargeVolume = Math.max(safeVolume, convertedVolumeByWeight);
+  const estimatedFee = chargeVolume * unitPrice;
+  const hasFreightInput = safeWeight > 0 || safeVolume > 0;
+  const cargoTypeLabel =
+    freightForm.cargoType === "normal"
+      ? "普货"
+      : freightForm.cargoType === "inspection"
+        ? "商检货"
+        : "敏感货";
+  const transportLabel =
+    freightForm.transportMode === "sea"
+      ? "海运"
+      : freightForm.transportMode === "land"
+        ? "陆运"
+        : "快线";
+
   return (
     <RoleShell allowedRole="client" title="客户端工作台">
       <p style={{ color: "#4b5563", marginBottom: 20 }}>
@@ -309,6 +362,104 @@ export default function ClientHomePage() {
           {aiAnswer ? (
             <div style={{ marginTop: 8, whiteSpace: "pre-wrap", color: "#334155", fontSize: 13 }}>{aiAnswer}</div>
           ) : null}
+        </div>
+
+        <div style={{ border: "1px solid #dbeafe", borderRadius: 10, padding: 12, marginBottom: 12, background: "#f8fbff" }}>
+          <div style={{ fontWeight: 700, color: "#1e40af", marginBottom: 8 }}>运费计算器</div>
+          <div style={{ color: "#475569", fontSize: 13, marginBottom: 10 }}>
+            选择仓库、运输方式和货物类型后，输入重量/体积即可得到预估运费。
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8 }}>
+            <select
+              value={freightForm.warehouseId}
+              onChange={(e) => setFreightForm((v) => ({ ...v, warehouseId: e.target.value }))}
+              style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}
+            >
+              <option value="">请选择国内仓库地址</option>
+              {warehouseOptions.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+            <select
+              value={freightForm.transportMode}
+              onChange={(e) =>
+                setFreightForm((v) => ({ ...v, transportMode: e.target.value as FreightTransportMode }))
+              }
+              style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}
+            >
+              <option value="land">陆运</option>
+              <option value="sea">海运</option>
+              <option value="express">快线</option>
+            </select>
+            <select
+              value={freightForm.cargoType}
+              onChange={(e) =>
+                setFreightForm((v) => ({ ...v, cargoType: e.target.value as FreightCargoType }))
+              }
+              style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}
+            >
+              <option value="normal">普货</option>
+              <option value="inspection">商检货</option>
+              <option value="sensitive">敏感货</option>
+            </select>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={freightForm.weightKg}
+              onChange={(e) => setFreightForm((v) => ({ ...v, weightKg: e.target.value }))}
+              placeholder="重量（千克）"
+              style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}
+            />
+            <input
+              type="number"
+              step="0.001"
+              min="0"
+              value={freightForm.volumeM3}
+              onChange={(e) => setFreightForm((v) => ({ ...v, volumeM3: e.target.value }))}
+              placeholder="体积（立方米）"
+              style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}
+            />
+            <input
+              type="number"
+              step="1"
+              min="0"
+              value={freightForm.unitPriceOverride}
+              onChange={(e) => setFreightForm((v) => ({ ...v, unitPriceOverride: e.target.value }))}
+              placeholder={`体积单价（元/立方），默认 ${defaultUnitPrice}`}
+              style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}
+            />
+          </div>
+
+          <div style={{ marginTop: 10, fontSize: 13, color: "#334155", whiteSpace: "pre-wrap" }}>
+            {freightForm.warehouseId
+              ? `仓库地址：${warehouseAddressMap[freightForm.warehouseId]}`
+              : "仓库地址：请先选择仓库"}
+          </div>
+          <div style={{ marginTop: 8, border: "1px solid #e2e8f0", borderRadius: 8, padding: "10px 12px", background: "#fff" }}>
+            {hasFreightInput ? (
+              <>
+                <div style={{ fontWeight: 700, color: "#0f172a" }}>
+                  预估运费：¥{estimatedFee.toFixed(2)}
+                </div>
+                <div style={{ marginTop: 6, color: "#334155", fontSize: 13 }}>
+                  计费规则：{transportLabel} / {cargoTypeLabel}，先比较体积：
+                  max(实际体积 {safeVolume.toFixed(3)}，重量折算体积 {convertedVolumeByWeight.toFixed(3)}（500千克=1立方米）)
+                  = {chargeVolume.toFixed(3)} 立方米；
+                  金额 = {chargeVolume.toFixed(3)} × ¥{unitPrice}/立方米 = ¥{estimatedFee.toFixed(2)}。
+                </div>
+                <div style={{ marginTop: 6, color: "#64748b", fontSize: 12 }}>
+                  注：该结果为预估价，最终以客服复核与实际计费规则为准。
+                </div>
+              </>
+            ) : (
+              <div style={{ color: "#64748b", fontSize: 13 }}>
+                请输入重量或体积后自动计算预估运费。
+              </div>
+            )}
+          </div>
         </div>
       </section>
 

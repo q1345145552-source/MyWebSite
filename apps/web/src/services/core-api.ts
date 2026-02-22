@@ -1,15 +1,16 @@
-import { getMockSession } from "../auth/mock-session";
+import { getOptionalSession } from "../auth/mock-session";
 
 export function apiBaseUrl(): string {
   return (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001").replace(/\/$/, "");
 }
 
 export function authHeaders(): Record<string, string> {
-  const session = getMockSession();
+  const session = getOptionalSession();
+  if (!session || !session.token) {
+    throw new Error("请先登录");
+  }
   return {
-    "x-role": session.role,
-    "x-user-id": session.userId,
-    "x-company-id": session.companyId,
+    Authorization: `Bearer ${session.token}`,
   };
 }
 

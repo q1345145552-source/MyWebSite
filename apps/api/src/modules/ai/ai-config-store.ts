@@ -5,7 +5,7 @@ import type {
 import type { ShipmentStatus } from "../../../../../packages/shared-types/shipment-status";
 import type { AiKnowledgeStore, StatusLabelStore } from "./ai-types";
 
-const DEFAULT_STATUS_LABELS: StatusLabelConfig[] = [
+export const DEFAULT_STATUS_LABELS: StatusLabelConfig[] = [
   { status: "created", labelZh: "已创建" },
   { status: "pickedUp", labelZh: "已揽收" },
   { status: "inWarehouseCN", labelZh: "中国仓已入库" },

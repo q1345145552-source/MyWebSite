@@ -1,4 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -21,6 +22,16 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+function hashPassword(password: string): string {
+  const salt = crypto.randomBytes(16);
+  const cost = 16384;
+  const blockSize = 8;
+  const parallelization = 1;
+  const keyLen = 64;
+  const derived = crypto.scryptSync(password, salt, keyLen, { N: cost, r: blockSize, p: parallelization });
+  return `scrypt$${cost}$${blockSize}$${parallelization}$${salt.toString("base64")}$${derived.toString("base64")}`;
+}
+
 export function createDbContext(): DbContext {
   const file = dbFilePath();
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -30,6 +41,7 @@ export function createDbContext(): DbContext {
   ensureSchema(db);
   ensureSeedData(db);
   ensurePresetStaffAccount(db);
+  ensureDefaultPasswordHashes(db);
   ensureClientDemoOrders(db);
   ensureWarehouseCompatibility(db);
   ensureShipmentsForApprovedOrders(db);
@@ -104,6 +116,66 @@ function ensureSchema(db: DatabaseSync): void {
       remark TEXT,
       changed_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS ai_session_memory (
+      key TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      intent TEXT,
+      item_name TEXT,
+      status_scope TEXT,
+      time_hint TEXT,
+      metric TEXT,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS ai_status_labels (
+      status TEXT PRIMARY KEY,
+      label_zh TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS ai_knowledge_items (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS ai_audit_logs (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      company_id TEXT NOT NULL,
+      session_id TEXT,
+      question TEXT NOT NULL,
+      answer_summary TEXT NOT NULL,
+      referenced_order_ids TEXT,
+      referenced_shipment_ids TEXT,
+      queried_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS ai_knowledge_gaps (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      session_id TEXT,
+      question TEXT NOT NULL,
+      answer_summary TEXT NOT NULL,
+      knowledge_count_at_ask INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'open',
+      created_at TEXT NOT NULL,
+      resolved_at TEXT,
+      resolved_by TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_ai_session_memory_updated_at ON ai_session_memory(updated_at);
+    CREATE INDEX IF NOT EXISTS idx_ai_knowledge_items_company_created ON ai_knowledge_items(company_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_ai_audit_logs_company_queried ON ai_audit_logs(company_id, queried_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_ai_knowledge_gaps_company_status_created
+      ON ai_knowledge_gaps(company_id, status, created_at DESC);
   `);
   ensureAdditionalColumns(db);
 }
@@ -256,6 +328,18 @@ function ensurePresetStaffAccount(db: DatabaseSync): void {
     JSON.stringify(CURRENT_WAREHOUSE_IDS),
     now,
   );
+}
+
+function ensureDefaultPasswordHashes(db: DatabaseSync): void {
+  const rows = db
+    .prepare("SELECT id FROM users WHERE status = 'active' AND (password_hash IS NULL OR TRIM(password_hash) = '')")
+    .all() as Array<{ id: string }>;
+  if (rows.length === 0) return;
+  const stmt = db.prepare("UPDATE users SET password_hash = ? WHERE id = ?");
+  const defaultHash = hashPassword("123456");
+  for (const row of rows) {
+    stmt.run(defaultHash, row.id);
+  }
 }
 
 function ensureClientDemoOrders(db: DatabaseSync): void {

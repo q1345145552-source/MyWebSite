@@ -1,4 +1,4 @@
-# 中泰国际物流系统（V1）
+# 湘泰国际物流系统（V1）
 
 单仓库、单前端应用（RBAC），包含三个角色界面：
 
@@ -29,6 +29,7 @@ cd "/Users/liuxiong/Desktop/物流网站制作/MyWebSite"
 export DEEPSEEK_API_KEY="sk-你的真实key"
 export DEEPSEEK_MODEL="deepseek-chat"
 export DEEPSEEK_API_BASE_URL="https://api.deepseek.com/chat/completions"
+export AUTH_SECRET="请替换为至少32位随机密钥"
 npx tsx apps/api/src/main.ts
 ```
 
@@ -44,19 +45,18 @@ npm run dev
 
 - `http://127.0.0.1:3000/`
 
-## 模拟登录（开发模式）
+## 登录与鉴权
 
-首页提供“模拟登录用户”面板，可选择角色并进入对应页面：
+页面入口：
 
-- `client` -> `/client`
-- `staff` -> `/staff`
-- `admin` -> `/admin`
+- `GET /login`：登录页
+- `GET /register`：客户端注册页
 
-请求头会自动附带：
+登录成功后，前端会自动在请求头附带：
 
-- `x-role`
-- `x-user-id`
-- `x-company-id`
+- `Authorization: Bearer <token>`
+
+后端已改为严格鉴权：缺少或无效 token 会返回 `401 UNAUTHORIZED`。
 
 ## AI 功能
 

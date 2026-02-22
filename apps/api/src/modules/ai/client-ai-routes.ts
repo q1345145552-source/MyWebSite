@@ -3,9 +3,15 @@ import type {
   AiSuggestionResponse,
 } from "../../../../../packages/shared-types/common-response";
 import type { ApiResponse } from "../../../../../packages/shared-types/common-response";
+import type { DatabaseSync } from "node:sqlite";
 import type { Order, Shipment, StatusLabelConfig } from "../../../../../packages/shared-types/entities";
-import { InMemoryAiAuditStore } from "./ai-audit-store";
-import { InMemoryAiKnowledgeStore, InMemoryStatusLabelStore } from "./ai-config-store";
+import {
+  SqliteAiAuditStore,
+  SqliteAiKnowledgeGapStore,
+  SqliteAiKnowledgeStore,
+  SqliteStatusLabelStore,
+} from "./ai-sqlite-store";
+import { SqliteAiSessionMemoryStore } from "./ai-session-memory-store";
 import { ClientAiService } from "./ai-service";
 import { HttpDeepSeekClient } from "./deepseek-client";
 import type { AuthContext, QueryDataSource } from "./ai-types";
@@ -27,63 +33,123 @@ export interface MinimalHttpApp {
   delete(path: string, handler: (req: HttpRequest, res: HttpResponse) => Promise<void>): void;
 }
 
-class InMemoryCompanyScopedDataSource implements QueryDataSource {
-  constructor(
-    private readonly orders: Order[],
-    private readonly shipments: Shipment[],
-  ) {}
+class SqliteCompanyScopedDataSource implements QueryDataSource {
+  constructor(private readonly db: DatabaseSync) {}
 
   async listOrders(scope: { companyId: string }): Promise<Order[]> {
-    return this.orders.filter((item) => item.companyId === scope.companyId);
+    const rows = this.db
+      .prepare(`
+        SELECT
+          id, company_id, client_id, item_name, product_quantity, package_count, package_unit,
+          domestic_tracking_no, order_no, transport_mode, warehouse_id, batch_no,
+          weight_kg, volume_m3, receiver_name_th, receiver_phone_th, receiver_address_th,
+          status_group, created_at, updated_at
+        FROM orders
+        WHERE company_id = ?
+        ORDER BY created_at DESC
+      `)
+      .all(scope.companyId) as Array<{
+      id: string;
+      company_id: string;
+      client_id: string;
+      item_name: string;
+      product_quantity: number;
+      package_count: number;
+      package_unit: "bag" | "box" | null;
+      domestic_tracking_no: string | null;
+      order_no: string | null;
+      transport_mode: "sea" | "land" | null;
+      warehouse_id: string | null;
+      batch_no: string | null;
+      weight_kg: number | null;
+      volume_m3: number | null;
+      receiver_name_th: string | null;
+      receiver_phone_th: string | null;
+      receiver_address_th: string | null;
+      status_group: "unfinished" | "completed" | null;
+      created_at: string;
+      updated_at: string;
+    }>;
+
+    return rows.map((r) => ({
+      id: r.id,
+      companyId: r.company_id,
+      clientId: r.client_id,
+      pickupAddressCn: "",
+      deliveryAddressTh: "",
+      receiverName: r.receiver_name_th ?? "",
+      receiverPhone: r.receiver_phone_th ?? "",
+      serviceType: "standard",
+      itemName: r.item_name,
+      productQuantity: r.product_quantity ?? 0,
+      packageCount: r.package_count ?? 0,
+      packageUnit: r.package_unit ?? "box",
+      domesticTrackingNo: r.domestic_tracking_no ?? undefined,
+      orderNo: r.order_no ?? undefined,
+      transportMode: r.transport_mode ?? undefined,
+      warehouseId: r.warehouse_id ?? undefined,
+      batchNo: r.batch_no ?? undefined,
+      weightKg: r.weight_kg ?? undefined,
+      volumeM3: r.volume_m3 ?? undefined,
+      receiverNameTh: r.receiver_name_th ?? undefined,
+      receiverPhoneTh: r.receiver_phone_th ?? undefined,
+      receiverAddressTh: r.receiver_address_th ?? undefined,
+      statusGroup: r.status_group ?? undefined,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    }));
   }
 
   async listShipments(scope: { companyId: string }): Promise<Shipment[]> {
-    return this.shipments.filter((item) => item.companyId === scope.companyId);
+    const rows = this.db
+      .prepare(`
+        SELECT
+          id, company_id, order_id, tracking_no, current_status, current_location,
+          weight_kg, volume_m3, package_count, package_unit, transport_mode,
+          domestic_tracking_no, warehouse_id, batch_no, created_at, updated_at
+        FROM shipments
+        WHERE company_id = ?
+        ORDER BY updated_at DESC
+      `)
+      .all(scope.companyId) as Array<{
+      id: string;
+      company_id: string;
+      order_id: string;
+      tracking_no: string;
+      current_status: Shipment["currentStatus"];
+      current_location: string | null;
+      weight_kg: number | null;
+      volume_m3: number | null;
+      package_count: number | null;
+      package_unit: "bag" | "box" | null;
+      transport_mode: "sea" | "land" | null;
+      domestic_tracking_no: string | null;
+      warehouse_id: string | null;
+      batch_no: string | null;
+      created_at: string;
+      updated_at: string;
+    }>;
+
+    return rows.map((r) => ({
+      id: r.id,
+      companyId: r.company_id,
+      orderId: r.order_id,
+      trackingNo: r.tracking_no,
+      currentStatus: r.current_status,
+      currentLocation: r.current_location ?? undefined,
+      weightKg: r.weight_kg ?? undefined,
+      volumeM3: r.volume_m3 ?? undefined,
+      packageCount: r.package_count ?? undefined,
+      packageUnit: r.package_unit ?? undefined,
+      transportMode: r.transport_mode ?? undefined,
+      domesticTrackingNo: r.domestic_tracking_no ?? undefined,
+      warehouseId: r.warehouse_id ?? undefined,
+      batchNo: r.batch_no ?? undefined,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    }));
   }
 }
-
-const seedOrders: Order[] = [
-  {
-    id: "o_001",
-    companyId: "c_001",
-    clientId: "u_client_001",
-    pickupAddressCn: "Guangzhou",
-    deliveryAddressTh: "Bangkok",
-    receiverName: "Somchai",
-    receiverPhone: "0812345678",
-    serviceType: "standard",
-    itemName: "手机壳",
-    productQuantity: 200,
-    packageCount: 12,
-    packageUnit: "box",
-    domesticTrackingNo: "SF12345678",
-    transportMode: "sea",
-    receiverNameTh: "Somchai",
-    receiverPhoneTh: "0812345678",
-    receiverAddressTh: "Bangkok",
-    createdAt: "2026-02-18T08:00:00.000Z",
-  },
-];
-
-const seedShipments: Shipment[] = [
-  {
-    id: "s_001",
-    companyId: "c_001",
-    orderId: "o_001",
-    trackingNo: "THCN0001",
-    currentStatus: "inTransit",
-    currentLocation: "Bangkok Hub",
-    weightKg: 120.5,
-    volumeM3: 1.28,
-    packageCount: 12,
-    packageUnit: "box",
-    transportMode: "sea",
-    domesticTrackingNo: "SF12345678",
-    warehouseId: "wh_bkk_01",
-    createdAt: "2026-02-18T08:00:00.000Z",
-    updatedAt: "2026-02-18T09:00:00.000Z",
-  },
-];
 
 function jsonOk<T>(data: T): ApiResponse<T> {
   return {
@@ -103,16 +169,20 @@ function jsonError(code: Exclude<ApiResponse<unknown>["code"], "OK">, message: s
   };
 }
 
-export function registerClientAiRoutes(app: MinimalHttpApp): void {
-  const auditStore = new InMemoryAiAuditStore();
-  const statusLabelStore = new InMemoryStatusLabelStore();
-  const knowledgeStore = new InMemoryAiKnowledgeStore();
+export function registerClientAiRoutes(app: MinimalHttpApp, db: DatabaseSync): void {
+  const auditStore = new SqliteAiAuditStore(db);
+  const knowledgeGapStore = new SqliteAiKnowledgeGapStore(db);
+  const statusLabelStore = new SqliteStatusLabelStore(db);
+  const knowledgeStore = new SqliteAiKnowledgeStore(db);
+  const memoryStore = new SqliteAiSessionMemoryStore(db);
   const service = new ClientAiService({
-    dataSource: new InMemoryCompanyScopedDataSource(seedOrders, seedShipments),
+    dataSource: new SqliteCompanyScopedDataSource(db),
     auditStore,
+    knowledgeGapStore,
     llmClient: new HttpDeepSeekClient(),
     statusLabelStore,
     knowledgeStore,
+    memoryStore,
   });
 
   app.post("/client/ai/chat", async (req, res) => {
@@ -131,6 +201,10 @@ export function registerClientAiRoutes(app: MinimalHttpApp): void {
       res.status(200).json(jsonOk(response));
     } catch (error) {
       const message = error instanceof Error ? error.message : "unknown error";
+      if (message.startsWith("BAD_REQUEST:")) {
+        res.status(400).json(jsonError("BAD_REQUEST", message.replace("BAD_REQUEST:", "").trim()));
+        return;
+      }
       if (message === "FORBIDDEN_ROLE") {
         res.status(403).json(jsonError("FORBIDDEN", "only client role can use ai chat"));
         return;
@@ -139,7 +213,16 @@ export function registerClientAiRoutes(app: MinimalHttpApp): void {
     }
   });
 
-  app.get("/client/ai/suggestions", async (_req, res) => {
+  app.get("/client/ai/suggestions", async (req, res) => {
+    const auth = req.auth;
+    if (!auth) {
+      res.status(401).json(jsonError("UNAUTHORIZED", "missing auth context"));
+      return;
+    }
+    if (auth.role !== "client") {
+      res.status(403).json(jsonError("FORBIDDEN", "only client role can use ai suggestions"));
+      return;
+    }
     const data: AiSuggestionResponse = service.getSuggestions();
     res.status(200).json(jsonOk(data));
   });
@@ -158,6 +241,94 @@ export function registerClientAiRoutes(app: MinimalHttpApp): void {
     const companyId = req.query?.companyId ?? auth.companyId;
     const logs = await auditStore.listByCompany(companyId);
     res.status(200).json(jsonOk(logs));
+  });
+
+  app.get("/admin/ai/knowledge-gaps", async (req, res) => {
+    const auth = req.auth;
+    if (!auth) {
+      res.status(401).json(jsonError("UNAUTHORIZED", "missing auth context"));
+      return;
+    }
+    if (auth.role !== "admin") {
+      res.status(403).json(jsonError("FORBIDDEN", "only admin can read ai knowledge gaps"));
+      return;
+    }
+    const companyId = req.query?.companyId ?? auth.companyId;
+    const statusRaw = req.query?.status?.trim();
+    const status = statusRaw === "open" || statusRaw === "resolved" ? statusRaw : undefined;
+    const list = await knowledgeGapStore.listByCompany(companyId, status);
+    res.status(200).json(jsonOk({ items: list, total: list.length, status: status ?? "all" }));
+  });
+
+  app.post("/admin/ai/knowledge-gaps/resolve", async (req, res) => {
+    const auth = req.auth;
+    if (!auth) {
+      res.status(401).json(jsonError("UNAUTHORIZED", "missing auth context"));
+      return;
+    }
+    if (auth.role !== "admin") {
+      res.status(403).json(jsonError("FORBIDDEN", "only admin can resolve ai knowledge gaps"));
+      return;
+    }
+    const payload = (req.body ?? {}) as { id?: string; companyId?: string };
+    const id = payload.id?.trim();
+    if (!id) {
+      res.status(400).json(jsonError("BAD_REQUEST", "id is required"));
+      return;
+    }
+    const companyId = payload.companyId ?? auth.companyId;
+    const okResolved = await knowledgeGapStore.resolve({
+      companyId,
+      id,
+      resolvedBy: auth.userId,
+    });
+    if (!okResolved) {
+      res.status(404).json(jsonError("NOT_FOUND", "knowledge gap not found or already resolved"));
+      return;
+    }
+    res.status(200).json(jsonOk({ resolved: true, id }));
+  });
+
+  app.get("/admin/ai/session-memory", async (req, res) => {
+    const auth = req.auth;
+    if (!auth) {
+      res.status(401).json(jsonError("UNAUTHORIZED", "missing auth context"));
+      return;
+    }
+    if (auth.role !== "admin") {
+      res.status(403).json(jsonError("FORBIDDEN", "only admin can read ai session memory"));
+      return;
+    }
+    const companyId = req.query?.companyId ?? auth.companyId;
+    const limitRaw = req.query?.limit?.trim();
+    const limit = limitRaw ? Number(limitRaw) : 200;
+    const safeLimit = Number.isNaN(limit) ? 200 : Math.max(1, Math.min(limit, 1000));
+    const list = await memoryStore.listByCompany(companyId);
+    res.status(200).json(jsonOk({ items: list.slice(0, safeLimit), total: list.length, limit: safeLimit }));
+  });
+
+  app.delete("/admin/ai/session-memory", async (req, res) => {
+    const auth = req.auth;
+    if (!auth) {
+      res.status(401).json(jsonError("UNAUTHORIZED", "missing auth context"));
+      return;
+    }
+    if (auth.role !== "admin") {
+      res.status(403).json(jsonError("FORBIDDEN", "only admin can clear ai session memory"));
+      return;
+    }
+    const companyId = req.query?.companyId ?? auth.companyId;
+    const sessionId = req.query?.sessionId?.trim() || undefined;
+    const userId = req.query?.userId?.trim() || undefined;
+    const removed = await memoryStore.removeByFilter({ companyId, sessionId, userId });
+    res.status(200).json(
+      jsonOk({
+        removed,
+        companyId,
+        sessionId: sessionId ?? null,
+        userId: userId ?? null,
+      }),
+    );
   });
 
   app.get("/admin/system/status-labels", async (req, res) => {

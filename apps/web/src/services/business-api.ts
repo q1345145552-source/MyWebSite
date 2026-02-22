@@ -7,7 +7,7 @@ export interface StaffCreateOrderPayload {
   trackingNo: string;
   arrivedAt: string;
   itemName: string;
-  productQuantity: number;
+  productQuantity?: number;
   packageCount: number;
   packageUnit: "bag" | "box";
   weightKg?: number;
@@ -120,6 +120,33 @@ export interface AdminOrderItem {
   statusGroup: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface AdminAiSessionMemoryItem {
+  key: string;
+  companyId: string;
+  userId: string;
+  sessionId: string;
+  intent?: string;
+  itemName?: string;
+  statusScope?: string;
+  timeHint?: string;
+  metric?: string;
+  updatedAt: string;
+}
+
+export interface AdminAiKnowledgeGapItem {
+  id: string;
+  companyId: string;
+  userId: string;
+  sessionId?: string;
+  question: string;
+  answerSummary: string;
+  knowledgeCountAtAsk: number;
+  status: "open" | "resolved";
+  createdAt: string;
+  resolvedAt?: string;
+  resolvedBy?: string;
 }
 
 export async function createStaffOrder(payload: StaffCreateOrderPayload): Promise<{
@@ -335,6 +362,74 @@ export async function createAdminClient(payload: {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(payload),
+  });
+  return parseApiResponse(response);
+}
+
+export async function fetchAdminAiSessionMemory(params?: {
+  companyId?: string;
+  limit?: number;
+}): Promise<{ items: AdminAiSessionMemoryItem[]; total: number; limit: number }> {
+  const query = new URLSearchParams();
+  if (params?.companyId) query.set("companyId", params.companyId);
+  if (typeof params?.limit === "number") query.set("limit", String(params.limit));
+  const suffix = query.toString();
+  const response = await fetch(
+    `${apiBaseUrl()}/admin/ai/session-memory${suffix ? `?${suffix}` : ""}`,
+    {
+      method: "GET",
+      headers: { ...authHeaders() },
+    },
+  );
+  return parseApiResponse(response);
+}
+
+export async function clearAdminAiSessionMemory(params?: {
+  companyId?: string;
+  sessionId?: string;
+  userId?: string;
+}): Promise<{ removed: number; companyId: string; sessionId: string | null; userId: string | null }> {
+  const query = new URLSearchParams();
+  if (params?.companyId) query.set("companyId", params.companyId);
+  if (params?.sessionId) query.set("sessionId", params.sessionId);
+  if (params?.userId) query.set("userId", params.userId);
+  const suffix = query.toString();
+  const response = await fetch(
+    `${apiBaseUrl()}/admin/ai/session-memory${suffix ? `?${suffix}` : ""}`,
+    {
+      method: "DELETE",
+      headers: { ...authHeaders() },
+    },
+  );
+  return parseApiResponse(response);
+}
+
+export async function fetchAdminAiKnowledgeGaps(params?: {
+  companyId?: string;
+  status?: "open" | "resolved";
+}): Promise<{ items: AdminAiKnowledgeGapItem[]; total: number; status: "open" | "resolved" | "all" }> {
+  const query = new URLSearchParams();
+  if (params?.companyId) query.set("companyId", params.companyId);
+  if (params?.status) query.set("status", params.status);
+  const suffix = query.toString();
+  const response = await fetch(
+    `${apiBaseUrl()}/admin/ai/knowledge-gaps${suffix ? `?${suffix}` : ""}`,
+    {
+      method: "GET",
+      headers: { ...authHeaders() },
+    },
+  );
+  return parseApiResponse(response);
+}
+
+export async function resolveAdminAiKnowledgeGap(params: {
+  id: string;
+  companyId?: string;
+}): Promise<{ resolved: true; id: string }> {
+  const response = await fetch(`${apiBaseUrl()}/admin/ai/knowledge-gaps/resolve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(params),
   });
   return parseApiResponse(response);
 }

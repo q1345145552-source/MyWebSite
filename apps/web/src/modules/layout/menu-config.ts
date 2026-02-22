@@ -23,6 +23,8 @@ export const roleMenus: Record<MockRole, MenuItem[]> = {
 
 export const globalMenus: MenuItem[] = [
   { id: "home", label: "首页", href: "/" },
+  { id: "go-login", label: "登录", href: "/login" },
+  { id: "go-register", label: "注册", href: "/register" },
   { id: "go-client", label: "客户端", href: "/client" },
   { id: "go-staff", label: "员工端", href: "/staff" },
   { id: "go-admin", label: "管理员端", href: "/admin" },

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { DEFAULT_SESSIONS, getMockSession, type MockRole, type MockSession } from "../../auth/mock-session";
+import { getOptionalSession, type MockRole, type MockSession } from "../../auth/mock-session";
 import RoleSwitcher from "../auth/RoleSwitcher";
 import { globalMenus, roleMenus } from "./menu-config";
 
@@ -18,16 +18,23 @@ export default function RoleShell(props: {
 }) {
   const { allowedRole, title, children } = props;
   const [mounted, setMounted] = useState(false);
-  const [session, setSession] = useState<MockSession>(DEFAULT_SESSIONS.client);
+  const [session, setSession] = useState<MockSession | null>(null);
 
   useEffect(() => {
-    const next = getMockSession();
+    const next = getOptionalSession();
     setSession(next);
     setMounted(true);
   }, []);
 
   useEffect(() => {
     if (!mounted) return;
+    if (!session) {
+      const timer = setTimeout(() => {
+        const from = encodeURIComponent(window.location.pathname);
+        window.location.href = `/login?from=${from}`;
+      }, 300);
+      return () => clearTimeout(timer);
+    }
     if (session.role !== allowedRole) {
       const timer = setTimeout(() => {
         const from = encodeURIComponent(window.location.pathname);
@@ -36,11 +43,11 @@ export default function RoleShell(props: {
       return () => clearTimeout(timer);
     }
     return;
-  }, [allowedRole, mounted, session.role]);
+  }, [allowedRole, mounted, session]);
 
   const subtitle = useMemo(
-    () => `${roleTitles[session.role]} / ${session.userId} / ${session.companyId}`,
-    [session.companyId, session.role, session.userId],
+    () => (session ? `${roleTitles[session.role]} / ${session.userId} / ${session.companyId}` : "未登录"),
+    [session],
   );
 
   if (!mounted) {
@@ -53,6 +60,17 @@ export default function RoleShell(props: {
           <div className="skeleton skeleton-line" />
           <div className="skeleton skeleton-line" />
         </div>
+      </main>
+    );
+  }
+
+  if (!session) {
+    return (
+      <main style={{ padding: 24 }}>
+        <h1 className="biz-title" style={{ fontSize: 28, marginBottom: 8 }}>{title}</h1>
+        <p style={{ color: "#b91c1c" }}>
+          当前未登录，正在跳转到登录页...
+        </p>
       </main>
     );
   }

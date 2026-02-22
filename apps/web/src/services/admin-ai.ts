@@ -1,26 +1,5 @@
-import type { AiKnowledgeItem, StatusLabelConfig } from "../../../../../packages/shared-types/entities";
-import { getMockSession } from "../auth/mock-session";
-
-function apiBaseUrl(): string {
-  return (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001").replace(/\/$/, "");
-}
-
-function authHeaders(): Record<string, string> {
-  const session = getMockSession();
-  return {
-    "x-role": session.role,
-    "x-user-id": session.userId,
-    "x-company-id": session.companyId,
-  };
-}
-
-async function parseResponse<T>(response: Response): Promise<T> {
-  const payload = await response.json();
-  if (!response.ok || payload?.code !== "OK") {
-    throw new Error(payload?.message ?? "request failed");
-  }
-  return payload.data as T;
-}
+import type { AiKnowledgeItem, StatusLabelConfig } from "../../../../packages/shared-types/entities";
+import { authHeaders, apiBaseUrl, parseApiResponse } from "./core-api";
 
 export async function fetchStatusLabels(): Promise<StatusLabelConfig[]> {
   const response = await fetch(`${apiBaseUrl()}/admin/system/status-labels`, {
@@ -30,7 +9,7 @@ export async function fetchStatusLabels(): Promise<StatusLabelConfig[]> {
       ...authHeaders(),
     },
   });
-  return parseResponse<StatusLabelConfig[]>(response);
+  return parseApiResponse<StatusLabelConfig[]>(response);
 }
 
 export async function updateStatusLabels(items: StatusLabelConfig[]): Promise<{ updated: number }> {
@@ -42,7 +21,7 @@ export async function updateStatusLabels(items: StatusLabelConfig[]): Promise<{ 
     },
     body: JSON.stringify({ items }),
   });
-  return parseResponse<{ updated: number }>(response);
+  return parseApiResponse<{ updated: number }>(response);
 }
 
 export async function resetStatusLabels(): Promise<{ reset: boolean; total: number }> {
@@ -53,7 +32,7 @@ export async function resetStatusLabels(): Promise<{ reset: boolean; total: numb
       ...authHeaders(),
     },
   });
-  return parseResponse<{ reset: boolean; total: number }>(response);
+  return parseApiResponse<{ reset: boolean; total: number }>(response);
 }
 
 export async function fetchKnowledgeList(companyId?: string): Promise<AiKnowledgeItem[]> {
@@ -67,7 +46,7 @@ export async function fetchKnowledgeList(companyId?: string): Promise<AiKnowledg
       ...authHeaders(),
     },
   });
-  return parseResponse<AiKnowledgeItem[]>(response);
+  return parseApiResponse<AiKnowledgeItem[]>(response);
 }
 
 export async function createKnowledgeItem(payload: {
@@ -83,7 +62,7 @@ export async function createKnowledgeItem(payload: {
     },
     body: JSON.stringify(payload),
   });
-  return parseResponse<AiKnowledgeItem>(response);
+  return parseApiResponse<AiKnowledgeItem>(response);
 }
 
 export async function deleteKnowledgeItem(id: string, companyId?: string): Promise<{ deleted: boolean; id: string }> {
@@ -97,5 +76,5 @@ export async function deleteKnowledgeItem(id: string, companyId?: string): Promi
       ...authHeaders(),
     },
   });
-  return parseResponse<{ deleted: boolean; id: string }>(response);
+  return parseApiResponse<{ deleted: boolean; id: string }>(response);
 }

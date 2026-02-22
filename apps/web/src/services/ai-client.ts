@@ -2,30 +2,8 @@ import type {
   AiChatRequest,
   AiChatResponse,
   AiSuggestionResponse,
-} from "../../../../../packages/shared-types/common-response";
-import { getMockSession } from "../auth/mock-session";
-
-function apiBaseUrl(): string {
-  return (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001").replace(/\/$/, "");
-}
-
-function authHeaders(): Record<string, string> {
-  const session = getMockSession();
-  return {
-    "x-role": session.role,
-    "x-user-id": session.userId,
-    "x-company-id": session.companyId,
-  };
-}
-
-async function parseResponse<T>(response: Response): Promise<T> {
-  const payload = await response.json();
-  if (!response.ok || payload?.code !== "OK") {
-    const message = payload?.message ?? "request failed";
-    throw new Error(message);
-  }
-  return payload.data as T;
-}
+} from "../../../../packages/shared-types/common-response";
+import { authHeaders, apiBaseUrl, parseApiResponse } from "./core-api";
 
 export async function fetchAiSuggestions(): Promise<AiSuggestionResponse> {
   const response = await fetch(`${apiBaseUrl()}/client/ai/suggestions`, {
@@ -35,7 +13,7 @@ export async function fetchAiSuggestions(): Promise<AiSuggestionResponse> {
       ...authHeaders(),
     },
   });
-  return parseResponse<AiSuggestionResponse>(response);
+  return parseApiResponse<AiSuggestionResponse>(response);
 }
 
 export async function sendAiMessage(payload: AiChatRequest): Promise<AiChatResponse> {
@@ -47,5 +25,5 @@ export async function sendAiMessage(payload: AiChatRequest): Promise<AiChatRespo
     },
     body: JSON.stringify(payload),
   });
-  return parseResponse<AiChatResponse>(response);
+  return parseApiResponse<AiChatResponse>(response);
 }
