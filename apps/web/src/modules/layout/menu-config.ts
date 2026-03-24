@@ -10,6 +10,7 @@ export const roleMenus: Record<MockRole, MenuItem[]> = {
   client: [
     { id: "client-home", label: "客户端工作台", href: "/client" },
     { id: "client-orders", label: "我的订单", href: "/client" },
+    { id: "client-bills", label: "账单", href: "/client/bills" },
   ],
   staff: [
     { id: "staff-home", label: "员工工作台", href: "/staff" },

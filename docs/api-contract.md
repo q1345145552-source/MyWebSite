@@ -146,6 +146,11 @@
 - page
 - pageSize
 
+返回补充字段：
+- paymentStatus: "unpaid" | "paid" （付款状态，由员工确认）
+- paidAt?: string （确认付款时间）
+- paidBy?: string （确认付款的员工ID）
+
 ## 9. Staff V1 接口补充（状态操作与仓库范围）
 
 ### 9.1 GET /staff/shipments
@@ -241,6 +246,28 @@
   "updatedAt": "2026-02-18T08:00:00.000Z"
 }
 
+### 10.4 POST /staff/orders/set-receivable
+用途：员工/管理员为已审核订单补录或修正“最终应收金额”
+
+请求：
+{
+  "orderId": "o_1771783226942",
+  "receivableAmountCny": 1234.56,
+  "receivableCurrency": "CNY"
+}
+
+### 10.5 POST /staff/orders/set-payment
+用途：员工/管理员确认订单账单付款状态（客户端据此展示“待付款/已付款”）
+
+请求：
+{
+  "orderId": "o_1771783226942",
+  "paymentStatus": "paid",
+  "proofFileName": "流水单.png",
+  "proofMime": "image/png",
+  "proofBase64": "<base64-contents>"
+}
+
 ### 10.3 GET /client/orders 与 GET /client/shipments/search 返回字段补充
 客户端返回中需包含：
 - trackingNo
@@ -249,6 +276,8 @@
 - volumeM3
 - packageCount
 - packageUnit
+- receivableAmountCny （最终应收金额，员工审核时录入/确认）
+- receivableCurrency （币种，默认 CNY）
 
 ## 11. Admin V1 接口补充
 

@@ -39,6 +39,9 @@ export function createDbContext(): DbContext {
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec("PRAGMA foreign_keys = ON;");
   ensureSchema(db);
+  // For existing dev DBs, backfill newly added columns.
+  ensureDefaultReceivableAmounts(db);
+  ensureDefaultPaymentStatus(db);
   ensureSeedData(db);
   ensurePresetStaffAccount(db);
   ensureDefaultPasswordHashes(db);
@@ -75,6 +78,15 @@ function ensureSchema(db: DatabaseSync): void {
       package_unit TEXT NOT NULL,
       weight_kg REAL,
       volume_m3 REAL,
+      receivable_amount_cny REAL,
+      receivable_currency TEXT NOT NULL DEFAULT 'CNY',
+      payment_status TEXT NOT NULL DEFAULT 'unpaid',
+      paid_at TEXT,
+      paid_by TEXT,
+      payment_proof_file_name TEXT,
+      payment_proof_mime TEXT,
+      payment_proof_base64 TEXT,
+      payment_proof_uploaded_at TEXT,
       ship_date TEXT,
       domestic_tracking_no TEXT,
       transport_mode TEXT NOT NULL,
@@ -204,6 +216,33 @@ function ensureAdditionalColumns(db: DatabaseSync): void {
   if (!hasColumn(db, "orders", "volume_m3")) {
     db.exec("ALTER TABLE orders ADD COLUMN volume_m3 REAL;");
   }
+  if (!hasColumn(db, "orders", "receivable_amount_cny")) {
+    db.exec("ALTER TABLE orders ADD COLUMN receivable_amount_cny REAL;");
+  }
+  if (!hasColumn(db, "orders", "receivable_currency")) {
+    db.exec("ALTER TABLE orders ADD COLUMN receivable_currency TEXT NOT NULL DEFAULT 'CNY';");
+  }
+  if (!hasColumn(db, "orders", "payment_status")) {
+    db.exec("ALTER TABLE orders ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'unpaid';");
+  }
+  if (!hasColumn(db, "orders", "paid_at")) {
+    db.exec("ALTER TABLE orders ADD COLUMN paid_at TEXT;");
+  }
+  if (!hasColumn(db, "orders", "paid_by")) {
+    db.exec("ALTER TABLE orders ADD COLUMN paid_by TEXT;");
+  }
+  if (!hasColumn(db, "orders", "payment_proof_file_name")) {
+    db.exec("ALTER TABLE orders ADD COLUMN payment_proof_file_name TEXT;");
+  }
+  if (!hasColumn(db, "orders", "payment_proof_mime")) {
+    db.exec("ALTER TABLE orders ADD COLUMN payment_proof_mime TEXT;");
+  }
+  if (!hasColumn(db, "orders", "payment_proof_base64")) {
+    db.exec("ALTER TABLE orders ADD COLUMN payment_proof_base64 TEXT;");
+  }
+  if (!hasColumn(db, "orders", "payment_proof_uploaded_at")) {
+    db.exec("ALTER TABLE orders ADD COLUMN payment_proof_uploaded_at TEXT;");
+  }
   if (!hasColumn(db, "orders", "ship_date")) {
     db.exec("ALTER TABLE orders ADD COLUMN ship_date TEXT;");
   }
@@ -218,6 +257,69 @@ function ensureAdditionalColumns(db: DatabaseSync): void {
   }
 }
 
+function estimateReceivableAmountCny(input: {
+  transportMode: string | null;
+  weightKg: number | null;
+  volumeM3: number | null;
+}): number | null {
+  const mode = (input.transportMode ?? "").trim().toLowerCase();
+  const unitPrice = mode === "sea" ? 540 : mode === "land" ? 680 : null;
+  if (!unitPrice) return null;
+  const weight = typeof input.weightKg === "number" && !Number.isNaN(input.weightKg) ? Math.max(input.weightKg, 0) : 0;
+  const volume = typeof input.volumeM3 === "number" && !Number.isNaN(input.volumeM3) ? Math.max(input.volumeM3, 0) : 0;
+  if (weight <= 0 && volume <= 0) return null;
+  const chargeVolume = Math.max(volume, weight / 500);
+  if (!Number.isFinite(chargeVolume) || chargeVolume <= 0) return null;
+  const amount = chargeVolume * unitPrice;
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  return Number(amount.toFixed(2));
+}
+
+function ensureDefaultReceivableAmounts(db: DatabaseSync): void {
+  if (!hasColumn(db, "orders", "receivable_amount_cny")) return;
+  if (!hasColumn(db, "orders", "receivable_currency")) return;
+
+  // Backfill only when amount is missing; don't override staff-confirmed final values.
+  const rows = db
+    .prepare(
+      `
+      SELECT id, transport_mode, weight_kg, volume_m3
+      FROM orders
+      WHERE approval_status = 'approved'
+        AND (receivable_amount_cny IS NULL OR receivable_amount_cny <= 0)
+      `,
+    )
+    .all() as Array<{ id: string; transport_mode: string | null; weight_kg: number | null; volume_m3: number | null }>;
+  if (rows.length === 0) return;
+
+  const update = db.prepare(`
+    UPDATE orders
+    SET receivable_amount_cny = ?, receivable_currency = CASE
+      WHEN receivable_currency IS NULL OR TRIM(receivable_currency) = '' THEN 'CNY'
+      ELSE receivable_currency
+    END
+    WHERE id = ?
+  `);
+  for (const row of rows) {
+    const amount = estimateReceivableAmountCny({
+      transportMode: row.transport_mode,
+      weightKg: row.weight_kg,
+      volumeM3: row.volume_m3,
+    });
+    if (amount === null) continue;
+    update.run(amount, row.id);
+  }
+}
+
+function ensureDefaultPaymentStatus(db: DatabaseSync): void {
+  if (!hasColumn(db, "orders", "payment_status")) return;
+  db.exec(`
+    UPDATE orders
+    SET payment_status = 'unpaid'
+    WHERE payment_status IS NULL OR TRIM(payment_status) = ''
+  `);
+}
+
 function ensureSeedData(db: DatabaseSync): void {
   const hasUsers = db.prepare("SELECT COUNT(1) as count FROM users").get() as { count: number };
   if (hasUsers.count > 0) return;
@@ -229,9 +331,9 @@ function ensureSeedData(db: DatabaseSync): void {
   const insertOrder = db.prepare(`
     INSERT INTO orders (
       id, company_id, client_id, warehouse_id, batch_no, order_no, approval_status, item_name, product_quantity, package_count, package_unit,
-      weight_kg, volume_m3, ship_date, domestic_tracking_no, transport_mode, receiver_name_th, receiver_phone_th, receiver_address_th,
+      weight_kg, volume_m3, receivable_amount_cny, receivable_currency, ship_date, domestic_tracking_no, transport_mode, receiver_name_th, receiver_phone_th, receiver_address_th,
       status_group, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const insertShipment = db.prepare(`
     INSERT INTO shipments (
@@ -277,6 +379,8 @@ function ensureSeedData(db: DatabaseSync): void {
     "box",
     120.5,
     1.28,
+    691.2,
+    "CNY",
     now.slice(0, 10),
     "SF12345678",
     "sea",
@@ -351,9 +455,10 @@ function ensureClientDemoOrders(db: DatabaseSync): void {
   const insertOrder = db.prepare(`
     INSERT OR IGNORE INTO orders (
       id, company_id, client_id, warehouse_id, batch_no, order_no, approval_status, item_name, product_quantity, package_count, package_unit,
-      weight_kg, volume_m3, ship_date, domestic_tracking_no, transport_mode, receiver_name_th, receiver_phone_th, receiver_address_th,
+      weight_kg, volume_m3, receivable_amount_cny, receivable_currency,
+      ship_date, domestic_tracking_no, transport_mode, receiver_name_th, receiver_phone_th, receiver_address_th,
       status_group, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const insertShipment = db.prepare(`
     INSERT OR IGNORE INTO shipments (
@@ -477,6 +582,9 @@ function ensureClientDemoOrders(db: DatabaseSync): void {
 
   for (const item of demoOrders) {
     const createdAt = new Date(Date.now() - item.minutesAgo * 60 * 1000).toISOString();
+    const unitPrice = item.transportMode === "sea" ? 540 : 680;
+    const chargeVolume = Math.max(item.volumeM3, item.weightKg / 500);
+    const receivableAmountCny = Number((chargeVolume * unitPrice).toFixed(2));
     insertOrder.run(
       item.orderId,
       "c_001",
@@ -491,6 +599,8 @@ function ensureClientDemoOrders(db: DatabaseSync): void {
       item.packageUnit,
       item.weightKg,
       item.volumeM3,
+      receivableAmountCny,
+      "CNY",
       createdAt.slice(0, 10),
       item.domesticTrackingNo,
       item.transportMode,

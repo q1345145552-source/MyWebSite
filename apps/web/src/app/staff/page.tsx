@@ -2,6 +2,7 @@
 
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
+import { calcOrderAmountCny, formatCny } from "../../modules/billing/billing-utils";
 import EmptyStateCard from "../../modules/layout/EmptyStateCard";
 import RoleShell from "../../modules/layout/RoleShell";
 import Toast from "../../modules/layout/Toast";
@@ -10,6 +11,8 @@ import {
   createStaffOrder,
   fetchStaffPrealerts,
   fetchStaffShipments,
+  setStaffOrderReceivable,
+  setStaffOrderPayment,
   type OrderItem,
   type ShipmentItem,
   updateStaffShipmentStatus,
@@ -24,6 +27,8 @@ export default function StaffHomePage() {
     productQuantity: number;
     weightKg: number;
     volumeM3: number;
+    receivableAmountCny: number;
+    receivableCurrency: "CNY" | "THB";
     domesticTrackingNo: string;
     transportMode: "sea" | "land";
     shipDate: string;
@@ -99,6 +104,18 @@ export default function StaffHomePage() {
     receiverPhoneTh: "0820000000",
     receiverAddressTh: "Chiang Mai",
   });
+  const [receivablePatch, setReceivablePatch] = useState({
+    orderId: "",
+    receivableAmountCny: "",
+    receivableCurrency: "CNY" as "CNY" | "THB",
+  });
+  const [paymentPatch, setPaymentPatch] = useState({
+    orderId: "",
+    paymentStatus: "paid" as "paid" | "unpaid",
+    proofFileName: "",
+    proofMime: "",
+    proofBase64: "",
+  });
   const buildPrealertDraft = (item: OrderItem): PrealertEditDraft => ({
     warehouseId: item.warehouseId ?? "",
     itemName: item.itemName,
@@ -107,6 +124,11 @@ export default function StaffHomePage() {
     productQuantity: item.productQuantity,
     weightKg: item.weightKg ?? 0,
     volumeM3: item.volumeM3 ?? 0,
+    receivableAmountCny:
+      typeof item.receivableAmountCny === "number"
+        ? item.receivableAmountCny
+        : calcOrderAmountCny(item) ?? 0,
+    receivableCurrency: item.receivableCurrency === "THB" ? "THB" : "CNY",
     domesticTrackingNo: item.domesticTrackingNo ?? "",
     transportMode: item.transportMode === "sea" ? "sea" : "land",
     shipDate: item.shipDate ?? item.createdAt.slice(0, 10),
@@ -120,6 +142,8 @@ export default function StaffHomePage() {
     a.productQuantity === b.productQuantity &&
     a.weightKg === b.weightKg &&
     a.volumeM3 === b.volumeM3 &&
+    a.receivableAmountCny === b.receivableAmountCny &&
+    a.receivableCurrency === b.receivableCurrency &&
     a.domesticTrackingNo === b.domesticTrackingNo &&
     a.transportMode === b.transportMode &&
     a.shipDate === b.shipDate;
@@ -145,6 +169,9 @@ export default function StaffHomePage() {
     }
     if (!Number.isFinite(draft.volumeM3) || draft.volumeM3 <= 0) {
       return "体积必须大于 0。";
+    }
+    if (!Number.isFinite(draft.receivableAmountCny) || draft.receivableAmountCny <= 0) {
+      return "应收金额必须大于 0。";
     }
     if (draft.transportMode !== "sea" && draft.transportMode !== "land") {
       return "运输方式无效，请选择海运或陆运。";
@@ -404,6 +431,8 @@ export default function StaffHomePage() {
         productQuantity: draft?.productQuantity,
         weightKg: draft?.weightKg,
         volumeM3: draft?.volumeM3,
+        receivableAmountCny: draft.receivableAmountCny,
+        receivableCurrency: draft.receivableCurrency,
         domesticTrackingNo: draft?.domesticTrackingNo,
         transportMode: draft?.transportMode,
         shipDate: draft?.shipDate,
@@ -415,6 +444,72 @@ export default function StaffHomePage() {
     } catch (error) {
       const text = error instanceof Error ? error.message : "审核失败";
       setMessage(`审核失败：${text}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const patchReceivableAmount = async () => {
+    const orderId = receivablePatch.orderId.trim();
+    const amount = Number(receivablePatch.receivableAmountCny.trim());
+    if (!orderId) {
+      setMessage("请先填写需要补录金额的订单号。");
+      return;
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setMessage("应收金额必须大于 0。");
+      return;
+    }
+    setLoading(true);
+    setMessage("");
+    try {
+      const result = await setStaffOrderReceivable({
+        orderId,
+        receivableAmountCny: amount,
+        receivableCurrency: receivablePatch.receivableCurrency,
+      });
+      setToast("应收金额已更新");
+      setMessage(
+        `订单 ${result.orderId} 应收金额已更新为 ${result.receivableCurrency} ${result.receivableAmountCny.toFixed(2)}`,
+      );
+      setReceivablePatch((v) => ({ ...v, receivableAmountCny: "" }));
+      await loadPageData();
+    } catch (error) {
+      const text = error instanceof Error ? error.message : "更新失败";
+      setMessage(`更新失败：${text}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const patchPaymentStatus = async () => {
+    const orderId = paymentPatch.orderId.trim();
+    if (!orderId) {
+      setMessage("请先填写需要确认付款的订单号。");
+      return;
+    }
+    if (paymentPatch.paymentStatus === "paid") {
+      if (!paymentPatch.proofFileName || !paymentPatch.proofMime || !paymentPatch.proofBase64) {
+        setMessage("确认已付款必须上传流水单凭证（文件）。");
+        return;
+      }
+    }
+    setLoading(true);
+    setMessage("");
+    try {
+      const result = await setStaffOrderPayment({
+        orderId,
+        paymentStatus: paymentPatch.paymentStatus,
+        proofFileName: paymentPatch.paymentStatus === "paid" ? paymentPatch.proofFileName : undefined,
+        proofMime: paymentPatch.paymentStatus === "paid" ? paymentPatch.proofMime : undefined,
+        proofBase64: paymentPatch.paymentStatus === "paid" ? paymentPatch.proofBase64 : undefined,
+      });
+      setToast("付款状态已更新");
+      setMessage(`订单 ${result.orderId} 付款状态已更新为 ${result.paymentStatus === "paid" ? "已付款" : "待付款"}`);
+      await loadPageData();
+    } catch (error) {
+      const text = error instanceof Error ? error.message : "更新失败";
+      setMessage(`更新失败：${text}`);
     } finally {
       setLoading(false);
     }
@@ -632,6 +727,166 @@ export default function StaffHomePage() {
       <section
         style={{
           border: "1px solid #e5e7eb",
+          borderLeft: "4px solid #0f766e",
+          borderRadius: 12,
+          padding: 16,
+          marginBottom: 18,
+          background: "#ffffff",
+          boxShadow: "0 1px 3px rgba(15,23,42,0.06)",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <h2 style={{ margin: 0, fontSize: 18, color: "#111827" }}>账单管理（业务板块）</h2>
+          <div style={{ fontSize: 12, color: "#64748b" }}>
+            金额/付款状态仅员工确认后对客户生效
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gap: 12 }}>
+          <div
+            style={{
+              border: "1px solid #fed7aa",
+              borderRadius: 12,
+              padding: 12,
+              background: "#fff7ed",
+            }}
+          >
+            <div style={{ fontWeight: 800, marginBottom: 8, color: "#9a3412" }}>已审核订单补录最终应收金额</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 8 }}>
+              <input
+                value={receivablePatch.orderId}
+                onChange={(e) => setReceivablePatch((v) => ({ ...v, orderId: e.target.value }))}
+                placeholder="订单号（例如 o_1771783226942）"
+                style={orderCreateInputStyle}
+              />
+              <input
+                type="number"
+                step="0.01"
+                min="0.01"
+                value={receivablePatch.receivableAmountCny}
+                onChange={(e) => setReceivablePatch((v) => ({ ...v, receivableAmountCny: e.target.value }))}
+                placeholder="最终应收金额"
+                style={orderCreateInputStyle}
+              />
+              <select
+                value={receivablePatch.receivableCurrency}
+                onChange={(e) =>
+                  setReceivablePatch((v) => ({
+                    ...v,
+                    receivableCurrency: e.target.value === "THB" ? "THB" : "CNY",
+                  }))
+                }
+                style={orderCreateInputStyle}
+              >
+                <option value="CNY">币种：CNY</option>
+                <option value="THB">币种：THB</option>
+              </select>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => void patchReceivableAmount()}
+                style={{
+                  border: "none",
+                  borderRadius: 10,
+                  padding: "10px 14px",
+                  color: "#fff",
+                  background: "#9a3412",
+                  fontWeight: 700,
+                }}
+              >
+                保存应收金额
+              </button>
+            </div>
+            <div style={{ marginTop: 8, fontSize: 12, color: "#9a3412" }}>
+              用于历史订单/已审核订单补录金额；新预报单请在审核通过前填写“最终应收金额”。
+            </div>
+          </div>
+
+          <div
+            style={{
+              border: "1px solid #bbf7d0",
+              borderRadius: 12,
+              padding: 12,
+              background: "#f0fdf4",
+            }}
+          >
+            <div style={{ fontWeight: 800, marginBottom: 8, color: "#166534" }}>
+              账单付款状态确认（员工权限，需上传流水单）
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 8 }}>
+              <input
+                value={paymentPatch.orderId}
+                onChange={(e) => setPaymentPatch((v) => ({ ...v, orderId: e.target.value }))}
+                placeholder="订单号（例如 o_1771783226942）"
+                style={orderCreateInputStyle}
+              />
+              <select
+                value={paymentPatch.paymentStatus}
+                onChange={(e) =>
+                  setPaymentPatch((v) => ({
+                    ...v,
+                    paymentStatus: e.target.value === "unpaid" ? "unpaid" : "paid",
+                  }))
+                }
+                style={orderCreateInputStyle}
+              >
+                <option value="paid">已付款</option>
+                <option value="unpaid">待付款</option>
+              </select>
+              <input
+                type="file"
+                accept="image/*,application/pdf"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) {
+                    setPaymentPatch((v) => ({ ...v, proofFileName: "", proofMime: "", proofBase64: "" }));
+                    return;
+                  }
+                  const reader = new FileReader();
+                  reader.onload = () => {
+                    const result = typeof reader.result === "string" ? reader.result : "";
+                    const base64 = result.includes(",") ? result.split(",").pop() ?? "" : "";
+                    setPaymentPatch((v) => ({
+                      ...v,
+                      proofFileName: file.name,
+                      proofMime: file.type || "application/octet-stream",
+                      proofBase64: base64,
+                    }));
+                  };
+                  reader.onerror = () => {
+                    setMessage("读取流水单文件失败，请重试或更换文件。");
+                  };
+                  reader.readAsDataURL(file);
+                }}
+                style={orderCreateInputStyle}
+              />
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => void patchPaymentStatus()}
+                style={{
+                  border: "none",
+                  borderRadius: 10,
+                  padding: "10px 14px",
+                  color: "#fff",
+                  background: "#166534",
+                  fontWeight: 700,
+                }}
+              >
+                保存付款状态
+              </button>
+            </div>
+            <div style={{ marginTop: 8, fontSize: 12, color: "#166534" }}>
+              客户端账单会按“待付款/已付款”分类展示；确认已付款必须上传流水单凭证。
+              {paymentPatch.proofFileName ? `（已选择：${paymentPatch.proofFileName}）` : ""}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section
+        style={{
+          border: "1px solid #e5e7eb",
           borderLeft: "4px solid #d1d5db",
           borderRadius: 12,
           padding: 16,
@@ -843,6 +1098,41 @@ export default function StaffHomePage() {
                             />
                             <span style={{ color: "#6b7280", fontSize: 13, minWidth: 30 }}>m3</span>
                           </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0.01"
+                              value={String(draft.receivableAmountCny)}
+                              onChange={(e) =>
+                                setPrealertEditDrafts((prev) => ({
+                                  ...prev,
+                                  [item.id]: {
+                                    ...(prev[item.id] ?? buildPrealertDraft(item)),
+                                    receivableAmountCny: Number(e.target.value || 0),
+                                  },
+                                }))
+                              }
+                              placeholder="最终应收金额"
+                              style={{ ...prealertEditInputStyle, marginBottom: 0 }}
+                            />
+                            <select
+                              value={draft.receivableCurrency}
+                              onChange={(e) =>
+                                setPrealertEditDrafts((prev) => ({
+                                  ...prev,
+                                  [item.id]: {
+                                    ...(prev[item.id] ?? buildPrealertDraft(item)),
+                                    receivableCurrency: e.target.value === "THB" ? "THB" : "CNY",
+                                  },
+                                }))
+                              }
+                              style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", minWidth: 100 }}
+                            >
+                              <option value="CNY">CNY</option>
+                              <option value="THB">THB</option>
+                            </select>
+                          </div>
                           <input
                             value={draft.domesticTrackingNo}
                             onChange={(e) =>
@@ -900,6 +1190,14 @@ export default function StaffHomePage() {
                           <InfoItem label="产品数量" value={String(displayDraft.productQuantity)} />
                           <InfoItem label="重量" value={`${displayDraft.weightKg ?? "-"} kg`} />
                           <InfoItem label="体积" value={`${displayDraft.volumeM3 ?? "-"} m3`} />
+                          <InfoItem
+                            label="最终应收金额"
+                            value={
+                              displayDraft.receivableCurrency === "THB"
+                                ? `THB ${displayDraft.receivableAmountCny.toFixed(2)}`
+                                : formatCny(displayDraft.receivableAmountCny)
+                            }
+                          />
                           <InfoItem label="国内快递单号" value={displayDraft.domesticTrackingNo ?? "-"} />
                           <InfoItem label="运输方式" value={displayDraft.transportMode === "sea" ? "海运" : "陆运"} />
                           <InfoItem label="发货日期" value={displayDraft.shipDate} />

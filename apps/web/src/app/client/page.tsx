@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import EmptyStateCard from "../../modules/layout/EmptyStateCard";
 import RoleShell from "../../modules/layout/RoleShell";
 import Toast from "../../modules/layout/Toast";
+import { formatCny } from "../../modules/billing/billing-utils";
 import { sendAiMessage } from "../../services/ai-client";
 import {
   createClientPrealert,
@@ -469,20 +470,36 @@ export default function ClientHomePage() {
         <div className="section-label section-label-query">查询区</div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
           <h2 style={{ margin: 0, fontSize: 20 }}>我的订单查询</h2>
-          <button
-            type="button"
-            onClick={() => setQueryPanelCollapsed((v) => !v)}
-            style={{
-              border: "1px solid #d1d5db",
-              borderRadius: 8,
-              padding: "6px 10px",
-              color: "#374151",
-              background: "#fff",
-              fontWeight: 600,
-            }}
-          >
-            {queryPanelCollapsed ? "展开" : "折叠"}
-          </button>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <a
+              href="/client/bills"
+              style={{
+                border: "1px solid #bfdbfe",
+                borderRadius: 8,
+                padding: "6px 10px",
+                color: "#1d4ed8",
+                background: "#eff6ff",
+                fontWeight: 800,
+                textDecoration: "none",
+              }}
+            >
+              账单
+            </a>
+            <button
+              type="button"
+              onClick={() => setQueryPanelCollapsed((v) => !v)}
+              style={{
+                border: "1px solid #d1d5db",
+                borderRadius: 8,
+                padding: "6px 10px",
+                color: "#374151",
+                background: "#fff",
+                fontWeight: 600,
+              }}
+            >
+              {queryPanelCollapsed ? "展开" : "折叠"}
+            </button>
+          </div>
         </div>
 
         {!queryPanelCollapsed ? (
@@ -630,6 +647,27 @@ export default function ClientHomePage() {
             <div className="order-head">
               <div className="order-title">#{idx + 1} 订单 {item.id}</div>
               <div className="order-badges">
+                <span className="order-badge order-badge-amount">金额：{formatCny(item.receivableAmountCny ?? null)}</span>
+                <span
+                  className={`order-badge ${(item.paymentStatus ?? "unpaid") === "paid" ? "order-badge-paid" : "order-badge-unpaid"}`}
+                >
+                  {(item.paymentStatus ?? "unpaid") === "paid" ? "已付款" : "待付款"}
+                </span>
+                <a
+                  href={`/client/bills/${encodeURIComponent(item.id)}`}
+                  style={{
+                    border: "1px solid #bfdbfe",
+                    borderRadius: 999,
+                    padding: "3px 10px",
+                    background: "#eff6ff",
+                    color: "#1d4ed8",
+                    textDecoration: "none",
+                    fontSize: 12,
+                    fontWeight: 700,
+                  }}
+                >
+                  账单
+                </a>
                 <span className={`order-badge ${item.transportMode === "sea" ? "order-badge-sea" : "order-badge-land"}`}>
                   {item.transportMode === "sea" ? "海运" : "陆运"}
                 </span>

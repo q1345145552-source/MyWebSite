@@ -92,7 +92,9 @@ export function registerAdminRoutes(app: MinimalHttpApp, db: DatabaseSync): void
         SELECT
           o.id, o.client_id, u.name as client_name, o.warehouse_id, o.order_no, o.item_name, o.transport_mode,
           o.domestic_tracking_no, o.batch_no, o.approval_status, o.product_quantity, o.package_count, o.package_unit,
-          o.weight_kg, o.volume_m3, o.ship_date, o.status_group, o.created_at, o.updated_at
+          o.weight_kg, o.volume_m3, o.receivable_amount_cny, o.receivable_currency,
+          o.payment_status, o.paid_at, o.paid_by,
+          o.ship_date, o.status_group, o.created_at, o.updated_at
         FROM orders o
         LEFT JOIN users u ON u.id = o.client_id
         WHERE o.company_id = ?
@@ -114,6 +116,11 @@ export function registerAdminRoutes(app: MinimalHttpApp, db: DatabaseSync): void
       package_unit: string;
       weight_kg: number | null;
       volume_m3: number | null;
+      receivable_amount_cny: number | null;
+      receivable_currency: string | null;
+      payment_status: string | null;
+      paid_at: string | null;
+      paid_by: string | null;
       ship_date: string | null;
       status_group: string;
       created_at: string;
@@ -137,6 +144,11 @@ export function registerAdminRoutes(app: MinimalHttpApp, db: DatabaseSync): void
         packageUnit: r.package_unit,
         weightKg: r.weight_kg,
         volumeM3: r.volume_m3,
+        receivableAmountCny: r.receivable_amount_cny,
+        receivableCurrency: r.receivable_currency ?? "CNY",
+        paymentStatus: r.payment_status ?? "unpaid",
+        paidAt: r.paid_at ?? undefined,
+        paidBy: r.paid_by ?? undefined,
         shipDate: r.ship_date,
         statusGroup: r.status_group,
         createdAt: r.created_at,

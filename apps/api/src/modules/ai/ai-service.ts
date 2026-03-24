@@ -142,8 +142,9 @@ export class ClientAiService implements AiService {
     } else if (this.isGreetingMessage(question) || modelIntent.intent === "greeting") {
       answerDraft = this.formatGreetingAnswer();
     } else if (this.isServiceQaIntent(question)) {
-      const hasRelevantKnowledge = this.hasRelevantKnowledge(question, knowledgeItems);
-      answerDraft = this.formatServiceQaAnswer(question, knowledgeItems.length, hasRelevantKnowledge);
+      const relevantKnowledge = this.pickRelevantKnowledge(question, knowledgeItems);
+      const hasRelevantKnowledge = relevantKnowledge.length > 0;
+      answerDraft = this.formatServiceQaAnswer(question, knowledgeItems.length, relevantKnowledge);
       shouldCreateKnowledgeGap = !hasRelevantKnowledge;
     } else if (this.shouldAskClarification(question, modelIntent)) {
       answerDraft = this.formatClarificationAnswer();
@@ -826,8 +827,12 @@ export class ClientAiService implements AiService {
     ].join("\n");
   }
 
-  private formatServiceQaAnswer(question: string, knowledgeCount: number, hasRelevantKnowledge: boolean): string {
-    if (!hasRelevantKnowledge) {
+  private formatServiceQaAnswer(
+    question: string,
+    knowledgeCount: number,
+    relevantKnowledge: AiKnowledgeItem[],
+  ): string {
+    if (relevantKnowledge.length === 0) {
       return [
         "【客服答复】",
         `已收到你的问题：「${question}」`,
@@ -843,12 +848,23 @@ export class ClientAiService implements AiService {
         "如涉及费用、时效、赔付等最终条款，请以你们公司最新公告与人工客服确认为准。",
       ].join("\n");
     }
+    const referenceLines = relevantKnowledge.slice(0, 3).map((item, index) => {
+      const summary = this.summarizeKnowledgeContent(item.content);
+      return `${index + 1}. ${item.title}：${summary}`;
+    });
+    const directHint = this.buildServiceQaDirectHint(question, relevantKnowledge[0]);
     return [
       "【客服答复】",
       `已收到你的问题：「${question}」`,
       knowledgeCount > 0
         ? `我会优先参考你们公司已投喂的业务知识（当前 ${knowledgeCount} 条）进行回答。`
         : "当前未检测到公司专属知识投喂，我会先按通用物流服务规则给你建议。",
+      "",
+      "【参考知识】",
+      ...referenceLines,
+      "",
+      "【结论】",
+      directHint,
       "",
       "【说明】",
       "如涉及费用、时效、赔付等最终条款，请以你们公司最新公告与人工客服确认为准。",
@@ -857,6 +873,11 @@ export class ClientAiService implements AiService {
 
   private hasRelevantKnowledge(question: string, knowledgeItems: AiKnowledgeItem[]): boolean {
     if (knowledgeItems.length === 0) return false;
+    return this.pickRelevantKnowledge(question, knowledgeItems).length > 0;
+  }
+
+  private pickRelevantKnowledge(question: string, knowledgeItems: AiKnowledgeItem[]): AiKnowledgeItem[] {
+    if (knowledgeItems.length === 0) return [];
     const normalizedQuestion = question.replace(/\s+/g, "");
     const hints = [
       "清关",
@@ -878,11 +899,37 @@ export class ClientAiService implements AiService {
       "装箱单",
       "轨迹",
     ].filter((item) => normalizedQuestion.includes(item));
-    if (hints.length === 0) return knowledgeItems.length > 0;
-    return knowledgeItems.some((item) => {
-      const content = `${item.title}${item.content}`.replace(/\s+/g, "");
-      return hints.some((hint) => content.includes(hint));
-    });
+    if (hints.length === 0) {
+      return knowledgeItems.slice(0, 2);
+    }
+    return knowledgeItems
+      .map((item) => {
+        const content = `${item.title}${item.content}`.replace(/\s+/g, "");
+        const score = hints.reduce((acc, hint) => (content.includes(hint) ? acc + 1 : acc), 0);
+        return { item, score };
+      })
+      .filter((entry) => entry.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .map((entry) => entry.item)
+      .slice(0, 3);
+  }
+
+  private summarizeKnowledgeContent(content: string): string {
+    const plain = content.replace(/\s+/g, " ").trim();
+    if (!plain) return "暂无详细内容";
+    return plain.length > 80 ? `${plain.slice(0, 80)}...` : plain;
+  }
+
+  private buildServiceQaDirectHint(question: string, topKnowledge?: AiKnowledgeItem): string {
+    if (!topKnowledge) return "基于当前资料，建议先联系人工客服确认。";
+    const questionText = question.replace(/\s+/g, "");
+    if (/(多久|几天|时效|清关)/.test(questionText)) {
+      return `根据「${topKnowledge.title}」的说明，清关/时效请以该条目内容为准，通常可按其中时长范围向客户答复。`;
+    }
+    if (/(费用|运费|计费|体积重|实重)/.test(questionText)) {
+      return `根据「${topKnowledge.title}」的说明，费用与计费规则请按该条目执行，并以最新对账口径为准。`;
+    }
+    return `根据「${topKnowledge.title}」可给出初步答复，具体执行请按该条目细则。`;
   }
 
   private shouldRecordKnowledgeGap(input: {

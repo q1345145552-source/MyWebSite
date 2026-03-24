@@ -76,8 +76,14 @@ export interface OrderItem {
   packageUnit: string;
   weightKg?: number;
   volumeM3?: number;
+  receivableAmountCny?: number | null;
+  receivableCurrency?: "CNY" | "THB";
+  paymentStatus?: "paid" | "unpaid";
+  paidAt?: string;
+  paidBy?: string;
   shipDate?: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface AdminOverview {
@@ -116,6 +122,8 @@ export interface AdminOrderItem {
   packageUnit: string;
   weightKg: number | null;
   volumeM3: number | null;
+  receivableAmountCny?: number | null;
+  receivableCurrency?: "CNY" | "THB";
   shipDate: string | null;
   statusGroup: string;
   createdAt: string;
@@ -220,6 +228,8 @@ export async function approveStaffPrealert(payload: {
   productQuantity?: number;
   weightKg?: number;
   volumeM3?: number;
+  receivableAmountCny: number;
+  receivableCurrency?: "CNY" | "THB";
   domesticTrackingNo?: string;
   transportMode?: "sea" | "land";
   shipDate?: string;
@@ -230,6 +240,46 @@ export async function approveStaffPrealert(payload: {
   approvedAt: string;
 }> {
   const response = await fetch(`${apiBaseUrl()}/staff/prealerts/approve`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(),
+    },
+    body: JSON.stringify(payload),
+  });
+  return parseApiResponse(response);
+}
+
+export async function setStaffOrderReceivable(payload: {
+  orderId: string;
+  receivableAmountCny: number;
+  receivableCurrency?: "CNY" | "THB";
+}): Promise<{ orderId: string; receivableAmountCny: number; receivableCurrency: "CNY" | "THB"; updatedAt: string }> {
+  const response = await fetch(`${apiBaseUrl()}/staff/orders/set-receivable`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(),
+    },
+    body: JSON.stringify(payload),
+  });
+  return parseApiResponse(response);
+}
+
+export async function setStaffOrderPayment(payload: {
+  orderId: string;
+  paymentStatus: "paid" | "unpaid";
+  proofFileName?: string;
+  proofMime?: string;
+  proofBase64?: string;
+}): Promise<{
+  orderId: string;
+  paymentStatus: "paid" | "unpaid";
+  paidAt: string | null;
+  paidBy: string | null;
+  updatedAt: string;
+}> {
+  const response = await fetch(`${apiBaseUrl()}/staff/orders/set-payment`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

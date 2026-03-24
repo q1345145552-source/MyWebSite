@@ -43,6 +43,8 @@ export interface Order {
   batchNo?: string;
   weightKg?: number;
   volumeM3?: number;
+  receivableAmountCny?: number;
+  receivableCurrency?: "CNY" | "THB";
   receiverNameTh?: string;
   receiverPhoneTh?: string;
   receiverAddressTh?: string;
