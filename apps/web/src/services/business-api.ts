@@ -167,6 +167,7 @@ export interface OrderItem {
   domesticTrackingNo?: string;
   trackingNo?: string;
   currentStatus?: string;
+  statusGroup?: "unfinished" | "completed";
   productQuantity: number;
   packageCount: number;
   packageUnit: string;

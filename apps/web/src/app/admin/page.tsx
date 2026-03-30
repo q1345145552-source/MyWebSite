@@ -524,10 +524,10 @@ export default function AdminHomePage() {
                     <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                     <XAxis dataKey="label" stroke="#64748b" />
                     <YAxis stroke="#64748b" />
-                    <Tooltip formatter={(value: number) => [`${value} 天`, "时效"]} labelFormatter={(_, payload) => {
-                      const row = payload?.[0]?.payload as { orderId?: string } | undefined;
-                      return row?.orderId ? `订单号：${row.orderId}` : "时效详情";
-                    }} />
+                    <Tooltip
+                      formatter={(value) => [`${String(value ?? "-")} 天`, "时效"]}
+                      labelFormatter={(label) => (label ? `订单号：${String(label)}` : "时效详情")}
+                    />
                     <Line type="monotone" dataKey="days" stroke="#1e3a8a" strokeWidth={2} dot={false} />
                   </LineChart>
                 </ResponsiveContainer>

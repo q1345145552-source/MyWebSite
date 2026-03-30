@@ -34,6 +34,8 @@ export default function ClientWalletPage() {
     return {
       cny,
       thb,
+      pair: data.exchangeRate.pair,
+      rate,
       totalCny: cny + thb / rate,
       totalThb: thb + cny * rate,
     };
@@ -55,8 +57,8 @@ export default function ClientWalletPage() {
               <div style={{ fontSize: 24, fontWeight: 700 }}>฿{summary.thb.toFixed(2)}</div>
             </div>
             <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10, background: "#f8fafc" }}>
-              <div style={{ color: "#64748b", fontSize: 12 }}>汇率（{data.exchangeRate.pair}）</div>
-              <div style={{ fontSize: 20, fontWeight: 700 }}>{data.exchangeRate.rate.toFixed(4)}</div>
+              <div style={{ color: "#64748b", fontSize: 12 }}>汇率（{summary.pair}）</div>
+              <div style={{ fontSize: 20, fontWeight: 700 }}>{summary.rate.toFixed(4)}</div>
             </div>
             <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10, background: "#f8fafc" }}>
               <div style={{ color: "#64748b", fontSize: 12 }}>折算总额（CNY）</div>

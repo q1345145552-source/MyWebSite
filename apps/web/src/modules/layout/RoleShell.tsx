@@ -197,7 +197,7 @@ export default function RoleShell(props: {
       <div className="dashboard-content">
         <div className="glass-topbar">
           <span className="glass-topbar-title">{title}</span>
-          <span className="glass-topbar-meta">{session.name} · {session.role}</span>
+          <span className="glass-topbar-meta">{session.userId} · {session.role}</span>
         </div>
         {children}
       </div>
