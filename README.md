@@ -133,3 +133,14 @@ lsof -nP -iTCP:3001 -sTCP:LISTEN | awk 'NR>1 {print $2}' | xargs -r kill -9
 仓库根目录已提供 `Dockerfile.api`、`Dockerfile.web`、`docker-compose.yml`。复制 `env.example` 为 `.env` 并填写 `AUTH_SECRET`、`NEXT_PUBLIC_API_BASE_URL` 后执行 `docker compose up -d --build`。
 
 **详细步骤（云服务器、域名、备案与 HTTPS）见 [docs/deploy-china.md](docs/deploy-china.md)。**
+
+## Render 部署（前后端分离）
+
+仓库根目录已提供 `render.yaml`，可在 Render 通过 Blueprint 一键创建 `xiangtai-api` 与 `xiangtai-web` 两个服务。
+
+关键变量：
+
+- API：`AUTH_SECRET`（必填），`DEEPSEEK_API_KEY`（可选）
+- Web：`NEXT_PUBLIC_API_BASE_URL`（填 API 的公网 URL，例如 `https://xiangtai-api.onrender.com`）
+
+详细步骤见 [docs/deploy-render.md](docs/deploy-render.md)。
