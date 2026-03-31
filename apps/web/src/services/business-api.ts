@@ -206,6 +206,7 @@ export interface AdminUserItem {
 
 export interface AdminOrderItem {
   id: string;
+  shipmentId?: string;
   clientId: string;
   clientName: string | null;
   warehouseId: string;
@@ -221,11 +222,13 @@ export interface AdminOrderItem {
   weightKg: number | null;
   volumeM3: number | null;
   receiverAddressTh?: string;
+  containerNo?: string;
   trackingNo?: string;
   currentStatus?: string;
   canEdit?: boolean;
   receivableAmountCny?: number | null;
   receivableCurrency?: "CNY" | "THB";
+  paymentStatus?: "paid" | "unpaid";
   shipDate: string | null;
   statusGroup: string;
   createdAt: string;
@@ -855,6 +858,11 @@ export async function updateAdminOrder(payload: {
   itemName: string;
   transportMode: "sea" | "land";
   domesticTrackingNo?: string;
+  trackingNo?: string;
+  batchNo?: string;
+  warehouseId?: string;
+  receiverAddressTh?: string;
+  containerNo?: string;
   productQuantity: number;
   packageCount: number;
   packageUnit: "bag" | "box";
@@ -862,6 +870,7 @@ export async function updateAdminOrder(payload: {
   volumeM3?: number;
   receivableAmountCny?: number;
   receivableCurrency?: "CNY" | "THB";
+  paymentStatus?: "paid" | "unpaid";
   shipDate?: string;
 }): Promise<{ orderId: string; updatedAt: string }> {
   const response = await fetch(`${apiBaseUrl()}/admin/orders/update`, {

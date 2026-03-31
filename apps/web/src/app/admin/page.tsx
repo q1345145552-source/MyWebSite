@@ -81,6 +81,15 @@ const WAREHOUSE_LABEL_MAP: Record<string, string> = {
   wh_dongguan_01: "东莞仓",
 };
 
+/**
+ * 管理端运单号前缀规则：仓库与单号前缀必须匹配。
+ */
+const WAREHOUSE_TRACKING_PREFIX_MAP: Record<string, string[]> = {
+  wh_yiwu_01: ["YW", "YWXT"],
+  wh_guangzhou_01: ["GZ", "GZXT"],
+  wh_dongguan_01: ["DG", "DGXT"],
+};
+
 export default function AdminHomePage() {
   const [session, setSession] = useState<MockSession>(DEFAULT_SESSIONS.client);
   const [loading, setLoading] = useState(false);
@@ -102,9 +111,14 @@ export default function AdminHomePage() {
   const [ordersPanelCollapsed, setOrdersPanelCollapsed] = useState(false);
   const [editingOrderId, setEditingOrderId] = useState("");
   const [orderEditForm, setOrderEditForm] = useState({
+    trackingNo: "",
+    batchNo: "",
+    warehouseId: "wh_yiwu_01",
     itemName: "",
     transportMode: "sea" as "sea" | "land",
     domesticTrackingNo: "",
+    receiverAddressTh: "",
+    containerNo: "",
     productQuantity: "",
     packageCount: "",
     packageUnit: "box" as "bag" | "box",
@@ -112,6 +126,7 @@ export default function AdminHomePage() {
     volumeM3: "",
     receivableAmountCny: "",
     receivableCurrency: "CNY" as "CNY" | "THB",
+    paymentStatus: "unpaid" as "paid" | "unpaid",
     shipDate: "",
   });
   const [staffForm, setStaffForm] = useState({ id: "", name: "", phone: "", password: "" });
@@ -240,9 +255,14 @@ export default function AdminHomePage() {
   const startEditOrder = (order: AdminOrderItem) => {
     setEditingOrderId(order.id);
     setOrderEditForm({
+      trackingNo: order.trackingNo ?? "",
+      batchNo: order.batchNo ?? "",
+      warehouseId: order.warehouseId ?? "wh_yiwu_01",
       itemName: order.itemName ?? "",
       transportMode: order.transportMode === "land" ? "land" : "sea",
       domesticTrackingNo: order.domesticTrackingNo ?? "",
+      receiverAddressTh: order.receiverAddressTh ?? "",
+      containerNo: order.containerNo ?? "",
       productQuantity: String(order.productQuantity ?? 0),
       packageCount: String(order.packageCount ?? 0),
       packageUnit: order.packageUnit === "bag" ? "bag" : "box",
@@ -251,6 +271,7 @@ export default function AdminHomePage() {
       receivableAmountCny:
         order.receivableAmountCny === null || order.receivableAmountCny === undefined ? "" : String(order.receivableAmountCny),
       receivableCurrency: order.receivableCurrency === "THB" ? "THB" : "CNY",
+      paymentStatus: order.paymentStatus === "paid" ? "paid" : "unpaid",
       shipDate: order.shipDate ?? "",
     });
   };
@@ -263,6 +284,16 @@ export default function AdminHomePage() {
       setMessage("请先选择要编辑的订单。");
       return;
     }
+    if (!orderEditForm.trackingNo.trim()) {
+      setMessage("请填写运单号。");
+      return;
+    }
+    const trackingNoUpper = orderEditForm.trackingNo.trim().toUpperCase();
+    const prefixes = WAREHOUSE_TRACKING_PREFIX_MAP[orderEditForm.warehouseId] ?? ["XT"];
+    if (!prefixes.some((prefix) => trackingNoUpper.startsWith(prefix))) {
+      setMessage(`运单号前缀需与仓库一致：${prefixes.join("/")}`);
+      return;
+    }
     if (!orderEditForm.itemName.trim()) {
       setMessage("请填写品名。");
       return;
@@ -273,8 +304,13 @@ export default function AdminHomePage() {
       await updateAdminOrder({
         orderId: editingOrderId,
         itemName: orderEditForm.itemName.trim(),
+        trackingNo: orderEditForm.trackingNo.trim() || undefined,
+        batchNo: orderEditForm.batchNo.trim() || undefined,
+        warehouseId: orderEditForm.warehouseId,
         transportMode: orderEditForm.transportMode,
         domesticTrackingNo: orderEditForm.domesticTrackingNo.trim() || undefined,
+        receiverAddressTh: orderEditForm.receiverAddressTh.trim(),
+        containerNo: orderEditForm.containerNo.trim() || undefined,
         productQuantity: Number(orderEditForm.productQuantity || 0),
         packageCount: Number(orderEditForm.packageCount || 0),
         packageUnit: orderEditForm.packageUnit,
@@ -282,6 +318,7 @@ export default function AdminHomePage() {
         volumeM3: orderEditForm.volumeM3.trim() ? Number(orderEditForm.volumeM3) : undefined,
         receivableAmountCny: orderEditForm.receivableAmountCny.trim() ? Number(orderEditForm.receivableAmountCny) : undefined,
         receivableCurrency: orderEditForm.receivableCurrency,
+        paymentStatus: orderEditForm.paymentStatus,
         shipDate: orderEditForm.shipDate.trim() || undefined,
       });
       setToast("订单信息已更新");
@@ -1014,12 +1051,21 @@ export default function AdminHomePage() {
               <div style={{ ...cardStyle, marginBottom: 10, display: "grid", gap: 8 }}>
                 <div style={{ fontWeight: 700, color: "#0f172a" }}>正在编辑订单：{editingOrderId}</div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
+                  <input value={orderEditForm.trackingNo} onChange={(e) => setOrderEditForm((v) => ({ ...v, trackingNo: e.target.value.toUpperCase() }))} placeholder="运单号（如 YW... / DG...）" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }} />
+                  <input value={orderEditForm.batchNo} onChange={(e) => setOrderEditForm((v) => ({ ...v, batchNo: e.target.value }))} placeholder="批次号" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }} />
+                  <select value={orderEditForm.warehouseId} onChange={(e) => setOrderEditForm((v) => ({ ...v, warehouseId: e.target.value }))} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}>
+                    <option value="wh_yiwu_01">义乌仓</option>
+                    <option value="wh_guangzhou_01">广州仓</option>
+                    <option value="wh_dongguan_01">东莞仓</option>
+                  </select>
                   <input value={orderEditForm.itemName} onChange={(e) => setOrderEditForm((v) => ({ ...v, itemName: e.target.value }))} placeholder="品名" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }} />
                   <select value={orderEditForm.transportMode} onChange={(e) => setOrderEditForm((v) => ({ ...v, transportMode: e.target.value as "sea" | "land" }))} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}>
                     <option value="sea">海运</option>
                     <option value="land">陆运</option>
                   </select>
                   <input value={orderEditForm.domesticTrackingNo} onChange={(e) => setOrderEditForm((v) => ({ ...v, domesticTrackingNo: e.target.value }))} placeholder="国内快递单号" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }} />
+                  <input value={orderEditForm.receiverAddressTh} onChange={(e) => setOrderEditForm((v) => ({ ...v, receiverAddressTh: e.target.value }))} placeholder="收货地址（泰国）" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }} />
+                  <input value={orderEditForm.containerNo} onChange={(e) => setOrderEditForm((v) => ({ ...v, containerNo: e.target.value }))} placeholder="装柜号" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }} />
                   <input value={orderEditForm.productQuantity} onChange={(e) => setOrderEditForm((v) => ({ ...v, productQuantity: e.target.value }))} placeholder="产品数量" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }} />
                   <input value={orderEditForm.packageCount} onChange={(e) => setOrderEditForm((v) => ({ ...v, packageCount: e.target.value }))} placeholder="件数" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }} />
                   <select value={orderEditForm.packageUnit} onChange={(e) => setOrderEditForm((v) => ({ ...v, packageUnit: e.target.value as "bag" | "box" }))} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}>
@@ -1032,6 +1078,10 @@ export default function AdminHomePage() {
                   <select value={orderEditForm.receivableCurrency} onChange={(e) => setOrderEditForm((v) => ({ ...v, receivableCurrency: e.target.value as "CNY" | "THB" }))} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}>
                     <option value="CNY">CNY</option>
                     <option value="THB">THB</option>
+                  </select>
+                  <select value={orderEditForm.paymentStatus} onChange={(e) => setOrderEditForm((v) => ({ ...v, paymentStatus: e.target.value as "paid" | "unpaid" }))} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}>
+                    <option value="unpaid">未支付</option>
+                    <option value="paid">已支付</option>
                   </select>
                   <input type="date" value={orderEditForm.shipDate} onChange={(e) => setOrderEditForm((v) => ({ ...v, shipDate: e.target.value }))} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }} />
                 </div>
@@ -1076,7 +1126,7 @@ export default function AdminHomePage() {
                 {orderList.map((o) => (
                   <tr key={o.id} style={{ borderBottom: "1px solid #e2e8f0" }}>
                     <td style={{ padding: "8px 6px", fontWeight: 600, color: "#1e3a8a", whiteSpace: "nowrap" }}>
-                      {o.trackingNo ?? o.id}
+                      {o.trackingNo ?? "—"}
                     </td>
                     <td style={{ padding: "8px 6px", color: "#334155" }}>{o.clientName ?? o.clientId ?? "—"}</td>
                     <td style={{ padding: "8px 6px", whiteSpace: "nowrap" }}>{shipmentStatusLabel(o.currentStatus)}</td>

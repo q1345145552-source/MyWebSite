@@ -8,6 +8,24 @@ function hashPassword(password: string): string {
   return crypto.createHash("sha256").update(password, "utf8").digest("hex");
 }
 
+/**
+ * 根据仓库ID返回允许的运单号前缀（兼容短前缀与历史长前缀）。
+ */
+function allowedTrackingPrefixesByWarehouse(warehouseId: string): string[] {
+  if (warehouseId === "wh_yiwu_01") return ["YW", "YWXT"];
+  if (warehouseId === "wh_dongguan_01") return ["DG", "DGXT"];
+  if (warehouseId === "wh_guangzhou_01") return ["GZ", "GZXT"];
+  return ["XT"];
+}
+
+/**
+ * 校验运单号是否与仓库前缀一致。
+ */
+function isTrackingNoMatchedWarehouse(warehouseId: string, trackingNo: string): boolean {
+  const normalized = trackingNo.trim().toUpperCase();
+  return allowedTrackingPrefixesByWarehouse(warehouseId).some((prefix) => normalized.startsWith(prefix));
+}
+
 export function registerAdminRoutes(app: MinimalHttpApp, db: DatabaseSync): void {
   app.get("/admin/dashboard/overview", async (req, res) => {
     const auth = requireRole(req, res, ["admin"]);
@@ -96,10 +114,56 @@ export function registerAdminRoutes(app: MinimalHttpApp, db: DatabaseSync): void
           o.weight_kg, o.volume_m3, o.receiver_address_th, o.receivable_amount_cny, o.receivable_currency,
           o.payment_status, o.paid_at, o.paid_by,
           o.ship_date, o.status_group, o.created_at, o.updated_at,
-          s.tracking_no, s.current_status
+          (
+            SELECT sx.id
+            FROM shipments sx
+            WHERE sx.company_id = o.company_id
+              AND (
+                sx.order_id = o.id
+                OR ((sx.order_id IS NULL OR sx.order_id = '') AND o.domestic_tracking_no IS NOT NULL AND sx.domestic_tracking_no = o.domestic_tracking_no)
+                OR ((sx.order_id IS NULL OR sx.order_id = '') AND o.batch_no IS NOT NULL AND sx.batch_no = o.batch_no)
+              )
+            ORDER BY CASE WHEN sx.order_id = o.id THEN 0 ELSE 1 END, sx.updated_at DESC
+            LIMIT 1
+          ) AS shipment_id,
+          (
+            SELECT sx.tracking_no
+            FROM shipments sx
+            WHERE sx.company_id = o.company_id
+              AND (
+                sx.order_id = o.id
+                OR ((sx.order_id IS NULL OR sx.order_id = '') AND o.domestic_tracking_no IS NOT NULL AND sx.domestic_tracking_no = o.domestic_tracking_no)
+                OR ((sx.order_id IS NULL OR sx.order_id = '') AND o.batch_no IS NOT NULL AND sx.batch_no = o.batch_no)
+              )
+            ORDER BY CASE WHEN sx.order_id = o.id THEN 0 ELSE 1 END, sx.updated_at DESC
+            LIMIT 1
+          ) AS tracking_no,
+          (
+            SELECT sx.current_status
+            FROM shipments sx
+            WHERE sx.company_id = o.company_id
+              AND (
+                sx.order_id = o.id
+                OR ((sx.order_id IS NULL OR sx.order_id = '') AND o.domestic_tracking_no IS NOT NULL AND sx.domestic_tracking_no = o.domestic_tracking_no)
+                OR ((sx.order_id IS NULL OR sx.order_id = '') AND o.batch_no IS NOT NULL AND sx.batch_no = o.batch_no)
+              )
+            ORDER BY CASE WHEN sx.order_id = o.id THEN 0 ELSE 1 END, sx.updated_at DESC
+            LIMIT 1
+          ) AS current_status,
+          (
+            SELECT sx.container_no
+            FROM shipments sx
+            WHERE sx.company_id = o.company_id
+              AND (
+                sx.order_id = o.id
+                OR ((sx.order_id IS NULL OR sx.order_id = '') AND o.domestic_tracking_no IS NOT NULL AND sx.domestic_tracking_no = o.domestic_tracking_no)
+                OR ((sx.order_id IS NULL OR sx.order_id = '') AND o.batch_no IS NOT NULL AND sx.batch_no = o.batch_no)
+              )
+            ORDER BY CASE WHEN sx.order_id = o.id THEN 0 ELSE 1 END, sx.updated_at DESC
+            LIMIT 1
+          ) AS container_no
         FROM orders o
         LEFT JOIN users u ON u.id = o.client_id
-        LEFT JOIN shipments s ON s.order_id = o.id AND s.company_id = o.company_id
         WHERE o.company_id = ?
         ORDER BY o.created_at DESC
       `)
@@ -129,8 +193,10 @@ export function registerAdminRoutes(app: MinimalHttpApp, db: DatabaseSync): void
       status_group: string;
       created_at: string;
       updated_at: string;
+      shipment_id: string | null;
       tracking_no: string | null;
       current_status: string | null;
+      container_no: string | null;
     }>;
 
     const adminOrderItems = rows.map((r) => ({
@@ -159,8 +225,10 @@ export function registerAdminRoutes(app: MinimalHttpApp, db: DatabaseSync): void
       statusGroup: r.status_group,
       createdAt: r.created_at,
       updatedAt: r.updated_at,
+      shipmentId: r.shipment_id ?? undefined,
       trackingNo: r.tracking_no ?? undefined,
       currentStatus: r.current_status ?? undefined,
+      containerNo: r.container_no ?? undefined,
       canEdit: true,
     }));
     const adminOrderIds = adminOrderItems.map((item) => item.id);
@@ -193,6 +261,12 @@ export function registerAdminRoutes(app: MinimalHttpApp, db: DatabaseSync): void
       receivableAmountCny?: number | null;
       receivableCurrency?: "CNY" | "THB";
       shipDate?: string | null;
+      trackingNo?: string | null;
+      batchNo?: string | null;
+      warehouseId?: string;
+      receiverAddressTh?: string;
+      containerNo?: string | null;
+      paymentStatus?: "paid" | "unpaid";
     };
 
     const orderId = body.orderId?.trim();
@@ -202,12 +276,45 @@ export function registerAdminRoutes(app: MinimalHttpApp, db: DatabaseSync): void
     }
 
     const exists = db
-      .prepare("SELECT id FROM orders WHERE id = ? AND company_id = ?")
-      .get(orderId, auth.companyId) as { id: string } | undefined;
+      .prepare("SELECT id, warehouse_id, batch_no, domestic_tracking_no, receiver_address_th, payment_status FROM orders WHERE id = ? AND company_id = ?")
+      .get(orderId, auth.companyId) as
+      | {
+          id: string;
+          warehouse_id: string;
+          batch_no: string | null;
+          domestic_tracking_no: string | null;
+          receiver_address_th: string | null;
+          payment_status: string | null;
+        }
+      | undefined;
     if (!exists) {
       fail(res, 404, "NOT_FOUND", "order not found");
       return;
     }
+    const linkedShipment = db
+      .prepare(
+        `
+        SELECT id, tracking_no, container_no
+        FROM shipments
+        WHERE company_id = ?
+          AND (
+            order_id = ?
+            OR ((order_id IS NULL OR order_id = '') AND ? IS NOT NULL AND domestic_tracking_no = ?)
+            OR ((order_id IS NULL OR order_id = '') AND ? IS NOT NULL AND batch_no = ?)
+          )
+        ORDER BY CASE WHEN order_id = ? THEN 0 ELSE 1 END, updated_at DESC
+        LIMIT 1
+        `,
+      )
+      .get(
+        auth.companyId,
+        orderId,
+        exists.domestic_tracking_no ?? null,
+        exists.domestic_tracking_no ?? null,
+        exists.batch_no,
+        exists.batch_no,
+        orderId,
+      ) as { id: string; tracking_no: string; container_no: string | null } | undefined;
 
     const itemName = body.itemName?.trim();
     if (!itemName) {
@@ -250,6 +357,37 @@ export function registerAdminRoutes(app: MinimalHttpApp, db: DatabaseSync): void
       receivableAmount = amount === 0 ? null : amount;
     }
     const receivableCurrency = body.receivableCurrency === "THB" ? "THB" : "CNY";
+    const warehouseId = body.warehouseId?.trim() || exists.warehouse_id;
+    const batchNo = body.batchNo === undefined ? exists.batch_no : body.batchNo?.trim() || null;
+    const receiverAddressTh = body.receiverAddressTh === undefined ? (exists.receiver_address_th ?? "") : body.receiverAddressTh.trim();
+    const paymentStatus =
+      body.paymentStatus === undefined
+        ? ((exists.payment_status === "paid" ? "paid" : "unpaid") as "paid" | "unpaid")
+        : body.paymentStatus;
+    const trackingNo = body.trackingNo === undefined ? linkedShipment?.tracking_no ?? null : body.trackingNo?.trim() || null;
+    const containerNo = body.containerNo === undefined ? linkedShipment?.container_no ?? null : body.containerNo?.trim() || null;
+    if (linkedShipment && !trackingNo) {
+      fail(res, 400, "BAD_REQUEST", "trackingNo is required");
+      return;
+    }
+    if (trackingNo && !isTrackingNoMatchedWarehouse(warehouseId, trackingNo)) {
+      fail(
+        res,
+        400,
+        "BAD_REQUEST",
+        `trackingNo prefix must match warehouse: ${allowedTrackingPrefixesByWarehouse(warehouseId).join("/")}`,
+      );
+      return;
+    }
+    if (trackingNo && linkedShipment) {
+      const conflict = db
+        .prepare("SELECT id FROM shipments WHERE company_id = ? AND tracking_no = ? AND id != ?")
+        .get(auth.companyId, trackingNo, linkedShipment.id) as { id: string } | undefined;
+      if (conflict) {
+        fail(res, 400, "BAD_REQUEST", "trackingNo already exists");
+        return;
+      }
+    }
 
     let shipDate: string | null = null;
     if (body.shipDate !== undefined && body.shipDate !== null && String(body.shipDate).trim() !== "") {
@@ -266,6 +404,8 @@ export function registerAdminRoutes(app: MinimalHttpApp, db: DatabaseSync): void
     db.prepare(
       `
       UPDATE orders SET
+        warehouse_id = ?,
+        batch_no = ?,
         item_name = ?,
         transport_mode = ?,
         domestic_tracking_no = ?,
@@ -276,11 +416,15 @@ export function registerAdminRoutes(app: MinimalHttpApp, db: DatabaseSync): void
         volume_m3 = ?,
         receivable_amount_cny = ?,
         receivable_currency = ?,
+        receiver_address_th = ?,
+        payment_status = ?,
         ship_date = ?,
         updated_at = ?
       WHERE id = ? AND company_id = ?
       `,
     ).run(
+      warehouseId,
+      batchNo,
       itemName,
       transportMode,
       domesticTrackingNo,
@@ -291,6 +435,8 @@ export function registerAdminRoutes(app: MinimalHttpApp, db: DatabaseSync): void
       volumeM3,
       receivableAmount,
       receivableCurrency,
+      receiverAddressTh,
+      paymentStatus,
       shipDate,
       now,
       orderId,
@@ -300,22 +446,30 @@ export function registerAdminRoutes(app: MinimalHttpApp, db: DatabaseSync): void
     db.prepare(
       `
       UPDATE shipments SET
+        warehouse_id = ?,
+        tracking_no = ?,
+        batch_no = ?,
         transport_mode = ?,
         domestic_tracking_no = ?,
         package_count = ?,
         package_unit = ?,
         weight_kg = ?,
         volume_m3 = ?,
+        container_no = ?,
         updated_at = ?
       WHERE order_id = ? AND company_id = ?
       `,
     ).run(
+      warehouseId,
+      trackingNo,
+      batchNo,
       transportMode,
       domesticTrackingNo,
       packageCount,
       packageUnit,
       weightKg,
       volumeM3,
+      containerNo,
       now,
       orderId,
       auth.companyId,

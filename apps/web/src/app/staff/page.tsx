@@ -2840,12 +2840,11 @@ export default function StaffHomePage() {
                           <tr>
                             <td colSpan={14} style={{ padding: 0, background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
                               <div style={{ padding: 14 }}>
-                                <div style={{ fontWeight: 700, marginBottom: 12, color: "#0f172a" }}>
-                                  {item.canEdit ? "运单编辑" : "运单详情（只读）"}
-                                </div>
+                                <div style={{ fontWeight: 700, marginBottom: 12, color: "#0f172a" }}>运单详情（只读）</div>
                                 {(() => {
                                   const draft = shipmentOrderEditDrafts[item.id] ?? buildShipmentOrderEditDraft(item);
-                                  const formDisabled = loading || !item.canEdit;
+                                  /** 员工端运单列表统一只读，禁止在此处修改任何字段。 */
+                                  const formDisabled = true;
                                   const inputInCard = { ...orderCreateInputStyle, marginBottom: 0 } as const;
                                   const currentShipmentStatus = item.currentStatus?.trim() || "created";
                                   const statusTargets = getValidShipmentStatusTargets(currentShipmentStatus);
@@ -2863,43 +2862,7 @@ export default function StaffHomePage() {
                                             alignItems: "center",
                                           }}
                                         >
-                                          <span>当前运单未关联订单，无法保存订单级信息。可尝试由系统自动补建关联订单。</span>
-                                          <button
-                                            type="button"
-                                            disabled={loading}
-                                            onClick={async () => {
-                                              setLoading(true);
-                                              setMessage("");
-                                              try {
-                                                const result = await repairStaffShipmentOrderLinks({ shipmentId: item.id });
-                                                const items = await loadPageData();
-                                                const updated = items.find((s) => s.id === item.id);
-                                                if (updated) {
-                                                  setShipmentOrderEditDrafts((prev) => ({
-                                                    ...prev,
-                                                    [item.id]: buildShipmentOrderEditDraft(updated),
-                                                  }));
-                                                }
-                                                setToast(formatRepairShipmentOrderLinkToast(result));
-                                              } catch (error) {
-                                                const text = error instanceof Error ? error.message : "修复失败";
-                                                setMessage(`修复失败：${text}`);
-                                              } finally {
-                                                setLoading(false);
-                                              }
-                                            }}
-                                            style={{
-                                              border: "1px solid #d97706",
-                                              borderRadius: 8,
-                                              padding: "4px 10px",
-                                              background: "#fffbeb",
-                                              color: "#b45309",
-                                              fontWeight: 600,
-                                              cursor: loading ? "not-allowed" : "pointer",
-                                            }}
-                                          >
-                                            尝试修复关联
-                                          </button>
+                                          <span>当前运单未关联订单，请联系管理员在管理端处理订单关联。</span>
                                         </div>
                                       ) : null}
                                       <div
@@ -3310,7 +3273,7 @@ export default function StaffHomePage() {
                                   <OrderProductImagesPanel
                                     orderId={item.orderId}
                                     images={item.productImages ?? []}
-                                    canManage={Boolean(item.canEdit)}
+                                    canManage={false}
                                     busy={loading}
                                     onSelectFile={(file) => uploadOrderProductImageAndReload(item.orderId!, file)}
                                     onDelete={(imageId) => deleteOrderProductImageAndReload(imageId)}
