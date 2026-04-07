@@ -334,6 +334,8 @@ function hasColumn(db: DatabaseSync, table: string, column: string): boolean {
 }
 
 function ensureAdditionalColumns(db: DatabaseSync): void {
+  // 兼容历史库：早期订单表可能使用 order_id 而非 id，先补列再回填，避免查询时报 no such column: o.id。
+  ensureLegacyOrderIdColumn(db);
   if (!hasColumn(db, "orders", "batch_no")) {
     db.exec("ALTER TABLE orders ADD COLUMN batch_no TEXT;");
   }
@@ -394,6 +396,15 @@ function ensureAdditionalColumns(db: DatabaseSync): void {
   if (!hasColumn(db, "users", "email")) {
     db.exec("ALTER TABLE users ADD COLUMN email TEXT;");
   }
+}
+
+function ensureLegacyOrderIdColumn(db: DatabaseSync): void {
+  const hasId = hasColumn(db, "orders", "id");
+  const hasOrderId = hasColumn(db, "orders", "order_id");
+  if (hasId || !hasOrderId) return;
+
+  db.exec("ALTER TABLE orders ADD COLUMN id TEXT;");
+  db.exec("UPDATE orders SET id = order_id WHERE id IS NULL OR TRIM(id) = '';");
 }
 
 function estimateReceivableAmountCny(input: {
