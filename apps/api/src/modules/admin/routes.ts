@@ -113,10 +113,43 @@ export function registerAdminRoutes(app: MinimalHttpApp, db: DatabaseSync): void
   app.get("/admin/orders", async (req, res) => {
     const auth = requireRole(req, res, ["admin"]);
     if (!auth) return;
-    const orderIdExpr = hasOrderColumn("id") ? "o.id" : "o.order_id";
 
-    const rows = db
-      .prepare(`
+    /**
+     * 读取管理员订单列表；orderIdExpr 允许在 id/order_id 历史结构间切换。
+     */
+    function queryAdminOrders(orderIdExpr: "o.id" | "o.order_id"): Array<{
+      id: string;
+      client_id: string;
+      client_name: string | null;
+      warehouse_id: string;
+      order_no: string | null;
+      item_name: string;
+      transport_mode: string;
+      domestic_tracking_no: string | null;
+      batch_no: string | null;
+      approval_status: string;
+      product_quantity: number;
+      package_count: number;
+      package_unit: string;
+      weight_kg: number | null;
+      volume_m3: number | null;
+      receiver_address_th: string | null;
+      receivable_amount_cny: number | null;
+      receivable_currency: string | null;
+      payment_status: string | null;
+      paid_at: string | null;
+      paid_by: string | null;
+      ship_date: string | null;
+      status_group: string;
+      created_at: string;
+      updated_at: string;
+      shipment_id: string | null;
+      tracking_no: string | null;
+      current_status: string | null;
+      container_no: string | null;
+    }> {
+      return db
+        .prepare(`
         SELECT
           ${orderIdExpr} AS id, o.client_id, u.name as client_name, o.warehouse_id, o.order_no, o.item_name, o.transport_mode,
           o.domestic_tracking_no, o.batch_no, o.approval_status, o.product_quantity, o.package_count, o.package_unit,
@@ -176,7 +209,40 @@ export function registerAdminRoutes(app: MinimalHttpApp, db: DatabaseSync): void
         WHERE o.company_id = ?
         ORDER BY o.created_at DESC
       `)
-      .all(auth.companyId) as Array<{
+        .all(auth.companyId) as Array<{
+        id: string;
+        client_id: string;
+        client_name: string | null;
+        warehouse_id: string;
+        order_no: string | null;
+        item_name: string;
+        transport_mode: string;
+        domestic_tracking_no: string | null;
+        batch_no: string | null;
+        approval_status: string;
+        product_quantity: number;
+        package_count: number;
+        package_unit: string;
+        weight_kg: number | null;
+        volume_m3: number | null;
+        receiver_address_th: string | null;
+        receivable_amount_cny: number | null;
+        receivable_currency: string | null;
+        payment_status: string | null;
+        paid_at: string | null;
+        paid_by: string | null;
+        ship_date: string | null;
+        status_group: string;
+        created_at: string;
+        updated_at: string;
+        shipment_id: string | null;
+        tracking_no: string | null;
+        current_status: string | null;
+        container_no: string | null;
+      }>;
+    }
+
+    let rows: Array<{
       id: string;
       client_id: string;
       client_name: string | null;
@@ -207,6 +273,21 @@ export function registerAdminRoutes(app: MinimalHttpApp, db: DatabaseSync): void
       current_status: string | null;
       container_no: string | null;
     }>;
+
+    // 双保险：先按探测列查询，若线上库结构异常再自动切换另一列重试。
+    try {
+      const preferredExpr: "o.id" | "o.order_id" = hasOrderColumn("id") ? "o.id" : "o.order_id";
+      rows = queryAdminOrders(preferredExpr);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      if (message.includes("no such column: o.id")) {
+        rows = queryAdminOrders("o.order_id");
+      } else if (message.includes("no such column: o.order_id")) {
+        rows = queryAdminOrders("o.id");
+      } else {
+        throw error;
+      }
+    }
 
     const adminOrderItems = rows.map((r) => ({
       id: r.id,
