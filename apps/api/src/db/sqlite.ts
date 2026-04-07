@@ -401,10 +401,19 @@ function ensureAdditionalColumns(db: DatabaseSync): void {
 function ensureLegacyOrderIdColumn(db: DatabaseSync): void {
   const hasId = hasColumn(db, "orders", "id");
   const hasOrderId = hasColumn(db, "orders", "order_id");
-  if (hasId || !hasOrderId) return;
+  const hasOrderNo = hasColumn(db, "orders", "order_no");
+  if (hasId) return;
 
   db.exec("ALTER TABLE orders ADD COLUMN id TEXT;");
-  db.exec("UPDATE orders SET id = order_id WHERE id IS NULL OR TRIM(id) = '';");
+  if (hasOrderId) {
+    db.exec("UPDATE orders SET id = order_id WHERE id IS NULL OR TRIM(id) = '';");
+    return;
+  }
+  if (hasOrderNo) {
+    db.exec("UPDATE orders SET id = COALESCE(NULLIF(order_no, ''), 'legacy-' || rowid) WHERE id IS NULL OR TRIM(id) = '';");
+    return;
+  }
+  db.exec("UPDATE orders SET id = 'legacy-' || rowid WHERE id IS NULL OR TRIM(id) = '';");
 }
 
 function estimateReceivableAmountCny(input: {
