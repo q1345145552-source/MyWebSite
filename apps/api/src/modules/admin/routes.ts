@@ -65,6 +65,14 @@ export function registerAdminRoutes(app: MinimalHttpApp, db: DatabaseSync): void
     return info.some((r) => r.name === column);
   }
 
+  /**
+   * 判断 orders 表是否包含指定列，用于兼容历史库字段差异。
+   */
+  function hasOrderColumn(column: string): boolean {
+    const info = db.prepare("PRAGMA table_info(orders)").all() as Array<{ name: string }>;
+    return info.some((r) => r.name === column);
+  }
+
   app.get("/admin/users", async (req, res) => {
     const auth = requireRole(req, res, ["admin"]);
     if (!auth) return;
@@ -105,11 +113,12 @@ export function registerAdminRoutes(app: MinimalHttpApp, db: DatabaseSync): void
   app.get("/admin/orders", async (req, res) => {
     const auth = requireRole(req, res, ["admin"]);
     if (!auth) return;
+    const orderIdExpr = hasOrderColumn("id") ? "o.id" : "o.order_id";
 
     const rows = db
       .prepare(`
         SELECT
-          o.id, o.client_id, u.name as client_name, o.warehouse_id, o.order_no, o.item_name, o.transport_mode,
+          ${orderIdExpr} AS id, o.client_id, u.name as client_name, o.warehouse_id, o.order_no, o.item_name, o.transport_mode,
           o.domestic_tracking_no, o.batch_no, o.approval_status, o.product_quantity, o.package_count, o.package_unit,
           o.weight_kg, o.volume_m3, o.receiver_address_th, o.receivable_amount_cny, o.receivable_currency,
           o.payment_status, o.paid_at, o.paid_by,
@@ -119,11 +128,11 @@ export function registerAdminRoutes(app: MinimalHttpApp, db: DatabaseSync): void
             FROM shipments sx
             WHERE sx.company_id = o.company_id
               AND (
-                sx.order_id = o.id
+                sx.order_id = ${orderIdExpr}
                 OR ((sx.order_id IS NULL OR sx.order_id = '') AND o.domestic_tracking_no IS NOT NULL AND sx.domestic_tracking_no = o.domestic_tracking_no)
                 OR ((sx.order_id IS NULL OR sx.order_id = '') AND o.batch_no IS NOT NULL AND sx.batch_no = o.batch_no)
               )
-            ORDER BY CASE WHEN sx.order_id = o.id THEN 0 ELSE 1 END, sx.updated_at DESC
+            ORDER BY CASE WHEN sx.order_id = ${orderIdExpr} THEN 0 ELSE 1 END, sx.updated_at DESC
             LIMIT 1
           ) AS shipment_id,
           (
@@ -131,11 +140,11 @@ export function registerAdminRoutes(app: MinimalHttpApp, db: DatabaseSync): void
             FROM shipments sx
             WHERE sx.company_id = o.company_id
               AND (
-                sx.order_id = o.id
+                sx.order_id = ${orderIdExpr}
                 OR ((sx.order_id IS NULL OR sx.order_id = '') AND o.domestic_tracking_no IS NOT NULL AND sx.domestic_tracking_no = o.domestic_tracking_no)
                 OR ((sx.order_id IS NULL OR sx.order_id = '') AND o.batch_no IS NOT NULL AND sx.batch_no = o.batch_no)
               )
-            ORDER BY CASE WHEN sx.order_id = o.id THEN 0 ELSE 1 END, sx.updated_at DESC
+            ORDER BY CASE WHEN sx.order_id = ${orderIdExpr} THEN 0 ELSE 1 END, sx.updated_at DESC
             LIMIT 1
           ) AS tracking_no,
           (
@@ -143,11 +152,11 @@ export function registerAdminRoutes(app: MinimalHttpApp, db: DatabaseSync): void
             FROM shipments sx
             WHERE sx.company_id = o.company_id
               AND (
-                sx.order_id = o.id
+                sx.order_id = ${orderIdExpr}
                 OR ((sx.order_id IS NULL OR sx.order_id = '') AND o.domestic_tracking_no IS NOT NULL AND sx.domestic_tracking_no = o.domestic_tracking_no)
                 OR ((sx.order_id IS NULL OR sx.order_id = '') AND o.batch_no IS NOT NULL AND sx.batch_no = o.batch_no)
               )
-            ORDER BY CASE WHEN sx.order_id = o.id THEN 0 ELSE 1 END, sx.updated_at DESC
+            ORDER BY CASE WHEN sx.order_id = ${orderIdExpr} THEN 0 ELSE 1 END, sx.updated_at DESC
             LIMIT 1
           ) AS current_status,
           (
@@ -155,11 +164,11 @@ export function registerAdminRoutes(app: MinimalHttpApp, db: DatabaseSync): void
             FROM shipments sx
             WHERE sx.company_id = o.company_id
               AND (
-                sx.order_id = o.id
+                sx.order_id = ${orderIdExpr}
                 OR ((sx.order_id IS NULL OR sx.order_id = '') AND o.domestic_tracking_no IS NOT NULL AND sx.domestic_tracking_no = o.domestic_tracking_no)
                 OR ((sx.order_id IS NULL OR sx.order_id = '') AND o.batch_no IS NOT NULL AND sx.batch_no = o.batch_no)
               )
-            ORDER BY CASE WHEN sx.order_id = o.id THEN 0 ELSE 1 END, sx.updated_at DESC
+            ORDER BY CASE WHEN sx.order_id = ${orderIdExpr} THEN 0 ELSE 1 END, sx.updated_at DESC
             LIMIT 1
           ) AS container_no
         FROM orders o
