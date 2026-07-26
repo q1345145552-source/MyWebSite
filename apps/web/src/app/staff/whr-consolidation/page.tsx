@@ -407,6 +407,23 @@ export default function StaffWhrConsolidationPage() {
 
   // ---- 装柜确认 ----
   const handleLoadingConfirm = (planId: string, prealertId: string, key: string) => {
+    const plan = opsPlans.find(p => p.planId === planId);
+    if (plan) {
+      const allSections = [
+        ...plan.sections.pending,
+        ...plan.sections.received_pending_payment,
+        ...plan.sections.payment_submitted,
+        ...plan.sections.paid,
+        ...plan.sections.loading,
+        ...plan.sections.shipped,
+      ];
+      const filled = allSections.reduce((s, pa) => s + (pa.volumeM3 ?? 0), 0);
+      const total = plan.totalVolumeM3 || 1;
+      const pct = Math.round((filled / total) * 100);
+      if (pct < 60) {
+        if (!window.confirm(`当前仅装填了 ${filled.toFixed(1)} 方，目标 ${total} 方，仅 ${pct}%。是否确认装柜？`)) return;
+      }
+    }
     doPrealertAction("/staff/whr-consolidation/loading-confirm", planId, prealertId, key);
   };
 
