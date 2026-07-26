@@ -176,7 +176,7 @@ export default function StaffWhrConsolidationPage() {
   const [thailandSubmitting, setThailandSubmitting] = useState(false);
 
   // ---- 仓库签收 ----
-  const [signTarget, setSignTarget] = useState<{ planId: string; prealertId: string; planNo: string; trackingNo: string; mark: string; clientName: string; deliveryAddress: string | null } | null>(null);
+  const [signTarget, setSignTarget] = useState<{ planId: string; prealertId: string; planNo: string; trackingNo: string; mark: string; clientName: string; clientPhone?: string; clientCompany?: string; deliveryAddress: string | null; items?: any[]; loading?: boolean } | null>(null);
   const [signFile, setSignFile] = useState<{ base64: string; fileName: string; mime: string } | null>(null);
   const [signSubmitting, setSignSubmitting] = useState(false);
 
@@ -279,6 +279,33 @@ export default function StaffWhrConsolidationPage() {
   };
 
   // ---- 仓库签收 ----
+  const handleOpenSign = async (pa: any, planId: string) => {
+    // 先弹出弹窗显示基本信息 + loading
+    setSignTarget({
+      planId, prealertId: pa.prealertId, planNo: pa.planNo || "",
+      trackingNo: pa.trackingNo, mark: pa.mark, clientName: pa.clientName,
+      deliveryAddress: pa.deliveryAddress, loading: true,
+    });
+    try {
+      const detail = await apiRequest<any>(
+        `${apiBaseUrl()}/staff/whr-consolidation/prealert-detail?prealertId=${encodeURIComponent(pa.prealertId)}`
+      );
+      setSignTarget({
+        planId, prealertId: pa.prealertId, planNo: pa.planNo || "",
+        trackingNo: pa.trackingNo, mark: pa.mark,
+        clientName: detail.clientName ?? pa.clientName,
+        clientPhone: detail.clientPhone,
+        clientCompany: detail.clientCompany,
+        deliveryAddress: detail.deliveryAddress ?? pa.deliveryAddress,
+        items: detail.items ?? [],
+        loading: false,
+      });
+    } catch (e: any) {
+      setToast(e?.message ?? "加载预报单详情失败");
+      setSignTarget(null);
+    }
+  };
+
   const handleWarehouseSign = async () => {
     if (!signTarget || !signFile) { setToast("请上传收货凭证照片"); return; }
     setSignSubmitting(true);
@@ -324,6 +351,7 @@ export default function StaffWhrConsolidationPage() {
           totalFee: detail.totalFee ?? pa.totalFee,
           paymentProofs: detail.paymentProofs ?? pa.paymentProofs,
           deliveryAddress: detail.deliveryAddress ?? pa.deliveryAddress,
+          feeBreakdown: detail.feeBreakdown,
         },
         loading: false,
       });
@@ -673,7 +701,7 @@ export default function StaffWhrConsolidationPage() {
                               : <span style={{ color: "#b91c1c", background: "#fee2e2", padding: "1px 6px", borderRadius: 4, marginLeft: 8 }}>⚠ 收货地址未填写</span>}
                           </div>
                           <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-                            <button onClick={() => setSignTarget({ planId: p.planId, prealertId: pa.prealertId, planNo: p.planNo, trackingNo: pa.trackingNo, mark: pa.mark, clientName: pa.clientName, deliveryAddress: pa.deliveryAddress })} style={btnBlue}>签收</button>
+                            <button onClick={() => handleOpenSign(pa, p.planId)} style={btnBlue}>签收</button>
                             <button onClick={(e) => { e.stopPropagation(); handleCancelPrealert(p.planId, pa.prealertId, pa.trackingNo); }} style={{ padding: "4px 10px", border: "1px solid #d1d5db", color: "#6b7280", background: "#fff", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>取消</button>
                           </div>
                         </div>
@@ -888,8 +916,42 @@ export default function StaffWhrConsolidationPage() {
           <Modal onClose={() => { setSignTarget(null); setSignFile(null); }}>
             <h3 style={{ marginTop: 0 }}>仓库签收</h3>
             <p style={{ fontSize: 13, color: "#6b7280" }}>{signTarget.planNo} · 预报单：{signTarget.trackingNo} · 唛头：{signTarget.mark || "-"}</p>
-            <p style={{ fontSize: 13, color: "#374151" }}>客户：{signTarget.clientName}</p>
+            <p style={{ fontSize: 13, color: "#374151" }}>
+              客户：{signTarget.clientName}
+              {signTarget.clientCompany && <span style={{ color: "#6b7280", marginLeft: 8 }}>{signTarget.clientCompany}</span>}
+              {signTarget.clientPhone && <span style={{ color: "#6b7280", marginLeft: 8 }}>{signTarget.clientPhone}</span>}
+            </p>
             {signTarget.deliveryAddress && <p style={{ fontSize: 12, color: "#6b7280" }}>收货地址：{signTarget.deliveryAddress}</p>}
+
+            {/* 货品清单 */}
+            {signTarget.loading ? (
+              <p style={{ color: "#9ca3af", padding: "12px 0" }}>加载预报单详情...</p>
+            ) : (
+              (signTarget.items ?? []).length > 0 && (
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 12 }}>货品清单（{signTarget.items!.length}款）</div>
+                  <div style={{ maxHeight: 300, overflowY: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                      <thead><tr style={{ background: "#f3f4f6" }}>
+                        {["品名","件数","方数","材质","类型"].map(h => <th key={h} style={{ ...thS, padding: "3px 6px", fontSize: 10 }}>{h}</th>)}
+                      </tr></thead>
+                      <tbody>
+                        {signTarget.items!.map((it: any, idx: number) => (
+                          <tr key={idx}>
+                            <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.productName}</td>
+                            <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.packageCount}</td>
+                            <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.volumeM3 != null ? (typeof it.volumeM3 === "number" ? it.volumeM3.toFixed(4) : it.volumeM3) : "-"}</td>
+                            <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.material || "-"}</td>
+                            <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.cargoType === "inspection" ? "商检" : it.cargoType === "sensitive" ? "敏感" : "普货"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )
+            )}
+
             <div style={{ marginTop: 14 }}>
               <label style={fl}>收货凭证照片 *</label>
               <input type="file" accept="image/*" onChange={async e => {
