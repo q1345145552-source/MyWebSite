@@ -274,6 +274,7 @@ export default function StaffWhrConsolidationPage() {
       setToast("操作成功");
       loadOperations();
       if (activeTab === "dispatch") loadDispatch();
+      if (selectedPlanId) loadPlanDetail(selectedPlanId);
     } catch (e: any) { setToast(e?.message ?? "操作失败"); }
     finally { setOpsActionSubmitting(p => ({ ...p, [key]: false })); }
   };
@@ -324,6 +325,8 @@ export default function StaffWhrConsolidationPage() {
       setSignTarget(null); setSignFile(null);
       loadOperations();
       if (activeTab === "dispatch") loadDispatch();
+      if (selectedPlanId) loadPlanDetail(selectedPlanId);
+      loadPlans();
     } catch (e: any) { setToast(e?.message ?? "签收失败"); }
     finally { setSignSubmitting(false); }
   };
@@ -376,6 +379,8 @@ export default function StaffWhrConsolidationPage() {
       setReviewTarget(null);
       loadOperations();
       if (activeTab === "dispatch") loadDispatch();
+      if (selectedPlanId) loadPlanDetail(selectedPlanId);
+      loadPlans();
     } catch (e: any) { setToast(e?.message ?? "审核失败"); }
     finally { setReviewSubmitting(false); }
   };
@@ -401,6 +406,8 @@ export default function StaffWhrConsolidationPage() {
       setShowReject(false); setReviewTarget(null); setRejectReason(""); setRejectPriceNormal(""); setRejectPriceInspection(""); setRejectPriceSensitive("");
       loadOperations();
       if (activeTab === "dispatch") loadDispatch();
+      if (selectedPlanId) loadPlanDetail(selectedPlanId);
+      loadPlans();
     } catch (e: any) { setToast(e?.message ?? "操作失败"); }
     finally { setReviewSubmitting(false); }
   };
@@ -876,7 +883,6 @@ export default function StaffWhrConsolidationPage() {
                         <div>
                           <strong>{c.clientName}</strong>
                           <span style={{ fontSize: 13, color: "#6b7280", marginLeft: 8 }}>{c.clientPhone} · {c.clientCompany}</span>
-                          <span style={{ fontSize: 12, padding: "2px 8px", borderRadius: 4, marginLeft: 8, background: "#f3f4f6", color: "#6b7280" }}>参与客户</span>
                         </div>
                         <span style={{ fontSize: 13, color: "#6b7280" }}>{c.totalVolumeM3}方 · {c.totalFee ? `¥${c.totalFee.toLocaleString()}` : ""}</span>
                       </div>
@@ -884,6 +890,65 @@ export default function StaffWhrConsolidationPage() {
                         普货：{c.unitPriceNormal}元/方 · 商检：{c.unitPriceInspection}元/方 · 敏感：{c.unitPriceSensitive}元/方
                       </div>
                       {c.deliveryAddress && <div style={{ fontSize: 13, color: "#6b7280", marginTop: 2 }}>收货地址：{c.deliveryAddress}</div>}
+
+                      {/* 预报单列表 */}
+                      {(c.prealerts ?? []).length > 0 && (
+                        <div style={{ marginTop: 10, borderTop: "1px solid #e5e7eb", paddingTop: 10 }}>
+                          <div style={{ fontWeight: 600, color: "#374151", marginBottom: 8, fontSize: 13 }}>预报单（{c.prealerts.length}）</div>
+                          {c.prealerts.map((pa: any) => {
+                            const paVol = (pa.items ?? []).reduce((s: number, it: any) => s + (it.volumeM3 ?? 0), 0);
+                            const paPkg = (pa.items ?? []).reduce((s: number, it: any) => s + it.packageCount, 0);
+                            const paStatus = pa.status;
+                            const canSign = paStatus === "pending";
+                            const canReview = paStatus === "payment_submitted";
+                            return (
+                              <div key={pa.id} style={{ border: "1px solid #e5e7eb", borderRadius: 6, padding: "8px 12px", marginBottom: 8, background: "#f9fafb", fontSize: 12 }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                    <strong>{pa.trackingNo}</strong>
+                                    <span style={{ color: "#6b7280" }}>唛头：{pa.mark || "-"}</span>
+                                    {pa.expressNo && <span style={{ color: "#6b7280" }}>快递：{pa.expressNo}</span>}
+                                    <span style={{ fontSize: 11, padding: "2px 6px", borderRadius: 3, background: TAG[paStatus]?.bg ?? "#e5e7eb", color: TAG[paStatus]?.color ?? "#374151" }}>
+                                      {PREALERT_ST_ZH[paStatus] ?? paStatus}
+                                    </span>
+                                  </div>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                    <span style={{ color: "#6b7280" }}>{paVol.toFixed(3)}方 · {paPkg}件</span>
+                                    {canSign && (
+                                      <button onClick={() => handleOpenSign({ prealertId: pa.id, trackingNo: pa.trackingNo, mark: pa.mark, clientName: c.clientName, planNo: planDetail.planNo, deliveryAddress: c.deliveryAddress }, selectedPlanId!)} style={{ ...btnBlue, padding: "4px 12px", fontSize: 11 }}>签收</button>
+                                    )}
+                                    {canReview && (
+                                      <button onClick={() => {
+                                        const paObj = { prealertId: pa.id, trackingNo: pa.trackingNo, mark: pa.mark, clientName: c.clientName, clientId: c.clientId, clientPhone: c.clientPhone, clientCompany: c.clientCompany, deliveryAddress: c.deliveryAddress, volumeM3: paVol, itemCount: (pa.items ?? []).length, packageCount: paPkg, status: paStatus };
+                                        handleOpenReview(paObj, selectedPlanId!);
+                                      }} style={{ ...btnBlue, padding: "4px 12px", fontSize: 11 }}>审核</button>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* 货品表格 */}
+                                {(pa.items ?? []).length > 0 && (
+                                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, marginTop: 6 }}>
+                                    <thead><tr style={{ background: "#f3f4f6" }}>
+                                      {["品名","件数","方数","类型"].map(h => <th key={h} style={{ ...thS, padding: "3px 6px", fontSize: 10 }}>{h}</th>)}
+                                    </tr></thead>
+                                    <tbody>
+                                      {(pa.items ?? []).map((it: any, idx: number) => (
+                                        <tr key={idx}>
+                                          <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.productName}</td>
+                                          <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.packageCount}</td>
+                                          <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.volumeM3 != null ? (typeof it.volumeM3 === "number" ? it.volumeM3.toFixed(4) : it.volumeM3) : "-"}</td>
+                                          <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.cargoType === "inspection" ? "商检" : it.cargoType === "sensitive" ? "敏感" : "普货"}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   ))}
                   {planDetail.customers.length === 0 && <p style={{ color: "#9ca3af", fontSize: 14, padding: "12px 0" }}>暂无客户</p>}
