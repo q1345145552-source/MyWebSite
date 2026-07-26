@@ -441,7 +441,7 @@ export default function StaffWhrConsolidationPage() {
   // ================================================================
   // Excel 导出
   // ================================================================
-  const handleExport = async () => {
+  const handleExportPlan = async (p: DispatchPlan) => {
     setExporting(true);
     try {
       const ExcelJS = (await import("exceljs")).default;
@@ -469,8 +469,6 @@ export default function StaffWhrConsolidationPage() {
       };
 
       let currentRow = 2;
-
-      for (const p of dispatchData) {
         const planTitleRow = ws.addRow([`${p.planNo}  ${p.warehouse}  ${p.containerType}  →  ${p.destinationTh}  ${p.totalVolumeM3}方`]);
         ws.mergeCells(currentRow, 1, currentRow, colCount);
         planTitleRow.eachCell((cell) => {
@@ -548,9 +546,6 @@ export default function StaffWhrConsolidationPage() {
           currentRow++;
         }
 
-        currentRow++;
-      }
-
       ws.columns = headers.map((_, i) => {
         if (i === 0 || i === 4 || i === 5 || i === 11) return { width: 16 };
         if (i === 7) return { width: 18 };
@@ -560,7 +555,7 @@ export default function StaffWhrConsolidationPage() {
       const buf = await wb.xlsx.writeBuffer();
       const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a"); a.href = url; a.download = `尾端拆派_${localDateStamp()}.xlsx`; a.click();
+      const a = document.createElement("a"); a.href = url; a.download = `尾端拆派_${p.planNo}_${localDateStamp()}.xlsx`; a.click();
       URL.revokeObjectURL(url);
       setToast("导出成功");
     } catch (e: any) { setToast(e?.message ?? "导出失败"); }
@@ -597,7 +592,6 @@ export default function StaffWhrConsolidationPage() {
           <>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
               <h3 style={{ fontSize: 17, margin: 0 }}>尾端拆派</h3>
-              <button onClick={handleExport} disabled={exporting} style={btnGreen}>{exporting ? "导出中..." : "导出 Excel"}</button>
             </div>
             {dispatchLoading ? <p style={{ color: "#9ca3af" }}>加载中...</p> : (
               dispatchData.length === 0 ? <p style={{ color: "#9ca3af", padding: "24px 0" }}>暂无数据</p> :
@@ -605,12 +599,15 @@ export default function StaffWhrConsolidationPage() {
                 const planExpanded = expandedPlan === p.planId;
                 return (
                   <div key={p.planId} style={{ marginBottom: 16, border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
-                    <div onClick={() => setExpandedPlan(planExpanded ? null : p.planId)} style={{ cursor: "pointer", padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#f9fafb" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ cursor: "pointer", padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#f9fafb" }}>
+                      <div onClick={() => setExpandedPlan(planExpanded ? null : p.planId)} style={{ display: "flex", alignItems: "center", gap: 12, flex: 1 }}>
                         <strong style={{ fontSize: 15 }}>{p.planNo}</strong>
                         <span style={{ fontSize: 13, color: "#6b7280" }}>{p.warehouse} · {p.containerType} · {p.destinationTh} · {p.totalVolumeM3}方</span>
                       </div>
-                      <span style={{ fontSize: 12, color: "#9ca3af" }}>{p.customers.length} 个客户 {planExpanded ? "▲" : "▼"}</span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <button onClick={(e) => { e.stopPropagation(); handleExportPlan(p); }} disabled={exporting} style={{ ...btnGreen, padding: "4px 12px", fontSize: 12 }}>导出</button>
+                        <span onClick={() => setExpandedPlan(planExpanded ? null : p.planId)} style={{ fontSize: 12, color: "#9ca3af" }}>{p.customers.length} 个客户 {planExpanded ? "▲" : "▼"}</span>
+                      </div>
                     </div>
                     {planExpanded && p.customers.map(c => {
                       const cExpanded = expandedCustomer === c.id;
