@@ -133,7 +133,7 @@ interface OpsPlan {
 
 interface PlanItem {
   id: string; planNo: string; warehouse: string; containerType: string; destinationTh: string;
-  totalVolumeM3: number; status: string; creatorName: string; customerCount: number; createdAt: string;
+  totalVolumeM3: number; usedVolumeM3?: number; status: string; creatorName: string; customerCount: number; createdAt: string;
 }
 interface PlanDetail { id: string; planNo: string; warehouse: string; containerType: string; destinationTh: string;
   totalVolumeM3: number; status: string; creatorName: string; createdAt: string; updatedAt: string;
@@ -877,7 +877,7 @@ export default function StaffWhrConsolidationPage() {
                     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                       <thead>
                         <tr style={{ background: "#f3f4f6" }}>
-                          {["计划编号", "仓库", "柜型", "目的地", "总方数", "客户数", "状态", "创建人", "创建时间"].map(h => <th key={h} style={thS}>{h}</th>)}
+                          {["计划编号", "仓库", "柜型", "目的地", "总方数", "已用/进度", "客户数", "状态", "创建人", "创建时间"].map(h => <th key={h} style={thS}>{h}</th>)}
                         </tr>
                       </thead>
                       <tbody>
@@ -890,6 +890,23 @@ export default function StaffWhrConsolidationPage() {
                             <td style={tdS}>{p.containerType}</td>
                             <td style={tdS}>{p.destinationTh}</td>
                             <td style={tdS}>{p.totalVolumeM3}方</td>
+                            <td style={tdS}>
+                              {(() => {
+                                const used = p.usedVolumeM3 ?? 0;
+                                const total = p.totalVolumeM3 || 1;
+                                const pct = Math.round((used / total) * 100);
+                                const warn = pct > 80;
+                                return (
+                                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                    <span style={{ fontSize: 12, fontWeight: 600, color: warn ? "#ef4444" : "#374151" }}>{used.toFixed(1)}方</span>
+                                    <div style={{ flex: 1, minWidth: 40, height: 6, background: "#e5e7eb", borderRadius: 3, overflow: "hidden" }}>
+                                      <div style={{ width: Math.min(pct, 100) + "%", height: "100%", background: warn ? "#ef4444" : "#059669", borderRadius: 3, transition: "width 0.3s" }} />
+                                    </div>
+                                    <span style={{ fontSize: 11, color: warn ? "#ef4444" : "#6b7280", fontWeight: warn ? 600 : 400 }}>{pct}%</span>
+                                  </div>
+                                );
+                              })()}
+                            </td>
                             <td style={tdS}>{p.customerCount}</td>
                             <td style={tdS}><span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 12, background: TAG[p.status]?.bg ?? "#e5e7eb", color: TAG[p.status]?.color ?? "#374151" }}>{PLAN_ST_ZH[p.status] ?? p.status}</span></td>
                             <td style={tdS}>{p.creatorName}</td>

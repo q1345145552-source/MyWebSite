@@ -183,6 +183,14 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
       },
     });
 
+    // 批量查询每个计划的已用方数（不含已取消客户）
+    const volumeSums = await prisma.whrConsolidationPlanCustomer.groupBy({
+      by: ["planId"],
+      where: { planId: { in: plans.map(p => p.id) } },
+      _sum: { totalVolumeM3: true },
+    });
+    const volumeMap = new Map(volumeSums.map(r => [r.planId, r._sum?.totalVolumeM3?.toNumber() ?? 0]));
+
     ok(res, {
       items: plans.map((p) => ({
         id: p.id,
@@ -195,6 +203,7 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
         createdBy: p.createdBy,
         creatorName: p.creatorName,
         customerCount: p._count.customers,
+        usedVolumeM3: Math.round((volumeMap.get(p.id) ?? 0) * 1000) / 1000,
         createdAt: p.createdAt.toISOString(),
         updatedAt: p.updatedAt.toISOString(),
       })),
