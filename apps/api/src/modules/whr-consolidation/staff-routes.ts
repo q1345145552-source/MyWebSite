@@ -98,7 +98,7 @@ export function registerWhrConsolidationStaffRoutes(app: MinimalHttpApp): void {
               row.paymentProofs = pa.paymentProofs ?? [];
             }
             if (pa.status === "shipped") {
-              row.thailandReceiptBase64 = pa.thailandReceiptBase64;
+              row.thailandReceiptProofs = pa.thailandReceiptProofs ?? [];
             }
             if (sections[pa.status] !== undefined) sections[pa.status].push(row);
           }
@@ -170,8 +170,8 @@ export function registerWhrConsolidationStaffRoutes(app: MinimalHttpApp): void {
       totalFee: pa.totalFee == null ? null : toNum(pa.totalFee),
       feeBreakdown,
       signedAt: pa.signedAt?.toISOString() ?? null,
-      warehouseReceiptBase64: pa.warehouseReceiptBase64,
-      thailandReceiptBase64: pa.thailandReceiptBase64,
+      warehouseReceiptProofs: pa.warehouseReceiptProofs ?? [],
+      thailandReceiptProofs: pa.thailandReceiptProofs ?? [],
       paymentProofs: pa.paymentProofs ?? [],
       paymentProofUploadedAt: pa.paymentProofUploadedAt?.toISOString() ?? null,
       paymentRejectReason: pa.paymentRejectReason,
@@ -226,9 +226,7 @@ export function registerWhrConsolidationStaffRoutes(app: MinimalHttpApp): void {
     const body = (req.body ?? {}) as {
       planId?: string;
       prealertId?: string;
-      receiptFileName?: string;
-      receiptMime?: string;
-      receiptBase64?: string;
+      receiptProofs?: { fileName?: string; mime?: string; base64?: string }[];
     };
     if (!body.planId?.trim()) {
       fail(res, 400, "BAD_REQUEST", "planId 为必填");
@@ -238,11 +236,12 @@ export function registerWhrConsolidationStaffRoutes(app: MinimalHttpApp): void {
       fail(res, 400, "BAD_REQUEST", "prealertId 为必填");
       return;
     }
-    if (!isValidBase64(body.receiptBase64)) {
-      fail(res, 400, "BAD_REQUEST", "收货凭证照片为必填且格式需正确");
+    const proofs = Array.isArray(body.receiptProofs) ? body.receiptProofs.filter(p => p?.base64?.trim() && isValidBase64(p.base64)) : [];
+    if (proofs.length === 0) {
+      fail(res, 400, "BAD_REQUEST", "请至少上传一张收货凭证照片");
       return;
     }
-    if (body.receiptBase64.length > MAX_IMAGE_BASE64_LENGTH) {
+    if (proofs.some(p => (p.base64?.length ?? 0) > MAX_IMAGE_BASE64_LENGTH)) {
       fail(res, 400, "BAD_REQUEST", "收货凭证照片过大，请压缩后再上传");
       return;
     }
@@ -288,14 +287,22 @@ export function registerWhrConsolidationStaffRoutes(app: MinimalHttpApp): void {
     const totalFee = calcFeeFromItems(prealert.items, prealert.planCustomer);
     const now = new Date();
 
-    // 图片先写盘，事务失败再删掉，避免事务里做文件 IO
-    let receiptPath: string;
+    // 多张图片先写盘，事务失败再删掉，避免事务里做文件 IO
+    const receiptProofs: { fileName: string; mime: string; base64Path: string; uploadedAt: string }[] = [];
     try {
-      receiptPath = saveImageToDisk(
-        `whr_warehouse_receipt_${prealert.id}_${Date.now()}`,
-        body.receiptMime?.trim() || "image/png",
-        body.receiptBase64.trim(),
-      );
+      for (const pf of proofs) {
+        const path = saveImageToDisk(
+          `whr_warehouse_receipt_${prealert.id}_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
+          pf.mime?.trim() || "image/png",
+          pf.base64!.trim(),
+        );
+        receiptProofs.push({
+          fileName: pf.fileName?.trim() || path.split("/").pop() || "",
+          mime: pf.mime?.trim() || "image/png",
+          base64Path: path,
+          uploadedAt: now.toISOString(),
+        });
+      }
     } catch {
       fail(res, 400, "BAD_REQUEST", "收货凭证保存失败，请重试");
       return;
@@ -310,10 +317,7 @@ export function registerWhrConsolidationStaffRoutes(app: MinimalHttpApp): void {
             signedAt: now,
             receivedAt: now,
             totalFee,
-            warehouseReceiptFileName:
-              body.receiptFileName?.trim() || receiptPath.split("/").pop() || "",
-            warehouseReceiptMime: body.receiptMime?.trim() || "image/png",
-            warehouseReceiptBase64: receiptPath,
+            warehouseReceiptProofs: receiptProofs,
           },
         });
         await tx.whrConsolidationStatusLog.create({
@@ -333,10 +337,8 @@ export function registerWhrConsolidationStaffRoutes(app: MinimalHttpApp): void {
         return true;
       });
     } catch (e) {
-      try {
-        deleteImageFile(receiptPath);
-      } catch {
-        /* ignore */
+      for (const pf of receiptProofs) {
+        try { deleteImageFile(pf.base64Path); } catch { /* ignore */ }
       }
       throw e;
     }
@@ -474,9 +476,7 @@ export function registerWhrConsolidationStaffRoutes(app: MinimalHttpApp): void {
     const body = (req.body ?? {}) as {
       planId?: string;
       prealertId?: string;
-      fileName?: string;
-      mime?: string;
-      base64?: string;
+      proofs?: { fileName?: string; mime?: string; base64?: string }[];
     };
     if (!body.planId?.trim()) {
       fail(res, 400, "BAD_REQUEST", "planId 为必填");
@@ -486,11 +486,12 @@ export function registerWhrConsolidationStaffRoutes(app: MinimalHttpApp): void {
       fail(res, 400, "BAD_REQUEST", "prealertId 为必填");
       return;
     }
-    if (!isValidBase64(body.base64)) {
-      fail(res, 400, "BAD_REQUEST", "泰国签收单为必填且格式需正确");
+    const proofs = Array.isArray(body.proofs) ? body.proofs.filter(p => p?.base64?.trim() && isValidBase64(p.base64)) : [];
+    if (proofs.length === 0) {
+      fail(res, 400, "BAD_REQUEST", "请至少上传一张泰国签收单");
       return;
     }
-    if (body.base64.length > MAX_IMAGE_BASE64_LENGTH) {
+    if (proofs.some(p => (p.base64?.length ?? 0) > MAX_IMAGE_BASE64_LENGTH)) {
       fail(res, 400, "BAD_REQUEST", "泰国签收单过大，请压缩后再上传");
       return;
     }
@@ -513,13 +514,21 @@ export function registerWhrConsolidationStaffRoutes(app: MinimalHttpApp): void {
     }
 
     const now = new Date();
-    let proofPath: string;
+    const thaiProofs: { fileName: string; mime: string; base64Path: string; uploadedAt: string }[] = [];
     try {
-      proofPath = saveImageToDisk(
-        `whr_thailand_sign_${prealert.id}_${Date.now()}`,
-        body.mime?.trim() || "image/png",
-        body.base64.trim(),
-      );
+      for (const pf of proofs) {
+        const path = saveImageToDisk(
+          `whr_thailand_sign_${prealert.id}_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
+          pf.mime?.trim() || "image/png",
+          pf.base64!.trim(),
+        );
+        thaiProofs.push({
+          fileName: pf.fileName?.trim() || path.split("/").pop() || "",
+          mime: pf.mime?.trim() || "image/png",
+          base64Path: path,
+          uploadedAt: now.toISOString(),
+        });
+      }
     } catch {
       fail(res, 400, "BAD_REQUEST", "泰国签收单保存失败，请重试");
       return;
@@ -532,9 +541,7 @@ export function registerWhrConsolidationStaffRoutes(app: MinimalHttpApp): void {
           data: {
             status: "thailand_received",
             thailandReceivedAt: now,
-            thailandReceiptFileName: body.fileName?.trim() || proofPath.split("/").pop() || "",
-            thailandReceiptMime: body.mime?.trim() || "image/png",
-            thailandReceiptBase64: proofPath,
+            thailandReceiptProofs: thaiProofs,
           },
         });
         await tx.whrConsolidationStatusLog.create({
@@ -553,10 +560,8 @@ export function registerWhrConsolidationStaffRoutes(app: MinimalHttpApp): void {
         return true;
       });
     } catch (e) {
-      try {
-        deleteImageFile(proofPath);
-      } catch {
-        /* ignore */
+      for (const pf of thaiProofs) {
+        try { deleteImageFile(pf.base64Path); } catch { /* ignore */ }
       }
       throw e;
     }
@@ -637,10 +642,8 @@ export function registerWhrConsolidationStaffRoutes(app: MinimalHttpApp): void {
                   status: pa.status,
                   receivedAt: pa.receivedAt?.toISOString() ?? null,
                   signedAt: pa.signedAt?.toISOString() ?? null,
-                  warehouseReceiptFileName: pa.warehouseReceiptFileName,
-                  warehouseReceiptBase64: pa.warehouseReceiptBase64,
-                  thailandReceiptFileName: pa.thailandReceiptFileName,
-                  thailandReceiptBase64: pa.thailandReceiptBase64,
+                  warehouseReceiptProofs: pa.warehouseReceiptProofs ?? [],
+                  thailandReceiptProofs: pa.thailandReceiptProofs ?? [],
                   items: pa.items.map((it: any) => ({
                     id: it.id,
                     productName: it.productName,

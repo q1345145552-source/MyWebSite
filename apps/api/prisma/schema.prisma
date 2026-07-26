@@ -935,10 +935,8 @@ model WhrConsolidationPrealert {
   receivedAt DateTime? @map("received_at")
 
   // 仓库签收
-  signedAt                 DateTime? @map("signed_at")
-  warehouseReceiptFileName String?   @map("warehouse_receipt_file_name")
-  warehouseReceiptMime     String?   @map("warehouse_receipt_mime")
-  warehouseReceiptBase64   String?   @map("warehouse_receipt_base64") @db.Text
+  signedAt                  DateTime? @map("signed_at")
+  warehouseReceiptProofs    Json      @default("[]") @map("warehouse_receipt_proofs") @db.JsonB
 
   // 付款凭证（多张，JSON 数组）
   paymentProofs          Json       @default("[]") @map("payment_proofs") @db.JsonB
@@ -951,10 +949,8 @@ model WhrConsolidationPrealert {
   paymentRejectReason String?   @map("payment_reject_reason") @db.Text
 
   // 泰国签收单
-  thailandReceiptFileName String?   @map("thailand_receipt_file_name")
-  thailandReceiptMime     String?   @map("thailand_receipt_mime")
-  thailandReceiptBase64   String?   @map("thailand_receipt_base64") @db.Text
-  thailandReceivedAt      DateTime? @map("thailand_received_at")
+  thailandReceiptProofs    Json      @default("[]") @map("thailand_receipt_proofs") @db.JsonB
+  thailandReceivedAt       DateTime? @map("thailand_received_at")
 
   // 取消
   cancelReason String?   @map("cancel_reason") @db.Text

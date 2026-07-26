@@ -57,13 +57,13 @@ interface ItemRow {
 interface PrealertRow {
   id: string; trackingNo: string; expressNo: string | null; mark: string;
   status: string; receivedAt: string | null; signedAt: string | null;
-  warehouseReceiptBase64: string | null;
+  warehouseReceiptProofs: { base64Path: string; fileName: string; mime: string; uploadedAt?: string }[];
   totalFee: number | null;
   feeBreakdown?: FeeBreakdown | null;
   paymentProofs: { fileName?: string; mime?: string; base64Path?: string; uploadedAt?: string }[];
   paymentProofUploadedAt: string | null;
   paymentReviewedAt: string | null; paymentRejectReason: string | null;
-  thailandReceiptBase64: string | null;
+  thailandReceiptProofs: { base64Path: string; fileName: string; mime: string; uploadedAt?: string }[];
   thailandReceivedAt: string | null;
   cancelReason?: string | null; cancelledAt?: string | null;
   createdAt: string; items: ItemRow[];
@@ -627,18 +627,26 @@ export default function ClientWhrConsolidationPage() {
                         )}
 
                         {/* --- 仓库签收凭证 --- */}
-                        {pa.warehouseReceiptBase64 && (
+                        {(pa.warehouseReceiptProofs ?? []).length > 0 && (
                           <div style={{ padding: "10px 12px", background: "#f0fdf4", borderRadius: 6, marginBottom: 10 }}>
-                            <div style={{ fontSize: 13, fontWeight: 600, color: "#065f46", marginBottom: 6 }}>仓库已签收</div>
-                            <img src={pa.warehouseReceiptBase64} alt="收货凭证" onClick={() => setPreviewImage(pa.warehouseReceiptBase64!)} style={{ maxWidth: 150, maxHeight: 100, borderRadius: 6, border: "1px solid #e5e7eb", cursor: "pointer" }} />
+                            <div style={{ fontSize: 13, fontWeight: 600, color: "#065f46", marginBottom: 6 }}>仓库已签收（{(pa.warehouseReceiptProofs ?? []).length}张）</div>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                              {(pa.warehouseReceiptProofs ?? []).map((pf, i) => (
+                                <img key={i} src={pf.base64Path} alt={`收货凭证 ${i+1}`} onClick={() => setPreviewImage(pf.base64Path)} style={{ maxWidth: 150, maxHeight: 100, borderRadius: 6, border: "1px solid #e5e7eb", cursor: "pointer" }} />
+                              ))}
+                            </div>
                           </div>
                         )}
 
                         {/* --- 泰国签收单 --- */}
-                        {pa.status === "thailand_received" && pa.thailandReceiptBase64 && (
+                        {pa.status === "thailand_received" && (pa.thailandReceiptProofs ?? []).length > 0 && (
                           <div style={{ padding: "10px 12px", background: "#d1fae5", borderRadius: 6, marginBottom: 10 }}>
-                            <div style={{ fontSize: 13, fontWeight: 600, color: "#065f46", marginBottom: 6 }}>泰国已签收</div>
-                            <img src={pa.thailandReceiptBase64} alt="泰国签收单" onClick={() => setPreviewImage(pa.thailandReceiptBase64!)} style={{ maxWidth: "100%", maxHeight: 250, borderRadius: 6, border: "1px solid #e5e7eb", cursor: "pointer" }} />
+                            <div style={{ fontSize: 13, fontWeight: 600, color: "#065f46", marginBottom: 6 }}>泰国已签收（{(pa.thailandReceiptProofs ?? []).length}张）</div>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                              {(pa.thailandReceiptProofs ?? []).map((pf, i) => (
+                                <img key={i} src={pf.base64Path} alt={`泰国签收单 ${i+1}`} onClick={() => setPreviewImage(pf.base64Path)} style={{ maxWidth: "100%", maxHeight: 250, borderRadius: 6, border: "1px solid #e5e7eb", cursor: "pointer" }} />
+                              ))}
+                            </div>
                             {pa.thailandReceivedAt && <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>签收时间：{formatBeijingTime(pa.thailandReceivedAt)}</div>}
                           </div>
                         )}

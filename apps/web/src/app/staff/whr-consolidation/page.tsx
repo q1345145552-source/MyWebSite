@@ -101,7 +101,7 @@ interface DispatchCustomer {
   status?: string; unitPriceNormal: number; unitPriceInspection: number; unitPriceSensitive: number;
   totalVolumeM3: number; totalFee: number | null; deliveryAddress: string | null; addressMissing?: boolean;
   totalItems: number; totalPackages: number; createdAt: string; 
-  prealerts?: { id: string; trackingNo: string; mark: string; expressNo: string | null; status: string; warehouseReceiptBase64?: string | null; thailandReceiptBase64?: string | null; items: DispatchCustomerItem[] }[];
+  prealerts?: { id: string; trackingNo: string; mark: string; expressNo: string | null; status: string; warehouseReceiptProofs?: { base64Path: string; fileName: string; mime: string; uploadedAt?: string }[]; thailandReceiptProofs?: { base64Path: string; fileName: string; mime: string; uploadedAt?: string }[]; items: DispatchCustomerItem[] }[];
 }
 interface DispatchPlan {
   planId: string; planNo: string; warehouse: string; containerType: string; destinationTh: string;
@@ -116,7 +116,8 @@ interface OpsPrealert {
   itemCount: number; volumeM3: number; packageCount: number;
   totalFee?: number | null;
   paymentProofs?: any[];
-  thailandReceiptBase64?: string | null;
+  warehouseReceiptProofs?: { base64Path: string; fileName: string; mime: string; uploadedAt?: string }[];
+  thailandReceiptProofs?: { base64Path: string; fileName: string; mime: string; uploadedAt?: string }[];
 }
 interface OpsPlan {
   planId: string; planNo: string; warehouse: string; containerType: string; destinationTh: string;
@@ -172,12 +173,12 @@ export default function StaffWhrConsolidationPage() {
 
   // ---- 泰国签收 ----
   const [thailandTarget, setThailandTarget] = useState<{ planId: string; prealertId: string; planNo: string; trackingNo: string; clientName: string; volumeM3: number } | null>(null);
-  const [thailandFile, setThailandFile] = useState<{ base64: string; fileName: string; mime: string } | null>(null);
+  const [thailandFiles, setThailandFiles] = useState<{ base64: string; fileName: string; mime: string }[]>([]);
   const [thailandSubmitting, setThailandSubmitting] = useState(false);
 
   // ---- 仓库签收 ----
   const [signTarget, setSignTarget] = useState<{ planId: string; prealertId: string; planNo: string; trackingNo: string; mark: string; clientName: string; clientPhone?: string; clientCompany?: string; deliveryAddress: string | null; items?: any[]; loading?: boolean } | null>(null);
-  const [signFile, setSignFile] = useState<{ base64: string; fileName: string; mime: string } | null>(null);
+  const [signFiles, setSignFiles] = useState<{ base64: string; fileName: string; mime: string }[]>([]);
   const [signSubmitting, setSignSubmitting] = useState(false);
 
   // ---- 审核付款 ----
@@ -308,7 +309,7 @@ export default function StaffWhrConsolidationPage() {
   };
 
   const handleWarehouseSign = async () => {
-    if (!signTarget || !signFile) { setToast("请上传收货凭证照片"); return; }
+    if (!signTarget || signFiles.length === 0) { setToast("请上传收货凭证照片"); return; }
     setSignSubmitting(true);
     try {
       await apiRequest<any>(
@@ -317,12 +318,12 @@ export default function StaffWhrConsolidationPage() {
           method: "POST", headers: jsonPost,
           body: JSON.stringify({
             planId: signTarget.planId, prealertId: signTarget.prealertId,
-            receiptFileName: signFile.fileName, receiptMime: signFile.mime, receiptBase64: signFile.base64,
+            receiptProofs: signFiles.map(f => ({ fileName: f.fileName, mime: f.mime, base64: f.base64 })),
           }),
         }
       );
       setToast("签收成功");
-      setSignTarget(null); setSignFile(null);
+      setSignTarget(null); setSignFiles([]);
       loadOperations();
       if (activeTab === "dispatch") loadDispatch();
       if (selectedPlanId) loadPlanDetail(selectedPlanId);
@@ -441,7 +442,7 @@ export default function StaffWhrConsolidationPage() {
 
   // ---- 泰国签收 ----
   const handleThailandSign = async () => {
-    if (!thailandTarget || !thailandFile) { setToast("请选择签收单文件"); return; }
+    if (!thailandTarget || thailandFiles.length === 0) { setToast("请选择签收单文件"); return; }
     setThailandSubmitting(true);
     try {
       await apiRequest<any>(
@@ -451,12 +452,12 @@ export default function StaffWhrConsolidationPage() {
           headers: jsonPost,
           body: JSON.stringify({
             planId: thailandTarget.planId, prealertId: thailandTarget.prealertId,
-            fileName: thailandFile.fileName, mime: thailandFile.mime, base64: thailandFile.base64,
+            proofs: thailandFiles.map(f => ({ fileName: f.fileName, mime: f.mime, base64: f.base64 })),
           }),
         }
       );
       setToast("泰国签收成功");
-      setThailandTarget(null); setThailandFile(null);
+      setThailandTarget(null); setThailandFiles([]);
       loadOperations(); loadDispatch();
     } catch (e: any) { setToast(e?.message ?? "签收失败"); }
     finally { setThailandSubmitting(false); }
@@ -644,8 +645,8 @@ export default function StaffWhrConsolidationPage() {
                               <span style={{ fontSize: 12, color: "#6b7280" }}>{c.clientPhone} · {c.clientCompany}</span>
                               {/* 客户维度状态由后端按所有预报单推导，不再拿第一条单的状态冒充 */}
                               {c.status && <span style={{ fontSize: 12, padding: "2px 8px", borderRadius: 4, background: TAG[c.status]?.bg ?? "#e5e7eb", color: TAG[c.status]?.color ?? "#374151" }}>{PREALERT_ST_ZH[c.status] ?? c.status}</span>}
-                              {(c.prealerts ?? []).map(pa => pa.warehouseReceiptBase64 ? <img key={`wr-${pa.id}`} src={pa.warehouseReceiptBase64} alt="收货凭证" onClick={(e) => { e.stopPropagation(); setPreviewImage(pa.warehouseReceiptBase64!); }} style={{ width: 32, height: 32, objectFit: "cover", borderRadius: 4, border: "1px solid #e5e7eb", cursor: "pointer" }} title="收货凭证" /> : null)}
-                              {(c.prealerts ?? []).map(pa => pa.thailandReceiptBase64 ? <img key={`th-${pa.id}`} src={pa.thailandReceiptBase64} alt="泰国签收单" onClick={(e) => { e.stopPropagation(); setPreviewImage(pa.thailandReceiptBase64!); }} style={{ width: 32, height: 32, objectFit: "cover", borderRadius: 4, border: "1px solid #10b981", cursor: "pointer" }} title="泰国签收单" /> : null)}
+                              {(c.prealerts ?? []).flatMap(pa => (pa.warehouseReceiptProofs ?? []).map((pf, i) => <img key={`wr-${pa.id}-${i}`} src={pf.base64Path} alt="收货凭证" onClick={(e) => { e.stopPropagation(); setPreviewImage(pf.base64Path); }} style={{ width: 32, height: 32, objectFit: "cover", borderRadius: 4, border: "1px solid #e5e7eb", cursor: "pointer" }} title={`收货凭证 ${i+1}`} />))}
+                              {(c.prealerts ?? []).flatMap(pa => (pa.thailandReceiptProofs ?? []).map((pf, i) => <img key={`th-${pa.id}-${i}`} src={pf.base64Path} alt="泰国签收单" onClick={(e) => { e.stopPropagation(); setPreviewImage(pf.base64Path); }} style={{ width: 32, height: 32, objectFit: "cover", borderRadius: 4, border: "1px solid #10b981", cursor: "pointer" }} title={`泰国签收单 ${i+1}`} />))}
                             </div>
                             <span style={{ fontSize: 12, color: "#9ca3af" }}>
                               {!c.deliveryAddress && <span style={{ color: "#b91c1c", marginRight: 8 }}>⚠ 缺地址</span>}
@@ -1009,7 +1010,7 @@ export default function StaffWhrConsolidationPage() {
         {/* 弹窗：仓库签收 */}
         {/* ================================================================ */}
         {signTarget && (
-          <Modal onClose={() => { setSignTarget(null); setSignFile(null); }}>
+          <Modal onClose={() => { setSignTarget(null); setSignFiles([]); }}>
             <h3 style={{ marginTop: 0 }}>仓库签收</h3>
             <p style={{ fontSize: 13, color: "#6b7280" }}>{signTarget.planNo} · 预报单：{signTarget.trackingNo} · 唛头：{signTarget.mark || "-"}</p>
             <p style={{ fontSize: 13, color: "#374151" }}>
@@ -1049,25 +1050,43 @@ export default function StaffWhrConsolidationPage() {
             )}
 
             <div style={{ marginTop: 14 }}>
-              <label style={fl}>收货凭证照片 *</label>
-              <input type="file" accept="image/*" onChange={async e => {
-                const file = e.target.files?.[0]; if (!file) return;
-                if (file.size > MAX_IMAGE_BYTES) {
-                  setToast(`图片超过 ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)}MB，请压缩后再上传`);
-                  e.target.value = "";
-                  return;
+              <label style={fl}>收货凭证照片 *（支持多张）</label>
+              <input type="file" accept="image/*" multiple onChange={async e => {
+                const files = Array.from(e.target.files ?? []);
+                if (files.length === 0) return;
+                const newFiles: { base64: string; fileName: string; mime: string }[] = [];
+                for (const file of files) {
+                  if (file.size > MAX_IMAGE_BYTES) {
+                    setToast(`${file.name} 超过 ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)}MB，已跳过`);
+                    continue;
+                  }
+                  const base64 = await new Promise<string>(r => { const fr = new FileReader(); fr.onload = () => r((fr.result as string).split(",")[1]); fr.readAsDataURL(file); });
+                  newFiles.push({ base64, fileName: file.name, mime: file.type });
                 }
-                const base64 = await new Promise<string>(r => { const fr = new FileReader(); fr.onload = () => r((fr.result as string).split(",")[1]); fr.readAsDataURL(file); });
-                setSignFile({ base64, fileName: file.name, mime: file.type });
+                if (newFiles.length > 0) setSignFiles(prev => [...prev, ...newFiles]);
+                e.target.value = "";
               }} style={{ marginTop: 4 }} />
-              {signFile && <div style={{ fontSize: 12, color: "#10b981", marginTop: 4, display: "flex", alignItems: "center", gap: 8 }}>已选择: {signFile.fileName}<button onClick={() => { if (window.confirm("确认删除已上传的收货凭证照片？")) { setSignFile(null); } }} style={{ padding: "1px 8px", border: "1px solid #ef4444", color: "#ef4444", background: "#fff", borderRadius: 3, cursor: "pointer", fontSize: 11 }}>删除凭证</button></div>}
+              {signFiles.length > 0 && (
+                <div style={{ marginTop: 4, fontSize: 12 }}>
+                  <span style={{ color: "#10b981" }}>已选择 {signFiles.length} 张照片</span>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+                    {signFiles.map((f, i) => (
+                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 4, background: "#f3f4f6", padding: "2px 8px", borderRadius: 4 }}>
+                        <span style={{ maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.fileName}</span>
+                        <button onClick={() => setSignFiles(prev => prev.filter((_, j) => j !== i))} style={{ border: "none", background: "none", color: "#ef4444", cursor: "pointer", fontSize: 14, padding: 0, lineHeight: 1 }}>×</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
             <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
-              <button onClick={handleWarehouseSign} disabled={signSubmitting || !signFile} style={{ ...btnBlue, opacity: !signFile ? 0.5 : 1, cursor: !signFile ? "not-allowed" : "pointer" }}>
+              <button onClick={handleWarehouseSign} disabled={signSubmitting || signFiles.length === 0} style={{ ...btnBlue, opacity: signFiles.length === 0 ? 0.5 : 1, cursor: signFiles.length === 0 ? "not-allowed" : "pointer" }}>
                 {signSubmitting ? "提交中..." : "确认签收"}
               </button>
-              <button onClick={() => { setSignTarget(null); setSignFile(null); }} style={btnGray}>取消</button>
+              <button onClick={() => { setSignTarget(null); setSignFiles([]); }} style={btnGray}>取消</button>
             </div>
+
           </Modal>
         )}
 
@@ -1178,28 +1197,45 @@ export default function StaffWhrConsolidationPage() {
         {/* 弹窗：泰国签收 */}
         {/* ================================================================ */}
         {thailandTarget && (
-          <Modal onClose={() => { setThailandTarget(null); setThailandFile(null); }}>
+          <Modal onClose={() => { setThailandTarget(null); setThailandFiles([]); }}>
             <h3 style={{ marginTop: 0 }}>泰国签收 - {thailandTarget.clientName}</h3>
             <p style={{ fontSize: 13, color: "#6b7280" }}>{thailandTarget.planNo} · 预报单：{thailandTarget.trackingNo} · {thailandTarget.volumeM3}方</p>
             <div style={{ marginTop: 14 }}>
-              <label style={fl}>签收单文件 *</label>
-              <input type="file" accept="image/*" onChange={async e => {
-                const file = e.target.files?.[0]; if (!file) return;
-                if (file.size > MAX_IMAGE_BYTES) {
-                  setToast(`图片超过 ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)}MB，请压缩后再上传`);
-                  e.target.value = "";
-                  return;
+              <label style={fl}>签收单文件 *（支持多张）</label>
+              <input type="file" accept="image/*" multiple onChange={async e => {
+                const files = Array.from(e.target.files ?? []);
+                if (files.length === 0) return;
+                const newFiles: { base64: string; fileName: string; mime: string }[] = [];
+                for (const file of files) {
+                  if (file.size > MAX_IMAGE_BYTES) {
+                    setToast(`${file.name} 超过 ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)}MB，已跳过`);
+                    continue;
+                  }
+                  const base64 = await new Promise<string>(r => { const fr = new FileReader(); fr.onload = () => r((fr.result as string).split(",")[1]); fr.readAsDataURL(file); });
+                  newFiles.push({ base64, fileName: file.name, mime: file.type });
                 }
-                const base64 = await new Promise<string>(r => { const fr = new FileReader(); fr.onload = () => r((fr.result as string).split(",")[1]); fr.readAsDataURL(file); });
-                setThailandFile({ base64, fileName: file.name, mime: file.type });
+                if (newFiles.length > 0) setThailandFiles(prev => [...prev, ...newFiles]);
+                e.target.value = "";
               }} style={{ marginTop: 4 }} />
-              {thailandFile && <div style={{ fontSize: 12, color: "#10b981", marginTop: 4 }}>已选择: {thailandFile.fileName}</div>}
+              {thailandFiles.length > 0 && (
+                <div style={{ marginTop: 4, fontSize: 12 }}>
+                  <span style={{ color: "#10b981" }}>已选择 {thailandFiles.length} 张照片</span>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+                    {thailandFiles.map((f, i) => (
+                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 4, background: "#f3f4f6", padding: "2px 8px", borderRadius: 4 }}>
+                        <span style={{ maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.fileName}</span>
+                        <button onClick={() => setThailandFiles(prev => prev.filter((_, j) => j !== i))} style={{ border: "none", background: "none", color: "#ef4444", cursor: "pointer", fontSize: 14, padding: 0, lineHeight: 1 }}>×</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
             <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
-              <button onClick={handleThailandSign} disabled={thailandSubmitting || !thailandFile} style={{ ...btnBlue, opacity: !thailandFile ? 0.5 : 1, cursor: !thailandFile ? "not-allowed" : "pointer" }}>
+              <button onClick={handleThailandSign} disabled={thailandSubmitting || thailandFiles.length === 0} style={{ ...btnBlue, opacity: thailandFiles.length === 0 ? 0.5 : 1, cursor: thailandFiles.length === 0 ? "not-allowed" : "pointer" }}>
                 {thailandSubmitting ? "提交中..." : "确认签收"}
               </button>
-              <button onClick={() => { setThailandTarget(null); setThailandFile(null); }} style={btnGray}>取消</button>
+              <button onClick={() => { setThailandTarget(null); setThailandFiles([]); }} style={btnGray}>取消</button>
             </div>
           </Modal>
         )}
