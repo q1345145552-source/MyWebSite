@@ -2,26 +2,31 @@
 
 import { useEffect, useState, useCallback } from "react";
 import RoleShell from "../../../modules/layout/RoleShell";
-import { authHeaders, apiBaseUrl, parseApiResponse } from "../../../services/core-api";
+import { apiBaseUrl, apiRequest } from "../../../services/core-api";
 import { formatBeijingTime } from "../../../modules/staff/utils";
+
+// 单张图片上传上限（原图字节），和后端 MAX_IMAGE_BASE64_LENGTH 对齐留出余量
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+const jsonPost = { "Content-Type": "application/json" } as const;
 
 // ============================================================================
 // 状态中文
 // ============================================================================
 const STATUS_ZH: Record<string, string> = {
-  filling: "填货中",
+  pending: "待签收",
   received_pending_payment: "待付款",
+  payment_submitted: "待审核",
   paid: "已付款",
   loading: "装柜中",
   shipped: "已发运",
   thailand_received: "泰国已签收",
   cancelled: "已取消",
-  pending: "待签收",
-  received: "已签收",
 };
 const ST_TAG: Record<string, { bg: string; color: string }> = {
-  filling: { bg: "#dbeafe", color: "#1e40af" },
+  pending: { bg: "#dbeafe", color: "#1e40af" },
   received_pending_payment: { bg: "#fef3c7", color: "#92400e" },
+  payment_submitted: { bg: "#dbeafe", color: "#1e40af" },
   paid: { bg: "#d1fae5", color: "#065f46" },
   loading: { bg: "#ede9fe", color: "#5b21b6" },
   shipped: { bg: "#e0e7ff", color: "#3730a3" },
@@ -34,14 +39,11 @@ const ST_TAG: Record<string, { bg: string; color: string }> = {
 // ============================================================================
 interface MyPlan {
   planId: string; planNo: string; warehouse: string; containerType: string; destinationTh: string;
-  totalVolumeM3: number; usedVolumeM3: number; myStatus: string;
+  totalVolumeM3: number; usedVolumeM3: number;
   myTotalVolumeM3: number; myTotalFee: number | null;
   myUnitPriceNormal: number; myUnitPriceInspection: number; myUnitPriceSensitive: number;
-  mySignedAt: string | null; myPaymentProofBase64: string | null;
-  myPaymentProofUploadedAt: string | null; myPaymentReviewedAt: string | null;
-  myPaymentRejectReason: string | null;
-  myThailandReceiptFileName: string | null; myThailandReceiptBase64: string | null;
-  myThailandReceivedAt: string | null; myCancelReason: string | null;
+  prealertCount: number; cancelledCount?: number; latestStatus: string;
+  deliveryAddress: string | null;
   createdAt: string;
 }
 
@@ -54,21 +56,27 @@ interface ItemRow {
 }
 interface PrealertRow {
   id: string; trackingNo: string; expressNo: string | null; mark: string;
-  status: string; receivedAt: string | null; createdAt: string; items: ItemRow[];
-}
-interface MyDetail {
-  customerId: string; status: string;
-  unitPriceNormal: number; unitPriceInspection: number; unitPriceSensitive: number;
-  totalVolumeM3: number; totalFee: number | null; signedAt: string | null;
-  deliveryAddress: string | null;
-  paymentProofs: { fileName: string; mime: string; base64Path: string; uploadedAt: string }[];
+  status: string; receivedAt: string | null; signedAt: string | null;
+  warehouseReceiptBase64: string | null;
+  totalFee: number | null;
+  feeBreakdown?: FeeBreakdown | null;
+  paymentProofs: { fileName?: string; mime?: string; base64Path?: string; uploadedAt?: string }[];
   paymentProofUploadedAt: string | null;
   paymentReviewedAt: string | null; paymentRejectReason: string | null;
-  thailandReceiptFileName: string | null; thailandReceiptBase64: string | null;
-  thailandReceivedAt: string | null; cancelReason: string | null;
+  thailandReceiptBase64: string | null;
+  thailandReceivedAt: string | null;
+  cancelReason?: string | null; cancelledAt?: string | null;
+  createdAt: string; items: ItemRow[];
+}
+interface MyDetail {
+  customerId: string; customerName: string; customerPhone: string;
+  unitPriceNormal: number; unitPriceInspection: number; unitPriceSensitive: number;
+  totalVolumeM3: number; totalFee: number | null;
+  feeBreakdown?: FeeBreakdown | null;
+  deliveryAddress: string | null;
   totalPrealerts: number; totalPackages: number;
   prealerts: PrealertRow[];
-  statusLogs: { id: string; operatorName: string; operatorRole: string; fromStatus: string; toStatus: string; remark: string | null; createdAt: string }[];
+  statusLogs: { id: string; trackingNo?: string; operatorName: string; operatorRole: string; fromStatus: string; toStatus: string; remark: string | null; createdAt: string }[];
 }
 
 // 货品表单行
@@ -77,7 +85,57 @@ interface ProductFormRow {
   lengthCm: string; widthCm: string; heightCm: string; unitWeightKg: string;
   material: string; cargoValue: string; cargoType: string;
   imageFile?: { fileName: string; mime: string; base64: string };
+  /** 已有图片的服务端路径（/images/xxx），保存时原样回传，后端据此保留原图 */
   existingImageBase64?: string;
+}
+
+// 费用明细（后端算好下发，保证和结算口径一致）
+interface FeeBreakdownRow {
+  cargoType: string; label: string; volumeM3: number; unitPrice: number; amount: number;
+}
+interface FeeBreakdown {
+  rows: FeeBreakdownRow[];
+  totalVolumeM3: number;
+  computedFee: number;
+  storedFee: number | null;
+  matchesStored: boolean;
+}
+
+const money = (n: number) => `¥${n.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/** 总费用的详细算式：每档「方数 × 单价 = 金额」，最后合计 */
+function FeeBreakdownPanel({ bd, title = "费用明细", compact }: { bd?: FeeBreakdown | null; title?: string; compact?: boolean }) {
+  if (!bd || !bd.rows || bd.rows.length === 0) return null;
+  const fs = compact ? 11 : 12;
+  return (
+    <div style={{ background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 6, padding: compact ? "6px 8px" : "8px 10px", fontSize: fs }}>
+      <div style={{ fontWeight: 600, color: "#374151", marginBottom: 4 }}>{title}</div>
+      {bd.rows.map(r => (
+        <div key={r.cargoType} style={{ display: "flex", justifyContent: "space-between", gap: 8, color: "#4b5563", padding: "1px 0" }}>
+          <span>{r.label}：{r.volumeM3.toFixed(3)} 方 × {r.unitPrice} 元/方</span>
+          <span style={{ whiteSpace: "nowrap" }}>= {money(r.amount)}</span>
+        </div>
+      ))}
+      <div style={{ borderTop: "1px solid #e5e7eb", marginTop: 4, paddingTop: 4, display: "flex", justifyContent: "space-between", gap: 8 }}>
+        <span style={{ color: "#6b7280" }}>合计 {bd.totalVolumeM3.toFixed(3)} 方</span>
+        <span style={{ fontWeight: 700, fontSize: fs + 2, color: "#059669", whiteSpace: "nowrap" }}>
+          {money(bd.storedFee ?? bd.computedFee)}
+        </span>
+      </div>
+      {!bd.matchesStored && bd.storedFee != null && (
+        <div style={{ marginTop: 4, color: "#b45309", fontSize: fs - 1 }}>
+          单价在本单结算后有过调整，按现价算为 {money(bd.computedFee)}；本单实际应付以签收时锁定的 {money(bd.storedFee)} 为准。
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 把接口返回的图片字段（可能是 /images 路径、data URL 或裸 base64）统一成可用的 src */
+function toImageSrc(src: unknown, mime?: string): string {
+  if (typeof src !== "string" || !src) return "";
+  if (src.startsWith("data:") || src.startsWith("/") || src.startsWith("http")) return src;
+  return `data:${mime || "image/png"};base64,${src}`;
 }
 
 // ============================================================================
@@ -90,6 +148,29 @@ const fl: React.CSSProperties = { display: "block", fontSize: 13, color: "#37415
 const fi: React.CSSProperties = { width: "100%", padding: "7px 10px", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 13, boxSizing: "border-box" };
 const thS: React.CSSProperties = { padding: "6px 8px", textAlign: "left", fontSize: 12, fontWeight: 600, color: "#374151", borderBottom: "2px solid #e5e7eb", whiteSpace: "nowrap" };
 const tdS: React.CSSProperties = { padding: "6px 8px", fontSize: 12, borderBottom: "1px solid #f3f4f6", verticalAlign: "middle" };
+
+/**
+ * 把已有货品转成表单行。
+ *
+ * 保存接口是「整单覆盖」语义：提交什么，这张预报单就剩什么。
+ * 所以不管是「编辑」还是「添加货品」，弹窗里都必须先带上这张单已有的全部货品，
+ * 否则一保存就把之前的顶掉了。
+ */
+function itemsToFormRows(items: any[]): ProductFormRow[] {
+  return (items ?? []).map((it) => ({
+    productName: it.productName ?? "",
+    packageCount: String(it.packageCount ?? 1),
+    quantityPerBox: String(it.quantityPerBox ?? 1),
+    lengthCm: String(it.lengthCm ?? ""),
+    widthCm: String(it.widthCm ?? ""),
+    heightCm: String(it.heightCm ?? ""),
+    unitWeightKg: String(it.unitWeightKg ?? ""),
+    material: it.material ?? "",
+    cargoValue: it.cargoValue ?? "",
+    cargoType: it.cargoType ?? "normal",
+    existingImageBase64: it.productImageBase64 || undefined,
+  }));
+}
 
 function emptyItemForm(): ProductFormRow {
   return { productName: "", packageCount: "1", quantityPerBox: "1", lengthCm: "", widthCm: "", heightCm: "", unitWeightKg: "", material: "", cargoValue: "", cargoType: "normal" };
@@ -135,6 +216,19 @@ export default function ClientWhrConsolidationPage() {
   const [showItemForm, setShowItemForm] = useState(false);
   const [itemForms, setItemForms] = useState<ProductFormRow[]>([emptyItemForm()]);
   const [itemSubmitting, setItemSubmitting] = useState(false);
+  // 弹窗当前编辑的是哪张预报单 —— 不再依赖 expandedPrealert，避免弹窗开着时展开状态变了保存到别的单上
+  const [itemFormPrealertId, setItemFormPrealertId] = useState<string | null>(null);
+  // 打开弹窗时这张单已有几行货品，用于在弹窗里给出提示
+  const [itemFormExistingCount, setItemFormExistingCount] = useState(0);
+
+  /** 打开货品弹窗：始终带上该预报单已有的全部货品；append=true 时末尾再补一行空白 */
+  const openItemForm = (prealertId: string, existingItems: any[], append: boolean) => {
+    const rows = itemsToFormRows(existingItems);
+    setItemFormPrealertId(prealertId);
+    setItemFormExistingCount(rows.length);
+    setItemForms(append || rows.length === 0 ? [...rows, emptyItemForm()] : rows);
+    setShowItemForm(true);
+  };
 
   // 删除确认
   const [deleteTarget, setDeleteTarget] = useState<{ prealertId: string; itemIdx: number } | null>(null);
@@ -144,8 +238,9 @@ export default function ClientWhrConsolidationPage() {
   const [addressVal, setAddressVal] = useState("");
   const [addressSaving, setAddressSaving] = useState(false);
 
-  // 付款上传
+  // 付款上传 — 预报单级别
   const [showPay, setShowPay] = useState(false);
+  const [currentPayPrealertId, setCurrentPayPrealertId] = useState<string | null>(null);
   const [payProofs, setPayProofs] = useState<{ fileName: string; mime: string; base64: string }[]>([]);
   const [paySubmitting, setPaySubmitting] = useState(false);
 
@@ -155,9 +250,7 @@ export default function ClientWhrConsolidationPage() {
   const loadPlans = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await parseApiResponse<{ items: MyPlan[] }>(
-        await fetch(`${apiBaseUrl()}/client/whr-consolidation/plans`, { headers: authHeaders() })
-      );
+      const data = await apiRequest<{ items: MyPlan[] }>(`${apiBaseUrl()}/client/whr-consolidation/plans`);
       setPlans(data.items ?? []);
     } catch (e: any) { setToast(e?.message ?? "加载计划列表失败"); }
     finally { setLoading(false); }
@@ -166,8 +259,8 @@ export default function ClientWhrConsolidationPage() {
   const loadDetail = useCallback(async (planId: string) => {
     setDetailLoading(true);
     try {
-      const data = await parseApiResponse<MyDetail>(
-        await fetch(`${apiBaseUrl()}/client/whr-consolidation/my-detail?planId=${encodeURIComponent(planId)}`, { headers: authHeaders() })
+      const data = await apiRequest<MyDetail>(
+        `${apiBaseUrl()}/client/whr-consolidation/my-detail?planId=${encodeURIComponent(planId)}`
       );
       setDetail(data);
     } catch (e: any) { setToast(e?.message ?? "加载详情失败"); }
@@ -176,6 +269,13 @@ export default function ClientWhrConsolidationPage() {
 
   useEffect(() => { loadPlans(); }, [loadPlans]);
 
+  // Toast 自动消失，避免旧提示一直挂在页面顶部
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(""), 5000);
+    return () => clearTimeout(t);
+  }, [toast]);
+
   // ==========================================================================
   // 操作：创建预报单
   // ==========================================================================
@@ -183,15 +283,15 @@ export default function ClientWhrConsolidationPage() {
     if (!selectedPlanId || !newMark.trim()) { setToast("请填写唛头"); return; }
     setCreatePSubmitting(true);
     try {
-      const newPrealert = await parseApiResponse<{ id: string; trackingNo: string }>(
-        await fetch(`${apiBaseUrl()}/client/whr-consolidation/prealerts`, {
-          method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" },
+      const newPrealert = await apiRequest<{ id: string; trackingNo: string }>(
+        `${apiBaseUrl()}/client/whr-consolidation/prealerts`,
+        {
+          method: "POST", headers: jsonPost,
           body: JSON.stringify({ planId: selectedPlanId, mark: newMark.trim(), expressNo: newExpressNo.trim() || undefined }),
-        })
+        }
       );
       setToast(`预报单 ${newPrealert.trackingNo} 创建成功`);
       setShowCreatePrealert(false); setNewMark(""); setNewExpressNo("");
-      // 先设 expandedPrealert，再 loadDetail，保证刷新后自动展开
       const newId = newPrealert.id;
       setExpandedPrealert(newId);
       loadDetail(selectedPlanId); loadPlans();
@@ -208,32 +308,42 @@ export default function ClientWhrConsolidationPage() {
       const r = rows[i];
       if (!r.productName.trim()) { setToast(`第${i + 1}行品名为必填`); return; }
       if (!r.packageCount || Number(r.packageCount) <= 0) { setToast(`第${i + 1}行件数必须大于0`); return; }
+      if (!r.quantityPerBox || Number(r.quantityPerBox) <= 0) { setToast(`第${i + 1}行每箱数量必须大于0`); return; }
+      // 长宽高必填：缺了算不出方数，签收时会按 0 方计费
+      const dims: [string, string][] = [["长", r.lengthCm], ["宽", r.widthCm], ["高", r.heightCm]];
+      for (const [label, v] of dims) {
+        if (!v || !(Number(v) > 0)) { setToast(`第${i + 1}行${label}(cm)必须大于0，否则无法计算方数`); return; }
+      }
       if (!r.material.trim()) { setToast(`第${i + 1}行材质为必填`); return; }
       if (!r.cargoValue.trim()) { setToast(`第${i + 1}行货值为必填`); return; }
     }
     setItemSubmitting(true);
     try {
-      await parseApiResponse<any>(
-        await fetch(`${apiBaseUrl()}/client/whr-consolidation/prealerts/items`, {
-          method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" },
+      // rows 允许为空数组 —— 代表删掉了最后一件货品，后端会清空该预报单的货品
+      await apiRequest<any>(
+        `${apiBaseUrl()}/client/whr-consolidation/prealerts/items`,
+        {
+          method: "POST", headers: jsonPost,
           body: JSON.stringify({
             planId: selectedPlanId, prealertId,
             items: rows.map(r => ({
               productName: r.productName.trim(), packageCount: Number(r.packageCount),
               quantityPerBox: Number(r.quantityPerBox) || 1,
-              lengthCm: r.lengthCm ? Number(r.lengthCm) : undefined,
-              widthCm: r.widthCm ? Number(r.widthCm) : undefined,
-              heightCm: r.heightCm ? Number(r.heightCm) : undefined,
+              lengthCm: Number(r.lengthCm),
+              widthCm: Number(r.widthCm),
+              heightCm: Number(r.heightCm),
               unitWeightKg: r.unitWeightKg ? Number(r.unitWeightKg) : undefined,
               material: r.material.trim(), cargoValue: r.cargoValue.trim(),
               cargoType: r.cargoType || "normal",
               imageFileName: r.imageFile?.fileName, imageMime: r.imageFile?.mime, imageBase64: r.imageFile?.base64,
+              // 没有重新选图时把原路径带回去，后端据此保留原图（不带就会被清空）
+              existingImagePath: r.imageFile ? undefined : r.existingImageBase64,
             })),
           }),
-        })
+        }
       );
-      setToast("货品保存成功");
-      setShowItemForm(false); setItemForms([emptyItemForm()]);
+      setToast(rows.length === 0 ? "货品已清空" : "货品保存成功");
+      setShowItemForm(false); setItemForms([emptyItemForm()]); setItemFormPrealertId(null); setItemFormExistingCount(0);
       loadDetail(selectedPlanId); loadPlans();
     } catch (e: any) { setToast(e?.message ?? "保存失败"); }
     finally { setItemSubmitting(false); }
@@ -244,13 +354,15 @@ export default function ClientWhrConsolidationPage() {
   // ==========================================================================
   const handleSaveAddress = async () => {
     if (!selectedPlanId || !detail) return;
+    if (!addressVal.trim()) { setToast("收货地址为必填"); setAddressSaving(false); return; }
     setAddressSaving(true);
     try {
-      await parseApiResponse<any>(
-        await fetch(`${apiBaseUrl()}/client/whr-consolidation/address`, {
-          method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" },
+      await apiRequest<any>(
+        `${apiBaseUrl()}/client/whr-consolidation/address`,
+        {
+          method: "POST", headers: jsonPost,
           body: JSON.stringify({ planId: selectedPlanId, deliveryAddress: addressVal.trim() }),
-        })
+        }
       );
       setToast("地址已保存");
       setEditAddress(false);
@@ -260,20 +372,21 @@ export default function ClientWhrConsolidationPage() {
   };
 
   // ==========================================================================
-  // 操作：上传付款
+  // 操作：上传付款（预报单级别）
   // ==========================================================================
   const handlePay = async () => {
-    if (!selectedPlanId || payProofs.length === 0) { setToast("请选择付款凭证"); return; }
+    if (!selectedPlanId || !currentPayPrealertId || payProofs.length === 0) { setToast("请选择付款凭证"); return; }
     setPaySubmitting(true);
     try {
-      await parseApiResponse<any>(
-        await fetch(`${apiBaseUrl()}/client/whr-consolidation/pay`, {
-          method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" },
-          body: JSON.stringify({ planId: selectedPlanId, proofs: payProofs }),
-        })
+      await apiRequest<any>(
+        `${apiBaseUrl()}/client/whr-consolidation/pay`,
+        {
+          method: "POST", headers: jsonPost,
+          body: JSON.stringify({ planId: selectedPlanId, prealertId: currentPayPrealertId, proofs: payProofs }),
+        }
       );
       setToast("付款凭证已提交，等待审核");
-      setShowPay(false); setPayProofs([]);
+      setShowPay(false); setPayProofs([]); setCurrentPayPrealertId(null);
       loadDetail(selectedPlanId); loadPlans();
     } catch (e: any) { setToast(e?.message ?? "提交失败"); }
     finally { setPaySubmitting(false); }
@@ -299,7 +412,7 @@ export default function ClientWhrConsolidationPage() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, marginBottom: 20 }}>
             <thead><tr style={{ background: "#f9fafb" }}>
               <th style={thS}>计划编号</th><th style={thS}>仓库</th><th style={thS}>柜型</th><th style={thS}>目的地</th>
-              <th style={thS}>方数 (已用/总)</th><th style={thS}>状态</th><th style={thS}>单价</th>
+              <th style={thS}>方数 (已用/总)</th><th style={thS}>预报单</th><th style={thS}>状态</th><th style={thS}>单价</th>
             </tr></thead>
             <tbody>
               {plans.map(p => {
@@ -311,8 +424,8 @@ export default function ClientWhrConsolidationPage() {
                     if (isSelected) { setSelectedPlanId(null); setDetail(null); }
                     else { setSelectedPlanId(p.planId); loadDetail(p.planId); }
                   }} style={{ cursor: "pointer", background: isSelected ? "#eff6ff" : "white" }}
-                    onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = "#f9fafb"; }}
-                    onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = "white"; }}>
+                    onMouseEnter={e => { e.currentTarget.style.background = isSelected ? "white" : "#f9fafb" }}
+                    onMouseLeave={e => { e.currentTarget.style.background = isSelected ? "#eff6ff" : "white" }}>
                     <td style={{ ...tdS, fontWeight: 600, minWidth: 120, whiteSpace: "nowrap" }}>{p.planNo}</td>
                     <td style={tdS}>{p.warehouse}</td>
                     <td style={tdS}>{p.containerType}</td>
@@ -325,13 +438,15 @@ export default function ClientWhrConsolidationPage() {
                         <span style={{ fontSize: 12, whiteSpace: "nowrap" }}>{p.usedVolumeM3} / {p.totalVolumeM3} 方</span>
                       </div>
                     </td>
+                    <td style={tdS}>{p.prealertCount} 个</td>
                     <td style={tdS}>
-                      <span style={{ fontSize: 12, padding: "2px 8px", borderRadius: 4, background: ST_TAG[p.myStatus]?.bg ?? "#e5e7eb", color: ST_TAG[p.myStatus]?.color ?? "#374151" }}>
-                        {STATUS_ZH[p.myStatus] ?? p.myStatus}
+                      <span style={{ fontSize: 12, padding: "2px 8px", borderRadius: 4, background: ST_TAG[p.latestStatus]?.bg ?? "#e5e7eb", color: ST_TAG[p.latestStatus]?.color ?? "#374151" }}>
+                        {STATUS_ZH[p.latestStatus] ?? p.latestStatus}
                       </span>
-                      {p.myCancelReason && <div style={{ fontSize: 11, color: "#ef4444", marginTop: 2 }}>{p.myCancelReason}</div>}
                     </td>
-                    <td style={tdS}>普:{p.myUnitPriceNormal} 商:{p.myUnitPriceInspection} 敏:{p.myUnitPriceSensitive}</td>
+                    <td style={{ ...tdS, fontSize: 12, color: "#6b7280" }}>
+                      普{p.myUnitPriceNormal} · 商{p.myUnitPriceInspection} · 敏{p.myUnitPriceSensitive}
+                    </td>
                   </tr>
                 );
               })}
@@ -340,212 +455,271 @@ export default function ClientWhrConsolidationPage() {
         }
 
         {/* ================================================================ */}
-        {/* 详情区域 */}
+        {/* 详情区 */}
         {/* ================================================================ */}
-        {selectedPlanId && (
-          detailLoading ? <p style={{ color: "#9ca3af", fontSize: 14 }}>加载中...</p> :
-          !detail ? <p style={{ color: "#9ca3af", fontSize: 14 }}>加载失败</p> :
-          <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: "20px 24px", background: "#f9fafb" }}>
-            {/* 大号费用（待付款及之后） */}
-            {detail.status !== "filling" && detail.status !== "cancelled" && detail.totalFee != null && (() => {
-              const allItems = detail.prealerts.flatMap(pa => pa.items);
-              const volNormal = allItems.filter(it => it.cargoType !== "inspection" && it.cargoType !== "sensitive").reduce((s, it) => s + (it.volumeM3 ?? 0), 0);
-              const volInspection = allItems.filter(it => it.cargoType === "inspection").reduce((s, it) => s + (it.volumeM3 ?? 0), 0);
-              const volSensitive = allItems.filter(it => it.cargoType === "sensitive").reduce((s, it) => s + (it.volumeM3 ?? 0), 0);
-              const feeNormal = Math.round(volNormal * detail.unitPriceNormal * 100) / 100;
-              const feeInspection = Math.round(volInspection * detail.unitPriceInspection * 100) / 100;
-              const feeSensitive = Math.round(volSensitive * detail.unitPriceSensitive * 100) / 100;
-              return (
-                <div style={{ textAlign: "left", padding: "16px 0", marginBottom: 16, borderBottom: "1px solid #e5e7eb" }}>
-                  <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 8 }}>应付费用明细</div>
-                  {volNormal > 0 && <div style={{ fontSize: 13, color: "#374151", marginBottom: 4 }}>普货：{volNormal.toFixed(3)} 方 × {detail.unitPriceNormal} 元/方 = <strong>¥{feeNormal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></div>}
-                  {volInspection > 0 && <div style={{ fontSize: 13, color: "#374151", marginBottom: 4 }}>商检：{volInspection.toFixed(3)} 方 × {detail.unitPriceInspection} 元/方 = <strong>¥{feeInspection.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></div>}
-                  {volSensitive > 0 && <div style={{ fontSize: 13, color: "#374151", marginBottom: 4 }}>敏感：{volSensitive.toFixed(3)} 方 × {detail.unitPriceSensitive} 元/方 = <strong>¥{feeSensitive.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></div>}
-                  <div style={{ borderTop: "1px solid #d1d5db", marginTop: 8, paddingTop: 8 }}>
-                    <div style={{ fontSize: 20, fontWeight: 700, color: "#059669" }}>合计：¥{detail.totalFee.toLocaleString()}</div>
-                  </div>
-                </div>
-              );
-            })()}
+        {selectedPlanId && detailLoading && <p style={{ color: "#9ca3af", padding: "20px 0" }}>加载详情中...</p>}
 
-            {/* 已取消 */}
-            {detail.status === "cancelled" && (
-              <div style={{ textAlign: "center", padding: "16px 0", marginBottom: 16, background: "#fee2e2", borderRadius: 8, color: "#991b1b", fontSize: 14, fontWeight: 600 }}>
-                该计划已被取消
-                {detail.cancelReason && <div style={{ fontSize: 12, fontWeight: 400, marginTop: 4 }}>{detail.cancelReason}</div>}
+        {selectedPlanId && detail && (() => {
+          const addressMissing = !detail.deliveryAddress?.trim();
+          return (
+          <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: "16px 20px", background: "#fafafa" }}>
+            {/* -------- 客户信息 -------- */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <div>
+                <strong style={{ fontSize: 15 }}>{detail.customerName}</strong>
+                <span style={{ fontSize: 13, color: "#6b7280", marginLeft: 8 }}>{detail.customerPhone}</span>
+              </div>
+              <span style={{ fontSize: 13, color: "#6b7280" }}>{detail.totalVolumeM3}方 · {detail.totalPackages}件 · {detail.totalPrealerts}个预报单</span>
+            </div>
+
+            {/* -------- 价格信息 -------- */}
+            <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 8 }}>
+              普货：{detail.unitPriceNormal}元/方 · 商检：{detail.unitPriceInspection}元/方 · 敏感：{detail.unitPriceSensitive}元/方
+            </div>
+
+            {/* -------- 总费用及其算式 -------- */}
+            {detail.feeBreakdown && detail.feeBreakdown.rows.length > 0 && (
+              <div style={{ marginBottom: 12, maxWidth: 460 }}>
+                <FeeBreakdownPanel bd={detail.feeBreakdown} title="总费用明细（全部未取消预报单合计）" />
               </div>
             )}
 
-            {/* ====== 泰国收货地址 ====== */}
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>泰国收货地址</span>
-                {(detail.status === "filling" || detail.status === "received_pending_payment") && !editAddress && (
-                  <button onClick={() => { setAddressVal(detail.deliveryAddress ?? ""); setEditAddress(true); }} style={{ ...btnGray, padding: "3px 10px", fontSize: 12 }}>编辑</button>
-                )}
-              </div>
+            {/* -------- 收货地址（必填） -------- */}
+            <div style={{ marginBottom: 12 }}>
               {editAddress ? (
-                <div style={{ display: "flex", gap: 8 }}>
-                  <input value={addressVal} onChange={e => setAddressVal(e.target.value)} placeholder="请输入泰国收货地址" style={{ ...fi, flex: 1 }} />
-                  <button onClick={handleSaveAddress} disabled={addressSaving} style={btnBlue}>{addressSaving ? "保存中" : "保存"}</button>
-                  <button onClick={() => setEditAddress(false)} style={btnGray}>取消</button>
+                <div>
+                  <label style={{ ...fl, marginBottom: 4 }}>
+                    泰国收货地址 <span style={{ color: "#ef4444" }}>*</span>
+                  </label>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <input
+                      value={addressVal}
+                      onChange={e => setAddressVal(e.target.value)}
+                      placeholder="请填写详细的泰国收货地址（必填）"
+                      style={{ ...fi, maxWidth: 360 }}
+                    />
+                    <button onClick={handleSaveAddress} disabled={addressSaving || !addressVal.trim()} style={{ ...btnBlue, opacity: addressVal.trim() ? 1 : 0.5, cursor: addressVal.trim() ? "pointer" : "not-allowed" }}>
+                      {addressSaving ? "..." : "保存"}
+                    </button>
+                    {detail.deliveryAddress && <button onClick={() => setEditAddress(false)} style={btnGray}>取消</button>}
+                  </div>
+                </div>
+              ) : addressMissing ? (
+                <div style={{ padding: "10px 12px", background: "#fee2e2", border: "1px solid #fecaca", borderRadius: 6 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#991b1b", marginBottom: 4 }}>
+                    请先填写泰国收货地址 <span style={{ color: "#ef4444" }}>*</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: "#7f1d1d", marginBottom: 8 }}>
+                    收货地址是必填项，尾端拆派要用。填写之前无法新建预报单，也无法上传付款凭证。
+                  </div>
+                  <button onClick={() => { setAddressVal(""); setEditAddress(true); }} style={btnBlue}>立即填写</button>
                 </div>
               ) : (
-                <p style={{ fontSize: 13, color: detail.deliveryAddress ? "#374151" : "#9ca3af", margin: 0 }}>
-                  {detail.deliveryAddress || "未填写"}
-                </p>
+                <div style={{ fontSize: 13, color: "#374151" }}>
+                  收货地址 <span style={{ color: "#ef4444" }}>*</span>：{detail.deliveryAddress}
+                  <button onClick={() => { setAddressVal(detail.deliveryAddress ?? ""); setEditAddress(true); }} style={{ ...btnGray, marginLeft: 8, padding: "3px 12px", fontSize: 12 }}>编辑</button>
+                </div>
               )}
             </div>
 
-            {/* ====== 预报单 + 货品 ====== */}
-            {(detail.status === "filling" || detail.status === "received_pending_payment") && (
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                  <span style={{ fontSize: 14, fontWeight: 600 }}>预报单（{detail.totalPrealerts}）</span>
-                  <button onClick={() => { setShowCreatePrealert(true); }} style={btnBlue}>+ 新建预报单</button>
-                </div>
-              </div>
-            )}
+            {/* -------- 新建预报单按钮（需先填收货地址） -------- */}
+            <div style={{ marginBottom: 14 }}>
+              <button
+                onClick={() => {
+                  if (addressMissing) { setToast("请先填写泰国收货地址"); setEditAddress(true); return; }
+                  setShowCreatePrealert(true); setNewMark(""); setNewExpressNo("");
+                }}
+                disabled={addressMissing}
+                style={{ ...btnBlue, opacity: addressMissing ? 0.5 : 1, cursor: addressMissing ? "not-allowed" : "pointer" }}
+                title={addressMissing ? "请先填写泰国收货地址" : ""}
+              >+ 新建预报单</button>
+              {addressMissing && <span style={{ fontSize: 12, color: "#ef4444", marginLeft: 8 }}>需先填写收货地址</span>}
+            </div>
 
-            {/* 预报单列表（所有状态都展示） */}
-            {detail.prealerts.length === 0 && detail.status === "filling" && (
-              <p style={{ color: "#9ca3af", fontSize: 13, marginBottom: 16 }}>暂无预报单，请新建</p>
-            )}
-            {detail.prealerts.length === 0 && detail.status !== "filling" && (
-              <p style={{ color: "#9ca3af", fontSize: 13, marginBottom: 16 }}>无预报单</p>
-            )}
+            {/* ====== 预报单列表 ====== */}
+            {detail.prealerts.length === 0 ? (
+              <p style={{ fontSize: 13, color: "#9ca3af", padding: "8px 0" }}>暂无预报单，请新建</p>
+            ) : (
+              detail.prealerts.map(pa => {
+                const isExpanded = expandedPrealert === pa.id;
+                const isEditing = pa.status === "pending";
+                const paItems = pa.items ?? [];
+                const paVol = paItems.reduce((s: number, it: ItemRow) => s + (it.volumeM3 ?? 0), 0);
+                const paPkg = paItems.reduce((s: number, it: ItemRow) => s + it.packageCount, 0);
 
-            {detail.prealerts.map(pa => {
-              const paItems = pa.items ?? [];
-              const paPkg = paItems.reduce((s: number, it: any) => s + it.packageCount, 0);
-              const paVol = paItems.reduce((s: number, it: any) => s + (it.volumeM3 ?? 0), 0);
-              const isEditing = detail.status === "filling" || detail.status === "received_pending_payment";
-              return (
-                <div key={pa.id} style={{ border: "1px solid #e5e7eb", borderRadius: 8, marginBottom: 10, overflow: "hidden", background: "white" }}>
-                  {/* 预报单信息栏 */}
-                  <div style={{ padding: "8px 14px", background: "#f9fafb", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                      <strong style={{ fontSize: 14, minWidth: 100, whiteSpace: "nowrap" }}>{pa.trackingNo}</strong>
-                      <span style={{ fontSize: 13, color: "#374151" }}>{pa.mark}</span>
-                      {pa.expressNo && <span style={{ fontSize: 12, color: "#9ca3af" }}>快递: {pa.expressNo}</span>}
-                      <span style={{ fontSize: 12, padding: "2px 8px", borderRadius: 4, background: pa.status === "received" ? "#d1fae5" : "#fef3c7", color: pa.status === "received" ? "#065f46" : "#92400e" }}>
-                        {STATUS_ZH[pa.status] ?? pa.status}
-                      </span>
+                return (
+                  <div key={pa.id} style={{ border: "1px solid #e5e7eb", borderRadius: 8, marginBottom: 12, background: "#fff", overflow: "hidden" }}>
+                    {/* 预报单头部 */}
+                    <div onClick={() => setExpandedPrealert(isExpanded ? null : pa.id)} style={{ cursor: "pointer", padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", background: isExpanded ? "#f0f7ff" : "#fff" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <strong style={{ fontSize: 14 }}>{pa.trackingNo}</strong>
+                        <span style={{ fontSize: 12, color: "#6b7280" }}>唛头：{pa.mark || "-"}</span>
+                        {pa.expressNo && <span style={{ fontSize: 12, color: "#6b7280" }}>快递：{pa.expressNo}</span>}
+                        <span style={{ fontSize: 12, padding: "2px 8px", borderRadius: 4, background: ST_TAG[pa.status]?.bg ?? "#e5e7eb", color: ST_TAG[pa.status]?.color ?? "#374151" }}>{STATUS_ZH[pa.status] ?? pa.status}</span>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        {pa.totalFee != null && <span style={{ fontSize: 14, fontWeight: 700, color: "#059669" }}>{money(pa.totalFee)}</span>}
+                        <span style={{ fontSize: 12, color: "#9ca3af" }}>{paVol.toFixed(3)}方 · {paItems.length}款 · {paPkg}件 {isExpanded ? "▲" : "▼"}</span>
+                      </div>
                     </div>
-                    <span style={{ fontSize: 12, color: "#6b7280" }}>{paPkg}件 · {paVol.toFixed(3)}方</span>
-                  </div>
-                  {/* 货品横排表格 */}
-                  {paItems.length > 0 ? (
-                    <div style={{ overflowX: "auto", padding: "6px 14px 10px" }}>
-                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
-                        <thead><tr style={{ background: "#f3f4f6" }}>
-                          <th style={{ ...thS, padding: "3px 6px", fontSize: 11, minWidth: 70 }}>品名</th>
-                          <th style={{ ...thS, padding: "3px 6px", fontSize: 11 }}>件数</th>
-                          <th style={{ ...thS, padding: "3px 6px", fontSize: 11 }}>每箱</th>
-                          <th style={{ ...thS, padding: "3px 6px", fontSize: 11 }}>总数</th>
-                          <th style={{ ...thS, padding: "3px 6px", fontSize: 11 }}>单重</th>
-                          <th style={{ ...thS, padding: "3px 6px", fontSize: 11 }}>总重</th>
-                          <th style={{ ...thS, padding: "3px 6px", fontSize: 11 }}>长</th>
-                          <th style={{ ...thS, padding: "3px 6px", fontSize: 11 }}>宽</th>
-                          <th style={{ ...thS, padding: "3px 6px", fontSize: 11 }}>高</th>
-                          <th style={{ ...thS, padding: "3px 6px", fontSize: 11 }}>方数</th>
-                          <th style={{ ...thS, padding: "3px 6px", fontSize: 11 }}>材质</th>
-                          <th style={{ ...thS, padding: "3px 6px", fontSize: 11 }}>货值</th>
-                          <th style={{ ...thS, padding: "3px 6px", fontSize: 11 }}>类型</th>
-                          <th style={{ ...thS, padding: "3px 6px", fontSize: 11 }}>图片</th>
-                          {isEditing && <th style={{ ...thS, padding: "3px 6px", fontSize: 11 }}>操作</th>}
-                        </tr></thead>
-                        <tbody>
-                          {paItems.map((it: any, i: number) => (
-                            <tr key={it.id ?? i}>
-                              <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.productName}</td>
-                              <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.packageCount}</td>
-                              <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.quantityPerBox}</td>
-                              <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.totalQuantity}</td>
-                              <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.unitWeightKg ?? "-"}</td>
-                              <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.totalWeightKg ?? "-"}</td>
-                              <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.lengthCm ?? "-"}</td>
-                              <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.widthCm ?? "-"}</td>
-                              <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.heightCm ?? "-"}</td>
-                              <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.volumeM3 != null ? it.volumeM3.toFixed(4) : "-"}</td>
-                              <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.material}</td>
-                              <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.cargoValue}</td>
-                              <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.cargoType === "inspection" ? "商检" : it.cargoType === "sensitive" ? "敏感" : "普货"}</td>
-                              <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>
-                                {it.productImageBase64
-                                  ? <button onClick={() => setPreviewImage(it.productImageBase64)} style={{ ...btnGray, padding: "2px 8px", fontSize: 11 }}>查看图片</button>
-                                  : <span style={{ color: "#d1d5db" }}>—</span>}
-                              </td>
-                              {isEditing && (
-                                <td style={{ ...tdS, padding: "3px 6px", fontSize: 11, whiteSpace: "nowrap" }}>
+
+                    {/* 预报单展开内容 */}
+                    {isExpanded && (
+                      <div style={{ padding: "10px 14px", borderTop: "1px solid #e5e7eb" }}>
+                        {/* --- 已取消提示 --- */}
+                        {pa.status === "cancelled" && (
+                          <div style={{ padding: "10px 12px", background: "#fee2e2", borderRadius: 6, marginBottom: 10, fontSize: 13, color: "#991b1b" }}>
+                            该预报单已取消{pa.cancelReason ? `：${pa.cancelReason}` : ""}
+                            {pa.cancelledAt && <span style={{ marginLeft: 8, color: "#6b7280" }}>{formatBeijingTime(pa.cancelledAt)}</span>}
+                            <div style={{ marginTop: 4, color: "#6b7280" }}>已释放占用的方数，不再计入本柜和费用。</div>
+                          </div>
+                        )}
+
+                        {/* --- 付款按钮（此预报单待付款时显示） --- */}
+                        {pa.status === "received_pending_payment" && (
+                          <div style={{ padding: "10px 12px", background: "#fef3c7", borderRadius: 6, marginBottom: 10 }}>
+                            {(pa.paymentProofs?.length ?? 0) > 0 ? (
+                              <div>
+                                <div style={{ fontSize: 13, fontWeight: 600, color: "#92400e", marginBottom: 6 }}>已提交 {pa.paymentProofs.length} 张付款凭证，等待审核</div>
+                                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                  {pa.paymentProofs.map((p, i) => {
+                                    const imgSrc = toImageSrc(p.base64Path || (p as any).base64, p.mime);
+                                    return imgSrc ? <img key={i} src={imgSrc} alt={`付款凭证 ${i + 1}`} onClick={() => setPreviewImage(imgSrc)} style={{ width: 100, height: 100, objectFit: "cover", borderRadius: 6, border: "1px solid #e5e7eb", cursor: "pointer" }} /> : null;
+                                  })}
+                                </div>
+                                {pa.paymentRejectReason && (
+                                  <div style={{ fontSize: 12, color: "#ef4444", marginTop: 6 }}>拒绝原因：{pa.paymentRejectReason}<br />请重新上传。</div>
+                                )}
+                                <button onClick={() => {
+                                  if (addressMissing) { setToast("请先填写泰国收货地址"); setEditAddress(true); return; }
+                                  setCurrentPayPrealertId(pa.id); setShowPay(true);
+                                }} disabled={addressMissing} style={{ ...btnBlue, marginTop: 8, opacity: addressMissing ? 0.5 : 1, cursor: addressMissing ? "not-allowed" : "pointer" }}>重新上传</button>
+                              </div>
+                            ) : (
+                              <div>
+                                <div style={{ fontSize: 13, color: "#92400e", fontWeight: 600, marginBottom: 6, textAlign: "center" }}>
+                                  待付款 {pa.totalFee != null ? money(pa.totalFee) : "—"}
+                                </div>
+                                <FeeBreakdownPanel bd={pa.feeBreakdown} title="本单费用是这样算的" />
+                                <div style={{ textAlign: "center", marginTop: 8 }}>
                                   <button onClick={() => {
-                                    const allRows: ProductFormRow[] = paItems.map((it2: any) => ({
-                                      productName: it2.productName, packageCount: String(it2.packageCount),
-                                      quantityPerBox: String(it2.quantityPerBox), lengthCm: String(it2.lengthCm ?? ""),
-                                      widthCm: String(it2.widthCm ?? ""), heightCm: String(it2.heightCm ?? ""),
-                                      unitWeightKg: String(it2.unitWeightKg ?? ""), material: it2.material,
-                                      cargoValue: it2.cargoValue, cargoType: it2.cargoType,
-                                      existingImageBase64: it2.productImageBase64 || undefined,
-                                    }));
-                                    setItemForms(allRows);
-                                    setShowItemForm(true);
-                                  }} style={{ ...btnGray, padding: "2px 8px", fontSize: 11, marginRight: 4 }}>编辑</button>
-                                  <button onClick={() => setDeleteTarget({ prealertId: pa.id, itemIdx: i })} style={{ ...btnDanger, padding: "2px 8px", fontSize: 11 }}>删除</button>
-                                </td>
-                              )}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    <div style={{ padding: "10px 14px" }}>
-                      <p style={{ fontSize: 12, color: "#9ca3af", margin: 0 }}>暂无货品</p>
-                    </div>
-                  )}
-                  {/* 添加货品按钮 */}
-                  {isEditing && (
-                    <div style={{ padding: "6px 14px 10px" }}>
-                      <button onClick={() => { setItemForms([emptyItemForm()]); setShowItemForm(true); }} style={btnBlue}>+ 添加货品</button>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                                    if (addressMissing) { setToast("请先填写泰国收货地址"); setEditAddress(true); return; }
+                                    setCurrentPayPrealertId(pa.id); setShowPay(true);
+                                  }} disabled={addressMissing} style={{ ...btnBlue, opacity: addressMissing ? 0.5 : 1, cursor: addressMissing ? "not-allowed" : "pointer" }}>上传付款凭证</button>
+                                  {addressMissing && <div style={{ fontSize: 12, color: "#ef4444", marginTop: 4 }}>需先填写收货地址才能付款</div>}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
 
-            {/* ====== 付款凭证上传 ====== */}
-            {detail.status === "received_pending_payment" && (
-              <div style={{ marginTop: 16, padding: "14px 16px", background: "#fef3c7", borderRadius: 8 }}>
-                {(detail.paymentProofs?.length ?? 0) > 0 ? (
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "#92400e", marginBottom: 6 }}>已提交 {detail.paymentProofs.length} 张付款凭证，等待审核</div>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      {detail.paymentProofs.map((p, i) => (
-                        <img key={i} src={p.base64Path} alt={`付款凭证 ${i + 1}`} onClick={() => setPreviewImage(p.base64Path)} style={{ width: 100, height: 100, objectFit: "cover", borderRadius: 6, border: "1px solid #e5e7eb", cursor: "pointer" }} />
-                      ))}
-                    </div>
-                    {detail.paymentRejectReason && (
-                      <div style={{ fontSize: 12, color: "#ef4444", marginTop: 6 }}>拒绝原因：{detail.paymentRejectReason}<br />请重新上传。</div>
+                        {/* --- 付款状态为待审核时 --- */}
+                        {pa.status === "payment_submitted" && (pa.paymentProofs?.length ?? 0) > 0 && (
+                          <div style={{ padding: "10px 12px", background: "#dbeafe", borderRadius: 6, marginBottom: 10 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: "#1e40af", marginBottom: 6 }}>已提交付款凭证，等待审核</div>
+                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                              {pa.paymentProofs.map((p, i) => {
+                                const imgSrc = toImageSrc(p.base64Path || (p as any).base64, p.mime);
+                                return imgSrc ? <img key={i} src={imgSrc} alt={`付款凭证 ${i + 1}`} onClick={() => setPreviewImage(imgSrc)} style={{ width: 100, height: 100, objectFit: "cover", borderRadius: 6, border: "1px solid #e5e7eb", cursor: "pointer" }} /> : null;
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* --- 仓库签收凭证 --- */}
+                        {pa.warehouseReceiptBase64 && (
+                          <div style={{ padding: "10px 12px", background: "#f0fdf4", borderRadius: 6, marginBottom: 10 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: "#065f46", marginBottom: 6 }}>仓库已签收</div>
+                            <img src={pa.warehouseReceiptBase64} alt="收货凭证" onClick={() => setPreviewImage(pa.warehouseReceiptBase64!)} style={{ maxWidth: 150, maxHeight: 100, borderRadius: 6, border: "1px solid #e5e7eb", cursor: "pointer" }} />
+                          </div>
+                        )}
+
+                        {/* --- 泰国签收单 --- */}
+                        {pa.status === "thailand_received" && pa.thailandReceiptBase64 && (
+                          <div style={{ padding: "10px 12px", background: "#d1fae5", borderRadius: 6, marginBottom: 10 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: "#065f46", marginBottom: 6 }}>泰国已签收</div>
+                            <img src={pa.thailandReceiptBase64} alt="泰国签收单" onClick={() => setPreviewImage(pa.thailandReceiptBase64!)} style={{ maxWidth: "100%", maxHeight: 250, borderRadius: 6, border: "1px solid #e5e7eb", cursor: "pointer" }} />
+                            {pa.thailandReceivedAt && <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>签收时间：{formatBeijingTime(pa.thailandReceivedAt)}</div>}
+                          </div>
+                        )}
+
+                        {/* --- 费用明细（待付款那块已经单独展示过，这里给其余状态用） --- */}
+                        {pa.status !== "received_pending_payment" && pa.status !== "cancelled" && pa.feeBreakdown && pa.feeBreakdown.rows.length > 0 && (
+                          <div style={{ marginBottom: 10, maxWidth: 420 }}>
+                            <FeeBreakdownPanel bd={pa.feeBreakdown} title="本单费用明细" />
+                          </div>
+                        )}
+
+                        {/* --- 货品表格 --- */}
+                        {paItems.length > 0 ? (
+                          <div style={{ overflowX: "auto" }}>
+                            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                              <thead><tr style={{ background: "#f3f4f6" }}>
+                                <th style={{ ...thS, padding: "3px 6px", fontSize: 11 }}>品名</th>
+                                <th style={{ ...thS, padding: "3px 6px", fontSize: 11 }}>件数</th>
+                                <th style={{ ...thS, padding: "3px 6px", fontSize: 11 }}>每箱</th>
+                                <th style={{ ...thS, padding: "3px 6px", fontSize: 11 }}>总数</th>
+                                <th style={{ ...thS, padding: "3px 6px", fontSize: 11 }}>单重</th>
+                                <th style={{ ...thS, padding: "3px 6px", fontSize: 11 }}>总重</th>
+                                <th style={{ ...thS, padding: "3px 6px", fontSize: 11 }}>长</th>
+                                <th style={{ ...thS, padding: "3px 6px", fontSize: 11 }}>宽</th>
+                                <th style={{ ...thS, padding: "3px 6px", fontSize: 11 }}>高</th>
+                                <th style={{ ...thS, padding: "3px 6px", fontSize: 11 }}>方数</th>
+                                <th style={{ ...thS, padding: "3px 6px", fontSize: 11 }}>材质</th>
+                                <th style={{ ...thS, padding: "3px 6px", fontSize: 11 }}>货值</th>
+                                <th style={{ ...thS, padding: "3px 6px", fontSize: 11 }}>类型</th>
+                                <th style={{ ...thS, padding: "3px 6px", fontSize: 11 }}>图片</th>
+                                {isEditing && <th style={{ ...thS, padding: "3px 6px", fontSize: 11 }}>操作</th>}
+                              </tr></thead>
+                              <tbody>
+                                {paItems.map((it: any, i: number) => (
+                                  <tr key={it.id ?? i}>
+                                    <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.productName}</td>
+                                    <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.packageCount}</td>
+                                    <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.quantityPerBox}</td>
+                                    <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.totalQuantity}</td>
+                                    <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.unitWeightKg ?? "-"}</td>
+                                    <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.totalWeightKg ?? "-"}</td>
+                                    <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.lengthCm ?? "-"}</td>
+                                    <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.widthCm ?? "-"}</td>
+                                    <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.heightCm ?? "-"}</td>
+                                    <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.volumeM3 != null ? it.volumeM3.toFixed(3) : "-"}</td>
+                                    <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.material}</td>
+                                    <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.cargoValue}</td>
+                                    <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>{it.cargoType === "inspection" ? "商检" : it.cargoType === "sensitive" ? "敏感" : "普货"}</td>
+                                    <td style={{ ...tdS, padding: "3px 6px", fontSize: 11 }}>
+                                      {it.productImageBase64
+                                        ? <button onClick={() => setPreviewImage(it.productImageBase64)} style={{ ...btnGray, padding: "2px 8px", fontSize: 11 }}>查看图片</button>
+                                        : <span style={{ color: "#d1d5db" }}>—</span>}
+                                    </td>
+                                    {isEditing && (
+                                      <td style={{ ...tdS, padding: "3px 6px", fontSize: 11, whiteSpace: "nowrap" }}>
+                                        <button onClick={() => openItemForm(pa.id, paItems, false)} style={{ ...btnGray, padding: "2px 8px", fontSize: 11, marginRight: 4 }}>编辑</button>
+                                        <button onClick={() => setDeleteTarget({ prealertId: pa.id, itemIdx: i })} style={{ ...btnDanger, padding: "2px 8px", fontSize: 11 }}>删除</button>
+                                      </td>
+                                    )}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : (
+                          <div style={{ padding: "10px 0" }}>
+                            <p style={{ fontSize: 12, color: "#9ca3af", margin: 0 }}>暂无货品</p>
+                          </div>
+                        )}
+
+                        {/* 添加货品按钮 */}
+                        {isEditing && (
+                          <div style={{ padding: "6px 0 4px" }}>
+                            <button onClick={() => openItemForm(pa.id, paItems, true)} style={btnBlue}>+ 添加货品</button>
+                          </div>
+                        )}
+                      </div>
                     )}
-                    <button onClick={() => setShowPay(true)} style={{ ...btnBlue, marginTop: 8 }}>重新上传</button>
                   </div>
-                ) : (
-                  <div style={{ textAlign: "center" }}>
-                    <div style={{ fontSize: 13, color: "#92400e", marginBottom: 8 }}>请上传付款凭证以完成付款</div>
-                    <button onClick={() => setShowPay(true)} style={btnBlue}>上传付款凭证</button>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ====== 泰国签收单 ====== */}
-            {detail.status === "thailand_received" && detail.thailandReceiptBase64 && (
-              <div style={{ marginTop: 16, padding: "14px 16px", background: "#d1fae5", borderRadius: 8 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#065f46", marginBottom: 6 }}>泰国已签收</div>
-                <img src={detail.thailandReceiptBase64} alt="泰国签收单" style={{ maxWidth: "100%", maxHeight: 250, borderRadius: 6, border: "1px solid #e5e7eb", cursor: "pointer" }} onClick={() => setPreviewImage(detail.thailandReceiptBase64)} />
-                {detail.thailandReceiptFileName && <div style={{ fontSize: 12, color: "#065f46", marginTop: 4 }}>{detail.thailandReceiptFileName}</div>}
-                <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>签收时间：{formatBeijingTime(detail.thailandReceivedAt)}</div>
-              </div>
+                );
+              })
             )}
 
             {/* ====== 状态时间线 ====== */}
@@ -554,6 +728,7 @@ export default function ClientWhrConsolidationPage() {
                 <div style={{ fontSize: 14, fontWeight: 600, color: "#374151", marginBottom: 10 }}>状态时间线</div>
                 {detail.statusLogs.map(sl => (
                   <div key={sl.id} style={{ fontSize: 12, color: "#6b7280", marginBottom: 6, paddingLeft: 10, borderLeft: "2px solid #e5e7eb" }}>
+                    {sl.trackingNo && <strong style={{ color: "#2563eb", marginRight: 6 }}>{sl.trackingNo}</strong>}
                     <strong style={{ color: "#374151" }}>{STATUS_ZH[sl.fromStatus] ?? sl.fromStatus}</strong> → <strong style={{ color: "#374151" }}>{STATUS_ZH[sl.toStatus] ?? sl.toStatus}</strong>
                     &nbsp;· {sl.operatorName} · {formatBeijingTime(sl.createdAt)}
                     {sl.remark && <div style={{ color: "#9ca3af", marginTop: 2 }}>{sl.remark}</div>}
@@ -562,7 +737,8 @@ export default function ClientWhrConsolidationPage() {
               </div>
             )}
           </div>
-        )}
+          );
+        })()}
 
         {/* ================================================================ */}
         {/* 弹窗：新建预报单 */}
@@ -575,101 +751,143 @@ export default function ClientWhrConsolidationPage() {
               <div><label style={fl}>快递单号（可选）</label><input value={newExpressNo} onChange={e => setNewExpressNo(e.target.value)} placeholder="可选" style={fi} /></div>
             </div>
             <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
-              <button onClick={handleCreatePrealert} disabled={createPSubmitting} style={btnBlue}>{createPSubmitting ? "创建中..." : "确认创建"}</button>
+              <button onClick={handleCreatePrealert} disabled={createPSubmitting} style={btnBlue}>{createPSubmitting ? "提交中..." : "确认创建"}</button>
               <button onClick={() => setShowCreatePrealert(false)} style={btnGray}>取消</button>
             </div>
           </Modal>
         )}
 
         {/* ================================================================ */}
-        {/* 弹窗：货品表单（多行）
+        {/* 弹窗：编辑货品（多行模式） */}
         {/* ================================================================ */}
-        {showItemForm && expandedPrealert && (() => {
-          const prealertItems = detail?.prealerts.find(p => p.id === expandedPrealert)?.items ?? [];
-          return (
-          <Modal wide onClose={() => { setShowItemForm(false); setItemForms([emptyItemForm()]); }}>
-            <h3 style={{ marginTop: 0 }}>编辑货品</h3>
-            <div style={{ overflowX: "auto", maxHeight: "50vh", overflowY: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
-                <thead><tr style={{ background: "#f3f4f6", position: "sticky", top: 0 }}>
-                  <th style={{ ...thS, padding: "4px 6px", fontSize: 11, minWidth: 70 }}>品名 *</th>
-                  <th style={{ ...thS, padding: "4px 6px", fontSize: 11, minWidth: 50 }}>件数 *</th>
-                  <th style={{ ...thS, padding: "4px 6px", fontSize: 11, minWidth: 50 }}>每箱数量</th>
-                  <th style={{ ...thS, padding: "4px 6px", fontSize: 11, minWidth: 50 }}>单件重</th>
-                  <th style={{ ...thS, padding: "4px 6px", fontSize: 11, minWidth: 50 }}>长cm</th>
-                  <th style={{ ...thS, padding: "4px 6px", fontSize: 11, minWidth: 50 }}>宽cm</th>
-                  <th style={{ ...thS, padding: "4px 6px", fontSize: 11, minWidth: 50 }}>高cm</th>
-                  <th style={{ ...thS, padding: "4px 6px", fontSize: 11, minWidth: 60 }}>材质 *</th>
-                  <th style={{ ...thS, padding: "4px 6px", fontSize: 11, minWidth: 60 }}>货值 *</th>
-                  <th style={{ ...thS, padding: "4px 6px", fontSize: 11, minWidth: 55 }}>类型</th>
-                  <th style={{ ...thS, padding: "4px 6px", fontSize: 11, minWidth: 60 }}>图片</th>
-                  <th style={{ ...thS, padding: "4px 6px", fontSize: 11, minWidth: 65 }}>自动算</th>
-                  <th style={{ ...thS, padding: "4px 6px", fontSize: 11, minWidth: 40 }}>删</th>
-                </tr></thead>
-                <tbody>
-                  {itemForms.map((rf, i) => {
-                    const c = calcItem(rf);
-                    return (
-                      <tr key={i}>
-                        <td style={{ ...tdS, padding: "3px 4px" }}><input value={rf.productName} onChange={e => { const copy = [...itemForms]; copy[i] = { ...copy[i], productName: e.target.value }; setItemForms(copy); }} style={{ ...fi, padding: "3px 5px", fontSize: 11 }} placeholder="品名" /></td>
-                        <td style={{ ...tdS, padding: "3px 4px" }}><input type="number" value={rf.packageCount} onChange={e => { const copy = [...itemForms]; copy[i] = { ...copy[i], packageCount: e.target.value }; setItemForms(copy); }} style={{ ...fi, padding: "3px 5px", fontSize: 11, width: 52 }} /></td>
-                        <td style={{ ...tdS, padding: "3px 4px" }}><input type="number" value={rf.quantityPerBox} onChange={e => { const copy = [...itemForms]; copy[i] = { ...copy[i], quantityPerBox: e.target.value }; setItemForms(copy); }} style={{ ...fi, padding: "3px 5px", fontSize: 11, width: 52 }} /></td>
-                        <td style={{ ...tdS, padding: "3px 4px" }}><input type="number" value={rf.unitWeightKg} onChange={e => { const copy = [...itemForms]; copy[i] = { ...copy[i], unitWeightKg: e.target.value }; setItemForms(copy); }} style={{ ...fi, padding: "3px 5px", fontSize: 11, width: 52 }} /></td>
-                        <td style={{ ...tdS, padding: "3px 4px" }}><input type="number" value={rf.lengthCm} onChange={e => { const copy = [...itemForms]; copy[i] = { ...copy[i], lengthCm: e.target.value }; setItemForms(copy); }} style={{ ...fi, padding: "3px 5px", fontSize: 11, width: 48 }} /></td>
-                        <td style={{ ...tdS, padding: "3px 4px" }}><input type="number" value={rf.widthCm} onChange={e => { const copy = [...itemForms]; copy[i] = { ...copy[i], widthCm: e.target.value }; setItemForms(copy); }} style={{ ...fi, padding: "3px 5px", fontSize: 11, width: 48 }} /></td>
-                        <td style={{ ...tdS, padding: "3px 4px" }}><input type="number" value={rf.heightCm} onChange={e => { const copy = [...itemForms]; copy[i] = { ...copy[i], heightCm: e.target.value }; setItemForms(copy); }} style={{ ...fi, padding: "3px 5px", fontSize: 11, width: 48 }} /></td>
-                        <td style={{ ...tdS, padding: "3px 4px" }}><input value={rf.material} onChange={e => { const copy = [...itemForms]; copy[i] = { ...copy[i], material: e.target.value }; setItemForms(copy); }} style={{ ...fi, padding: "3px 5px", fontSize: 11, width: 56 }} placeholder="材质" /></td>
-                        <td style={{ ...tdS, padding: "3px 4px" }}><input value={rf.cargoValue} onChange={e => { const copy = [...itemForms]; copy[i] = { ...copy[i], cargoValue: e.target.value }; setItemForms(copy); }} style={{ ...fi, padding: "3px 5px", fontSize: 11, width: 56 }} placeholder="货值" /></td>
-                        <td style={{ ...tdS, padding: "3px 4px" }}>
-                          <select value={rf.cargoType} onChange={e => { const copy = [...itemForms]; copy[i] = { ...copy[i], cargoType: e.target.value }; setItemForms(copy); }} style={{ ...fi, padding: "3px 5px", fontSize: 10, width: 56 }}>
-                            <option value="normal">普货</option><option value="inspection">商检</option><option value="sensitive">敏感</option>
-                          </select>
-                        </td>
-                        <td style={{ ...tdS, padding: "3px 4px" }}>
-                          {rf.imageFile ? (
-                            <span style={{ fontSize: 10, color: "#10b981" }}>✓</span>
-                          ) : rf.existingImageBase64 ? (
-                            <img src={rf.existingImageBase64} alt="产品图片" style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 4, border: "1px solid #e5e7eb", cursor: "pointer" }} onClick={() => setPreviewImage(rf.existingImageBase64!)} />
-                          ) : null}
-                          <input type="file" accept="image/*" onChange={async e => {
-                            const file = e.target.files?.[0]; if (!file) return;
-                            const base64 = await new Promise<string>(r => { const fr = new FileReader(); fr.onload = () => r((fr.result as string).split(",")[1]); fr.readAsDataURL(file); });
-                            const copy = [...itemForms]; copy[i] = { ...copy[i], imageFile: { fileName: file.name, mime: file.type, base64 }, existingImageBase64: undefined }; setItemForms(copy);
-                          }} style={{ fontSize: 10, width: 60 }} />
-                        </td>
-                        <td style={{ ...tdS, padding: "3px 4px", fontSize: 10, color: "#059669" }}>
-                          总{c.totalQty}件{c.totalWeight > 0 ? ` ${c.totalWeight.toFixed(1)}kg` : ""}{c.vol > 0 ? ` ${c.vol.toFixed(3)}m³` : ""}
-                        </td>
-                        <td style={{ ...tdS, padding: "3px 4px" }}>
-                          <button onClick={() => { setItemForms(itemForms.filter((_, j) => j !== i)); }} style={{ ...btnDanger, padding: "2px 6px", fontSize: 10 }}>×</button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+        {showItemForm && (
+          <Modal wide onClose={() => { setShowItemForm(false); setItemFormPrealertId(null); }}>
+            <h3 style={{ marginTop: 0 }}>
+              货品清单
+              {itemFormPrealertId && (
+                <span style={{ fontSize: 13, fontWeight: 400, color: "#6b7280", marginLeft: 8 }}>
+                  {detail?.prealerts.find(p => p.id === itemFormPrealertId)?.trackingNo ?? ""}
+                </span>
+              )}
+            </h3>
+            <div style={{ fontSize: 12, color: "#92400e", background: "#fef3c7", borderRadius: 6, padding: "8px 10px", marginBottom: 10 }}>
+              这里是该预报单的<strong>完整</strong>货品清单
+              {itemFormExistingCount > 0 && `（已有 ${itemFormExistingCount} 款，本次共 ${itemForms.length} 款）`}
+              。点「保存全部」后，这张预报单的货品就以下面的列表为准；在这里删掉的行会被真正删除。
             </div>
-            <button onClick={() => setItemForms([...itemForms, emptyItemForm()])} style={{ ...btnBlue, marginTop: 8, padding: "5px 14px", fontSize: 12 }}>+ 添加一行</button>
-            <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
-              <button onClick={() => handleSaveItems(expandedPrealert!, itemForms)} disabled={itemSubmitting} style={btnBlue}>{itemSubmitting ? "保存中..." : "确认保存"}</button>
-              <button onClick={() => { setShowItemForm(false); setItemForms([emptyItemForm()]); }} style={btnGray}>取消</button>
+            <div style={{ maxHeight: "60vh", overflowY: "auto" }}>
+              {itemForms.map((row, idx) => {
+                const { totalQty, totalWeight, vol } = calcItem(row);
+                return (
+                  <div key={idx} style={{ border: "1px solid #e5e7eb", borderRadius: 6, padding: 10, marginBottom: 10, background: "#fafafa" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                      <strong style={{ fontSize: 13 }}>
+                        产品 {idx + 1}
+                        {idx < itemFormExistingCount
+                          ? <span style={{ fontSize: 11, fontWeight: 400, color: "#6b7280", marginLeft: 6 }}>已有</span>
+                          : <span style={{ fontSize: 11, fontWeight: 400, color: "#059669", marginLeft: 6 }}>新增</span>}
+                      </strong>
+                      <button onClick={() => setItemForms(itemForms.filter((_, i) => i !== idx))} style={{ ...btnDanger, padding: "2px 10px", fontSize: 11 }}>移除</button>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                      <div><label style={{ fontSize: 11, color: "#6b7280" }}>品名</label><input value={row.productName} onChange={e => { const cp = [...itemForms]; cp[idx] = { ...cp[idx], productName: e.target.value }; setItemForms(cp); }} placeholder="品名 *" style={{ ...fi, marginTop: 2 }} /></div>
+                      <div><label style={{ fontSize: 11, color: "#6b7280" }}>件数</label><input type="number" value={row.packageCount} onChange={e => { const cp = [...itemForms]; cp[idx] = { ...cp[idx], packageCount: e.target.value }; setItemForms(cp); }} style={{ ...fi, marginTop: 2 }} /></div>
+                      <div><label style={{ fontSize: 11, color: "#6b7280" }}>每箱数量</label><input type="number" value={row.quantityPerBox} onChange={e => { const cp = [...itemForms]; cp[idx] = { ...cp[idx], quantityPerBox: e.target.value }; setItemForms(cp); }} style={{ ...fi, marginTop: 2 }} /></div>
+                      <div><label style={{ fontSize: 11, color: "#6b7280" }}>单件重量(kg)</label><input type="number" value={row.unitWeightKg} onChange={e => { const cp = [...itemForms]; cp[idx] = { ...cp[idx], unitWeightKg: e.target.value }; setItemForms(cp); }} style={{ ...fi, marginTop: 2 }} /></div>
+                      <div><label style={{ fontSize: 11, color: "#6b7280" }}>长(cm)</label><input type="number" value={row.lengthCm} onChange={e => { const cp = [...itemForms]; cp[idx] = { ...cp[idx], lengthCm: e.target.value }; setItemForms(cp); }} style={{ ...fi, marginTop: 2 }} /></div>
+                      <div><label style={{ fontSize: 11, color: "#6b7280" }}>宽(cm)</label><input type="number" value={row.widthCm} onChange={e => { const cp = [...itemForms]; cp[idx] = { ...cp[idx], widthCm: e.target.value }; setItemForms(cp); }} style={{ ...fi, marginTop: 2 }} /></div>
+                      <div><label style={{ fontSize: 11, color: "#6b7280" }}>高(cm)</label><input type="number" value={row.heightCm} onChange={e => { const cp = [...itemForms]; cp[idx] = { ...cp[idx], heightCm: e.target.value }; setItemForms(cp); }} style={{ ...fi, marginTop: 2 }} /></div>
+                      <div><label style={{ fontSize: 11, color: "#6b7280" }}>材质</label><input value={row.material} onChange={e => { const cp = [...itemForms]; cp[idx] = { ...cp[idx], material: e.target.value }; setItemForms(cp); }} placeholder="材质 *" style={{ ...fi, marginTop: 2 }} /></div>
+                      <div><label style={{ fontSize: 11, color: "#6b7280" }}>货值</label><input value={row.cargoValue} onChange={e => { const cp = [...itemForms]; cp[idx] = { ...cp[idx], cargoValue: e.target.value }; setItemForms(cp); }} placeholder="货值 *" style={{ ...fi, marginTop: 2 }} /></div>
+                      <div>
+                        <label style={{ fontSize: 11, color: "#6b7280" }}>类型</label>
+                        <select value={row.cargoType} onChange={e => { const cp = [...itemForms]; cp[idx] = { ...cp[idx], cargoType: e.target.value }; setItemForms(cp); }} style={{ ...fi, marginTop: 2 }}>
+                          <option value="normal">普货</option>
+                          <option value="inspection">商检</option>
+                          <option value="sensitive">敏感</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 8, fontSize: 11, color: "#6b7280" }}>
+                      总数：{totalQty} 件 · 总重：{totalWeight.toFixed(2)} kg · 方数：{vol.toFixed(3)} m³
+                    </div>
+                    <div style={{ marginTop: 6 }}>
+                      <label style={{ fontSize: 11, color: "#6b7280" }}>产品图片</label>
+                      {row.existingImageBase64 && (
+                        <div style={{ marginTop: 2, marginBottom: 4 }}>
+                          <img src={row.existingImageBase64} alt="已有图片" style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 4, border: "1px solid #e5e7eb" }} />
+                        </div>
+                      )}
+                      <input type="file" accept="image/*" onChange={async e => {
+                        const file = e.target.files?.[0]; if (!file) return;
+                        if (file.size > MAX_IMAGE_BYTES) {
+                          setToast(`图片 ${file.name} 超过 ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)}MB，请压缩后再上传`);
+                          e.target.value = "";
+                          return;
+                        }
+                        const base64 = await new Promise<string>(r => { const fr = new FileReader(); fr.onload = () => r((fr.result as string).split(",")[1]); fr.readAsDataURL(file); });
+                        const cp = [...itemForms];
+                        cp[idx] = { ...cp[idx], imageFile: { fileName: file.name, mime: file.type, base64 }, existingImageBase64: undefined };
+                        setItemForms(cp);
+                      }} style={{ marginTop: 2 }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {itemForms.length === 0 && (
+              <p style={{ fontSize: 13, color: "#ef4444", padding: "8px 0" }}>当前清单为空，保存后这张预报单的货品会被全部清空。</p>
+            )}
+            <div style={{ marginTop: 12, marginBottom: 14 }}>
+              <button onClick={() => setItemForms([...itemForms, emptyItemForm()])} style={{ ...btnGray, fontSize: 12 }}>+ 添加一行</button>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => {
+                if (!itemFormPrealertId) { setToast("请先选择预报单"); return; }
+                handleSaveItems(itemFormPrealertId, itemForms);
+              }} disabled={itemSubmitting} style={btnBlue}>{itemSubmitting ? "保存中..." : `保存全部（${itemForms.length} 款）`}</button>
+              <button onClick={() => { setShowItemForm(false); setItemFormPrealertId(null); }} style={btnGray}>取消</button>
             </div>
           </Modal>
-        );
-        })()}
+        )}
 
         {/* ================================================================ */}
-        {/* 弹窗：付款上传 */}
+        {/* 弹窗：付款上传（预报单级别） */}
         {/* ================================================================ */}
         {showPay && (
-          <Modal onClose={() => { setShowPay(false); setPayProofs([]); }}>
+          <Modal onClose={() => { setShowPay(false); setPayProofs([]); setCurrentPayPrealertId(null); }}>
             <h3 style={{ marginTop: 0 }}>上传付款凭证</h3>
-            {detail?.totalFee != null && <div style={{ fontSize: 18, fontWeight: 700, color: "#059669", marginBottom: 10 }}>¥{detail.totalFee.toLocaleString()}</div>}
-            <div style={{ marginBottom: 10 }}>
+            {currentPayPrealertId && detail && (() => {
+              const payPa = detail.prealerts.find(pa => pa.id === currentPayPrealertId);
+              return (
+                <>
+                  <p style={{ fontSize: 13, color: "#6b7280", marginBottom: 8 }}>
+                    预报单：{payPa?.trackingNo ?? "—"}
+                    &nbsp;· 应付：<strong style={{ color: "#059669", fontSize: 15 }}>{payPa?.totalFee != null ? money(payPa.totalFee) : "—"}</strong>
+                  </p>
+                  <FeeBreakdownPanel bd={payPa?.feeBreakdown} title="费用是这样算出来的" />
+                  <p style={{ fontSize: 12, color: "#6b7280", marginTop: 8 }}>
+                    收货地址：{detail.deliveryAddress || "未填写"}
+                  </p>
+                </>
+              );
+            })()}
+            <div style={{ marginTop: 12 }}>
               <label style={fl}>添加付款截图</label>
               <input type="file" accept="image/*" multiple onChange={async e => {
                 const files = Array.from(e.target.files || []);
                 if (!files.length) return;
+                const tooBig = files.filter(f => f.size > MAX_IMAGE_BYTES);
+                if (tooBig.length > 0) {
+                  setToast(`${tooBig.map(f => f.name).join("、")} 超过 ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)}MB，请压缩后再上传`);
+                  e.target.value = "";
+                  return;
+                }
+                if (payProofs.length + files.length > 10) {
+                  setToast("一次最多上传 10 张付款凭证");
+                  e.target.value = "";
+                  return;
+                }
                 const newProofs = await Promise.all(files.map(async file => {
                   const base64 = await new Promise<string>(r => { const fr = new FileReader(); fr.onload = () => r((fr.result as string).split(",")[1]); fr.readAsDataURL(file); });
                   return { fileName: file.name, mime: file.type, base64 };
@@ -681,7 +899,7 @@ export default function ClientWhrConsolidationPage() {
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10, maxHeight: 160, overflowY: "auto" }}>
                 {payProofs.map((p, i) => (
                   <div key={i} style={{ position: "relative", width: 80, height: 80, flexShrink: 0 }}>
-                    <img src={`data:image/png;base64,${p.base64}`} alt={`凭证 ${i + 1}`} style={{ width: 80, height: 80, objectFit: "cover", borderRadius: 4, border: "1px solid #e5e7eb" }} />
+                    <img src={`data:${p.mime || "image/png"};base64,${p.base64}`} alt={`凭证 ${i + 1}`} style={{ width: 80, height: 80, objectFit: "cover", borderRadius: 4, border: "1px solid #e5e7eb" }} />
                     <button onClick={() => setPayProofs(payProofs.filter((_, j) => j !== i))} style={{ position: "absolute", top: -6, right: -6, width: 20, height: 20, borderRadius: "50%", background: "#ef4444", color: "#fff", border: "none", cursor: "pointer", fontSize: 12, lineHeight: "20px", textAlign: "center", padding: 0 }}>×</button>
                   </div>
                 ))}
@@ -692,7 +910,7 @@ export default function ClientWhrConsolidationPage() {
               <button onClick={handlePay} disabled={paySubmitting || payProofs.length === 0} style={{ ...btnBlue, opacity: payProofs.length === 0 ? 0.5 : 1, cursor: payProofs.length === 0 ? "not-allowed" : "pointer" }}>
                 {paySubmitting ? "提交中..." : "确认提交"}
               </button>
-              <button onClick={() => { setShowPay(false); setPayProofs([]); }} style={btnGray}>取消</button>
+              <button onClick={() => { setShowPay(false); setPayProofs([]); setCurrentPayPrealertId(null); }} style={btnGray}>取消</button>
             </div>
           </Modal>
         )}
@@ -700,22 +918,35 @@ export default function ClientWhrConsolidationPage() {
         {/* ================================================================ */}
         {/* 弹窗：删除确认 */}
         {/* ================================================================ */}
-        {deleteTarget && expandedPrealert && (
-          <Modal onClose={() => setDeleteTarget(null)}>
-            <p style={{ marginTop: 0 }}>确定删除该货品吗？</p>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={() => {
-                const items = detail?.prealerts.find(p => p.id === expandedPrealert)?.items ?? [];
-                const filtered = items.filter((_, i) => i !== deleteTarget.itemIdx).map(it => ({
-                  productName: it.productName, packageCount: String(it.packageCount), quantityPerBox: String(it.quantityPerBox), lengthCm: String(it.lengthCm ?? ""), widthCm: String(it.widthCm ?? ""), heightCm: String(it.heightCm ?? ""), unitWeightKg: String(it.unitWeightKg ?? ""), material: it.material, cargoValue: it.cargoValue, cargoType: it.cargoType,
-                }));
-                setDeleteTarget(null);
-                handleSaveItems(expandedPrealert!, filtered);
-              }} style={btnDanger}>确认删除</button>
-              <button onClick={() => setDeleteTarget(null)} style={btnGray}>取消</button>
-            </div>
-          </Modal>
-        )}
+        {deleteTarget && (() => {
+          // 以 deleteTarget.prealertId 为准，不依赖当前展开的是哪张单
+          const targetPa = detail?.prealerts.find(p => p.id === deleteTarget.prealertId);
+          const targetItems = targetPa?.items ?? [];
+          const targetItem = targetItems[deleteTarget.itemIdx];
+          return (
+            <Modal onClose={() => setDeleteTarget(null)}>
+              <p style={{ marginTop: 0 }}>
+                确定删除货品「{targetItem?.productName ?? "-"}」吗？
+              </p>
+              <p style={{ fontSize: 12, color: "#6b7280", marginTop: 0 }}>
+                预报单 {targetPa?.trackingNo ?? "-"} 删除后将剩余 {Math.max(targetItems.length - 1, 0)} 款货品。
+              </p>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => {
+                  // 保留其余行的已有图片路径，否则删一件会把整单的产品图片全部清空
+                  const filtered: ProductFormRow[] = itemsToFormRows(
+                    targetItems.filter((_, i) => i !== deleteTarget.itemIdx)
+                  );
+                  const paId = deleteTarget.prealertId;
+                  setDeleteTarget(null);
+                  // filtered 可能为空数组（删的是最后一件），后端已支持清空
+                  handleSaveItems(paId, filtered);
+                }} style={btnDanger}>确认删除</button>
+                <button onClick={() => setDeleteTarget(null)} style={btnGray}>取消</button>
+              </div>
+            </Modal>
+          );
+        })()}
 
         {/* ================================================================ */}
         {/* 弹窗：图片预览 */}

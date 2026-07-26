@@ -905,9 +905,34 @@ model WhrConsolidationPlanCustomer {
   totalFee            Decimal? @map("total_fee") @db.Decimal(12, 2)
   deliveryAddress     String?  @map("delivery_address") @db.Text
 
-  // 客户状态流转: filling → received_pending_payment → paid → loading → shipped → thailand_received
+  // 汇总
+  totalPrealerts Int @default(0) @map("total_prealerts")
+  totalPackages  Int @default(0) @map("total_packages")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  plan       WhrConsolidationPlan        @relation(fields: [planId], references: [id], onDelete: Cascade)
+  client     User                        @relation(fields: [clientId], references: [id])
+  prealerts  WhrConsolidationPrealert[]
+
+  @@index([companyId, clientId])
+  @@index([companyId, planId])
+  @@map("whr_consolidation_plan_customers")
+}
+
+model WhrConsolidationPrealert {
+  id         String    @id @default(cuid())
+  customerId String    @map("customer_id")
+  companyId  String    @map("company_id")
+  trackingNo String    @unique @map("tracking_no") // WHRP + 4位数字
+  expressNo  String?   @map("express_no")
+  mark       String    @map("mark")
+
+  // 预报单状态流转: pending → received_pending_payment → payment_submitted → paid → loading → shipped → thailand_received
   // 任意节点可 → cancelled
-  status String @default("filling")
+  status     String    @default("pending") // pending | received_pending_payment | payment_submitted | paid | loading | shipped | thailand_received | cancelled
+  receivedAt DateTime? @map("received_at")
 
   // 仓库签收
   signedAt                 DateTime? @map("signed_at")
@@ -915,11 +940,10 @@ model WhrConsolidationPlanCustomer {
   warehouseReceiptMime     String?   @map("warehouse_receipt_mime")
   warehouseReceiptBase64   String?   @map("warehouse_receipt_base64") @db.Text
 
-  // 付款凭证（客户上传）
-  paymentProofFileName   String?   @map("payment_proof_file_name")
-  paymentProofMime       String?   @map("payment_proof_mime")
-  paymentProofBase64     String?   @map("payment_proof_base64") @db.Text
-  paymentProofUploadedAt DateTime? @map("payment_proof_uploaded_at")
+  // 付款凭证（多张，JSON 数组）
+  paymentProofs          Json       @default("[]") @map("payment_proofs") @db.JsonB
+  paymentProofUploadedAt DateTime?  @map("payment_proof_uploaded_at")
+  totalFee Decimal? @map("total_fee") @db.Decimal(12, 2)
 
   // 管理员审核
   paymentReviewedAt   DateTime? @map("payment_reviewed_at")
@@ -936,41 +960,16 @@ model WhrConsolidationPlanCustomer {
   cancelReason String?   @map("cancel_reason") @db.Text
   cancelledAt  DateTime? @map("cancelled_at")
 
-  // 汇总
-  totalPrealerts Int @default(0) @map("total_prealerts")
-  totalPackages  Int @default(0) @map("total_packages")
-
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  plan       WhrConsolidationPlan        @relation(fields: [planId], references: [id], onDelete: Cascade)
-  client     User                        @relation(fields: [clientId], references: [id])
-  prealerts  WhrConsolidationPrealert[]
-  statusLogs WhrConsolidationStatusLog[]
-
-  @@index([companyId, clientId])
-  @@index([planId, status])
-  @@index([companyId, planId])
-  @@map("whr_consolidation_plan_customers")
-}
-
-model WhrConsolidationPrealert {
-  id         String    @id @default(cuid())
-  customerId String    @map("customer_id")
-  companyId  String    @map("company_id")
-  trackingNo String    @unique @map("tracking_no") // WHRP + 4位数字
-  expressNo  String?   @map("express_no")
-  mark       String    @map("mark")
-  status     String    @default("pending") // pending | received
-  receivedAt DateTime? @map("received_at")
   createdAt  DateTime  @default(now()) @map("created_at")
   updatedAt  DateTime  @updatedAt @map("updated_at")
 
   planCustomer WhrConsolidationPlanCustomer   @relation(fields: [customerId], references: [id], onDelete: Cascade)
   items        WhrConsolidationPrealertItem[]
+  statusLogs   WhrConsolidationStatusLog[]
 
   @@index([customerId])
   @@index([companyId, customerId])
+  @@index([status])
   @@map("whr_consolidation_prealerts")
 }
 
@@ -1005,7 +1004,7 @@ model WhrConsolidationPrealertItem {
 
 model WhrConsolidationStatusLog {
   id           String   @id @default(cuid())
-  customerId   String   @map("customer_id")
+  prealertId   String   @map("prealert_id")
   companyId    String   @map("company_id")
   operatorId   String   @map("operator_id")
   operatorRole String   @map("operator_role")
@@ -1015,8 +1014,8 @@ model WhrConsolidationStatusLog {
   remark       String?  @map("remark")
   createdAt    DateTime @default(now()) @map("created_at")
 
-  planCustomer WhrConsolidationPlanCustomer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  prealert WhrConsolidationPrealert @relation(fields: [prealertId], references: [id], onDelete: Cascade)
 
-  @@index([customerId, createdAt(sort: Desc)])
+  @@index([prealertId, createdAt(sort: Desc)])
   @@map("whr_consolidation_status_logs")
 }
