@@ -423,6 +423,8 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       mark?: string;
       expressNo?: string;
       products?: Array<{
+        /** 已有产品行的编号；不传表示这是新增的一行 */
+        id?: string;
         productName?: string;
         packageCount?: number;
         quantityPerBox?: number;
@@ -432,6 +434,7 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
         heightCm?: number;
         material?: string;
         cargoValue?: string;
+        /** 只有本次真的换了图才传；不传表示沿用原图 */
         productImage?: { fileName?: string; mime?: string; base64?: string };
       }>;
     };
@@ -469,21 +472,30 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       }
     }
 
-    // 事务内：先删旧产品行，再建新的
+    // 事务内：产品行按行增量同步，不再整批删除重建
     const updated = await prisma.$transaction(async (tx) => {
       if (body.products) {
+        const rows = body.products;
+        const keepIds = rows
+          .map((p) => p.id?.trim())
+          .filter((v): v is string => Boolean(v));
+
+        // 只删本次没提交的行
         await tx.consolidationPrealertProduct.deleteMany({
-          where: { prealertId: body.prealertId },
+          where: {
+            prealertId: body.prealertId,
+            ...(keepIds.length > 0 ? { id: { notIn: keepIds } } : {}),
+          },
         });
 
-        const productData = body.products.map((p, idx) => {
+        for (let idx = 0; idx < rows.length; idx++) {
+          const p = rows[idx];
           const totalQuantity = p.packageCount! * p.quantityPerBox!;
           const totalWeightKg = parseFloat((p.unitWeightKg! * totalQuantity).toFixed(2));
           const volumeM3 = parseFloat(
             ((p.lengthCm! * p.widthCm! * p.heightCm!) / 1_000_000 * p.packageCount!).toFixed(6),
           );
-          return {
-            prealertId: body.prealertId!,
+          const data = {
             productName: p.productName!.trim(),
             packageCount: p.packageCount!,
             quantityPerBox: p.quantityPerBox!,
@@ -498,27 +510,32 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
             cargoValue: p.cargoValue!.trim(),
             sortOrder: idx,
           };
-        });
 
-        // 处理图片
-        for (let i = 0; i < body.products.length; i++) {
-          const img = body.products[i].productImage;
-          if (img?.base64 && img.mime) {
-            const savedPath = saveImageToDisk(
-              `consolidation_${Date.now()}`,
-              img.mime,
-              img.base64,
-            );
-            productData[i] = {
-              ...productData[i],
-              productImageFileName: img.fileName || savedPath.split("/").pop() || "",
-              productImageMime: img.mime,
-              productImageBase64: savedPath,
-            };
+          // 传了新图才落盘覆盖；没传就不动图片字段，原图保留
+          const img = p.productImage;
+          const imagePatch = img?.base64 && img.mime
+            ? (() => {
+                const savedPath = saveImageToDisk(`consolidation_${Date.now()}`, img.mime!, img.base64!);
+                return {
+                  productImageFileName: img.fileName || savedPath.split("/").pop() || "",
+                  productImageMime: img.mime!,
+                  productImageBase64: savedPath,
+                };
+              })()
+            : {};
+
+          const rowId = p.id?.trim();
+          if (rowId) {
+            await tx.consolidationPrealertProduct.updateMany({
+              where: { id: rowId, prealertId: body.prealertId },
+              data: { ...data, ...imagePatch },
+            });
+          } else {
+            await tx.consolidationPrealertProduct.create({
+              data: { prealertId: body.prealertId!, ...data, ...imagePatch },
+            });
           }
         }
-
-        await tx.consolidationPrealertProduct.createMany({ data: productData });
       }
 
       const updateData: any = {};
@@ -1324,6 +1341,8 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       mark?: string;
       expressNo?: string;
       products?: Array<{
+        /** 已有产品行的编号；不传表示这是新增的一行 */
+        id?: string;
         productName?: string;
         packageCount?: number;
         quantityPerBox?: number;
@@ -1333,6 +1352,7 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
         heightCm?: number;
         material?: string;
         cargoValue?: string;
+        /** 只有本次真的换了图才传；不传表示沿用原图 */
         productImage?: { fileName?: string; mime?: string; base64?: string };
       }>;
     };
@@ -1369,16 +1389,27 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
 
     await prisma.$transaction(async (tx) => {
       if (body.products) {
-        await tx.consolidationPrealertProduct.deleteMany({ where: { prealertId: body.prealertId } });
+        // 产品行按行增量同步，不再整批删除重建（重建会把没重传的图片弄丢）
+        const rows = body.products;
+        const keepIds = rows
+          .map((p) => p.id?.trim())
+          .filter((v): v is string => Boolean(v));
 
-        const productData = body.products.map((p, idx) => {
+        await tx.consolidationPrealertProduct.deleteMany({
+          where: {
+            prealertId: body.prealertId,
+            ...(keepIds.length > 0 ? { id: { notIn: keepIds } } : {}),
+          },
+        });
+
+        for (let idx = 0; idx < rows.length; idx++) {
+          const p = rows[idx];
           const totalQuantity = p.packageCount! * p.quantityPerBox!;
           const totalWeightKg = parseFloat((p.unitWeightKg! * totalQuantity).toFixed(2));
           const volumeM3 = parseFloat(
             ((p.lengthCm! * p.widthCm! * p.heightCm!) / 1_000_000 * p.packageCount!).toFixed(6),
           );
-          return {
-            prealertId: body.prealertId!,
+          const data = {
             productName: p.productName!.trim(),
             packageCount: p.packageCount!,
             quantityPerBox: p.quantityPerBox!,
@@ -1393,22 +1424,31 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
             cargoValue: p.cargoValue!.trim(),
             sortOrder: idx,
           };
-        });
 
-        for (let i = 0; i < body.products.length; i++) {
-          const img = body.products[i].productImage;
-          if (img?.base64 && img.mime) {
-            const savedPath = saveImageToDisk(`consolidation_admin_${Date.now()}`, img.mime, img.base64);
-            productData[i] = {
-              ...productData[i],
-              productImageFileName: img.fileName || savedPath.split("/").pop() || "",
-              productImageMime: img.mime,
-              productImageBase64: savedPath,
-            };
+          const img = p.productImage;
+          const imagePatch = img?.base64 && img.mime
+            ? (() => {
+                const savedPath = saveImageToDisk(`consolidation_admin_${Date.now()}`, img.mime!, img.base64!);
+                return {
+                  productImageFileName: img.fileName || savedPath.split("/").pop() || "",
+                  productImageMime: img.mime!,
+                  productImageBase64: savedPath,
+                };
+              })()
+            : {};
+
+          const rowId = p.id?.trim();
+          if (rowId) {
+            await tx.consolidationPrealertProduct.updateMany({
+              where: { id: rowId, prealertId: body.prealertId },
+              data: { ...data, ...imagePatch },
+            });
+          } else {
+            await tx.consolidationPrealertProduct.create({
+              data: { prealertId: body.prealertId!, ...data, ...imagePatch },
+            });
           }
         }
-
-        await tx.consolidationPrealertProduct.createMany({ data: productData });
       }
 
       const updateData: any = {};

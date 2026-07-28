@@ -283,8 +283,12 @@ export default function AdminHomePage() {
     remark: "",
   });
   const [editProducts, setEditProducts] = useState<Array<{
+    /** 已有产品行的编号；新加的行为空，后端据此判断是改还是新增 */
+    id?: string;
     itemName: string; packageCount: string; lengthCm: string; widthCm: string; heightCm: string; productQuantity: string; weightKg: string; cargoType: string; domesticTrackingNo: string;
   }>>([]);
+  /** 打开编辑弹窗那一刻的原始数据，用于保存时算出「哪些项被改过」 */
+  const [editSnapshot, setEditSnapshot] = useState<{ form: Record<string, string>; productsJson: string } | null>(null);
   const [staffForm, setStaffForm] = useState({ id: "", name: "", phone: "", password: "" });
   const [clientForm, setClientForm] = useState({ id: "", name: "", companyName: "", phone: "", email: "", password: "" });
   const [showStaffModal, setShowStaffModal] = useState(false);
@@ -392,6 +396,34 @@ export default function AdminHomePage() {
    */
   const startEditOrder = (order: AdminOrderItem) => {
     setEditingOrderId(order.orderId ?? order.id);
+    // 记下打开弹窗那一刻的样子，保存时只把改动过的项发出去，
+    // 避免把别人在这期间改的字段一起覆盖掉
+    setEditSnapshot({
+      form: {
+        clientId: order.clientId ?? "",
+        trackingNo: order.trackingNo ?? "",
+        batchNo: order.batchNo ?? "",
+        warehouseId: order.warehouseId ?? "wh_yiwu_01",
+        itemName: order.itemName ?? "",
+        transportMode: order.transportMode === "land" ? "land" : "sea",
+        domesticTrackingNo: order.domesticTrackingNo ?? "",
+        receiverAddressTh: order.receiverAddressTh ?? "",
+        containerNo: order.containerNo ?? "",
+        productQuantity: String(order.productQuantity ?? 0),
+        packageCount: String(order.packageCount ?? 0),
+        packageUnit: order.packageUnit === "bag" ? "bag" : "box",
+        weightKg: order.weightKg === null || order.weightKg === undefined ? "" : String(order.weightKg),
+        volumeM3: order.volumeM3 === null || order.volumeM3 === undefined ? "" : String(order.volumeM3),
+        cargoType: order.cargoType ?? "normal",
+        receivableAmountCny:
+          order.receivableAmountCny === null || order.receivableAmountCny === undefined ? "" : String(order.receivableAmountCny),
+        receivableCurrency: order.receivableCurrency === "THB" ? "THB" : "CNY",
+        paymentStatus: order.paymentStatus === "paid" ? "paid" : "unpaid",
+        shipDate: order.shipDate ?? "",
+        remark: order.remark ?? "",
+      } as Record<string, string>,
+      productsJson: "", // 下面构建完产品行后再填
+    });
     setOrderEditForm({
       clientId: order.clientId ?? "",
       trackingNo: order.trackingNo ?? "",
@@ -415,21 +447,21 @@ export default function AdminHomePage() {
       shipDate: order.shipDate ?? "",
       remark: order.remark ?? "",
     });
-    if (order.products && order.products.length > 0) {
-      setEditProducts(order.products.map((p) => ({
-        itemName: p.itemName ?? "",
-        packageCount: String(p.packageCount ?? ""),
-        lengthCm: p.lengthCm != null ? String(p.lengthCm) : "",
-        widthCm: p.widthCm != null ? String(p.widthCm) : "",
-        heightCm: p.heightCm != null ? String(p.heightCm) : "",
-        productQuantity: p.productQuantity != null ? String(p.productQuantity) : "",
-        weightKg: p.weightKg != null ? String(p.weightKg) : "",
-        cargoType: p.cargoType ?? "normal",
-        domesticTrackingNo: p.domesticTrackingNo ?? "货拉拉",
-      })));
-    } else {
-      setEditProducts([]);
-    }
+    const rows = (order.products ?? []).map((p) => ({
+      id: p.id,
+      itemName: p.itemName ?? "",
+      packageCount: String(p.packageCount ?? ""),
+      lengthCm: p.lengthCm != null ? String(p.lengthCm) : "",
+      widthCm: p.widthCm != null ? String(p.widthCm) : "",
+      heightCm: p.heightCm != null ? String(p.heightCm) : "",
+      productQuantity: p.productQuantity != null ? String(p.productQuantity) : "",
+      weightKg: p.weightKg != null ? String(p.weightKg) : "",
+      cargoType: p.cargoType ?? "normal",
+      domesticTrackingNo: p.domesticTrackingNo ?? "货拉拉",
+    }));
+    setEditProducts(rows);
+    // 产品行的快照直接用表单自己的格式，比对时不会因为格式差异误判
+    setEditSnapshot((prev) => (prev ? { ...prev, productsJson: JSON.stringify(rows) } : prev));
   };
 
   /**
@@ -481,38 +513,52 @@ export default function AdminHomePage() {
     setLoading(true);
     setMessage("");
     try {
+      const products = activeProducts.map(p => ({
+        id: p.id,
+        itemName: p.itemName.trim(),
+        packageCount: Number(p.packageCount) || 1,
+        lengthCm: p.lengthCm ? Number(p.lengthCm) : undefined,
+        widthCm: p.widthCm ? Number(p.widthCm) : undefined,
+        heightCm: p.heightCm ? Number(p.heightCm) : undefined,
+        productQuantity: p.productQuantity ? Number(p.productQuantity) : undefined,
+        cargoType: p.cargoType || "normal",
+        domesticTrackingNo: p.domesticTrackingNo.trim() || "货拉拉",
+        weightKg: p.weightKg ? Number(p.weightKg) : undefined,
+      }));
+
+      // 只把「打开弹窗之后被改动过的项」发出去。没改的不发，
+      // 后端就不会去动它 —— 这样两个人改不同字段不会互相覆盖。
+      const snap = editSnapshot?.form;
+      const changed = (key: string, current: string) => !snap || snap[key] !== current;
+      const productsChanged = !editSnapshot || editSnapshot.productsJson !== JSON.stringify(activeProducts);
+
       await updateAdminOrder({
         orderId: saveOrderId,
-        clientId: orderEditForm.clientId.trim() || "",
-        itemName: primaryItemName,
-        trackingNo: orderEditForm.trackingNo.trim() || "",
-        batchNo: orderEditForm.batchNo.trim() || "",
-        warehouseId: orderEditForm.warehouseId,
-        transportMode: orderEditForm.transportMode,
-        domesticTrackingNo: orderEditForm.domesticTrackingNo.trim() || "",
-        receiverAddressTh: orderEditForm.receiverAddressTh.trim(),
-        containerNo: orderEditForm.containerNo.trim() || "",
-        productQuantity: totalProductQuantity,
-        packageCount: totalPackageCount,
-        packageUnit: orderEditForm.packageUnit,
-        weightKg: finalWeight,
-        volumeM3: finalVolume,
-        receivableAmountCny: orderEditForm.receivableAmountCny.trim() ? Number(orderEditForm.receivableAmountCny) : null,
-        receivableCurrency: orderEditForm.receivableCurrency,
-        paymentStatus: orderEditForm.paymentStatus,
-        shipDate: orderEditForm.shipDate.trim() || undefined,
-        remark: orderEditForm.remark?.trim() || null,
-        products: activeProducts.map(p => ({
-          itemName: p.itemName.trim(),
-          packageCount: Number(p.packageCount) || 1,
-          lengthCm: p.lengthCm ? Number(p.lengthCm) : undefined,
-          widthCm: p.widthCm ? Number(p.widthCm) : undefined,
-          heightCm: p.heightCm ? Number(p.heightCm) : undefined,
-          productQuantity: p.productQuantity ? Number(p.productQuantity) : undefined,
-          cargoType: p.cargoType || "normal",
-          domesticTrackingNo: p.domesticTrackingNo.trim() || "货拉拉",
-          weightKg: p.weightKg ? Number(p.weightKg) : undefined,
-        })),
+        ...(changed("clientId", orderEditForm.clientId) ? { clientId: orderEditForm.clientId.trim() || "" } : {}),
+        ...(changed("itemName", orderEditForm.itemName) || productsChanged ? { itemName: primaryItemName } : {}),
+        ...(changed("trackingNo", orderEditForm.trackingNo) ? { trackingNo: orderEditForm.trackingNo.trim() || "" } : {}),
+        ...(changed("batchNo", orderEditForm.batchNo) ? { batchNo: orderEditForm.batchNo.trim() || "" } : {}),
+        ...(changed("warehouseId", orderEditForm.warehouseId) ? { warehouseId: orderEditForm.warehouseId } : {}),
+        ...(changed("transportMode", orderEditForm.transportMode) ? { transportMode: orderEditForm.transportMode } : {}),
+        ...(changed("domesticTrackingNo", orderEditForm.domesticTrackingNo) ? { domesticTrackingNo: orderEditForm.domesticTrackingNo.trim() || "" } : {}),
+        ...(changed("receiverAddressTh", orderEditForm.receiverAddressTh) ? { receiverAddressTh: orderEditForm.receiverAddressTh.trim() } : {}),
+        ...(changed("containerNo", orderEditForm.containerNo) ? { containerNo: orderEditForm.containerNo.trim() || "" } : {}),
+        ...(changed("packageUnit", orderEditForm.packageUnit) ? { packageUnit: orderEditForm.packageUnit } : {}),
+        ...(changed("cargoType", orderEditForm.cargoType) ? { cargoType: orderEditForm.cargoType } : {}),
+        ...(changed("receivableAmountCny", orderEditForm.receivableAmountCny)
+          ? { receivableAmountCny: orderEditForm.receivableAmountCny.trim() ? Number(orderEditForm.receivableAmountCny) : null } : {}),
+        ...(changed("receivableCurrency", orderEditForm.receivableCurrency) ? { receivableCurrency: orderEditForm.receivableCurrency } : {}),
+        ...(changed("paymentStatus", orderEditForm.paymentStatus) ? { paymentStatus: orderEditForm.paymentStatus } : {}),
+        ...(changed("shipDate", orderEditForm.shipDate) ? { shipDate: orderEditForm.shipDate.trim() } : {}),
+        ...(changed("remark", orderEditForm.remark ?? "") ? { remark: orderEditForm.remark?.trim() || null } : {}),
+        // 件数/数量/重量/体积是按产品行算出来的，产品行没动就不发
+        ...(productsChanged ? {
+          productQuantity: totalProductQuantity,
+          packageCount: totalPackageCount,
+          weightKg: finalWeight,
+          volumeM3: finalVolume,
+          products,
+        } : {}),
       });
       setToast("订单信息已更新");
       await loadOrders();

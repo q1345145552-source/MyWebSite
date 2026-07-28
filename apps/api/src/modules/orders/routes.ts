@@ -842,7 +842,13 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
     const orderNo = req.query.orderNo?.trim();
     const domesticTrackingNo = req.query.domesticTrackingNo?.trim();
 
-    const where = { companyId: auth.companyId, approvalStatus: { in: ["approved", "shipped"] }, clientId: auth.userId } as const;
+    const where: Prisma.OrderWhereInput = {
+      companyId: auth.companyId,
+      approvalStatus: { in: ["approved", "shipped"] },
+      clientId: auth.userId,
+      // 运单号搜索下推到数据库：父单、子单任一命中都算，且 count 与列表口径一致
+      ...(trackingNo ? { shipments: { some: { trackingNo } } } : {}),
+    };
     const [total, orders] = await Promise.all([
       prisma.order.count({ where }),
       prisma.order.findMany({
@@ -852,7 +858,9 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
         take: pageSize,
         include: {
           shipments: {
-            orderBy: { updatedAt: "desc" },
+            // 客户端只展示父运单：parentTrackingNo 为 null 的排在最前，
+            // 万一某订单只剩子单（父单被删）才退回最近更新的那条，不至于整行没单号
+            orderBy: [{ parentTrackingNo: { sort: "asc", nulls: "first" } }, { updatedAt: "desc" }],
             take: 1,
             select: {
               id: true,
@@ -880,11 +888,10 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
     const filtered = orders
       .filter((o) => !itemName || o.itemName.includes(itemName))
       .filter((o) => !transportMode || o.transportMode === transportMode)
-      .filter((o) => !trackingNo || o.shipments[0]?.trackingNo === trackingNo)
       .filter((o) => !orderNo || o.orderNo === orderNo)
       .filter((o) => !domesticTrackingNo || o.domesticTrackingNo === domesticTrackingNo)
       .filter((o) => {
-        // shipments 已用 take:1 限制为 1 条，直接取其状态
+        // shipments 已用 take:1 限制为 1 条（父单优先），直接取其状态
         const cur = o.shipments[0]?.currentStatus ?? null;
         const completed = cur ? COMPLETED.has(cur) : false;
         if (statusGroup === "completed") return completed;
@@ -893,7 +900,8 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       });
 
     const items = filtered.map((o) => {
-      const ship = o.shipments.find(s => !s.parentTrackingNo) || o.shipments[0];
+      // orderBy 已保证父单排在最前 + take:1，这里直接取即可
+      const ship = o.shipments[0];
       const logisticsRecords = (ship?.statusLogs ?? []).map((r) => ({
         remark: r.remark ?? "",
         changedAt: r.changedAt.toISOString(),

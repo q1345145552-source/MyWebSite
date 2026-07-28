@@ -316,7 +316,10 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
       receiverAddressTh?: string;
       containerNo?: string | null;
       paymentStatus?: "paid" | "unpaid";
+      remark?: string | null;
       products?: Array<{
+        /** 已有产品行的编号；不传表示这是新增的一行 */
+        id?: string;
         itemName: string;
         packageCount: number;
         lengthCm?: number;
@@ -325,6 +328,7 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
         productQuantity?: number;
         cargoType?: string;
         domesticTrackingNo?: string;
+        weightKg?: number;
       }>;
     };
 
@@ -364,58 +368,65 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
     }]);
     const linkedShipment = shipmentMap.get(exists.id) ?? null;
 
+    // ────────────────────────────────────────────────────────────────
+    // 增量更新：只处理本次真正提交上来的字段。
+    // 没提交的字段一律不写，避免把别人在这期间的改动覆盖掉。
+    // 注意：不能改成「没提交就写默认值/null」，那会静默清空数据。
+    // ────────────────────────────────────────────────────────────────
+    const has = (k: keyof typeof body) => body[k] !== undefined;
+
     const itemName = body.itemName?.trim();
-    if (!itemName) {
+    if (has("itemName") && !itemName) {
       fail(res, 400, "BAD_REQUEST", "itemName is required");
       return;
     }
 
-    const productQuantity = Number(body.productQuantity);
-    const packageCount = Number(body.packageCount);
-    if (!Number.isFinite(productQuantity) || productQuantity < 0) {
+    const productQuantity = has("productQuantity") ? Number(body.productQuantity) : undefined;
+    const packageCount = has("packageCount") ? Number(body.packageCount) : undefined;
+    if (productQuantity !== undefined && (!Number.isFinite(productQuantity) || productQuantity < 0)) {
       fail(res, 400, "BAD_REQUEST", "invalid productQuantity");
       return;
     }
-    if (!Number.isFinite(packageCount) || packageCount < 0) {
+    if (packageCount !== undefined && (!Number.isFinite(packageCount) || packageCount < 0)) {
       fail(res, 400, "BAD_REQUEST", "invalid packageCount");
       return;
     }
 
-    const packageUnit = body.packageUnit === "bag" ? "bag" : "box";
-    const transportMode = body.transportMode === "land" ? "land" : "sea";
-    const domesticTrackingNo = body.domesticTrackingNo?.trim() || null; // 空字符串 = 清空
-    const weightKg = body.weightKg === undefined || body.weightKg === null ? null : Number(body.weightKg);
-    const volumeM3 = body.volumeM3 === undefined || body.volumeM3 === null ? null : Number(body.volumeM3);
-    if (weightKg !== null && !Number.isFinite(weightKg)) {
+    const packageUnit = has("packageUnit") ? (body.packageUnit === "bag" ? "bag" : "box") : undefined;
+    const transportMode = has("transportMode") ? (body.transportMode === "land" ? "land" : "sea") : undefined;
+    const domesticTrackingNo = has("domesticTrackingNo") ? (body.domesticTrackingNo?.trim() || null) : undefined; // 传空字符串 = 主动清空
+    const weightKg = has("weightKg") ? (body.weightKg === null ? null : Number(body.weightKg)) : undefined;
+    const volumeM3 = has("volumeM3") ? (body.volumeM3 === null ? null : Number(body.volumeM3)) : undefined;
+    if (weightKg !== undefined && weightKg !== null && !Number.isFinite(weightKg)) {
       fail(res, 400, "BAD_REQUEST", "invalid weightKg");
       return;
     }
-    if (volumeM3 !== null && !Number.isFinite(volumeM3)) {
+    if (volumeM3 !== undefined && volumeM3 !== null && !Number.isFinite(volumeM3)) {
       fail(res, 400, "BAD_REQUEST", "invalid volumeM3");
       return;
     }
 
-    let receivableAmount: number | null = null;
-    if (body.receivableAmountCny !== undefined && body.receivableAmountCny !== null) {
-      const amount = Number(body.receivableAmountCny);
-      if (!Number.isFinite(amount) || amount < 0) {
-        fail(res, 400, "BAD_REQUEST", "invalid receivableAmountCny");
-        return;
+    let receivableAmount: number | null | undefined = undefined;
+    if (has("receivableAmountCny")) {
+      if (body.receivableAmountCny === null) {
+        receivableAmount = null;
+      } else {
+        const amount = Number(body.receivableAmountCny);
+        if (!Number.isFinite(amount) || amount < 0) {
+          fail(res, 400, "BAD_REQUEST", "invalid receivableAmountCny");
+          return;
+        }
+        receivableAmount = amount === 0 ? null : amount;
       }
-      receivableAmount = amount === 0 ? null : amount;
     }
-    const receivableCurrency = body.receivableCurrency === "THB" ? "THB" : "CNY";
-    const warehouseId = body.warehouseId?.trim() || exists.warehouseId;
-    const batchNo = body.batchNo === undefined ? exists.batchNo : body.batchNo?.trim() || null;
-    const receiverAddressTh = body.receiverAddressTh === undefined
-      ? (exists.receiverAddressTh ?? "")
-      : body.receiverAddressTh.trim();
-    const paymentStatus =
-      body.paymentStatus === undefined
-        ? ((exists.paymentStatus === "paid" ? "paid" : "unpaid") as "paid" | "unpaid")
-        : body.paymentStatus;
-    const trackingNo = body.trackingNo === undefined ? linkedShipment?.trackingNo ?? null : body.trackingNo?.trim() || null;
-    const containerNo = body.containerNo === undefined ? linkedShipment?.containerNo ?? null : body.containerNo?.trim() || null;
+    const receivableCurrency = has("receivableCurrency") ? (body.receivableCurrency === "THB" ? "THB" : "CNY") : undefined;
+    const warehouseId = has("warehouseId") ? (body.warehouseId?.trim() || exists.warehouseId) : undefined;
+    const batchNo = has("batchNo") ? (body.batchNo?.trim() || null) : undefined;
+    const receiverAddressTh = has("receiverAddressTh") ? (body.receiverAddressTh ?? "").trim() : undefined;
+    const paymentStatus = has("paymentStatus") ? body.paymentStatus : undefined;
+    // trackingNo 本次没提交就沿用现有值（查重仍要用到），但不会再写回运单
+    const trackingNo = has("trackingNo") ? (body.trackingNo?.trim() || null) : (linkedShipment?.trackingNo ?? null);
+    const containerNo = has("containerNo") ? (body.containerNo?.trim() || null) : undefined;
     if (!trackingNo) {
       fail(res, 400, "BAD_REQUEST", "trackingNo is required");
       return;
@@ -439,15 +450,20 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    let shipDate: string | null = null;
-    if (body.shipDate !== undefined && body.shipDate !== null && String(body.shipDate).trim() !== "") {
-      const raw = String(body.shipDate).trim().slice(0, 10);
-      const parsed = new Date(`${raw}T00:00:00`);
-      if (Number.isNaN(parsed.getTime())) {
-        fail(res, 400, "BAD_REQUEST", "invalid shipDate");
-        return;
+    let shipDate: string | null | undefined = undefined;
+    if (has("shipDate")) {
+      const rawInput = body.shipDate === null ? "" : String(body.shipDate).trim();
+      if (rawInput === "") {
+        shipDate = null; // 传了空 = 主动清空
+      } else {
+        const raw = rawInput.slice(0, 10);
+        const parsed = new Date(`${raw}T00:00:00`);
+        if (Number.isNaN(parsed.getTime())) {
+          fail(res, 400, "BAD_REQUEST", "invalid shipDate");
+          return;
+        }
+        shipDate = raw;
       }
-      shipDate = raw;
     }
 
     const now = new Date();
@@ -458,7 +474,9 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
         data: {
           warehouseId,
           batchNo,
-          ...(body.clientId !== undefined ? { clientId: body.clientId?.trim() || null } : {}),
+          // clientId 在库里是必填，给 null 会直接抛错。
+          // 传了非空值才改归属，传空串/不传就保持原样。
+          ...(body.clientId?.trim() ? { clientId: body.clientId.trim() } : {}),
           itemName,
           cargoType: body.cargoType?.trim() || undefined,
           transportMode,
@@ -477,11 +495,12 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
         },
       }),
       // 同步所有关联运单（按 order_id 关联的那些）
+      // data 里凡是 undefined 的键，Prisma 会跳过不写 —— 也就是「本次没改就不碰」
       prisma.shipment.updateMany({
         where: { orderId, companyId: auth.companyId, parentTrackingNo: null },
         data: {
           warehouseId,
-          ...(trackingNo ? { trackingNo } : {}),
+          ...(has("trackingNo") && trackingNo ? { trackingNo } : {}),
           batchNo,
           transportMode,
           domesticTrackingNo,
@@ -495,28 +514,54 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
         },
       }),
     ];
-    // 如果传了 products 数组，则删除旧产品行并重建
+    // 产品行按行增量同步：带 id 的改、不带 id 的新增、本次没提交的才删。
+    // 不再整批删除重建 —— 重建一旦漏字段（曾漏过 weightKg）就会静默丢数据。
     if (body.products && body.products.length > 0) {
+      const keepIds = body.products
+        .map((p) => p.id?.trim())
+        .filter((v): v is string => Boolean(v));
+
       txOps.push(
-        prisma.orderProduct.deleteMany({ where: { orderId, companyId: auth.companyId } }),
-      );
-      txOps.push(
-        prisma.orderProduct.createMany({
-          data: body.products.map((p, i) => ({
-            companyId: auth.companyId,
+        prisma.orderProduct.deleteMany({
+          where: {
             orderId,
-            itemName: p.itemName.trim(),
-            packageCount: p.packageCount || 1,
-            lengthCm: p.lengthCm ?? null,
-            widthCm: p.widthCm ?? null,
-            heightCm: p.heightCm ?? null,
-            productQuantity: p.productQuantity ?? null,
-            cargoType: p.cargoType?.trim() || "normal",
-            domesticTrackingNo: p.domesticTrackingNo?.trim() || "货拉拉",
-            sortOrder: i,
-          })),
+            companyId: auth.companyId,
+            ...(keepIds.length > 0 ? { id: { notIn: keepIds } } : {}),
+          },
         }),
       );
+
+      body.products.forEach((p, i) => {
+        const data = {
+          itemName: p.itemName.trim(),
+          packageCount: p.packageCount || 1,
+          lengthCm: p.lengthCm ?? null,
+          widthCm: p.widthCm ?? null,
+          heightCm: p.heightCm ?? null,
+          productQuantity: p.productQuantity ?? null,
+          cargoType: p.cargoType?.trim() || "normal",
+          domesticTrackingNo: p.domesticTrackingNo?.trim() || "货拉拉",
+          weightKg: p.weightKg ?? null,
+          sortOrder: i,
+        };
+        const rowId = p.id?.trim();
+        if (rowId) {
+          // 用 updateMany 而不是 update：where 里带上 orderId + companyId，
+          // 传了别的订单的行号也只会匹配不到，不会被改动
+          txOps.push(
+            prisma.orderProduct.updateMany({
+              where: { id: rowId, orderId, companyId: auth.companyId },
+              data,
+            }),
+          );
+        } else {
+          txOps.push(
+            prisma.orderProduct.create({
+              data: { companyId: auth.companyId, orderId, ...data },
+            }),
+          );
+        }
+      });
     }
     // 事务：订单 + 关联运单 + 产品行一致更新
     await prisma.$transaction(txOps);

@@ -1454,3 +1454,354 @@ button:disabled {
   opacity: 0.5;
   cursor: not-allowed !important;
 }
+
+/* ==========================================================================
+   登录 / 注册页（UI 改版样板）
+   左图右表的分栏结构，窄屏自动堆叠。颜色一律取 :root 里的标准色，
+   不再各页面手写色值。
+   ========================================================================== */
+
+.auth-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  background: #fff;
+}
+
+/* 左侧图片：只取图片左半边，避开素材本身的拼接缝 */
+.auth-visual {
+  position: relative;
+  background-image: url(/images/login-bg.jpg);
+  background-size: cover;
+  background-position: left center;
+  display: flex;
+  align-items: flex-end;
+  padding: 44px;
+}
+
+.auth-visual::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(10, 20, 45, 0.15) 0%, rgba(10, 20, 45, 0.72) 100%);
+}
+
+.auth-visual-text {
+  position: relative;
+  z-index: 1;
+  color: #fff;
+}
+
+.auth-visual-text h2 {
+  margin: 0 0 6px;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.auth-visual-text p {
+  margin: 0;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.82);
+  line-height: 1.7;
+}
+
+/* 右侧表单区 */
+.auth-panel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 32px;
+}
+
+.auth-form {
+  width: 100%;
+  max-width: 360px;
+}
+
+.auth-form h1 {
+  margin: 0 0 6px;
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.auth-form .auth-sub {
+  margin: 0 0 26px;
+  font-size: 14px;
+  color: var(--ink-mute);
+}
+
+.auth-field {
+  margin-bottom: 14px;
+}
+
+.auth-field label {
+  display: block;
+  font-size: 13px;
+  color: var(--ink-mute);
+  margin-bottom: 6px;
+}
+
+.auth-field input {
+  width: 100%;
+  border: 1px solid #d8d6d1;
+  border-radius: var(--radius-sm);
+  padding: 11px 13px;
+  font-size: 14px;
+  color: var(--ink);
+  background: #fff;
+  outline: none;
+}
+
+.auth-field input::placeholder {
+  color: #a8a5a0;
+}
+
+.auth-field input:focus {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.12);
+}
+
+.auth-btn {
+  width: 100%;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--brand);
+  cursor: pointer;
+  margin-top: 6px;
+}
+
+.auth-btn:hover:not(:disabled) {
+  background: var(--brand-hover);
+}
+
+.auth-btn:disabled {
+  background: #e5e3df;
+  color: #a8a5a0;
+  cursor: not-allowed !important;
+  opacity: 1;
+}
+
+.auth-btn-ghost {
+  width: auto;
+  background: #fff;
+  color: var(--ink-mute);
+  border: 1px solid #d8d6d1;
+  padding: 11px 18px;
+}
+
+.auth-btn-ghost:hover:not(:disabled) {
+  background: var(--canvas-soft);
+}
+
+.auth-error {
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--danger);
+}
+
+.auth-foot {
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--hairline);
+  font-size: 13px;
+  color: var(--ink-mute);
+}
+
+.auth-foot a {
+  color: var(--brand);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+/* 已登录提示卡 */
+.auth-resume {
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--canvas-soft);
+  padding: 16px;
+  font-size: 14px;
+  color: var(--ink-mute);
+  margin-bottom: 16px;
+}
+
+.auth-resume strong {
+  color: var(--ink);
+}
+
+/* 窄屏：图片收成顶部横幅 */
+@media (max-width: 820px) {
+  .auth-shell {
+    grid-template-columns: 1fr;
+    align-content: start;
+  }
+  .auth-visual {
+    min-height: 170px;
+    padding: 22px;
+    /* 素材本身是两张图拼的，中间有缝。竖屏时整张图会被完整显示出来，
+       所以放大到 2.3 倍并靠左，只露出左半边的货轮，把接缝裁掉 */
+    background-size: 230% auto;
+    background-position: 8% center;
+  }
+  .auth-visual-text h2 {
+    font-size: 21px;
+  }
+  .auth-visual-text p {
+    font-size: 13px;
+  }
+  /* 表单顶到图片下方，别在中间留一大块空白 */
+  .auth-panel {
+    align-items: flex-start;
+    padding: 28px 22px 44px;
+  }
+}
+
+/* ==========================================================================
+   数据表格统一观感（UI 改版）
+   页面里每个 th/td 都写死了行内样式，行内样式优先级高于普通 CSS，
+   所以这里只能用 !important 才盖得住。好处是不必去改几百个格子，
+   真出问题删掉这一段就能完全还原。
+   ⚠️ 只改观感：列的顺序、宽度、内容一律不动。
+   ========================================================================== */
+
+.table-card {
+  border: none !important;
+  border-radius: 0 !important;
+  background: #fff !important;
+  box-shadow: none !important;
+}
+
+/* 表头：去掉灰底和粗分割线，只留一条细线 */
+.table-card table thead tr {
+  background: transparent !important;
+  border-bottom: 1px solid var(--line-soft) !important;
+}
+
+.table-card table thead th {
+  background: transparent !important;
+  color: #9c9ca3 !important;
+  font-weight: 500 !important;
+  font-size: 12px !important;
+  padding: 0 10px 9px 0 !important;
+  border-bottom: none !important;
+}
+
+/* 数据行：只用一条细横线分隔，行距放松一点。
+   :not([colspan]) 很关键 —— 展开的详情面板是一个跨列的大格子，
+   它自己要 padding:0 来放内部布局，不能被这里的内边距覆盖掉。 */
+.table-card table tbody td:not([colspan]) {
+  border-bottom: 1px solid #eceae6 !important;
+  padding: 11px 10px 11px 0 !important;
+}
+
+.table-card table tbody tr:last-child td:not([colspan]) {
+  border-bottom: none !important;
+}
+
+.table-card table tbody tr:hover td:not([colspan]) {
+  background: #fcfbf9 !important;
+}
+
+/* 数字列右对齐 + 等宽数字，一列扫下来能比大小 */
+.table-card table td.col-num,
+.table-card table th.col-num {
+  text-align: right !important;
+  padding-right: 20px !important;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 操作列的按钮：统一成黑色文字链接，不要各种描边和底色 */
+.table-card table td .row-act,
+.row-act {
+  border: none !important;
+  background: transparent !important;
+  color: #111827 !important;
+  font-weight: 500 !important;
+  padding: 2px 0 !important;
+  margin-right: 14px !important;
+  font-size: 12.5px !important;
+  cursor: pointer;
+  border-radius: 0 !important;
+}
+
+.row-act:hover {
+  text-decoration: underline;
+}
+
+.row-act:last-child {
+  margin-right: 0 !important;
+}
+
+/* ==========================================================================
+   运单详情：全屏弹窗
+   挂载点在表格的跨列格子里，靠 position:fixed 脱离表格布局铺满屏幕，
+   所以那一行不会被撑高。
+   ========================================================================== */
+
+.detail-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  background: #fff;
+}
+
+.detail-panel {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  background: #fff;
+}
+
+/* 标题栏吸顶，往下滚也能随时关掉 */
+.detail-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #fff;
+  border-bottom: 1px solid var(--line-soft);
+  padding: 14px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.detail-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.detail-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #9c9ca3;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.detail-close {
+  border: 1px solid #d8d6d1;
+  background: #fff;
+  color: var(--ink-mute);
+  border-radius: 6px;
+  width: 30px;
+  height: 30px;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.detail-close:hover {
+  background: var(--canvas-soft);
+  color: var(--ink);
+}
+
+@media (max-width: 820px) {
+  .detail-head { padding: 12px 16px; }
+}

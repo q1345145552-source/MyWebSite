@@ -1,6 +1,14 @@
 import path from "node:path";
 import type { NextConfig } from "next";
 
+/**
+ * 转发目标。默认 http://api:3001 是 Docker Compose 里的服务名，
+ * 线上不设这个变量就跟以前完全一样。
+ * 本地开发没有叫 api 的主机，在 apps/web/.env.local 里设成
+ * http://127.0.0.1:3001 即可，不用改 hosts。
+ */
+const API_PROXY_TARGET = process.env.API_PROXY_TARGET?.trim() || "http://api:3001";
+
 const nextConfig: NextConfig = {
   turbopack: {
     root: path.join(__dirname, "..", ".."),
@@ -8,11 +16,11 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   async rewrites() {
     return [
-      { source: "/auth/:path*", destination: "http://api:3001/auth/:path*" },
-      { source: "/admin/:path*", destination: "http://api:3001/admin/:path*" },
-      { source: "/staff/:path*", destination: "http://api:3001/staff/:path*" },
-      { source: "/client/:path*", destination: "http://api:3001/client/:path*" },
-      { source: "/images/:path*", destination: "http://api:3001/images/:path*" },
+      { source: "/auth/:path*", destination: `${API_PROXY_TARGET}/auth/:path*` },
+      { source: "/admin/:path*", destination: `${API_PROXY_TARGET}/admin/:path*` },
+      { source: "/staff/:path*", destination: `${API_PROXY_TARGET}/staff/:path*` },
+      { source: "/client/:path*", destination: `${API_PROXY_TARGET}/client/:path*` },
+      { source: "/images/:path*", destination: `${API_PROXY_TARGET}/images/:path*` },
     ];
   },
   async headers() {

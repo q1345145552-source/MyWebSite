@@ -635,7 +635,44 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
           orderBy: { trackingNo: "asc" },
         });
 
+    const isClient = auth.role === "client";
+
+    /**
+     * 装柜时写的日志内容是「装入柜子 <柜号>（分装 N件）」，柜号就藏在正文里。
+     * 客户端本来就不允许看柜号（containers、batchNo 都对客户屏蔽过），
+     * 所以这里要把正文里的柜号一并抹掉，只保留「已装柜」和分装件数。
+     */
+    const sanitizeRemark = (remark: string): string =>
+      // 柜号后面可能紧跟「（分装 N件）」，中间没有空格，
+      // 所以匹配到括号就停，别把后半句一起吃掉
+      isClient ? remark.replace(/装入柜子\s*[^\s（(]+/g, "已装柜") : remark;
+
+    const mapLog = (
+      log: { fromStatus: string; toStatus: string; remark: string | null; changedAt: Date; operatorRole: string; operatorName: string | null },
+      trackingNo: string,
+    ) => ({
+      trackingNo,
+      fromStatus: log.fromStatus,
+      toStatus: log.toStatus,
+      remark: sanitizeRemark(log.remark ?? ""),
+      changedAt: log.changedAt.toISOString(),
+      // 操作人是内部信息，客户端连数据都不下发（不只是前端不显示）
+      operatorRole: isClient ? "" : log.operatorRole,
+      operatorName: isClient ? "" : (log.operatorName ?? ""),
+    });
+
+    // 父运单的轨迹 = 自己的记录 + 所有子运单的记录，按时间升序合并。
+    // 拆柜后的操作只会记在子单上（同步父单状态时并不写日志），不合并的话
+    // 父单标签会出现「当前状态：已签收 / 暂无物流轨迹」这种自相矛盾的显示。
+    // 每条都带上来源单号，前端据此标注是哪一件货。
+    const mergedTimeline = [
+      ...shipment.statusLogs.map((log) => mapLog(log, shipment.trackingNo)),
+      ...childShipments.flatMap((cs) => cs.statusLogs.map((log) => mapLog(log, cs.trackingNo))),
+    ].sort((a, b) => a.changedAt.localeCompare(b.changedAt));
+
     ok(res, {
+      /** 前端据此决定要不要显示操作人等内部信息 */
+      viewerRole: auth.role,
       trackingNo: shipment.trackingNo,
       orderId: shipment.order?.id ?? null,
       orderNo: shipment.order?.orderNo ?? null,
@@ -677,15 +714,8 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
           ata: it.container.ata?.toISOString() ?? null,
           customsClearedAt: it.container.customsClearedAt?.toISOString() ?? null,
         })),
-      // 状态时间线
-      timeline: shipment.statusLogs.map((log) => ({
-        fromStatus: log.fromStatus,
-        toStatus: log.toStatus,
-        remark: log.remark ?? "",
-        changedAt: log.changedAt.toISOString(),
-        operatorRole: log.operatorRole,
-        operatorName: log.operatorName ?? "",
-      })),
+      // 状态时间线（父单为合并后的完整链路，子单为自身记录）
+      timeline: mergedTimeline,
       // 子单信息（分柜后运单才有）
       // 子单信息
       children: childShipments.length > 0
@@ -695,14 +725,7 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
             itemName: cs.itemName,
             packageCount: cs.packageCount,
             currentStatus: cs.currentStatus,
-            timeline: cs.statusLogs.map((log) => ({
-              fromStatus: log.fromStatus,
-              toStatus: log.toStatus,
-              remark: log.remark ?? "",
-              changedAt: log.changedAt.toISOString(),
-              operatorRole: log.operatorRole,
-              operatorName: log.operatorName ?? "",
-            })),
+            timeline: cs.statusLogs.map((log) => mapLog(log, cs.trackingNo)),
           }))
         : undefined,
       createdAt: shipment.createdAt.toISOString(),

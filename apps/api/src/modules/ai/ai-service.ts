@@ -118,8 +118,11 @@ export class ClientAiService implements AiService {
     const memory = await this.getSessionMemory(auth, sessionId);
     const isFollowUp = this.isFollowUpMessage(question);
 
-    const orders = await this.deps.dataSource.listOrders({ companyId: auth.companyId });
-    const shipments = await this.deps.dataSource.listShipments({ companyId: auth.companyId });
+    // assertClientRole 已保证 role === "client"，此时 auth.userId 即客户 ID，
+    // 与 /client/orders 的 `clientId: auth.userId` 口径一致
+    const scope = { companyId: auth.companyId, clientId: auth.userId };
+    const orders = await this.deps.dataSource.listOrders(scope);
+    const shipments = await this.deps.dataSource.listShipments(scope);
     const knowledgeItems = await this.deps.knowledgeStore.list(auth.companyId);
 
     const modelIntent = await this.parseIntentWithModel(question, orders, memory);

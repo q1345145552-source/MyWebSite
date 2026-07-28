@@ -42,6 +42,8 @@ const ALL_STATUSES = ["collecting", "full_confirmed", "quoted", "paid", "loading
 // ============================================================================
 interface ProductFormRow {
   key: number;
+  /** 已有产品行的编号；新加的行为空，后端据此判断是改还是新增 */
+  id?: string;
   productName: string;
   packageCount: string;
   quantityPerBox: string;
@@ -187,6 +189,7 @@ export default function AdminConsolidationPage() {
     setEditProductRows(
       pa.products.map((p, i) => ({
         key: Date.now() + i,
+        id: p.id,
         productName: p.productName,
         packageCount: String(p.packageCount),
         quantityPerBox: String(p.quantityPerBox),
@@ -218,6 +221,7 @@ export default function AdminConsolidationPage() {
     setEditSubmitting(true);
     try {
       const products = editProductRows.map((r) => ({
+        id: r.id,
         productName: r.productName.trim(),
         packageCount: parseInt(r.packageCount),
         quantityPerBox: parseInt(r.quantityPerBox),

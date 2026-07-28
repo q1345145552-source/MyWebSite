@@ -585,6 +585,21 @@ const loadLmShipments = async () => {
     });
   };
 
+  /** 运单详情是全屏弹窗：开着时按 ESC 关闭，并锁住背景滚动 */
+  useEffect(() => {
+    if (!shipmentTableExpandedId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShipmentTableExpandedId(null);
+    };
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [shipmentTableExpandedId]);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -1626,7 +1641,7 @@ const loadLmShipments = async () => {
           <div style={{ flex: 1 }}>
             <h2 style={{ margin: 0, fontSize: 18, color: "#111827" }}>运单管理</h2>
             <p style={{ margin: "6px 0 8px", fontSize: 12, color: "#000000" }}>
-              表格展示运单号、用户、状态、加收金额、运输方式、发货时间、件重体、仓库与地址；点击「查看」或 + 展开查看详情与物流轨迹。
+              表格展示运单号、用户、状态、加收金额、运输方式、发货时间、件重体、仓库与地址；点击「查看」打开运单详情与物流轨迹。
             </p>
         <ShipmentSearch value={shipmentSearch} onChange={(key, val) => setShipmentSearch((prev) => ({ ...prev, [key]: val }))} onSearch={runShipmentListSearch} warehouseOptions={warehouseOptions} logisticsStatusOptions={logisticsStatusOptions} inputStyle={orderCreateInputStyle} />
           </div>
@@ -1705,37 +1720,7 @@ const loadLmShipments = async () => {
                       <Fragment key={item.id}>
                         <tr style={{ borderBottom: "1px solid #e2e8f0", background: shipmentTableExpandedId === item.id ? "#eff6ff" : "#fff" }}>
                           <td style={{ padding: "8px 6px", verticalAlign: "middle", whiteSpace: "nowrap" }}>
-                            <input type="checkbox" checked={selectedForExport.has(item.trackingNo)} onChange={() => toggleSelectShipment(item.trackingNo)} style={{ cursor: "pointer", marginRight: 4 }} />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setShipmentTableExpandedId((prev) => {
-                                  if (prev === item.id) return null;
-                                  setShipmentOrderEditDrafts((d) => ({ ...d, [item.id]: buildShipmentOrderEditDraft(item) }));
-                                  const oid = item.orderId;
-                                  if (oid) {
-                                    fetchShipmentImages(oid).then((imgs) => {
-                                      setShipmentImagesCache((c) => ({ ...c, [oid]: imgs }));
-                                    }).catch(() => {});
-                                  }
-                                  return item.id;
-                                });
-                              }}
-                              style={{
-                                border: "1px solid #cbd5e1",
-                                borderRadius: 6,
-                                width: 28,
-                                height: 28,
-                                background: "#fff",
-                                cursor: "pointer",
-                                fontSize: 16,
-                                lineHeight: 1,
-                                color: "#0f172a",
-                              }}
-                              aria-label={shipmentTableExpandedId === item.id ? "收起详情" : "展开详情"}
-                            >
-                              {shipmentTableExpandedId === item.id ? "−" : "+"}
-                            </button>
+                            <input type="checkbox" checked={selectedForExport.has(item.trackingNo)} onChange={() => toggleSelectShipment(item.trackingNo)} style={{ cursor: "pointer" }} />
                           </td>
                           <td style={{ padding: "8px 6px", fontWeight: 600, color: "#6b21a8", whiteSpace: "nowrap", fontFamily: "monospace", fontSize: 12 }}>{item.clientId ?? "—"}</td>
                           <td style={{ padding: "8px 6px", fontWeight: 600, color: "#1e3a8a", whiteSpace: "nowrap" }}>{item.orderNo || item.trackingNo}</td>
@@ -1809,32 +1794,32 @@ const loadLmShipments = async () => {
                                 setShipmentTableExpandedId((prev) => {
                                   if (prev === item.id) return null;
                                   setShipmentOrderEditDrafts((d) => ({ ...d, [item.id]: buildShipmentOrderEditDraft(item) }));
+                                  // 原来加载产品图的逻辑在已删掉的 + 按钮里，挪到这里来，
+                                  // 否则详情弹窗打开后图片是空的
+                                  const oid = item.orderId;
+                                  if (oid) {
+                                    fetchShipmentImages(oid).then((imgs) => {
+                                      setShipmentImagesCache((c) => ({ ...c, [oid]: imgs }));
+                                    }).catch(() => {});
+                                  }
                                   return item.id;
                                 });
                               }}
-                              style={{
-                                border: "none",
-                                background: "transparent",
-                                color: "#2563eb",
-                                cursor: "pointer",
-                                fontWeight: 600,
-                                padding: 0,
-                                marginRight: 8,
-                              }}
+                              className="row-act"
                             >
                               查看
                             </button>
                             <button
                               type="button"
                               onClick={() => openShipmentTrack(item.trackingNo)}
-                              style={{ border: "none", background: "transparent", color: "#2563eb", cursor: "pointer", fontWeight: 600, padding: 0 }}
+                              className="row-act"
                             >
                               物流轨迹
                             </button>
                             <button
                               type="button"
                               onClick={() => openPrintLabel({ marks: item.clientName ?? item.clientId ?? "—", packageCount: item.packageCount ?? "—", trackingNo: item.trackingNo ?? "", itemName: item.itemName, productQuantity: item.productQuantity, transportMode: item.transportMode, products: item.products?.map(p => ({ itemName: p.itemName, packageCount: p.packageCount })) })}
-                              style={{ border: "none", background: "transparent", color: "#16a34a", cursor: "pointer", fontWeight: 600, padding: 0, marginLeft: 8 }}
+                              className="row-act"
                             >
                               打印
                             </button>
@@ -1842,10 +1827,26 @@ const loadLmShipments = async () => {
                         </tr>
                         {shipmentTableExpandedId === item.id ? (
                           <tr>
-                            <td colSpan={14} style={{ padding: 0, background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
-                              <div style={{ padding: 14 }}>
-                                {/* 隐藏信息栏 */}
-                                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 20px", marginBottom: 12, padding: 8, background: "#f1f5f9", borderRadius: 6, fontSize: 12 }}>
+                            {/* 详情改成全屏弹窗：这个格子只作挂载点，内容用 position:fixed 铺满屏幕，
+                                所以格子本身不占高度，表格行不会被撑开 */}
+                            <td colSpan={14} style={{ padding: 0, border: "none" }}>
+                              <div className="detail-overlay">
+                                <div className="detail-panel">
+                                  <div className="detail-head">
+                                    <div>
+                                      <div className="detail-title">运单详情</div>
+                                      <div className="detail-sub">{item.trackingNo ?? "—"}</div>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      className="detail-close"
+                                      onClick={() => setShipmentTableExpandedId(null)}
+                                      aria-label="关闭"
+                                    >✕</button>
+                                  </div>
+                              <div style={{ padding: "18px 24px 28px" }}>
+                                {/* 隐藏信息栏：不用色块，靠一条细线跟下面分开 */}
+                                <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 24px", marginBottom: 14, paddingBottom: 12, borderBottom: "1px solid #eceae6", fontSize: 12, color: "#6b6b72" }}>
                                   <span>仓库：<strong>{warehouseLabelFromId(item.warehouseId)}</strong></span>
                                   <span>柜号：<strong>{item.batchNo ?? "—"}</strong></span>
                                   <span>包装：<strong>{item.packageUnit === "bag" ? "袋" : "箱"}</strong></span>
@@ -2311,10 +2312,12 @@ const loadLmShipments = async () => {
                                     type="button"
                                     disabled={loading}
                                     onClick={() => setShipmentTableExpandedId(null)}
-                                    style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 14px", background: "#fff", color: "#000000" }}
+                                    style={{ border: "1px solid #d8d6d1", borderRadius: 6, padding: "8px 16px", background: "#fff", color: "#1a1a1e" }}
                                   >
-                                    收起
+                                    关闭
                                   </button>
+                                </div>
+                              </div>
                                 </div>
                               </div>
                             </td>

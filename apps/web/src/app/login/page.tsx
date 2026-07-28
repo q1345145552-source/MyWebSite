@@ -10,6 +10,12 @@ const roleRouteMap: Record<string, string> = {
   client: "/client",
 };
 
+const roleLabel: Record<string, string> = {
+  admin: "管理员",
+  staff: "员工",
+  client: "客户",
+};
+
 export default function LoginPage() {
   const [account, setAccount] = useState("");
   const [password, setPassword] = useState("");
@@ -56,105 +62,88 @@ export default function LoginPage() {
   };
 
   return (
-    <div style={{
-        minHeight: "100vh",
-        width: "100vw",
-        display: "grid",
-        placeItems: "center",
-        padding: 20,
-        position: "relative",
-        overflow: "hidden",
-        backgroundImage: "url(/images/login-bg.jpg)",
-        backgroundSize: "cover",
-        backgroundPosition: "center",
-        backgroundRepeat: "no-repeat",
-      }}>
-      {/* 半透明遮罩 */}
-      <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.15)", zIndex: 0 }} />
-      <section style={{
-          position: "relative",
-          zIndex: 1,
-          width: "100%",
-          maxWidth: 440,
-          border: "1px solid rgba(255,255,255,0.18)",
-          borderRadius: 16,
-          background: "rgba(255,255,255,0.75)",
-          backdropFilter: "blur(20px)",
-          WebkitBackdropFilter: "blur(20px)",
-          padding: "32px 28px",
-          boxShadow: "0 16px 48px rgba(0,0,0,0.3)",
-        }}>
-        <h1 style={{ margin: 0, fontSize: 24, textAlign: "center", color: "#171717" }}>湘泰物流网站登录</h1>
+    <div className="auth-shell">
+      <div className="auth-visual">
+        <div className="auth-visual-text">
+          <h2>湘泰物流</h2>
+          <p>中泰跨境物流管理系统<br />预报 · 装柜 · 清关 · 派送 · 签收，全程可查</p>
+        </div>
+      </div>
 
-        {existingSession ? (
-          <div style={{ marginTop: 16, textAlign: "center" }}>
-            <p style={{ color: "#000000", fontSize: 14, marginBottom: 12 }}>
-              检测到已登录账号：<strong>{existingSession.userId}</strong>（{existingSession.role === "admin" ? "管理员" : existingSession.role === "staff" ? "员工" : "客户"}）
-            </p>
-            <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+      <div className="auth-panel">
+        <div className="auth-form">
+          {existingSession ? (
+            <>
+              <h1>欢迎回来</h1>
+              <p className="auth-sub">检测到你已经登录过</p>
+              <div className="auth-resume">
+                当前账号 <strong>{existingSession.userId}</strong>
+                <br />
+                身份 {roleLabel[existingSession.role] ?? existingSession.role}
+              </div>
               <button
                 type="button"
+                className="auth-btn"
                 onClick={() => { window.location.href = roleRouteMap[existingSession.role] || "/"; }}
-                style={{ border: "none", borderRadius: 8, padding: "10px 20px", background: "#2563eb", color: "#fff", fontWeight: 600, cursor: "pointer" }}
               >
                 进入工作台
               </button>
+              <div className="auth-foot">
+                不是本人？
+                <a
+                  href="/login"
+                  onClick={(e) => { e.preventDefault(); clearAuthSession(); setExistingSession(null); }}
+                >退出并换个账号登录</a>
+              </div>
+            </>
+          ) : (
+            <>
+              <h1>登录</h1>
+              <p className="auth-sub">请输入账号和密码</p>
+
+              <div className="auth-field">
+                <label htmlFor="login-account">账号</label>
+                <input
+                  id="login-account"
+                  value={account}
+                  onChange={(e) => setAccount(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") void submit(); }}
+                  placeholder="请输入账号"
+                  autoComplete="username"
+                />
+              </div>
+
+              <div className="auth-field">
+                <label htmlFor="login-password">密码</label>
+                <input
+                  id="login-password"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") void submit(); }}
+                  placeholder="请输入密码"
+                  autoComplete="current-password"
+                />
+              </div>
+
               <button
                 type="button"
-                onClick={() => { clearAuthSession(); setExistingSession(null); }}
-                style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "10px 20px", background: "#fff", cursor: "pointer", color: "#dc2626" }}
+                className="auth-btn"
+                onClick={() => void submit()}
+                disabled={!canSubmit || loading}
               >
-                退出并切换账号
+                {loading ? "登录中…" : "登录"}
               </button>
-            </div>
-          </div>
-        ) : (
-          <>
-            <p style={{ marginTop: 8, color: "#000000", fontSize: 14, textAlign: "center" }}>请输入账号和密码登录系统。</p>
 
-        <div style={{ display: "grid", gap: 10, marginTop: 14 }}>
-          <input
-            value={account}
-            onChange={(e) => setAccount(e.target.value)}
-            placeholder="账号"
-            style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "10px 12px" }}
-          />
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="密码"
-            style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "10px 12px" }}
-          />
+              {message ? <p className="auth-error">{message}</p> : null}
 
-          <button
-            type="button"
-            onClick={() => void submit()}
-            disabled={!canSubmit || loading}
-            style={{
-              border: "none",
-              borderRadius: 8,
-              padding: "10px 12px",
-              background: canSubmit && !loading ? "#2563eb" : "#000000",
-              color: "#fff",
-              fontWeight: 600,
-              cursor: canSubmit && !loading ? "pointer" : "not-allowed",
-            }}
-          >
-            {loading ? "登录中..." : "登录"}
-          </button>
+              <div className="auth-foot">
+                还没有账号？<a href="/register">去注册</a>
+              </div>
+            </>
+          )}
         </div>
-
-        {message ? <p style={{ marginTop: 10, color: "#b91c1c", fontSize: 13 }}>{message}</p> : null}
-
-        {!existingSession && (
-          <div style={{ marginTop: 12, fontSize: 13 }}>
-            还没有账号？<a href="/register" style={{ color: "#2563eb", textDecoration: "none" }}>去注册</a>
-          </div>
-        )}
-          </>
-        )}
-      </section>
+      </div>
     </div>
   );
 }

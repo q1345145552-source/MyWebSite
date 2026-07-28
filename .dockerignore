@@ -5,6 +5,10 @@ apps/web/.next
 *.log
 .env
 .env.*
+# 上面两条只挡根目录，子目录（如 apps/web/.env.local）挡不住。
+# 本机的开发配置一旦被打进镜像会覆盖线上配置，必须一起排除。
+**/.env
+**/.env.*
 scripts/
 docs/
 *.md

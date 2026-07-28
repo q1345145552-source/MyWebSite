@@ -7,6 +7,8 @@ import { authHeaders, apiBaseUrl, parseApiResponse } from "../../services/core-a
 // ── Types ──
 
 interface TimelineItem {
+  /** 该条记录来自哪张运单。父运单标签里会混入子运单的记录，用它区分是哪一件货 */
+  trackingNo?: string;
   fromStatus: string;
   toStatus: string;
   remark: string;
@@ -25,6 +27,8 @@ interface ChildShipmentData {
 }
 
 interface TrackData {
+  /** 看这个页面的人是什么角色，客户端要隐藏内部信息 */
+  viewerRole?: "admin" | "staff" | "client";
   trackingNo: string;
   itemName?: string;
   products?: Array<{ itemName: string; packageCount: number }>;
@@ -105,7 +109,7 @@ function LoadingSkeleton() {
           <div style={{ position: "absolute", left: 2, top: 0, bottom: -20, width: 2, background: "#e5e7eb" }} />
           <div style={{ position: "absolute", left: -3, top: 2, width: 12, height: 12, borderRadius: "50%", background: "#e5e7eb" }} />
           <div style={{ flex: 1 }}>
-            <div style={{ height: 12, width: 80, background: "#e5e7eb", borderRadius: 4, marginBottom: 6, animation: "none" }} />
+            <div style={{ height: 12, width: 80, background: "#e5e7eb", borderRadius: 4, marginBottom: 6 }} />
             <div style={{ height: 14, width: "70%", background: "#f3f4f6", borderRadius: 4, marginBottom: 4 }} />
             <div style={{ height: 10, width: "40%", background: "#f9fafb", borderRadius: 4 }} />
           </div>
@@ -115,153 +119,97 @@ function LoadingSkeleton() {
   );
 }
 
-function TimelineNode({ item, isLast, isChild, index, total }: { item: TimelineItem; isLast: boolean; isChild?: boolean; index: number; total: number }) {
-  const fromCfg = statusCfg(item.fromStatus);
+/**
+ * 一条轨迹记录。样式参考主流快递的物流详情：
+ * 左侧圆点竖线，右侧「状态 + 时间」一行、备注一行，不用卡片和色块。
+ * 列表是倒序渲染的（最新在最上），所以 index === 0 就是最新那条。
+ */
+function TimelineNode({ item, isLast, isChild, index, tabTrackingNo, hideOperator }: { item: TimelineItem; isLast: boolean; isChild?: boolean; index: number; total: number; tabTrackingNo?: string; hideOperator?: boolean }) {
   const toCfg = statusCfg(item.toStatus);
-  const dotSize = isChild ? 10 : 16;
+  const isLatest = index === 0;
+  // 父运单标签下混合展示了各子单的记录，标出这条属于哪个子单
+  const sourceLabel = item.trackingNo && item.trackingNo !== tabTrackingNo ? item.trackingNo : null;
+  // 墨黑配色：不用彩色，最新一条黑色实心，历史节点浅灰描边
+  const INK = "#111827";
+  const tickColor = isLatest ? "#fff" : "#9ca3af";
+  const dot = isChild ? 20 : 22;
+  // 备注跟状态说的是同一件事就不重复显示
+  const showRemark = Boolean(item.remark && item.remark !== toCfg.zh);
+  // 客户端一律不显示操作人；其余角色也要真有名字才显示，不再兜底成「员工/管理员」
+  const showOperator = !hideOperator && Boolean(item.operatorName) && item.operatorRole !== "client";
 
   return (
-    <div style={{
-      position: "relative",
-      paddingBottom: isLast ? 0 : 32,
-      paddingLeft: isChild ? 28 : 36,
-    }}>
-      {/* connecting line */}
+    <div style={{ position: "relative", paddingLeft: dot + 16, paddingBottom: isLast ? 0 : 22 }}>
+      {/* 竖线：连到下一条 */}
       {!isLast && (
         <div style={{
           position: "absolute",
-          left: isChild ? 12 : 16,
-          top: dotSize + 8,
+          left: dot / 2 - 0.5,
+          top: dot + 4,
           bottom: 0,
-          width: 2,
-          background: isChild
-            ? "linear-gradient(180deg, #d1d5db, #e5e7eb)"
-            : `linear-gradient(180deg, ${toCfg.color}60, #e5e7eb)`,
-          borderRadius: 1,
+          width: 1,
+          background: "#e5e7eb",
         }} />
       )}
 
-      {/* dot ring */}
+      {/* 圆点：最新一条黑色实心，其余白底浅灰描边。对勾用两条边框画，比字体的 ✓ 更细更规整 */}
       <div style={{
         position: "absolute",
-        left: isChild ? 3 : 4,
-        top: 4,
-        width: dotSize + 8,
-        height: dotSize + 8,
+        left: 0,
+        top: 1,
+        width: dot,
+        height: dot,
         borderRadius: "50%",
-        background: isLast ? `${toCfg.color}15` : `${toCfg.color}08`,
-        zIndex: 0,
-      }} />
-      {/* dot */}
-      <div style={{
-        position: "absolute",
-        left: isChild ? 7 : 8,
-        top: 8,
-        width: dotSize,
-        height: dotSize,
-        borderRadius: "50%",
-        background: isLast ? toCfg.color : "#fff",
-        border: `3px solid ${isLast ? toCfg.color : "#94a3b8"}`,
-        zIndex: 1,
-        boxShadow: `0 0 0 3px #fff`,
-      }} />
-
-      {/* step badge */}
-      {!isChild && (
-        <div style={{
-          position: "absolute",
-          left: -6,
-          top: dotSize + 4,
-          fontSize: 10,
-          color: "#94a3b8",
-          fontWeight: 500,
-          whiteSpace: "nowrap",
-        }}>
-          第{index + 1}步
-        </div>
-      )}
-
-      {/* content card */}
-      <div style={{
-        background: "#fff",
-        border: `1px solid ${isLast ? toCfg.color + "40" : "#e5e7eb"}`,
-        borderLeft: `3px solid ${toCfg.color}`,
-        borderRadius: "8px 10px 10px 8px",
-        padding: isChild ? "10px 12px" : "14px 16px",
-        boxShadow: isLast
-          ? `0 2px 8px ${toCfg.color}15`
-          : "0 1px 3px rgba(0,0,0,0.04)",
+        border: `1.5px solid ${isLatest ? INK : "#d1d5db"}`,
+        background: isLatest ? INK : "#fff",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        boxSizing: "border-box",
       }}>
-        {/* time */}
-        <div style={{
-          fontSize: isChild ? 11 : 13,
-          color: "#374151",
-          fontWeight: 600,
-          marginBottom: 10,
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-        }}>
-          <span style={{ fontSize: 14 }}></span>
+        <span style={{
+          display: "block",
+          width: isChild ? 4 : 5,
+          height: isChild ? 8 : 9,
+          marginTop: -2,
+          borderRight: `1.6px solid ${tickColor}`,
+          borderBottom: `1.6px solid ${tickColor}`,
+          transform: "rotate(45deg)",
+        }} />
+      </div>
+
+      {/* 第一行：状态 + 时间 */}
+      <div style={{ display: "flex", alignItems: "baseline", flexWrap: "wrap", gap: 10 }}>
+        <span style={{
+          fontSize: isChild ? 14 : 15,
+          fontWeight: isLatest ? 700 : 500,
+          color: isLatest ? "#111827" : "#374151",
+        }}>{toCfg.zh}</span>
+        <span style={{ fontSize: isChild ? 12 : 13, color: "#9ca3af" }}>
           {formatTime(item.changedAt)}
-        </div>
-
-        {/* status */}
-        <div style={{
-          marginBottom: item.remark ? 10 : 6,
-        }}>
-          <span style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 4,
-            padding: "3px 10px",
-            borderRadius: 6,
-            fontSize: isChild ? 11 : 12,
-            fontWeight: 600,
-            background: toCfg.bg,
-            color: toCfg.color,
-            border: toCfg.color + "30",
-          }}>
-            {toCfg.zh}
-          </span>
-        </div>
-
-        {/* remark */}
-        {item.remark ? (
-          <div style={{
-            fontSize: isChild ? 12 : 13,
-            color: "#1e293b",
-            lineHeight: 1.6,
-            marginBottom: 8,
-            padding: "8px 10px",
-            background: "#f8fafc",
-            borderRadius: 6,
-            border: "1px solid #e2e8f0",
-          }}>
-            {item.remark}
-          </div>
-        ) : null}
-
-        {/* operator */}
-        {item.operatorRole !== "client" && (
-          <div style={{
-            fontSize: isChild ? 11 : 12,
-            color: "#64748b",
-            display: "flex",
-            alignItems: "center",
-            gap: 4,
-          }}>
-            <span style={{ fontSize: 13 }}>{item.operatorRole === "staff" ? "" : ""}</span>
-            <span style={{ fontWeight: 600 }}>{item.operatorName || (item.operatorRole === "staff" ? "员工" : "管理员")}</span>
-          </div>
+        </span>
+        {sourceLabel && (
+          <span style={{ fontSize: 12, color: "#6b7280" }}>{sourceLabel}</span>
         )}
       </div>
+
+      {/* 第二行：备注（跟状态重复就不显示）+ 操作人。
+          操作人只在有名字时才显示 —— 客户端后端已经把它清空，这里不会再兜底成「员工/管理员」 */}
+      {showRemark || showOperator ? (
+        <div style={{ marginTop: 4, fontSize: isChild ? 12 : 13, color: "#9ca3af", lineHeight: 1.6 }}>
+          {showRemark ? item.remark : null}
+          {showOperator ? (
+            <span style={{ marginLeft: showRemark ? 8 : 0 }}>{item.operatorName}</span>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
 
 function TrackContent({ data }: { data: TrackData }) {
   const [activeTab, setActiveTab] = useState(0); // 0=父运单, 1+=子运单
+  const [zoomImage, setZoomImage] = useState<string | null>(null);
   const allTabs = [
     { trackingNo: data.trackingNo, currentStatus: data.currentStatus, timeline: data.timeline, packageCount: undefined as number | undefined },
     ...(data.children ?? []).map(c => ({ trackingNo: c.trackingNo, currentStatus: c.currentStatus, timeline: c.timeline, packageCount: c.packageCount })),
@@ -288,7 +236,6 @@ function TrackContent({ data }: { data: TrackData }) {
                 color: activeTab === i ? "#fff" : "#374151",
                 cursor: "pointer",
                 borderRight: i < allTabs.length - 1 ? "1px solid #e5e7eb" : "none",
-                transition: "all 0.15s",
               }}
             >
               {i === 0 ? `${t.trackingNo}` : `${t.trackingNo}`}
@@ -299,8 +246,8 @@ function TrackContent({ data }: { data: TrackData }) {
 
       {/* 装柜时间线（客户端看到日期但不含柜号） */}
       {data.containers && data.containers.length > 0 && data.containers.some(c => c.loadingDate || c.departureDate) ? (
-        <div style={{ marginBottom: 12, padding: "8px 12px", background: "#f0f9ff", borderRadius: 8, fontSize: 12, border: "1px solid #bae6fd" }}>
-          <div style={{ fontWeight: 600, color: "#0369a1", marginBottom: 4 }}>装柜时间</div>
+        <div style={{ marginBottom: 14, fontSize: 13, color: "#6b7280" }}>
+          <div style={{ fontWeight: 600, color: "#374151", marginBottom: 4 }}>装柜时间</div>
           {data.containers.map((c, i) => (
             <div key={i} style={{ marginBottom: 4 }}>
               {c.loadingDate ? <div>装柜：{c.loadingDate.slice(0, 10)}</div> : null}
@@ -314,20 +261,29 @@ function TrackContent({ data }: { data: TrackData }) {
 
       {/* 尾程派送 */}
       {data.lastmile ? (
-        <div style={{ marginBottom: 12, padding: "10px 12px", background: "#fefce8", borderRadius: 8, fontSize: 12, border: "1px solid #fde68a" }}>
-          <div style={{ fontWeight: 600, color: "#92400e", marginBottom: 4 }}> 派送信息</div>
+        <div style={{ marginBottom: 14, fontSize: 13, color: "#6b7280" }}>
+          <div style={{ fontWeight: 600, color: "#374151", marginBottom: 4 }}>派送信息</div>
           {data.lastmile.driverName ? <div>司机：{data.lastmile.driverName}</div> : null}
           {data.lastmile.licensePlate ? <div>车牌：{data.lastmile.licensePlate}</div> : null}
           {data.lastmile.phoneNumber ? <div>电话：{data.lastmile.phoneNumber}</div> : null}
           <div>状态：{data.lastmile.status === "SIGNED" ? "已签收" : " 派送中"}</div>
           {data.lastmile.signImageBase64 ? (
-            <img src={data.lastmile.signImageBase64} alt="签收凭证" style={{ marginTop: 4, maxWidth: 200, maxHeight: 200, borderRadius: 6, border: "1px solid #e5e7eb" }} />
+            <div style={{ marginTop: 6 }}>
+              <img
+                src={data.lastmile.signImageBase64}
+                alt="签收凭证"
+                onClick={() => setZoomImage(data.lastmile!.signImageBase64!)}
+                title="点击查看大图"
+                style={{ maxWidth: 200, maxHeight: 200, borderRadius: 6, border: "1px solid #e5e7eb", cursor: "zoom-in", display: "block" }}
+              />
+              <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 3 }}>点击查看大图</div>
+            </div>
           ) : null}
         </div>
       ) : null}
 
       {/* 产品信息 */}
-      <div style={{ marginBottom: 12, padding: "8px 12px", background: "#f8fafc", borderRadius: 8, fontSize: 12, color: "#374151" }}>
+      <div style={{ marginBottom: 14, fontSize: 13, color: "#6b7280" }}>
         {activeTab === 0 ? (
           <>
             {data.products && data.products.length > 1 ? (
@@ -344,38 +300,15 @@ function TrackContent({ data }: { data: TrackData }) {
         ) : null}
       </div>
 
-      {/* Current status banner */}
-      <div style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 12,
-        padding: "14px 16px",
-        background: `linear-gradient(135deg, ${currentCfg.bg} 0%, #ffffff 100%)`,
-        borderRadius: 12,
-        border: `1px solid ${currentCfg.color}30`,
-        marginBottom: 16,
-      }}>
-        <div style={{
-          width: 44,
-          height: 44,
-          borderRadius: 12,
-          background: currentCfg.color,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: 22,
-          flexShrink: 0,
-          boxShadow: `0 4px 12px ${currentCfg.color}40`,
-        }}></div>
-        <div>
-          <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 2 }}>当前状态</div>
-          <div style={{ fontSize: 17, fontWeight: 700, color: currentCfg.color }}>{currentCfg.zh}</div>
-          {activeTab === 0 && data.containers?.length > 0 && (
-            <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
-              {data.containers.map((c) => c.containerNo).filter(Boolean).join("  ｜  ") || null}
-            </div>
-          )}
-        </div>
+      {/* 当前状态：只留文字，不用渐变底、色块和光晕 */}
+      <div style={{ marginBottom: 18 }}>
+        <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 3 }}>当前状态</div>
+        <div style={{ fontSize: 18, fontWeight: 700, color: "#111827" }}>{currentCfg.zh}</div>
+        {activeTab === 0 && data.containers?.length > 0 && (
+          <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 3 }}>
+            {data.containers.map((c) => c.containerNo).filter(Boolean).join("  ｜  ") || null}
+          </div>
+        )}
       </div>
 
       {/* Timeline header */}
@@ -383,20 +316,14 @@ function TrackContent({ data }: { data: TrackData }) {
         <>
           <div style={{
             display: "flex",
-            alignItems: "center",
-            gap: 6,
-            marginBottom: 12,
+            alignItems: "baseline",
+            gap: 8,
+            marginBottom: 14,
             paddingBottom: 8,
-            borderBottom: "1px solid #e5e7eb",
+            borderBottom: "1px solid #f3f4f6",
           }}>
             <span style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>状态变更记录</span>
-            <span style={{
-              fontSize: 11,
-              color: "#6b7280",
-              background: "#f3f4f6",
-              borderRadius: 10,
-              padding: "1px 8px",
-            }}>{tab.timeline.length} 条</span>
+            <span style={{ fontSize: 12, color: "#9ca3af" }}>{tab.timeline.length} 条</span>
           </div>
 
           {/* Timeline: 最新在上 */}
@@ -408,10 +335,33 @@ function TrackContent({ data }: { data: TrackData }) {
                 isLast={i === tab.timeline.length - 1}
                 index={i}
                 total={tab.timeline.length}
+                tabTrackingNo={tab.trackingNo}
+                hideOperator={data.viewerRole === "client"}
               />
             ))}
           </div>
         </>
+      ) : null}
+
+      {/* 大图查看：点图片放大，点任意处关闭 */}
+      {zoomImage ? (
+        <div
+          onClick={() => setZoomImage(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 10000,
+            background: "rgba(0,0,0,0.85)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 24,
+            cursor: "zoom-out",
+          }}
+        >
+          <img src={zoomImage} alt="查看大图" style={{ maxWidth: "100%", maxHeight: "100%", borderRadius: 8 }} />
+          <div style={{ position: "absolute", top: 16, right: 20, color: "#fff", fontSize: 28, lineHeight: 1 }}>×</div>
+        </div>
       ) : null}
     </div>
   );
@@ -465,9 +415,7 @@ function ShipmentTrackModal({ trackingOrId, onClose }: { trackingOrId: string; o
         alignItems: "center",
         justifyContent: "center",
         background: "rgba(0,0,0,0.45)",
-        backdropFilter: "blur(2px)",
         padding: 16,
-        animation: "none",
       }}
     >
       <div style={{
@@ -478,7 +426,6 @@ function ShipmentTrackModal({ trackingOrId, onClose }: { trackingOrId: string; o
         background: "#fff",
         borderRadius: 16,
         boxShadow: "0 24px 80px rgba(0,0,0,0.25)",
-        animation: "none",
       }}>
         {/* Header */}
         <div style={{
@@ -489,7 +436,7 @@ function ShipmentTrackModal({ trackingOrId, onClose }: { trackingOrId: string; o
           justifyContent: "space-between",
           alignItems: "center",
           padding: "18px 22px",
-          background: "linear-gradient(180deg, #ffffff, #fafbfc)",
+          background: "#fff",
           borderBottom: "1px solid #e5e7eb",
           borderRadius: "16px 16px 0 0",
         }}>
@@ -513,7 +460,6 @@ function ShipmentTrackModal({ trackingOrId, onClose }: { trackingOrId: string; o
               justifyContent: "center",
               fontSize: 16,
               color: "#6b7280",
-              transition: "all 0.15s ease",
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.background = "#f3f4f6";

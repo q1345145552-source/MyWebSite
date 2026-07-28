@@ -25,6 +25,9 @@ WORKDIR /app/apps/web
 ENV NODE_ENV=production
 ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
+# 转发目标显式写死成容器内的 api 服务，真实环境变量优先级高于 .env 文件，
+# 万一有本机配置漏进镜像也压不过这里
+ENV API_PROXY_TARGET=http://api:3001
 
 COPY --chown=node:node --from=builder /app/apps/web/.next ./.next
 COPY --chown=node:node --from=builder /app/apps/web/public ./public

@@ -1033,10 +1033,11 @@ export async function fetchAdminOrders(): Promise<AdminOrderItem[]> {
  */
 export async function updateAdminOrder(payload: {
   orderId: string;
+  // 除 orderId 外全部可选：只传本次改动过的项，没传的后端不会去动
   clientId?: string;
-  itemName: string;
+  itemName?: string;
   cargoType?: string;
-  transportMode: "sea" | "land";
+  transportMode?: "sea" | "land";
   domesticTrackingNo?: string;
   trackingNo?: string;
   batchNo?: string;
@@ -1044,9 +1045,9 @@ export async function updateAdminOrder(payload: {
   remark?: string | null;
   receiverAddressTh?: string;
   containerNo?: string;
-  productQuantity: number;
-  packageCount: number;
-  packageUnit: "bag" | "box";
+  productQuantity?: number;
+  packageCount?: number;
+  packageUnit?: "bag" | "box";
   weightKg?: number | null;
   volumeM3?: number | null;
   receivableAmountCny?: number | null;
@@ -1054,6 +1055,8 @@ export async function updateAdminOrder(payload: {
   paymentStatus?: "paid" | "unpaid";
   shipDate?: string;
   products?: Array<{
+    /** 已有产品行的编号；不传表示新增一行 */
+    id?: string;
     itemName: string;
     packageCount: number;
     lengthCm?: number;
@@ -1062,6 +1065,7 @@ export async function updateAdminOrder(payload: {
     productQuantity?: number;
     cargoType?: string;
     domesticTrackingNo?: string;
+    weightKg?: number;
   }>;
 }): Promise<{ orderId: string; updatedAt: string }> {
   const response = await fetch(`${apiBaseUrl()}/admin/orders/update`, {
@@ -1831,6 +1835,8 @@ export async function updateConsolidationPrealert(payload: {
   mark?: string;
   expressNo?: string;
   products?: Array<{
+    /** 已有产品行的编号；不传表示新增一行。不传 productImage 则沿用原图 */
+    id?: string;
     productName: string;
     packageCount: number;
     quantityPerBox: number;
@@ -2081,6 +2087,8 @@ export async function adminForceEditConsolidationPrealert(payload: {
   mark?: string;
   expressNo?: string;
   products?: Array<{
+    /** 已有产品行的编号；不传表示新增一行。不传 productImage 则沿用原图 */
+    id?: string;
     productName: string;
     packageCount: number;
     quantityPerBox: number;

@@ -20,6 +20,12 @@ export interface AuthContext {
 
 export interface QueryScope {
   companyId: string;
+  /**
+   * 必填：AI 对话只对 client 角色开放，数据必须收窄到该客户自己的单，
+   * 否则模型上下文里会带上同公司其他客户的运单。设为必填而非可选，
+   * 就是为了让漏传时直接编译报错。
+   */
+  clientId: string;
 }
 
 export interface QueryDataSource {

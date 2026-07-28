@@ -15,15 +15,15 @@ import {
 } from "./ai-prisma-store";
 import { ClientAiService } from "./ai-service";
 import { HttpDeepSeekClient } from "./deepseek-client";
-import type { AuthContext, QueryDataSource } from "./ai-types";
+import type { AuthContext, QueryDataSource, QueryScope } from "./ai-types";
 import type { HttpRequest, HttpResponse, MinimalHttpApp } from "../../server";
 
 
 
-class PrismaCompanyScopedDataSource implements QueryDataSource {
-  async listOrders(scope: { companyId: string }): Promise<Order[]> {
+class PrismaClientScopedDataSource implements QueryDataSource {
+  async listOrders(scope: QueryScope): Promise<Order[]> {
     const rows = await prisma.order.findMany({
-      where: { companyId: scope.companyId },
+      where: { companyId: scope.companyId, clientId: scope.clientId },
       orderBy: { createdAt: "desc" },
     });
 
@@ -56,9 +56,10 @@ class PrismaCompanyScopedDataSource implements QueryDataSource {
     }));
   }
 
-  async listShipments(scope: { companyId: string }): Promise<Shipment[]> {
+  async listShipments(scope: QueryScope): Promise<Shipment[]> {
+    // Shipment 上没有 clientId，通过所属订单收窄到该客户
     const rows = await prisma.shipment.findMany({
-      where: { companyId: scope.companyId },
+      where: { companyId: scope.companyId, order: { clientId: scope.clientId } },
       orderBy: { updatedAt: "desc" },
     });
 
@@ -108,7 +109,7 @@ export function registerClientAiRoutes(app: MinimalHttpApp): void {
   const knowledgeStore = new PrismaAiKnowledgeStore();
   const memoryStore = new PrismaAiSessionMemoryStore();
   const service = new ClientAiService({
-    dataSource: new PrismaCompanyScopedDataSource(),
+    dataSource: new PrismaClientScopedDataSource(),
     auditStore,
     knowledgeGapStore,
     llmClient: new HttpDeepSeekClient(),
