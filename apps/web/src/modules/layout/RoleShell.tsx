@@ -119,10 +119,14 @@ export default function RoleShell(props: {
         {(roleFunctionGroups[allowedRoles[0]] ?? []).map((group) => {
           const isExpanded = expandedGroups.has(group.groupLabel);
           return (
-            <div key={group.groupLabel} className="dashboard-sidebar-group">
+            <div
+              key={group.groupLabel}
+              className={`dashboard-sidebar-group dashboard-sidebar-group-collapsible ${isExpanded ? "is-expanded" : ""}`}
+            >
               <button
                 type="button"
                 className="dashboard-sidebar-group-header"
+                aria-expanded={isExpanded}
                 onClick={() => {
                   setExpandedGroups((prev) => {
                     const next = new Set(prev);
@@ -132,19 +136,26 @@ export default function RoleShell(props: {
                   });
                 }}
               >
-                <span className="dashboard-sidebar-group-arrow">{isExpanded ? "▾" : "▸"}</span>
+                {/* 箭头只有一个字符，展开靠 CSS 转 90 度，换字符会丢掉过渡动画 */}
+                <span className="dashboard-sidebar-group-arrow">▸</span>
                 {group.groupLabel}
               </button>
-              {isExpanded && group.items.map((item) => (
-                <a
-                  key={item.id}
-                  href={item.href}
-                  className={`dashboard-sidebar-link ${currentPath + currentHash === item.href ? "dashboard-sidebar-link-active" : ""}`}
-                  onClick={closeSidebar}
-                >
-                  {item.label}
-                </a>
-              ))}
+              {/* 收起时不摘节点，只把外层高度收到 0：摘掉就没法放收起动画了 */}
+              <div className="dashboard-sidebar-group-body" aria-hidden={!isExpanded}>
+                <div className="dashboard-sidebar-group-body-inner">
+                  {group.items.map((item) => (
+                    <a
+                      key={item.id}
+                      href={item.href}
+                      className={`dashboard-sidebar-link ${currentPath + currentHash === item.href ? "dashboard-sidebar-link-active" : ""}`}
+                      tabIndex={isExpanded ? undefined : -1}
+                      onClick={closeSidebar}
+                    >
+                      {item.label}
+                    </a>
+                  ))}
+                </div>
+              </div>
             </div>
           );
         })}

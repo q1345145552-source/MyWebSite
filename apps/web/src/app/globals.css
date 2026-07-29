@@ -198,7 +198,95 @@ main {
   color: #9ca3af;
   width: 10px;
   flex-shrink: 0;
-  transition: transform 0.15s;
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ---- 功能分区：展开 / 收起 ---- */
+
+/* 可折叠分组自己管间距：靠父级 gap 的话，收起时头和空内容之间还会留一道缝 */
+.dashboard-sidebar-group-collapsible {
+  gap: 0;
+}
+
+.dashboard-sidebar-group-collapsible.is-expanded .dashboard-sidebar-group-arrow {
+  transform: rotate(90deg);
+}
+
+.dashboard-sidebar-group-body {
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  /* 360px 足够放下最长的分组（7 项约 215px）；留余量但别太大，
+     太大收起时前半段会像卡住不动 */
+  transition: max-height 220ms cubic-bezier(0.22, 1, 0.36, 1), opacity 140ms ease-out;
+}
+
+.dashboard-sidebar-group-collapsible.is-expanded .dashboard-sidebar-group-body {
+  max-height: 360px;
+  opacity: 1;
+}
+
+.dashboard-sidebar-group-body-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 4px;
+}
+
+/* 展开时菜单项依次滑进来，每项晚 25ms，最后一项也就晚 150ms，不拖沓。
+   位移用独立的 translate 属性、不用 transform：
+   动画 fill 到最后会一直占着 transform，鼠标悬停的放大就被压掉了。
+   translate 和 scale 是两个属性，互不打架。 */
+@keyframes sidebarItemIn {
+  from { opacity: 0; translate: -6px 0; }
+  to   { opacity: 1; translate: none; }
+}
+
+.dashboard-sidebar-group-collapsible.is-expanded .dashboard-sidebar-link {
+  animation: sidebarItemIn 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.dashboard-sidebar-group-collapsible.is-expanded .dashboard-sidebar-link:nth-child(1) { animation-delay: 0ms; }
+.dashboard-sidebar-group-collapsible.is-expanded .dashboard-sidebar-link:nth-child(2) { animation-delay: 25ms; }
+.dashboard-sidebar-group-collapsible.is-expanded .dashboard-sidebar-link:nth-child(3) { animation-delay: 50ms; }
+.dashboard-sidebar-group-collapsible.is-expanded .dashboard-sidebar-link:nth-child(4) { animation-delay: 75ms; }
+.dashboard-sidebar-group-collapsible.is-expanded .dashboard-sidebar-link:nth-child(5) { animation-delay: 100ms; }
+.dashboard-sidebar-group-collapsible.is-expanded .dashboard-sidebar-link:nth-child(6) { animation-delay: 125ms; }
+.dashboard-sidebar-group-collapsible.is-expanded .dashboard-sidebar-link:nth-child(n + 7) { animation-delay: 150ms; }
+
+/* 鼠标放上去轻微放大。
+   从左边缘放大，不然右侧会顶出侧边栏；幅度只有 2%，多了就晃眼。 */
+.dashboard-sidebar-group-collapsible .dashboard-sidebar-group-header,
+.dashboard-sidebar-group-collapsible .dashboard-sidebar-link {
+  transform-origin: left center;
+  transition: background-color 0.15s, border-color 0.15s, scale 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.dashboard-sidebar-group-collapsible .dashboard-sidebar-link:hover {
+  scale: 1.03;
+}
+
+.dashboard-sidebar-group-collapsible .dashboard-sidebar-group-header:hover {
+  /* 分区标题是整行宽度，放太多会顶到边框，1.5% 够了 */
+  scale: 1.015;
+}
+
+/* 按下去回弹一点，手感上有「点到了」的反馈 */
+.dashboard-sidebar-group-collapsible .dashboard-sidebar-link:active,
+.dashboard-sidebar-group-collapsible .dashboard-sidebar-group-header:active {
+  scale: 0.99;
+  transition-duration: 80ms;
+}
+
+/* 系统开了「减弱动态效果」就直接不放动画 */
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-sidebar-group-arrow,
+  .dashboard-sidebar-group-body { transition: none; }
+  .dashboard-sidebar-group-collapsible.is-expanded .dashboard-sidebar-link { animation: none; }
+  .dashboard-sidebar-group-collapsible .dashboard-sidebar-link:hover,
+  .dashboard-sidebar-group-collapsible .dashboard-sidebar-group-header:hover,
+  .dashboard-sidebar-group-collapsible .dashboard-sidebar-link:active,
+  .dashboard-sidebar-group-collapsible .dashboard-sidebar-group-header:active { scale: none; }
 }
 
 .dashboard-sidebar-link {
