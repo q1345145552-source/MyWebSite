@@ -9,6 +9,7 @@ import { openShipmentTrack } from "../../modules/shipment/ShipmentTrackModal";
 import { splitStaffShipment } from "../../services/business-api";
 import EmptyStateCard from "../../modules/layout/EmptyStateCard";
 import RoleShell from "../../modules/layout/RoleShell";
+import DetailModal from "../../modules/layout/DetailModal";
 import Toast from "../../modules/layout/Toast";
 import { apiBaseUrl, authHeaders } from "../../services/core-api";
 import {
@@ -584,21 +585,6 @@ const loadLmShipments = async () => {
       return { ...prev, [shipmentId]: { ...cur, ...partial } };
     });
   };
-
-  /** 运单详情是全屏弹窗：开着时按 ESC 关闭，并锁住背景滚动 */
-  useEffect(() => {
-    if (!shipmentTableExpandedId) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setShipmentTableExpandedId(null);
-    };
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prevOverflow;
-    };
-  }, [shipmentTableExpandedId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1830,21 +1816,12 @@ const loadLmShipments = async () => {
                             {/* 详情改成全屏弹窗：这个格子只作挂载点，内容用 position:fixed 铺满屏幕，
                                 所以格子本身不占高度，表格行不会被撑开 */}
                             <td colSpan={14} style={{ padding: 0, border: "none" }}>
-                              <div className="detail-overlay">
-                                <div className="detail-panel">
-                                  <div className="detail-head">
-                                    <div>
-                                      <div className="detail-title">运单详情</div>
-                                      <div className="detail-sub">{item.trackingNo ?? "—"}</div>
-                                    </div>
-                                    <button
-                                      type="button"
-                                      className="detail-close"
-                                      onClick={() => setShipmentTableExpandedId(null)}
-                                      aria-label="关闭"
-                                    >✕</button>
-                                  </div>
-                              <div style={{ padding: "18px 24px 28px" }}>
+                              <DetailModal
+                                title="运单详情"
+                                subtitle={item.trackingNo ?? "—"}
+                                onClose={() => setShipmentTableExpandedId(null)}
+                              >
+                              <div>
                                 {/* 隐藏信息栏：不用色块，靠一条细线跟下面分开 */}
                                 <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 24px", marginBottom: 14, paddingBottom: 12, borderBottom: "1px solid #eceae6", fontSize: 12, color: "#6b6b72" }}>
                                   <span>仓库：<strong>{warehouseLabelFromId(item.warehouseId)}</strong></span>
@@ -2318,8 +2295,7 @@ const loadLmShipments = async () => {
                                   </button>
                                 </div>
                               </div>
-                                </div>
-                              </div>
+                              </DetailModal>
                             </td>
                           </tr>
                         ) : null}

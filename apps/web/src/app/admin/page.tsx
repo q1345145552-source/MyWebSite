@@ -12,6 +12,7 @@ import Toast from "../../modules/layout/Toast";
 import ShipmentSearch from "../../modules/shipment/ShipmentSearch";
 import { openPrintLabel } from "../../modules/shipment/ShipmentPrintLabel";
 import { openShipmentTrack } from "../../modules/shipment/ShipmentTrackModal";
+import DetailModal from "../../modules/layout/DetailModal";
 import { apiBaseUrl, authHeaders, parseApiResponse } from "../../services/core-api";
 import { DEFAULT_SHIPPING_PRICES, INSPECTION_SURCHARGE, SENSITIVE_SURCHARGE } from "../../../../../packages/shared-types/constants";
 import { shipmentStatusZh, transportModeLabel, warehouseLabelFromId } from "../../modules/staff/utils";
@@ -612,35 +613,6 @@ export default function AdminHomePage() {
     },
     [session, loadOverview, loadOpsOverview, loadStaff, loadClients, loadOrders, loadSessionMemory, loadKnowledgeGaps],
   );
-
-  /** 运单详情是全屏弹窗：开着时按 ESC 关闭，并锁住背景滚动 */
-  useEffect(() => {
-    if (!expandedOrderId) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setExpandedOrderId("");
-    };
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prevOverflow;
-    };
-  }, [expandedOrderId]);
-
-  /**
-   * 编辑运单也是全屏弹窗，同样锁住背景滚动。
-   * 但这里刻意不绑 ESC —— 编辑是在填表，误按一下就把填了一半的内容丢了，
-   * 只允许点「关闭」或「取消」退出。
-   */
-  useEffect(() => {
-    if (!editingOrderId) return;
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prevOverflow;
-    };
-  }, [editingOrderId]);
 
   useEffect(() => {
     const next = getOptionalSession();
@@ -1660,21 +1632,12 @@ export default function AdminHomePage() {
                       {/* 详情改成全屏弹窗：格子只作挂载点，内容用 position:fixed 铺满屏幕，
                           所以这一行不占高度，表格不会被撑开 */}
                       <td colSpan={14} style={{ padding: 0, border: "none" }}>
-                        <div className="detail-overlay">
-                          <div className="detail-panel">
-                            <div className="detail-head">
-                              <div>
-                                <div className="detail-title">运单详情</div>
-                                <div className="detail-sub">{o.trackingNo ?? o.orderNo ?? "—"}</div>
-                              </div>
-                              <button
-                                type="button"
-                                className="detail-close"
-                                onClick={() => setExpandedOrderId("")}
-                                aria-label="关闭"
-                              >✕</button>
-                            </div>
-                        <div style={{ padding: "18px 24px 28px" }}>
+                        <DetailModal
+                          title="运单详情"
+                          subtitle={o.trackingNo ?? o.orderNo ?? "—"}
+                          onClose={() => setExpandedOrderId("")}
+                        >
+                        <div>
                           <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 24px", marginBottom: 14, paddingBottom: 12, borderBottom: "1px solid #eceae6", fontSize: 12, color: "#6b6b72" }}>
                             <span>仓库：<strong>{warehouseOptions.find(w => w.id === o.warehouseId)?.label ?? "—"}</strong></span>
                             <span>柜号：<strong>{o.batchNo ?? "—"}</strong></span>
@@ -1704,8 +1667,7 @@ export default function AdminHomePage() {
                             </div>
                           )}
                         </div>
-                          </div>
-                        </div>
+                        </DetailModal>
                       </td>
                     </tr>
                   ) : null}
@@ -1713,21 +1675,12 @@ export default function AdminHomePage() {
                     <tr key={`edit-${o.id}`}>
                       {/* 编辑表单同样改成全屏弹窗；格子只作挂载点，不占高度 */}
                       <td colSpan={14} style={{ padding: 0, border: "none" }}>
-                        <div className="detail-overlay">
-                          <div className="detail-panel">
-                            <div className="detail-head">
-                              <div>
-                                <div className="detail-title">编辑运单</div>
-                                <div className="detail-sub">{o.trackingNo ?? o.orderNo ?? "—"}</div>
-                              </div>
-                              <button
-                                type="button"
-                                className="detail-close"
-                                onClick={() => setEditingOrderId("")}
-                                aria-label="关闭"
-                              >✕</button>
-                            </div>
-                        <div style={{ padding: "18px 24px 28px" }}>
+                        <DetailModal
+                          title="编辑运单"
+                          subtitle={o.trackingNo ?? o.orderNo ?? "—"}
+                          onClose={() => setEditingOrderId("")}
+                          closeOnEsc={false}
+                        >
                         <div style={{ display: "grid", gap: 8 }}>
                           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
                             <input value={orderEditForm.clientId} onChange={(e) => setOrderEditForm((v) => ({ ...v, clientId: e.target.value }))} placeholder="唛头" list="admin-client-options" autoComplete="off" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }} />
@@ -1792,9 +1745,7 @@ export default function AdminHomePage() {
                             <button type="button" onClick={() => setEditingOrderId("")} style={{ border: "1px solid #d8d6d1", borderRadius: 6, padding: "9px 18px", background: "#fff", cursor: "pointer", color: "#1a1a1e" }}>取消</button>
                           </div>
                         </div>
-                          </div>
-                          </div>
-                        </div>
+                        </DetailModal>
                       </td>
                     </tr>
                   ) : null}

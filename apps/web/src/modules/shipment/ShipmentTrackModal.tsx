@@ -406,6 +406,7 @@ function ShipmentTrackModal({ trackingOrId, onClose }: { trackingOrId: string; o
 
   return (
     <div
+      className="track-overlay"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       style={{
         position: "fixed",
