@@ -240,6 +240,22 @@ export default function ClientHomePage() {
     }));
   };
 
+  /** 运单详情是全屏弹窗：开着时按 ESC 关闭，并锁住背景滚动 */
+  useEffect(() => {
+    const openId = Object.keys(openDetailsByOrder).find((k) => openDetailsByOrder[k]);
+    if (!openId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpenDetailsByOrder({});
+    };
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [openDetailsByOrder]);
+
   useEffect(() => {
     setDashboardLoading(true);
     refreshMainData()
@@ -1164,8 +1180,8 @@ export default function ClientHomePage() {
                                 }
                               }
                               setOpenDetailsByOrder(next);
-                            }} style={{ border: "none", borderRadius: 4, padding: "2px 6px", background: isExpanded ? "#dbeafe" : "#f3f4f6", color: "#374151", cursor: "pointer", fontSize: 14, fontWeight: 700, lineHeight: 1 }}>
-                              {isExpanded ? "−" : "+"}
+                            }} className="row-act">
+                              详情
                             </button>
                           </td>
                           <td style={{ padding: "6px 8px", fontFamily: "monospace", color: "#6b21a8", fontSize: 12 }}>{item.clientId || "—"}</td>
@@ -1183,8 +1199,25 @@ export default function ClientHomePage() {
                           </td>
                         </tr>
                         {isExpanded && (
-                          <tr style={{ borderBottom: "1px solid #e5e7eb", background: "#f8fafc" }}>
-                            <td colSpan={11} style={{ padding: "12px 16px" }}>
+                          <tr>
+                            {/* 详情改成全屏弹窗：格子只作挂载点，内容用 position:fixed 铺满屏幕，
+                                所以这一行不占高度，表格不会被撑开 */}
+                            <td colSpan={11} style={{ padding: 0, border: "none" }}>
+                              <div className="detail-overlay">
+                                <div className="detail-panel">
+                                  <div className="detail-head">
+                                    <div>
+                                      <div className="detail-title">运单详情</div>
+                                      <div className="detail-sub">{item.trackingNo ?? item.orderNo ?? "—"}</div>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      className="detail-close"
+                                      onClick={() => setOpenDetailsByOrder((prev) => ({ ...prev, [item.id]: false }))}
+                                      aria-label="关闭"
+                                    >✕</button>
+                                  </div>
+                                  <div style={{ padding: "18px 24px 28px" }}>
                               {/* 基本信息 */}
                               <h4 style={{ margin: "0 0 8px", fontSize: 14, color: "#374151" }}>基本信息</h4>
                               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "6px 16px", marginBottom: 12 }}>
@@ -1247,6 +1280,9 @@ export default function ClientHomePage() {
                                     ))}
                                   </div>
                                 )}
+                              </div>
+                                  </div>
+                                </div>
                               </div>
                             </td>
                           </tr>

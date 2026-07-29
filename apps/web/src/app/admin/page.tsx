@@ -613,6 +613,35 @@ export default function AdminHomePage() {
     [session, loadOverview, loadOpsOverview, loadStaff, loadClients, loadOrders, loadSessionMemory, loadKnowledgeGaps],
   );
 
+  /** 运单详情是全屏弹窗：开着时按 ESC 关闭，并锁住背景滚动 */
+  useEffect(() => {
+    if (!expandedOrderId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setExpandedOrderId("");
+    };
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [expandedOrderId]);
+
+  /**
+   * 编辑运单也是全屏弹窗，同样锁住背景滚动。
+   * 但这里刻意不绑 ESC —— 编辑是在填表，误按一下就把填了一半的内容丢了，
+   * 只允许点「关闭」或「取消」退出。
+   */
+  useEffect(() => {
+    if (!editingOrderId) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [editingOrderId]);
+
   useEffect(() => {
     const next = getOptionalSession();
     if (!next) return;
@@ -1509,9 +1538,9 @@ export default function AdminHomePage() {
                             return o.id;
                           });
                         }}
-                        style={{ border: "1px solid #cbd5e1", borderRadius: 6, width: 28, height: 28, background: "#fff", cursor: "pointer", fontSize: 16, lineHeight: 1, color: "#0f172a" }}
+                        className="row-act"
                       >
-                        {expandedOrderId === o.id ? "−" : "+"}
+                        详情
                       </button>
                     </td>
                     <td style={{ padding: "8px 6px", color: "#000000", fontWeight: 600 }}>{o.clientId ?? "—"}</td>
@@ -1589,9 +1618,9 @@ export default function AdminHomePage() {
                             startEditOrder(o);
                           }
                         }}
-                        style={{ border: "1px solid #bfdbfe", borderRadius: 8, padding: "4px 10px", background: editingOrderId === (o.orderId ?? o.id) ? "#e0e7ff" : "#eff6ff", color: "#1d4ed8", cursor: "pointer", fontWeight: 700, marginRight: 6 }}
+                        className="row-act"
                       >
-                        {editingOrderId === (o.orderId ?? o.id) ? "收起" : "编辑"}
+                        编辑
                       </button>
                       <button
                         type="button"
@@ -1628,9 +1657,25 @@ export default function AdminHomePage() {
                   </tr>
                   {expandedOrderId === o.id ? (
                     <tr>
-                      <td colSpan={14} style={{ padding: 0, background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
-                        <div style={{ padding: 14 }}>
-                          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 20px", marginBottom: 12, padding: 8, background: "#f1f5f9", borderRadius: 6, fontSize: 12 }}>
+                      {/* 详情改成全屏弹窗：格子只作挂载点，内容用 position:fixed 铺满屏幕，
+                          所以这一行不占高度，表格不会被撑开 */}
+                      <td colSpan={14} style={{ padding: 0, border: "none" }}>
+                        <div className="detail-overlay">
+                          <div className="detail-panel">
+                            <div className="detail-head">
+                              <div>
+                                <div className="detail-title">运单详情</div>
+                                <div className="detail-sub">{o.trackingNo ?? o.orderNo ?? "—"}</div>
+                              </div>
+                              <button
+                                type="button"
+                                className="detail-close"
+                                onClick={() => setExpandedOrderId("")}
+                                aria-label="关闭"
+                              >✕</button>
+                            </div>
+                        <div style={{ padding: "18px 24px 28px" }}>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 24px", marginBottom: 14, paddingBottom: 12, borderBottom: "1px solid #eceae6", fontSize: 12, color: "#6b6b72" }}>
                             <span>仓库：<strong>{warehouseOptions.find(w => w.id === o.warehouseId)?.label ?? "—"}</strong></span>
                             <span>柜号：<strong>{o.batchNo ?? "—"}</strong></span>
                             <span>包装：<strong>{o.packageUnit === "bag" ? "袋" : "箱"}</strong></span>
@@ -1659,14 +1704,31 @@ export default function AdminHomePage() {
                             </div>
                           )}
                         </div>
+                          </div>
+                        </div>
                       </td>
                     </tr>
                   ) : null}
                   {editingOrderId === (o.orderId ?? o.id) ? (
-                    <tr key={`edit-${o.id}`} style={{ background: "#f8fafc" }}>
-                      <td colSpan={14} style={{ padding: 12 }}>
+                    <tr key={`edit-${o.id}`}>
+                      {/* 编辑表单同样改成全屏弹窗；格子只作挂载点，不占高度 */}
+                      <td colSpan={14} style={{ padding: 0, border: "none" }}>
+                        <div className="detail-overlay">
+                          <div className="detail-panel">
+                            <div className="detail-head">
+                              <div>
+                                <div className="detail-title">编辑运单</div>
+                                <div className="detail-sub">{o.trackingNo ?? o.orderNo ?? "—"}</div>
+                              </div>
+                              <button
+                                type="button"
+                                className="detail-close"
+                                onClick={() => setEditingOrderId("")}
+                                aria-label="关闭"
+                              >✕</button>
+                            </div>
+                        <div style={{ padding: "18px 24px 28px" }}>
                         <div style={{ display: "grid", gap: 8 }}>
-                          <div style={{ fontWeight: 700, color: "#0f172a" }}>编辑：{o.trackingNo ?? "—"}</div>
                           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
                             <input value={orderEditForm.clientId} onChange={(e) => setOrderEditForm((v) => ({ ...v, clientId: e.target.value }))} placeholder="唛头" list="admin-client-options" autoComplete="off" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }} />
                             <datalist id="admin-client-options">{clientList.map((c) => (<option key={c.id} value={c.id}>{c.id}</option>))}</datalist>
@@ -1726,8 +1788,11 @@ export default function AdminHomePage() {
                           </div>
 
                           <div style={{ display: "flex", gap: 8 }}>
-                            <button type="button" onClick={() => void submitOrderEdit()} disabled={loading} style={{ border: "none", borderRadius: 8, padding: "8px 14px", color: "#fff", background: "#2563eb", cursor: "pointer" }}>保存</button>
-                            <button type="button" onClick={() => setEditingOrderId("")} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 14px", background: "#fff", cursor: "pointer", color: "#000000" }}>取消</button>
+                            <button type="button" onClick={() => void submitOrderEdit()} disabled={loading} style={{ border: "none", borderRadius: 6, padding: "9px 18px", color: "#fff", background: "#1e3a8a", cursor: "pointer", fontWeight: 600 }}>保存</button>
+                            <button type="button" onClick={() => setEditingOrderId("")} style={{ border: "1px solid #d8d6d1", borderRadius: 6, padding: "9px 18px", background: "#fff", cursor: "pointer", color: "#1a1a1e" }}>取消</button>
+                          </div>
+                        </div>
+                          </div>
                           </div>
                         </div>
                       </td>

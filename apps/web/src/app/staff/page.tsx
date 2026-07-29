@@ -1641,7 +1641,7 @@ const loadLmShipments = async () => {
           <div style={{ flex: 1 }}>
             <h2 style={{ margin: 0, fontSize: 18, color: "#111827" }}>运单管理</h2>
             <p style={{ margin: "6px 0 8px", fontSize: 12, color: "#000000" }}>
-              表格展示运单号、用户、状态、加收金额、运输方式、发货时间、件重体、仓库与地址；点击「查看」打开运单详情与物流轨迹。
+              表格展示运单号、用户、状态、加收金额、运输方式、发货时间、件重体、仓库与地址；点击「详情」打开运单详情与物流轨迹。
             </p>
         <ShipmentSearch value={shipmentSearch} onChange={(key, val) => setShipmentSearch((prev) => ({ ...prev, [key]: val }))} onSearch={runShipmentListSearch} warehouseOptions={warehouseOptions} logisticsStatusOptions={logisticsStatusOptions} inputStyle={orderCreateInputStyle} />
           </div>
@@ -1807,7 +1807,7 @@ const loadLmShipments = async () => {
                               }}
                               className="row-act"
                             >
-                              查看
+                              详情
                             </button>
                             <button
                               type="button"
