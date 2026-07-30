@@ -21,6 +21,7 @@ export default function DetailModal(props: {
   const { title, subtitle, onClose, closeOnEsc = true, children } = props;
   const [closing, setClosing] = useState(false);
   const closedRef = useRef(false);
+  const closeTimerRef = useRef<number | null>(null);
 
   const requestClose = useCallback(() => {
     if (closedRef.current) return;
@@ -28,7 +29,7 @@ export default function DetailModal(props: {
     setClosing(true);
     // 必须和 globals.css 里 pageTurnOut / overlayFadeOut 的时长一致，
     // 短了会在动画放完前就把节点摘掉，看起来像"闪一下没了"
-    window.setTimeout(onClose, 200);
+    closeTimerRef.current = window.setTimeout(onClose, 200);
   }, [onClose]);
 
   useEffect(() => {
@@ -43,6 +44,18 @@ export default function DetailModal(props: {
       document.body.style.overflow = prevOverflow;
     };
   }, [closeOnEsc, requestClose]);
+
+  // 【审查问题 8】关闭动画的定时器原来没人清：
+  // 弹窗还在放动画时列表刚好自动刷新把节点摘掉，这个 onClose 会晚 200ms 空放一次，
+  // 有可能把用户刚打开的下一个弹窗关掉。组件卸载时一并清掉。
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current !== null) {
+        window.clearTimeout(closeTimerRef.current);
+        closeTimerRef.current = null;
+      }
+    };
+  }, []);
 
   return (
     <div className={`detail-overlay${closing ? " is-closing" : ""}`}>

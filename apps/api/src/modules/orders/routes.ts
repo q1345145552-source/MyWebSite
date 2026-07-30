@@ -370,6 +370,29 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       return;
     }
 
+    // 【审查问题 6】原来直接 Number(...) 就往库里写，Excel 里箱数填成"三箱"
+    // 会变成 NaN → Prisma 写库报错 → 500。这里补上和 admin/routes.ts 一致的校验。
+    const numOrFail = (raw: unknown, field: string): number | null => {
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 0) {
+        fail(res, 400, "BAD_REQUEST", `invalid ${field}`);
+        return null;
+      }
+      return n;
+    };
+    let receivePackageCount: number | undefined;
+    if (body.packageCount !== undefined) {
+      const n = numOrFail(body.packageCount, "packageCount");
+      if (n === null) return;
+      receivePackageCount = n;
+    }
+    let receiveProductQuantity: number | undefined;
+    if (body.productQuantity !== undefined) {
+      const n = numOrFail(body.productQuantity, "productQuantity");
+      if (n === null) return;
+      receiveProductQuantity = n;
+    }
+
     const now = new Date();
     const updateData: any = {
       approvalStatus: "received",
@@ -377,11 +400,11 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       updatedAt: now,
     };
     if (body.itemName?.trim()) updateData.itemName = body.itemName.trim();
-    if (body.packageCount !== undefined) updateData.packageCount = Number(body.packageCount);
+    if (receivePackageCount !== undefined) updateData.packageCount = receivePackageCount;
     if (body.packageUnit) updateData.packageUnit = body.packageUnit;
     if (body.weightKg !== undefined) updateData.weightKg = body.weightKg as any;
     if (body.volumeM3 !== undefined) updateData.volumeM3 = body.volumeM3 as any;
-    if (body.productQuantity !== undefined) updateData.productQuantity = Number(body.productQuantity);
+    if (receiveProductQuantity !== undefined) updateData.productQuantity = receiveProductQuantity;
     if (body.transportMode) updateData.transportMode = body.transportMode;
     if (body.cargoType) updateData.cargoType = body.cargoType;
     if (body.domesticTrackingNo) updateData.domesticTrackingNo = body.domesticTrackingNo;
@@ -394,7 +417,7 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       const sUpdate: any = { updatedAt: now };
       if (body.weightKg !== undefined) sUpdate.weightKg = body.weightKg as any;
       if (body.volumeM3 !== undefined) sUpdate.volumeM3 = body.volumeM3 as any;
-      if (body.packageCount !== undefined) sUpdate.packageCount = Number(body.packageCount);
+      if (receivePackageCount !== undefined) sUpdate.packageCount = receivePackageCount;
       if (body.packageUnit) sUpdate.packageUnit = body.packageUnit;
       if (body.transportMode) sUpdate.transportMode = body.transportMode;
       if (body.itemName?.trim()) sUpdate.itemName = body.itemName.trim();
@@ -1305,11 +1328,17 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       return;
     }
 
+    // 【审查问题 7】原来在 include.order 里写了 where —— Prisma 不允许对
+    // 一对一关联加 where（schema 里 order 是必填的一对一），一调就抛校验错误变 500。
+    // 归属公司的限制改到外层 where 上，等价且合法。
     const shipment = await prisma.shipment.findFirst({
-      where: { id: shipmentId, companyId: auth.companyId },
+      where: {
+        id: shipmentId,
+        companyId: auth.companyId,
+        order: { companyId: auth.companyId },
+      },
       include: {
         order: {
-          where: { companyId: auth.companyId },
           select: {
             id: true,
             warehouseId: true,

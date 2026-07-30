@@ -230,12 +230,14 @@ export default function AdminHomePage() {
   const lmSignFileRef = useRef<HTMLInputElement>(null);
   const [lmSignData, setLmSignData] = useState<{id:string;base64:string}|null>(null);
   const loadLmShipments = async () => {
-    try { const r = await fetch(apiBaseUrl()+"/staff/shipments?pageSize=500&all=1",{headers:authHeaders()}); const d=await r.json();
-      if(d.code==="OK") setLmShipments(d.data.items.filter((s:any)=>["inwarehouseth","outfordelivery","delivered"].includes((s.currentStatus||"").toLowerCase())).map((s:any)=>({id:s.id,trackingNo:s.trackingNo,clientId:s.clientId??"",itemName:s.itemName??"",packageCount:s.packageCount??0,containerNo:s.containerNo||undefined}))); } catch (e) { console.error(e); }
+    // 【审查问题 3】原来用 r.json() 自己判 code，绕过了 parseApiResponse——
+    // 登录过期(401)时既不跳登录页也不提示，页面只会一片空白。
+    try { const r = await fetch(apiBaseUrl()+"/staff/shipments?pageSize=500&all=1",{headers:authHeaders()}); const d=await parseApiResponse<{items:any[]}>(r);
+      setLmShipments((d.items ?? []).filter((s:any)=>["inwarehouseth","outfordelivery","delivered"].includes((s.currentStatus||"").toLowerCase())).map((s:any)=>({id:s.id,trackingNo:s.trackingNo,clientId:s.clientId??"",itemName:s.itemName??"",packageCount:s.packageCount??0,containerNo:s.containerNo||undefined}))); } catch (e) { console.error(e); setMessage(`尾端运单加载失败：${e instanceof Error ? e.message : "未知错误"}`); }
   };
   const [lmOrders, setLmOrders] = useState<Array<{id:string;deliveryNo:string;shipmentId:string;trackingNo?:string;driverName?:string|null;licensePlate?:string|null;phoneNumber?:string|null;deliveryDate?:string|null;signImageBase64?:string|null;status:string}>>([]);
   const loadLastmileOrders = async () => {
-    try { const res = await fetch(`${apiBaseUrl()}/admin/lastmile/orders`, { headers: authHeaders() }); const d = await parseApiResponse<{items:any[]}>(res); setLmOrders(d.items); } catch (e) { console.error(e); }
+    try { const res = await fetch(`${apiBaseUrl()}/admin/lastmile/orders`, { headers: authHeaders() }); const d = await parseApiResponse<{items:any[]}>(res); setLmOrders(d.items ?? []); } catch (e) { console.error(e); }
   };
   const updateLastmileStatus = async (id: string, status: string, signImageBase64?: string) => {
     const res = await fetch(`${apiBaseUrl()}/admin/lastmile/status`, { method: "POST", headers: {"Content-Type":"application/json",...authHeaders()}, body: JSON.stringify({id, status, signImageBase64: signImageBase64 || undefined}) });
@@ -251,7 +253,8 @@ export default function AdminHomePage() {
   const [offlineRejectId, setOfflineRejectId] = useState<string | null>(null);
   const [offlineRejectRemark, setOfflineRejectRemark] = useState("");
   const loadOfflinePayments = async () => {
-    try { const r = await fetch(`${apiBaseUrl()}/admin/offline-payments`, { headers: authHeaders() }); const d = await r.json(); if (d.code === "OK") setOfflinePayments(d.data.items); } catch (e) { console.error(e); }
+    // 【审查问题 3】同上：改走 parseApiResponse，401 会自动跳登录页
+    try { const r = await fetch(`${apiBaseUrl()}/admin/offline-payments`, { headers: authHeaders() }); const d = await parseApiResponse<{items:any[]}>(r); setOfflinePayments(d.items ?? []); } catch (e) { console.error(e); setMessage(`付款审核加载失败：${e instanceof Error ? e.message : "未知错误"}`); }
   };
   const [rejectRemark, setRejectRemark] = useState("");
   const loadRecharges = async () => {
@@ -384,10 +387,13 @@ export default function AdminHomePage() {
   const loadOrders = useCallback(async () => {
     const list = await fetchAdminOrders();
     // 按运单号数字降序：YW0001220 > YW0001219
+    // 【审查问题 10】原来用 Number() 比大小，超过 15 位会丢精度导致排序乱。
+    // 改成先按位数、再按字符串比 —— 纯数字字符串等长时字典序就是数值序，不受长度限制。
     list.sort((a, b) => {
-      const an = (a.trackingNo ?? "").replace(/\D/g, "");
-      const bn = (b.trackingNo ?? "").replace(/\D/g, "");
-      return (Number(bn) || 0) - (Number(an) || 0);
+      const an = (a.trackingNo ?? "").replace(/\D/g, "").replace(/^0+/, "");
+      const bn = (b.trackingNo ?? "").replace(/\D/g, "").replace(/^0+/, "");
+      if (an.length !== bn.length) return bn.length - an.length;
+      return bn.localeCompare(an);
     });
     setOrderList(list);
   }, []);
@@ -573,12 +579,12 @@ export default function AdminHomePage() {
 
   const loadSessionMemory = useCallback(async () => {
     const data = await fetchAdminAiSessionMemory({ limit: 200 });
-    setSessionMemoryList(data.items);
+    setSessionMemoryList(data.items ?? []); // 【审查问题 13】接口少了 items 就会让整页崩掉
   }, []);
 
   const loadKnowledgeGaps = useCallback(async () => {
     const data = await fetchAdminAiKnowledgeGaps({ status: knowledgeGapStatus });
-    setKnowledgeGapList(data.items);
+    setKnowledgeGapList(data.items ?? []); // 【审查问题 13】同上
   }, [knowledgeGapStatus]);
 
   const loadKnowledge = useCallback(async () => {
@@ -995,7 +1001,7 @@ export default function AdminHomePage() {
   const loadRates = async () => {
     try {
       const data = await fetchAdminShippingRates();
-      setRateItems(data.items);
+      setRateItems(data.items ?? []); // 【审查问题 13】同上
       setRateDefaults(data.defaults);
       // 初始化默认价格编辑值
       const initPrices: Record<string, number> = {};
@@ -1036,10 +1042,19 @@ export default function AdminHomePage() {
   useEffect(() => {
     if (activeSection === "shipping-config" && clientList.length > 0) void loadRates();
     if (activeSection === "lastmile") loadLastmileOrders();
-    if (activeSection === "wallet-recharges") loadRecharges();
     if (activeSection === "offline-payments") loadOfflinePayments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSection, clientList]);
+
+  // 【审查问题 5】充值审核的状态筛选原来写在 onClick 里：
+  // setRechargeStatusFilter(s) 之后紧接着 setTimeout(loadRecharges, 0)，
+  // 但那个 loadRecharges 闭包读的还是点击前的筛选值 —— 结果永远慢一拍，
+  // 点「待审核」拉回来的是上一次的结果。改成让筛选值变化自己触发加载。
+  useEffect(() => {
+    if (activeSection !== "wallet-recharges") return;
+    void loadRecharges();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSection, rechargeStatusFilter]);
 
   if (!session) return null;
 
@@ -1827,8 +1842,13 @@ export default function AdminHomePage() {
           <button disabled={loading || lmSelected.size===0} onClick={async () => {
             setLoading(true);
             try {
-              (()=>{const ids=Array.from(lmSelected);return fetch(apiBaseUrl()+"/admin/lastmile/orders",{method:"POST",headers:{"Content-Type":"application/json",...authHeaders()},body:JSON.stringify({shipmentIds:ids,driverName:lmForm.driverName.trim(),licensePlate:lmForm.licensePlate.trim(),phoneNumber:lmForm.phoneNumber.trim(),deliveryDate:lmForm.deliveryDate})}).then(r=>r.json()).then(d=>{if(d.code!=="OK")throw new Error(d.message||"创建失败");setToast(d.data.deliveryNo+" 已创建（"+d.data.count+"个运单）")})})();
-              setToast("派送单已创建");
+              // 【审查问题 3 + 漏 await】原来这个立即执行函数返回的 Promise 没被 await：
+              // 请求还没回来就先弹「派送单已创建」，失败时里面的 throw 也接不到，
+              // 变成浏览器里的 unhandled rejection。现在改成等结果再提示。
+              const ids = Array.from(lmSelected);
+              const res = await fetch(apiBaseUrl()+"/admin/lastmile/orders",{method:"POST",headers:{"Content-Type":"application/json",...authHeaders()},body:JSON.stringify({shipmentIds:ids,driverName:lmForm.driverName.trim(),licensePlate:lmForm.licensePlate.trim(),phoneNumber:lmForm.phoneNumber.trim(),deliveryDate:lmForm.deliveryDate})});
+              const created = await parseApiResponse<{ deliveryNo: string; count: number }>(res);
+              setToast(`${created.deliveryNo} 已创建（${created.count}个运单）`);
               setLmForm({ driverName: "", licensePlate: "", phoneNumber: "", deliveryDate: "" }); setLmSelected(new Set());
               loadLastmileOrders();
             } catch (e: any) { setToast(e.message ?? "创建失败"); }
@@ -1866,7 +1886,8 @@ export default function AdminHomePage() {
                           setLmSignData({id:o.id,base64:""}); lmSignFileRef.current?.click();
                         }} style={{ border: "1px solid #16a34a", borderRadius: 4, padding: "2px 8px", fontSize: 11, background: "#fff", color: "#16a34a", cursor: "pointer" }}>签收</button>
                       )}
-                      <button onClick={async ()=>{if(!confirm("确定删除？"))return;try{await fetch(apiBaseUrl()+"/admin/lastmile/orders?id="+o.id,{method:"DELETE",headers:authHeaders()});setToast("已删除");loadLastmileOrders()}catch(e:any){setToast(e.message||"失败")}}} style={{ border: "1px solid #fca5a5", borderRadius: 4, padding: "2px 6px", fontSize: 11, background: "#fff", color: "#dc2626", cursor: "pointer", marginLeft: 4 }}>删除</button>
+                      {/* 【审查问题 2】原来删除不看返回就弹「已删除」，删失败刷新一下单子又回来了 */}
+                      <button onClick={async ()=>{if(!confirm("确定删除？"))return;try{const res=await fetch(apiBaseUrl()+"/admin/lastmile/orders?id="+o.id,{method:"DELETE",headers:authHeaders()});await parseApiResponse(res);setToast("已删除");loadLastmileOrders()}catch(e:any){setToast(e.message||"删除失败，请重试")}}} style={{ border: "1px solid #fca5a5", borderRadius: 4, padding: "2px 6px", fontSize: 11, background: "#fff", color: "#dc2626", cursor: "pointer", marginLeft: 4 }}>删除</button>
                     </td>
                   </tr>
                 ))}
@@ -1913,7 +1934,7 @@ export default function AdminHomePage() {
             <button
               key={s}
               type="button"
-              onClick={() => { setRechargeStatusFilter(s); setTimeout(() => loadRecharges(), 0); }}
+              onClick={() => setRechargeStatusFilter(s)}
               style={{
                 border: rechargeStatusFilter === s ? "2px solid #2563eb" : "1px solid #d1d5db",
                 borderRadius: 8,
@@ -2083,7 +2104,8 @@ export default function AdminHomePage() {
               <button type="button" onClick={() => setOfflineRejectId(null)} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 16px", background: "#fff", cursor: "pointer", fontSize: 13 }}>取消</button>
               <button type="button" onClick={async () => {
                 if (!offlineRejectRemark.trim()) { setToast("请填写拒绝原因"); return; }
-                try { await fetch(`${apiBaseUrl()}/admin/offline-payments/reject`, { method: "POST", headers: {"Content-Type":"application/json",...authHeaders()}, body: JSON.stringify({orderId: offlineRejectId, remark: offlineRejectRemark.trim()}) }); setToast("已拒绝"); setOfflineRejectId(null); loadOfflinePayments(); } catch (e: any) { setToast(e.message||"失败"); }
+                // 【审查问题 2】同上：不确认后端结果就弹「已拒绝」，失败也看不出来
+                try { const res = await fetch(`${apiBaseUrl()}/admin/offline-payments/reject`, { method: "POST", headers: {"Content-Type":"application/json",...authHeaders()}, body: JSON.stringify({orderId: offlineRejectId, remark: offlineRejectRemark.trim()}) }); await parseApiResponse(res); setToast("已拒绝"); setOfflineRejectId(null); loadOfflinePayments(); } catch (e: any) { setToast(e.message||"操作失败，请重试"); }
               }} style={{ border: "none", borderRadius: 8, padding: "8px 16px", background: "#dc2626", color: "#fff", fontWeight: 600, cursor: "pointer", fontSize: 13 }}>确认拒绝</button>
             </div>
           </div>
@@ -2121,7 +2143,9 @@ export default function AdminHomePage() {
                     <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
                       <button type="button" onClick={async () => {
                         if (!confirm("确认通过？运单将标记为已付款")) return;
-                        try { await fetch(`${apiBaseUrl()}/admin/offline-payments/approve`, { method: "POST", headers: {"Content-Type":"application/json",...authHeaders()}, body: JSON.stringify({orderId: p.orderId}) }); setToast("已通过"); loadOfflinePayments(); } catch (e: any) { setToast(e.message||"失败"); }
+                        // 【审查问题 2】原来不看返回就弹「已通过」，服务器报错也照弹。
+                        // 财务操作必须确认后端真的成功 —— parseApiResponse 失败会抛错。
+                        try { const res = await fetch(`${apiBaseUrl()}/admin/offline-payments/approve`, { method: "POST", headers: {"Content-Type":"application/json",...authHeaders()}, body: JSON.stringify({orderId: p.orderId}) }); await parseApiResponse(res); setToast("已通过"); loadOfflinePayments(); } catch (e: any) { setToast(e.message||"操作失败，请重试"); }
                       }} style={{ border: "none", borderRadius: 6, padding: "4px 10px", background: "#16a34a", color: "#fff", cursor: "pointer", fontSize: 12, marginRight: 4 }}>通过</button>
                       <button type="button" onClick={() => { setOfflineRejectId(p.orderId); setOfflineRejectRemark(""); }} style={{ border: "none", borderRadius: 6, padding: "4px 10px", background: "#dc2626", color: "#fff", cursor: "pointer", fontSize: 12 }}>拒绝</button>
                     </td>

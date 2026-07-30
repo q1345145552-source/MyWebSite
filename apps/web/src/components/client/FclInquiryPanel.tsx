@@ -43,7 +43,7 @@ export default function FclInquiryPanel(props: ClientFclInquiryProps) {
   const loadList = async () => {
     try {
       const data = await apiRequest<{ items: FclInquiryItem[] }>(`${apiBaseUrl()}/client/fcl-inquiries`);
-      setList(data.items);
+      setList(data.items ?? []); // 【审查问题 13】接口少了 items 就会让整页崩掉
     } catch (e: any) { props.onToast("加载询价记录失败：" + (e.message || "网络错误")); setListError(true); }
     setListLoaded(true);
   };

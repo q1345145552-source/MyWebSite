@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { apiBaseUrl, authHeaders } from "../services/core-api";
+import { apiBaseUrl, authHeaders, parseApiResponse } from "../services/core-api";
 
 type ContainerInfo = {
   containerId: string;
@@ -101,13 +101,10 @@ export function ContainerTrackingSection({ shipmentId, trackingNo, hideContainer
       headers: { ...authHeaders() },
     })
       .then(async (resp) => {
-        const json = await resp.json();
+        // 【审查问题 3】走 parseApiResponse：401 会自动跳登录页；失败统一走下面的 catch
+        const json = await parseApiResponse<TrackData>(resp);
         if (cancelled) return;
-        if (json.code === "OK") {
-          setData(json.data as TrackData);
-        } else {
-          setError(json.message || "加载失败");
-        }
+        setData(json);
       })
       .catch((err) => {
         if (!cancelled) setError(err?.message || "网络错误");

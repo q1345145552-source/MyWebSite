@@ -11,7 +11,7 @@ import EmptyStateCard from "../../modules/layout/EmptyStateCard";
 import RoleShell from "../../modules/layout/RoleShell";
 import DetailModal from "../../modules/layout/DetailModal";
 import Toast from "../../modules/layout/Toast";
-import { apiBaseUrl, authHeaders } from "../../services/core-api";
+import { apiBaseUrl, authHeaders, parseApiResponse } from "../../services/core-api";
 import {
   receiveStaffPrealert,
   createStaffOrder,
@@ -149,9 +149,10 @@ export default function StaffHomePage() {
     setAddrLoading(true);
     try {
       const resp = await fetch(apiBaseUrl() + "/staff/lastmile/addresses?keyword=" + encodeURIComponent(keyword), { headers: authHeaders() });
-      const json = await resp.json();
-      if (json.code === "OK") setAddrItems(json.data.items);
-    } catch (e) { console.error(e); }
+      // 【审查问题 3】走 parseApiResponse：401 会自动跳登录页；失败也给提示，不再静默空白
+      const json = await parseApiResponse<{ items: typeof addrItems }>(resp);
+      setAddrItems(json.items ?? []);
+    } catch (e) { console.error(e); setMessage(`地址库加载失败：${e instanceof Error ? e.message : "未知错误"}`); }
     finally { setAddrLoading(false); }
   };
 
@@ -176,15 +177,17 @@ export default function StaffHomePage() {
 
   const saveNote = async (clientId: string, content: string) => {
     try {
-      await fetch(`${apiBaseUrl()}/admin/shipping/notes`, {
+      // 【审查问题 12】原来不看返回就弹「备注已保存」，失败也照弹
+      const res = await fetch(`${apiBaseUrl()}/admin/shipping/notes`, {
         method: "POST",
         headers: { ...authHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({ clientId, content }),
       });
+      await parseApiResponse(res);
       setToast("备注已保存");
       setEditingNote(null);
       await loadClientNotesData();
-    } catch { setToast("保存失败"); }
+    } catch (e: any) { setToast(e?.message || "保存失败，请重试"); }
   };
 
   const saveAddr = async (clientId: string) => {
@@ -192,16 +195,18 @@ export default function StaffHomePage() {
       setToast("请填写完整地址信息"); return;
     }
     try {
-      await fetch(`${apiBaseUrl()}/staff/client-addresses`, {
+      // 【审查问题 12】原来不看返回就弹「地址已添加」，失败也照弹
+      const res = await fetch(`${apiBaseUrl()}/staff/client-addresses`, {
         method: "POST",
         headers: { ...authHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({ clientId, ...addrForm }),
       });
+      await parseApiResponse(res);
       setToast("地址已添加");
       setShowAddAddress(null);
       setAddrForm({ contactName: "", contactPhone: "", addressDetail: "", label: "" });
       void loadLastmileAddresses(lastmileKeyword);
-    } catch { setToast("保存失败"); }
+    } catch (e: any) { setToast(e?.message || "保存失败，请重试"); }
   };
 
   const loadClientNotesData = async () => {
@@ -214,9 +219,10 @@ export default function StaffHomePage() {
         method: "DELETE",
         headers: { ...authHeaders() },
       });
-      const json = await resp.json();
-      if (json.code === "OK") { setToast("地址已删除"); void loadLastmileAddresses(lastmileKeyword); }
-      else setMessage("删除失败：" + (json.message ?? "未知错误"));
+      // 【审查问题 3】走 parseApiResponse：401 会自动跳登录页，失败也统一抛错
+      await parseApiResponse(resp);
+      setToast("地址已删除");
+      void loadLastmileAddresses(lastmileKeyword);
     } catch (e: any) { setMessage("删除失败：" + (e.message ?? "网络错误")); }
   };
 
@@ -226,9 +232,9 @@ export default function StaffHomePage() {
       const resp = await fetch(`${apiBaseUrl()}/staff/lastmile/addresses?keyword=${encodeURIComponent(keyword)}`, {
         headers: { ...authHeaders() },
       });
-      const json = await resp.json();
-      if (json.code === "OK") setLastmileItems(json.data.items);
-      else setMessage("查询失败：" + (json.message ?? "未知错误"));
+      // 【审查问题 3】同上
+      const json = await parseApiResponse<{ items: typeof lastmileItems }>(resp);
+      setLastmileItems(json.items ?? []);
     } catch (e: any) {
       setMessage("查询失败：" + (e.message ?? "网络错误"));
     } finally { setLastmileLoading(false); }
@@ -309,11 +315,13 @@ export default function StaffHomePage() {
   const [lmShipSearch, setLmShipSearch] = useState("");
   const [lmBatchInput, setLmBatchInput] = useState("");
 const loadLmShipments = async () => {
-    try { const r = await fetch(apiBaseUrl()+"/staff/shipments?pageSize=500&all=1",{headers:authHeaders()}); const d=await r.json();
-      if(d.code==="OK") setLmShipments(d.data.items.filter((s:any)=>["inwarehouseth","outfordelivery","delivered"].includes((s.currentStatus||"").toLowerCase())).map((s:any)=>({id:s.id,trackingNo:s.trackingNo,clientId:s.clientId??"",itemName:s.itemName??"",packageCount:s.packageCount??0,containerNo:s.containerNo||undefined}))); } catch (e) { console.error(e); }
+    // 【审查问题 3】走 parseApiResponse：401 会自动跳登录页，不再只是空白列表
+    try { const r = await fetch(apiBaseUrl()+"/staff/shipments?pageSize=500&all=1",{headers:authHeaders()}); const d=await parseApiResponse<{items:any[]}>(r);
+      setLmShipments((d.items ?? []).filter((s:any)=>["inwarehouseth","outfordelivery","delivered"].includes((s.currentStatus||"").toLowerCase())).map((s:any)=>({id:s.id,trackingNo:s.trackingNo,clientId:s.clientId??"",itemName:s.itemName??"",packageCount:s.packageCount??0,containerNo:s.containerNo||undefined}))); } catch (e) { console.error(e); setMessage(`尾端运单加载失败：${e instanceof Error ? e.message : "未知错误"}`); }
   };
   const [lmOrderList, setLmOrderList] = useState<Array<{id:string;deliveryNo:string;shipmentId:string;trackingNo?:string;driverName?:string;licensePlate?:string;phoneNumber?:string;deliveryDate?:string;clientId?:string;status:string}>>([]);
-  const loadLmOrders = async () => { try { const r=await fetch(apiBaseUrl()+"/admin/lastmile/orders",{headers:authHeaders()}); const d=await r.json(); if(d.code==="OK")setLmOrderList(d.data.items); } catch (e) { console.error(e); } };
+  // 【审查问题 3】走 parseApiResponse：401 会自动跳登录页
+  const loadLmOrders = async () => { try { const r=await fetch(apiBaseUrl()+"/admin/lastmile/orders",{headers:authHeaders()}); const d=await parseApiResponse<{items:typeof lmOrderList}>(r); setLmOrderList(d.items ?? []); } catch (e) { console.error(e); setMessage(`派送单加载失败：${e instanceof Error ? e.message : "未知错误"}`); } };
 
   // 客户余额
   const [walletBalances, setWalletBalances] = useState<StaffWalletBalanceItem[]>([]);
@@ -399,10 +407,12 @@ const loadLmShipments = async () => {
   const loadPageData = async (): Promise<ShipmentItem[]> => {
     const [shipmentItems, prealertItems, clientItems] = await Promise.all([fetchStaffShipments(), fetchStaffPrealerts(), fetchStaffClients()]);
     // 按运单号数字降序
+    // 【审查问题 10】同 admin：原来 Number() 超 15 位丢精度，改成按位数+字符串比
     shipmentItems.sort((a, b) => {
-      const an = (a.trackingNo ?? "").replace(/\D/g, "");
-      const bn = (b.trackingNo ?? "").replace(/\D/g, "");
-      return (Number(bn) || 0) - (Number(an) || 0);
+      const an = (a.trackingNo ?? "").replace(/\D/g, "").replace(/^0+/, "");
+      const bn = (b.trackingNo ?? "").replace(/\D/g, "").replace(/^0+/, "");
+      if (an.length !== bn.length) return bn.length - an.length;
+      return bn.localeCompare(an);
     });
     setStaffClients(clientItems);
     setShipments(shipmentItems.filter(s => !s.parentTrackingNo));
@@ -2397,7 +2407,7 @@ const loadLmShipments = async () => {
 
 
       {message ? <p style={{ marginTop: 12, color: message.includes("失败") ? "#b91c1c" : "#065f46" }}>{message}</p> : null}
-            <input ref={lmSignFileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={async (e: any) => { const f = e.target.files?.[0]; e.target.value = ""; if (!f || !lmSignData) return; const rdr = new FileReader(); rdr.onload = async () => { const b64 = (rdr.result as string).split(",")[1] || ""; try { const res = await fetch(apiBaseUrl()+"/admin/lastmile/status", { method: "POST", headers: {"Content-Type":"application/json",...authHeaders()}, body: JSON.stringify({ id: lmSignData.id, status: lmSignData.action === "sign" ? "SIGNED" : undefined, signImageBase64: b64 }) }); if (!res.ok) throw new Error((await res.json()).message||"失败"); setToast(lmSignData.action === "sign" ? "已签收" : "图片已上传"); loadLmOrders(); } catch(e: any) { setToast(e.message||"失败"); } setLmSignData(null); }; rdr.readAsDataURL(f); }} />
+            <input ref={lmSignFileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={async (e: any) => { const f = e.target.files?.[0]; e.target.value = ""; if (!f || !lmSignData) return; const rdr = new FileReader(); rdr.onload = async () => { const b64 = (rdr.result as string).split(",")[1] || ""; try { const res = await fetch(apiBaseUrl()+"/admin/lastmile/status", { method: "POST", headers: {"Content-Type":"application/json",...authHeaders()}, body: JSON.stringify({ id: lmSignData.id, status: lmSignData.action === "sign" ? "SIGNED" : undefined, signImageBase64: b64 }) }); /* 【审查问题 3】原来只看 res.ok，200 但业务失败照样弹「已签收」；也不跳登录页 */ await parseApiResponse(res); setToast(lmSignData.action === "sign" ? "已签收" : "图片已上传"); loadLmOrders(); } catch(e: any) { setToast(e.message||"操作失败，请重试"); } setLmSignData(null); }; rdr.readAsDataURL(f); }} />
 <Toast open={toast.length > 0} message={toast} />
       {/* 预报单审核弹窗 */}
       {approvingPrealert && (

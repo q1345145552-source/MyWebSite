@@ -89,12 +89,14 @@ export async function apiRequest<T>(
   url: string,
   options: RequestInit = {},
 ): Promise<T> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30_000); // 30秒超时
-
   let lastError: Error | null = null;
   // 429 限流自动重试最多 2 次，间隔 2s / 4s
   for (let attempt = 0; attempt < 3; attempt++) {
+    // 【审查问题 9】超时控制器改成每次请求各自一个：
+    // 原来 3 次重试共用一个 30 秒计时器，等待的 2s+4s 也算在里面，
+    // 最后一次实际只剩不到 24 秒；而且一旦 abort 过，signal 就报废了。
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000); // 单次请求 30 秒超时
     try {
       const response = await fetch(url, {
         ...options,
@@ -107,21 +109,24 @@ export async function apiRequest<T>(
 
       // 429 限流 → 等待后重试
       if (response.status === 429 && attempt < 2) {
+        clearTimeout(timeout);
         await new Promise((r) => setTimeout(r, (attempt + 1) * 2000));
         continue;
       }
 
-      // 5xx 服务器错误 → 友好提示
+      // 【审查问题 4】5xx 只提示、不重试。
+      // 原来这里 throw 会被下面的 catch 接住再 continue，等于服务器已经扛不住了
+      // 前端还给它发 3 倍请求。直接跳出循环。
       if (response.status >= 500) {
-        throw new Error("服务器繁忙，请稍后重试");
+        lastError = new Error("服务器繁忙，请稍后重试");
+        break;
       }
 
-      clearTimeout(timeout);
-      return parseApiResponse<T>(response);
+      return await parseApiResponse<T>(response);
     } catch (e: any) {
-      lastError = e;
+      lastError = e instanceof Error ? e : new Error(String(e));
       // 超时
-      if (e.name === "AbortError") {
+      if (e?.name === "AbortError") {
         lastError = new Error("请求超时，请检查网络后重试");
         break;
       }
@@ -130,12 +135,12 @@ export async function apiRequest<T>(
         lastError = new Error("网络连接异常，请检查网络后重试");
         break;
       }
-      // 429 重试中不抛
-      if (attempt < 2) continue;
+      // 其余错误（含后端返回的业务错误）不重试，直接抛给调用方
       break;
+    } finally {
+      clearTimeout(timeout);
     }
   }
 
-  clearTimeout(timeout);
   throw lastError || new Error("请求失败");
 }

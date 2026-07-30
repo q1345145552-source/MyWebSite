@@ -62,6 +62,21 @@ startDailyExchangeRateScheduler();
 // ===== AI routes =====
 registerClientAiRoutes(app);
 
+// 【审查问题 1】进程级兜底：Node 15 起，没人接的 Promise rejection 会直接杀掉进程。
+// 只要漏掉一处 catch，整个 API 就会下线。这里记下日志但不退出，
+// 保证单个请求出问题不至于连带所有人都用不了。
+process.on("unhandledRejection", (reason) => {
+  logger.error("unhandledRejection", {
+    error: reason instanceof Error ? reason.message : String(reason),
+    stack: reason instanceof Error ? reason.stack : undefined,
+  });
+});
+// uncaughtException 之后进程状态已不可信，记完日志正常退出，交给 Docker 重启
+process.on("uncaughtException", (error) => {
+  logger.error("uncaughtException, exiting", { error: error.message, stack: error.stack });
+  process.exit(1);
+});
+
 // 优雅停机
 process.on("SIGINT", async () => {
   logger.info("SIGINT received, closing Prisma...");

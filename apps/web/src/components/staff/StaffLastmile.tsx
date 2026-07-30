@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { apiBaseUrl, authHeaders } from "../../services/core-api";
+import { apiBaseUrl, authHeaders, parseApiResponse } from "../../services/core-api";
 
 type LmShipment = { id: string; trackingNo: string; clientId: string; itemName: string; packageCount: number; containerNo?: string };
 type LmOrderItem = { id: string; deliveryNo: string; shipmentId: string; trackingNo?: string; driverName?: string; licensePlate?: string; phoneNumber?: string; deliveryDate?: string; clientId?: string; status: string; signImageBase64?: string | null };
@@ -41,9 +41,9 @@ export default function StaffLastmile(props: StaffLastmileProps) {
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({ shipmentIds: ids, driverName: lmDriverName.trim(), licensePlate: lmLicensePlate.trim(), phoneNumber: lmPhoneNumber.trim(), deliveryDate: lmDeliveryDate }),
       });
-      const d = await r.json();
-      if (d.code !== "OK") throw new Error(d.message || "创建失败");
-      props.onToast(`派送单 ${d.data.deliveryNo} 已创建（${d.data.count}个运单）`);
+      // 【审查问题 3】走 parseApiResponse：401 会自动跳登录页
+      const d = await parseApiResponse<{ deliveryNo: string; count: number }>(r);
+      props.onToast(`派送单 ${d.deliveryNo} 已创建（${d.count}个运单）`);
       setLmSelected(new Set());
       setLmDriverName("");
       setLmLicensePlate("");
@@ -68,16 +68,13 @@ export default function StaffLastmile(props: StaffLastmileProps) {
           headers: { "Content-Type": "application/json", ...authHeaders() },
           body: JSON.stringify({ id: lmSignData.id, status: lmSignData.action === "sign" ? "SIGNED" : undefined, signImageBase64: b64 }),
         });
-        if (!res.ok) {
-          const text = await res.text();
-          let msg = "失败";
-          try { const d = JSON.parse(text); msg = d.message || msg; } catch {}
-          throw new Error(msg);
-        }
+        // 【审查问题 12】原来只看 res.ok：HTTP 200 但业务失败（code != OK）
+        // 照样弹「已签收」，而且 401 也不跳登录页。签收是关键节点，不能糊过去。
+        await parseApiResponse(res);
         props.onToast(lmSignData.action === "sign" ? "已签收" : "图片已上传");
         props.onReloadOrders();
       } catch (e: any) {
-        props.onToast(e.message || "失败");
+        props.onToast(e.message || "操作失败，请重试");
       } finally {
         setLmSignData(null);
       }
@@ -88,11 +85,13 @@ export default function StaffLastmile(props: StaffLastmileProps) {
   const deleteOrder = async (id: string) => {
     if (!confirm("确定删除？")) return;
     try {
-      await fetch(apiBaseUrl() + "/admin/lastmile/orders?id=" + id, { method: "DELETE", headers: authHeaders() });
+      // 【审查问题 2】原来完全不看返回，删失败也弹「已删除」
+      const res = await fetch(apiBaseUrl() + "/admin/lastmile/orders?id=" + id, { method: "DELETE", headers: authHeaders() });
+      await parseApiResponse(res);
       props.onToast("已删除");
       props.onReloadOrders();
     } catch (e: any) {
-      props.onToast(e.message || "失败");
+      props.onToast(e.message || "删除失败，请重试");
     }
   };
 
@@ -179,9 +178,9 @@ export default function StaffLastmile(props: StaffLastmileProps) {
                   if (ids.length === 0) { props.onToast("请先勾选运单"); return; }
                   try {
                     const r = await fetch(apiBaseUrl() + "/admin/lastmile/orders", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ shipmentIds: ids, deliveryNo: dn }) });
-                    const d = await r.json();
-                    if (d.code !== "OK") throw new Error(d.message || "追加失败");
-                    props.onToast("已追加 " + d.data.count + " 个运单");
+                    // 【审查问题 3】走 parseApiResponse：401 会自动跳登录页
+                    const d = await parseApiResponse<{ count: number }>(r);
+                    props.onToast("已追加 " + d.count + " 个运单");
                     setLmSelected(new Set());
                     props.onReloadOrders();
                   } catch (e: any) { props.onToast(e.message || "追加失败"); }

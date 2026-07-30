@@ -6,7 +6,7 @@ import EmptyStateCard from "../../../modules/layout/EmptyStateCard";
 import RoleShell from "../../../modules/layout/RoleShell";
 import { formatCny } from "../../../modules/billing/billing-utils";
 import { fetchClientOrders, fetchClientWalletOverview, type OrderItem } from "../../../services/business-api";
-import { apiBaseUrl, authHeaders } from "../../../services/core-api";
+import { apiBaseUrl, authHeaders, parseApiResponse } from "../../../services/core-api";
 
 function uniqueById(items: OrderItem[]): OrderItem[] {
   const seen = new Set<string>();
@@ -63,9 +63,9 @@ export default function ClientBillsPage() {
         method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({ orderId: payModal.orderId, method: payMethod, proofImage: payMethod === "offline" ? payProof : undefined }),
       });
-      const data = await res.json();
-      if (data.code !== "OK") throw new Error(data.message || "付款失败");
-      setMessage(data.data?.message || "付款成功");
+      // 【审查问题 3】走 parseApiResponse：401 会自动跳登录页，不再显示成"付款失败"
+      const data = await parseApiResponse<{ message?: string } | null>(res);
+      setMessage(data?.message || "付款成功");
       setPayModal(null);
       setPayProof(null);
       await loadOrders();

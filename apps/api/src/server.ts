@@ -97,7 +97,12 @@ export function createApp(): MinimalHttpApp {
       deleteRoutes[path] = handler;
     },
     listen(port, callback) {
-      const server = createServer(async (rawReq, rawRes) => {
+      // 【审查问题 1】原来整段逻辑直接写在 createServer 的回调里，
+      // 而 try/catch 只包住了最后调 handler 的那一句。
+      // 前面的 await readJsonBody() 一抛错（客户上传照片中途断网就会）
+      // 就是一个没人接的 Promise rejection —— Node 会直接结束进程，整个 API 挂掉。
+      // 现在把整段抽成函数，在外面统一兜一层。
+      const handleRequest = async (rawReq: IncomingMessage, rawRes: ServerResponse): Promise<void> => {
         const allowedOrigin = process.env.CORS_ORIGIN?.trim() || (process.env.NODE_ENV === "production" ? "" : "*");
         if (allowedOrigin) {
           rawRes.setHeader("Access-Control-Allow-Origin", allowedOrigin);
@@ -180,6 +185,24 @@ export function createApp(): MinimalHttpApp {
             message,
           });
         }
+      };
+
+      const server = createServer((rawReq, rawRes) => {
+        void handleRequest(rawReq, rawRes).catch((error: unknown) => {
+          logger.error("request pipeline error", {
+            method: rawReq.method,
+            url: rawReq.url,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          // 静态图片那条分支可能已经开始往外写了，这时候不能再写响应头
+          if (rawRes.headersSent) {
+            if (!rawRes.writableEnded) rawRes.end();
+            return;
+          }
+          rawRes.statusCode = 500;
+          rawRes.setHeader("Content-Type", "application/json; charset=utf-8");
+          rawRes.end(JSON.stringify({ code: "INTERNAL_ERROR", message: "Internal server error" }));
+        });
       });
 
       const host = process.env.BIND_HOST?.trim() || "0.0.0.0";
