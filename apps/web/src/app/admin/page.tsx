@@ -2581,14 +2581,18 @@ export default function AdminHomePage() {
                         <tbody>{batchRows.slice(0, 20).map((r: any, i: number) => (<tr key={i}>{Object.values(r).slice(0, 6).map((v: any, j: number) => (<td key={j} style={{ padding: "2px 6px" }}>{String(v ?? "")}</td>))}</tr>))}</tbody>
                       </table>
                     </div>
-                    <button onClick={() => setBatchConfirmed(true)} style={{ marginTop: 8, border: "none", borderRadius: 6, padding: "6px 12px", background: "#16a34a", color: "#fff", cursor: "pointer", fontSize: 12 }}>确认导入</button>
+                    <button onClick={() => setBatchConfirmed(true)} style={{ marginTop: 8, border: "none", borderRadius: 6, padding: "6px 12px", background: "#2563eb", color: "#fff", cursor: "pointer", fontSize: 12 }}>确认导入</button>
                   </div>
                 )}
               </>
             ) : (
               <div>
-                <div style={{ marginBottom: 8, fontSize: 12 }}>正在导入 {batchRows.length} 条…</div>
-                {batchProgress.current > 0 && (<div style={{ height: 4, background: "#e5e7eb", borderRadius: 2, marginBottom: 8 }}><div style={{ height: "100%", background: "#16a34a", borderRadius: 2, width: `${(batchProgress.current / batchRows.length) * 100}%` }} /></div>)}
+                {/* 进度：只用文字报数，不放进度条 */}
+                <div style={{ marginBottom: 8, fontSize: 12, color: "#000" }}>
+                  正在导入 {batchRows.length} 条…
+                  {batchProgress.current > 0 ? `　已处理 ${batchProgress.current}/${batchRows.length}，成功 ${batchProgress.success} 条` : ""}
+                  {batchProgress.fail > 0 ? <span style={{ color: "#b91c1c" }}>，失败 {batchProgress.fail} 条</span> : null}
+                </div>
               </div>
             )}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>

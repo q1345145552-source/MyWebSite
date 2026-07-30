@@ -2609,8 +2609,8 @@ const loadLmShipments = async () => {
               支持 Excel 批量导入订单。建议先下载模板，按字段填好后上传。
             </p>
             {batchFileName && (
-              <div style={{ marginBottom: 12, padding: "10px 14px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, fontSize: 14 }}>
-                📄 已上传: <strong>{batchFileName}</strong> — 有效数据 <strong>{batchRows.length}</strong> 条
+              <div style={{ marginBottom: 12, padding: "10px 14px", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 14, color: "#000000" }}>
+                已上传: <strong>{batchFileName}</strong> — 有效数据 <strong>{batchRows.length}</strong> 条
                 {batchRows.length === 0 && <span style={{ color: "#dc2626", marginLeft: 8 }}>无有效数据，请检查模板格式</span>}
               </div>
             )}
@@ -2636,20 +2636,19 @@ const loadLmShipments = async () => {
                 }} />
               </label>
               {!batchConfirmed && batchRows.length > 0 && !batchLoading && batchProgress.current === 0 && (
-                <button type="button" onClick={() => { setBatchConfirmed(true); void submitStaffBatch(); }} style={{ border: "none", borderRadius: 8, padding: "8px 16px", background: "#16a34a", color: "#fff", cursor: "pointer", fontWeight: 600, fontSize: 14 }}>
+                <button type="button" onClick={() => { setBatchConfirmed(true); void submitStaffBatch(); }} style={{ border: "none", borderRadius: 8, padding: "8px 16px", background: "#2563eb", color: "#fff", cursor: "pointer", fontWeight: 600, fontSize: 14 }}>
                   确认上传 {batchRows.length} 条
                 </button>
               )}
             </div>
+            {/* 进度：只用文字报数，不放进度条动画 */}
             {batchLoading && (
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}>
-                  <span>正在提交第 {batchProgress.current}/{batchRows.length} 条…</span>
-                  <span><span style={{ color: "#16a34a" }}>{batchProgress.success}</span> / <span style={{ color: batchProgress.fail > 0 ? "#dc2626" : "#6b7280" }}>{batchProgress.fail}</span></span>
-                </div>
-                <div style={{ height: 8, background: "#e5e7eb", borderRadius: 4, overflow: "hidden" }}>
-                  <div style={{ height: "100%", width: `${(batchProgress.current / batchRows.length) * 100}%`, background: "#2563eb", borderRadius: 4, transition: "width 0.3s" }} />
-                </div>
+              <div style={{ marginBottom: 12, display: "flex", justifyContent: "space-between", fontSize: 13, color: "#000000" }}>
+                <span>正在提交第 {batchProgress.current}/{batchRows.length} 条…</span>
+                <span>
+                  成功 {batchProgress.success} 条
+                  {batchProgress.fail > 0 ? <span style={{ color: "#b91c1c" }}>　失败 {batchProgress.fail} 条</span> : null}
+                </span>
               </div>
             )}
             {batchErrors.length > 0 && !batchLoading && (
@@ -2661,8 +2660,8 @@ const loadLmShipments = async () => {
               </div>
             )}
             {!batchLoading && batchProgress.current > 0 && batchErrors.length === 0 && (
-              <div style={{ marginBottom: 12, padding: 12, borderRadius: 8, background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
-                <div style={{ fontWeight: 600, fontSize: 14, color: "#166534" }}>全部提交成功：{batchProgress.success} 条</div>
+              <div style={{ marginBottom: 12, padding: 12, border: "1px solid #e5e7eb", background: "#fff" }}>
+                <div style={{ fontWeight: 600, fontSize: 14, color: "#000000" }}>全部提交成功：{batchProgress.success} 条</div>
               </div>
             )}
             {batchRows.length > 0 && (

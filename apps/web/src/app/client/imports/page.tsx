@@ -241,27 +241,21 @@ export default function ClientImportsPage() {
           </button>
         </div>
 
-        {/* 进度条 */}
+        {/* 进度：只用文字报数，不放进度条动画 */}
         {loading && (
-          <div style={{ marginBottom: 12 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}>
-              <span>正在提交第 {current}/{rows.length} 条…</span>
-              <span>
-                <span style={{ color: "#16a34a" }}>{successCount}</span>
-                {" / "}
-                <span style={{ color: failCount > 0 ? "#dc2626" : "#6b7280" }}>{failCount}</span>
-              </span>
-            </div>
-            <div style={{ height: 8, background: "#e5e7eb", borderRadius: 4, overflow: "hidden" }}>
-              <div style={{ height: "100%", width: `${(current / rows.length) * 100}%`, background: "#2563eb", borderRadius: 4, transition: "width 0.3s" }} />
-            </div>
+          <div style={{ marginBottom: 12, display: "flex", justifyContent: "space-between", fontSize: 13, color: "#000000" }}>
+            <span>正在提交第 {current}/{rows.length} 条…</span>
+            <span>
+              成功 {successCount} 条
+              {failCount > 0 ? <span style={{ color: "#b91c1c" }}>　失败 {failCount} 条</span> : null}
+            </span>
           </div>
         )}
 
         {/* 完成汇总 */}
         {done && (
-          <div style={{ marginBottom: 12, padding: 12, borderRadius: 8, background: failCount > 0 ? "#fef2f2" : "#f0fdf4", border: `1px solid ${failCount > 0 ? "#fecaca" : "#bbf7d0"}` }}>
-            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
+          <div style={{ marginBottom: 12, padding: 12, border: "1px solid #e5e7eb", background: "#fff" }}>
+            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4, color: "#000000" }}>
               批量下单完成：成功 {successCount} 条 / 失败 {failCount} 条
             </div>
             {errors.length > 0 && (
@@ -273,7 +267,7 @@ export default function ClientImportsPage() {
         )}
 
         {/* 单条消息 */}
-        {message && !done && <p style={{ marginBottom: 10, color: "#166534", fontSize: 13 }}>{message}</p>}
+        {message && !done && <p style={{ marginBottom: 10, color: "#000000", fontSize: 13 }}>{message}</p>}
 
         {/* 预览表格 */}
         {rows.length > 0 && (
