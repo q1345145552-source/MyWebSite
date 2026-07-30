@@ -1497,23 +1497,7 @@ export default function AdminHomePage() {
                   <Fragment key={o.id}>
                   <tr style={{ borderBottom: "1px solid #e2e8f0", background: expandedOrderId === o.id ? "#eff6ff" : "#fff" }}>
                     <td style={{ padding: "8px 6px", verticalAlign: "middle", whiteSpace: "nowrap" }}>
-                      <input type="checkbox" checked={selectedOrders.has(o.id)} onChange={() => toggleSelectOrder(o.id)} style={{ cursor: "pointer", marginRight: 4 }} />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setExpandedOrderId((prev) => {
-                            if (prev === o.id) return "";
-                            const oid = o.orderId ?? o.id;
-                            fetchShipmentImages(oid).then((imgs: any) => {
-                              setOrderImagesCache((c: any) => ({ ...c, [oid]: imgs }));
-                            }).catch(() => {});
-                            return o.id;
-                          });
-                        }}
-                        className="row-act"
-                      >
-                        详情
-                      </button>
+                      <input type="checkbox" checked={selectedOrders.has(o.id)} onChange={() => toggleSelectOrder(o.id)} style={{ cursor: "pointer" }} />
                     </td>
                     <td style={{ padding: "8px 6px", color: "#000000", fontWeight: 600 }}>{o.clientId ?? "—"}</td>
                     <td style={{ padding: "8px 6px", fontWeight: 600, color: "#1e3a8a", whiteSpace: "nowrap" }}>
@@ -1581,6 +1565,22 @@ export default function AdminHomePage() {
                     </td>
                     <td style={{ padding: "8px 6px", fontSize: 12, maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={o.remark || ""}>{o.remark || ""}</td>
                     <td style={{ padding: "8px 6px", whiteSpace: "nowrap" }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setExpandedOrderId((prev) => {
+                            if (prev === o.id) return "";
+                            const oid = o.orderId ?? o.id;
+                            fetchShipmentImages(oid).then((imgs: any) => {
+                              setOrderImagesCache((c: any) => ({ ...c, [oid]: imgs }));
+                            }).catch(() => {});
+                            return o.id;
+                          });
+                        }}
+                        className="row-act"
+                      >
+                        详情
+                      </button>
                       <button
                         type="button"
                         onClick={() => {
