@@ -45,7 +45,10 @@
 
 ### 5. 数据与兼容
 
-- **PostgreSQL**：生产使用 Neon 云数据库；本地开发可用 Docker Compose 中 Postgres 容器。
+- **PostgreSQL**：⚠️ **生产库是服务器上的 `xiangtai-postgres` 容器，不是 Neon。**
+  Neon（`.env` 里的 `DATABASE_URL`）只是本地开发连的**测试库**，可随意删改。
+  两者结构可能不一致，改动生产库前先跑 `scripts/check-schema-drift.sql` 体检。
+  （原文误写为「生产使用 Neon 云数据库」，2026-07-31 更正 —— 这句话曾把排查带偏。）
 - 密码使用 Node.js `scrypt` 哈希（`crypto-utils.ts`），已升级到安全级别。
 - 图片存储：同时支持 Base64（数据库）和文件系统（`IMAGES_DIR`），建议生产迁移到对象存储。
 - **遗留 SQLite 代码已清理**（`db/sqlite.ts`、`ai-sqlite-store.ts` 等 3 个文件已删除）。
