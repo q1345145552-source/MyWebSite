@@ -5,8 +5,24 @@
 # - 部署后检查图片文件完整性
 # - 构建失败保留旧容器，不中断服务
 
+# 先复制一份自己，用副本跑。
+#
+# 这个脚本跑到一半会 `git reset --hard`。如果这次部署的内容恰好也改了 deploy.sh 自己，
+# 文件就在脚本还没跑完的时候被换掉了 —— bash 是按「读到第几个字节」往下读的，
+# 会接着从新文件的那个位置继续读，执行出半截乱码命令（本地实测确认会）。
+# 用副本跑，原文件怎么变都不影响正在跑的这一次。
+if [ -z "$DEPLOY_SRC_DIR" ]; then
+  export DEPLOY_SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
+  SELF_COPY="$(mktemp /tmp/deploy-running-XXXXXX.sh)" || { echo "❌ 无法创建临时文件"; exit 1; }
+  cp "$0" "$SELF_COPY" || { echo "❌ 复制部署脚本失败"; rm -f "$SELF_COPY"; exit 1; }
+  bash "$SELF_COPY" "$@"
+  DEPLOY_RC=$?
+  rm -f "$SELF_COPY"
+  exit $DEPLOY_RC
+fi
+
 echo "=== 湘泰物流网站部署 ==="
-cd "$(dirname "$0")"
+cd "$DEPLOY_SRC_DIR" || exit 1
 
 # 收集本次部署出现的问题。
 # 原来每一步出问题都只是打一行警告，然后照样往下走、最后照样显示「部署完成」——
@@ -106,32 +122,37 @@ if [ "$API_READY" = false ]; then
   note_issue "API 在 60 秒内没就绪，后续步骤可能不准"
 fi
 
-# 11a. 同步前先备份数据库
+# 11a. 动数据库之前先备份
 #
-# 下一步的 `prisma db push --accept-data-loss` 会让数据库去对齐设计图 ——
-# 设计图里没有的字段会被删掉，字段类型对不上时可能删了重建，数据一起没。
-# --accept-data-loss 跳过了确认提示，-T 又是无人值守，所以没有任何人工拦截。
-# 备份失败就不做这一步，宁可 schema 不同步（可以事后补），也不能没退路就删。
-echo "💾 同步前备份数据库..."
+# 下一步会改生产库的结构。虽然换成迁移文件之后不会再有「擅自删字段」的事，
+# 但毕竟是在动生产库，备份失败就不做这一步 —— 宁可结构晚一步同步（可以事后补），
+# 也不能没退路就动。
+echo "💾 改结构前备份数据库..."
 BACKUP_OK=false
 if BACKUP_LABEL="predeploy_$(date +%Y%m%d_%H%M%S)" bash "$(dirname "$0")/scripts/backup-db.sh"; then
   BACKUP_OK=true
 else
-  note_issue "数据库备份失败 —— 已跳过结构同步"
+  note_issue "数据库备份失败 —— 已跳过数据库迁移"
 fi
 
-# 11. 同步数据库 schema（带重试，失败会报错）
+# 11b. 执行迁移文件（原来这里是 `prisma db push --accept-data-loss`）
+#
+# 为什么换掉 db push：它的职责是让数据库和 schema.prisma 长得一模一样 ——
+# 设计图里没有的字段会被删掉；改字段名在它眼里是「删旧的、加一个新的空的」，
+# 那一列数据全没。2026-07-31 部署时它真的删过一个带数据的字段。
+# migrate deploy 只执行 apps/api/prisma/migrations/ 下写好的迁移文件，不自作主张，
+# 也不会因为设计图里少写了什么就去删东西。
 DB_SYNC_OK=false
 if [ "$BACKUP_OK" = false ]; then
   echo ""
-  echo "⛔ 跳过数据库同步 —— 因为备份没成功，此时执行 db push 一旦删错东西无法回退。"
-  echo "   请先修好备份，再手动执行同步。服务本身不受影响，代码已经上线。"
+  echo "⛔ 跳过数据库迁移 —— 因为备份没成功，此时改结构一旦出问题无法回退。"
+  echo "   请先修好备份，再手动执行迁移。服务本身不受影响，代码已经上线。"
   echo ""
 else
-echo "🗄️  同步数据库 schema..."
+echo "🗄️  执行数据库迁移..."
 for i in 1 2 3; do
   echo "  第${i}次尝试..."
-  if docker compose exec -T api npx prisma db push --schema=apps/api/prisma/schema.prisma --accept-data-loss 2>&1; then
+  if docker compose exec -T api npx prisma migrate deploy --schema=apps/api/prisma/schema.prisma 2>&1; then
     DB_SYNC_OK=true
     break
   fi
@@ -139,12 +160,38 @@ for i in 1 2 3; do
 done
 fi
 
-if [ "$DB_SYNC_OK" = false ]; then
-  note_issue "数据库结构同步失败，需要手动执行 db push（部分功能可能报错）"
-else
-  echo "✅ 数据库已同步"
+if [ "$BACKUP_OK" = true ] && [ "$DB_SYNC_OK" = false ]; then
+  note_issue "数据库迁移失败 —— 如果是某个迁移文件执行到一半失败，它会挡住以后所有迁移，必须先处理（先看上面的报错，再跑 prisma migrate status 确认）"
+elif [ "$DB_SYNC_OK" = true ]; then
+  echo "✅ 数据库迁移完成"
   docker compose restart api 2>&1 | tail -1
   sleep 5
+fi
+
+# 11c. 数据库结构体检（纯只读，一个字都不改）
+#
+# 换成 migrate deploy 之后，就没有「谁改了设计图但忘了写迁移文件、db push 也能自动补上」
+# 这个兜底了。所以每次部署都得体检一遍：设计图有、数据库没有的字段会被列出来。
+# 不体检的话，缺字段要等客户点开页面弹「服务器繁忙」才发现（集货拼柜那次就是）。
+echo "🔍 数据库结构体检..."
+if [ ! -f scripts/check-schema-drift.sql ]; then
+  note_issue "找不到 scripts/check-schema-drift.sql，这次没做结构体检"
+else
+  DRIFT_RAW=$(docker compose exec -T postgres sh -c 'psql -U $POSTGRES_USER -d $POSTGRES_DB -t -A -q -v ON_ERROR_STOP=1' < scripts/check-schema-drift.sql 2>&1)
+  DRIFT_RC=$?
+  if [ $DRIFT_RC -ne 0 ]; then
+    echo "$DRIFT_RAW"
+    note_issue "结构体检没跑起来（上面是原始输出）—— 这次部署没检查数据库结构"
+  else
+    DRIFT=$(echo "$DRIFT_RAW" | grep -v '^[[:space:]]*$')
+    if [ -n "$DRIFT" ]; then
+      echo "$DRIFT"
+      DRIFT_COUNT=$(echo "$DRIFT" | wc -l | tr -d ' ')
+      note_issue "数据库结构与设计图有 ${DRIFT_COUNT} 处对不上（见上面几行）：「A 缺失」是数据库少了字段，相关页面会报错，要补一个迁移文件；「B 多余」不影响使用，不用管"
+    else
+      echo "✅ 结构与设计图一致"
+    fi
+  fi
 fi
 
 # 12. 健康检查
