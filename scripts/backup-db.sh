@@ -7,8 +7,12 @@ set -euo pipefail
 BACKUP_DIR="/root/db-backups"
 RETENTION_DAYS=14
 TODAY=$(date +%Y%m%d)
-FILE="$BACKUP_DIR/xiangtai_${TODAY}.sql.gz"
-TMP_FILE="$BACKUP_DIR/xiangtai_${TODAY}.tmp.sql.gz"
+# 文件名默认按日期（每天定时备份用）。
+# 部署脚本会传 BACKUP_LABEL 换一个带时刻的名字，
+# 否则一天部署两次，第二次的备份会把第一次的覆盖掉。
+TAG="${BACKUP_LABEL:-$TODAY}"
+FILE="$BACKUP_DIR/xiangtai_${TAG}.sql.gz"
+TMP_FILE="$BACKUP_DIR/xiangtai_${TAG}.tmp.sql.gz"
 MIN_SIZE_KB=50  # 小于50KB认为备份异常
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"; }

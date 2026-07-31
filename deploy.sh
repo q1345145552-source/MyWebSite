@@ -97,9 +97,29 @@ if [ "$API_READY" = false ]; then
   echo "⚠️  API 未就绪，尝试继续执行..."
 fi
 
+# 11a. 同步前先备份数据库
+#
+# 下一步的 `prisma db push --accept-data-loss` 会让数据库去对齐设计图 ——
+# 设计图里没有的字段会被删掉，字段类型对不上时可能删了重建，数据一起没。
+# --accept-data-loss 跳过了确认提示，-T 又是无人值守，所以没有任何人工拦截。
+# 备份失败就不做这一步，宁可 schema 不同步（可以事后补），也不能没退路就删。
+echo "💾 同步前备份数据库..."
+BACKUP_OK=false
+if BACKUP_LABEL="predeploy_$(date +%Y%m%d_%H%M%S)" bash "$(dirname "$0")/scripts/backup-db.sh"; then
+  BACKUP_OK=true
+else
+  echo "⚠️  备份失败"
+fi
+
 # 11. 同步数据库 schema（带重试，失败会报错）
-echo "🗄️  同步数据库 schema..."
 DB_SYNC_OK=false
+if [ "$BACKUP_OK" = false ]; then
+  echo ""
+  echo "⛔ 跳过数据库同步 —— 因为备份没成功，此时执行 db push 一旦删错东西无法回退。"
+  echo "   请先修好备份，再手动执行同步。服务本身不受影响，代码已经上线。"
+  echo ""
+else
+echo "🗄️  同步数据库 schema..."
 for i in 1 2 3; do
   echo "  第${i}次尝试..."
   if docker compose exec -T api npx prisma db push --schema=apps/api/prisma/schema.prisma --accept-data-loss 2>&1; then
@@ -108,6 +128,7 @@ for i in 1 2 3; do
   fi
   sleep 5
 done
+fi
 
 if [ "$DB_SYNC_OK" = false ]; then
   echo "❌ 数据库同步失败！请手动执行 db push"
