@@ -8,6 +8,15 @@
 echo "=== 湘泰物流网站部署 ==="
 cd "$(dirname "$0")"
 
+# 收集本次部署出现的问题。
+# 原来每一步出问题都只是打一行警告，然后照样往下走、最后照样显示「部署完成」——
+# 不盯着屏幕看根本发现不了。现在统一记下来，结尾一次性摊开，并用退出码区分成败。
+DEPLOY_ISSUES=()
+note_issue() {
+  DEPLOY_ISSUES+=("$1")
+  echo "⚠️  $1"
+}
+
 # 1. 检查 .env
 if ! grep -q "NEXT_PUBLIC_API_BASE_URL=" .env 2>/dev/null; then
   echo "❌ 缺少 .env 文件或 NEXT_PUBLIC_API_BASE_URL 未设置"
@@ -42,10 +51,10 @@ git reset --hard origin/main
 # 4. 检查关键环境变量
 echo "🔍 环境检查..."
 if ! grep -q "IMAGES_DIR" docker-compose.yml; then
-  echo "⚠️  docker-compose.yml 缺少 IMAGES_DIR 环境变量（图片可能无法访问）"
+  note_issue "docker-compose.yml 缺少 IMAGES_DIR 环境变量（图片可能无法访问）"
 fi
 if ! grep -q "127.0.0.1" docker-compose.yml; then
-  echo "⚠️  docker-compose.yml healthcheck 仍使用 localhost（可能导致 unhealthy）"
+  note_issue "docker-compose.yml healthcheck 仍使用 localhost（可能导致 unhealthy）"
 fi
 
 # 5. 修复备份脚本权限
@@ -94,7 +103,7 @@ for i in $(seq 1 20); do
 done
 
 if [ "$API_READY" = false ]; then
-  echo "⚠️  API 未就绪，尝试继续执行..."
+  note_issue "API 在 60 秒内没就绪，后续步骤可能不准"
 fi
 
 # 11a. 同步前先备份数据库
@@ -108,7 +117,7 @@ BACKUP_OK=false
 if BACKUP_LABEL="predeploy_$(date +%Y%m%d_%H%M%S)" bash "$(dirname "$0")/scripts/backup-db.sh"; then
   BACKUP_OK=true
 else
-  echo "⚠️  备份失败"
+  note_issue "数据库备份失败 —— 已跳过结构同步"
 fi
 
 # 11. 同步数据库 schema（带重试，失败会报错）
@@ -131,7 +140,7 @@ done
 fi
 
 if [ "$DB_SYNC_OK" = false ]; then
-  echo "❌ 数据库同步失败！请手动执行 db push"
+  note_issue "数据库结构同步失败，需要手动执行 db push（部分功能可能报错）"
 else
   echo "✅ 数据库已同步"
   docker compose restart api 2>&1 | tail -1
@@ -154,25 +163,50 @@ wait_for_service() {
     sleep 3
     elapsed=$((elapsed + 3))
   done
-  echo "⚠️  $name 未响应（等了 ${max_wait}s）"
+  echo "❌ $name 未响应（等了 ${max_wait}s）"
   return 1
 }
 
-wait_for_service "http://localhost:3001" "API"
-wait_for_service "http://localhost:3000" "Web"
+wait_for_service "http://localhost:3001" "API" || note_issue "API 健康检查未通过 —— 后台可能不可用"
+wait_for_service "http://localhost:3000" "Web" || note_issue "Web 健康检查未通过 —— 前台可能打不开"
 
 # 13. 图片完整性检查
 echo "🖼️  图片文件检查..."
 IMG_DB=$(docker compose exec -T postgres psql -t -A -U xiangtai -d xiangtai -c "SELECT count(*) FROM order_product_images WHERE file_path IS NOT NULL AND file_path != ''" 2>/dev/null | tr -d ' ' || echo "0")
-IMG_DISK=$(docker compose exec -T api ls /images/ 2>/dev/null | wc -l || echo "0")
+IMG_DISK=$(docker compose exec -T api ls /images/ 2>/dev/null | wc -l | tr -d ' ' || echo "0")
 echo "  数据库记录: $IMG_DB | 磁盘文件: $IMG_DISK"
 if [ "$IMG_DB" -gt 0 ] 2>/dev/null && [ "$IMG_DISK" -lt "$IMG_DB" ] 2>/dev/null; then
-  echo "⚠️  磁盘文件($IMG_DISK)少于数据库记录($IMG_DB)，图片可能无法显示"
+  note_issue "磁盘图片($IMG_DISK)少于数据库记录($IMG_DB)，部分图片可能显示不出来"
 fi
 
 # 14. 重载 nginx
 nginx -s reload 2>/dev/null || true
 
 echo ""
-echo "=== 部署完成 ==="
+echo "=============================================="
+if [ ${#DEPLOY_ISSUES[@]} -eq 0 ]; then
+  echo "=== ✅ 部署完成，一切正常 ==="
+  echo "📌 新版本: $(git rev-parse --short HEAD)"
+  echo "=============================================="
+  exit 0
+fi
+
+# 走到这里说明中途有问题。原来这些问题只在过程中一闪而过，
+# 结尾照样显示「部署完成」，很容易被当成成功。
+echo "=== ⚠️  部署完成，但有 ${#DEPLOY_ISSUES[@]} 处问题需要处理 ==="
+echo ""
+i=1
+for issue in "${DEPLOY_ISSUES[@]}"; do
+  echo "  $i) $issue"
+  i=$((i + 1))
+done
+echo ""
 echo "📌 新版本: $(git rev-parse --short HEAD)"
+echo "📌 上一版: ${OLD_COMMIT:0:8}"
+echo ""
+echo "需要回滚到上一版的话："
+echo "  cd $(pwd) && git reset --hard ${OLD_COMMIT} && docker compose up -d --build"
+echo ""
+echo "数据库备份在 /root/db-backups/（本次的文件名以 predeploy_ 开头）"
+echo "=============================================="
+exit 1
