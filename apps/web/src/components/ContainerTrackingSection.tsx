@@ -56,6 +56,7 @@ function statusColor(status: string): { bg: string; fg: string; border: string }
     case "IN_TRANSIT":
       return { bg: "#dbeafe", fg: "#1d4ed8", border: "#bfdbfe" };
     case "DELAY_DEPARTED":
+    case "DELAY_IN_TRANSIT":
       return { bg: "#fef3c7", fg: "#b45309", border: "#fde68a" };
     case "ARRIVED":
       return { bg: "#cffafe", fg: "#0e7490", border: "#a5f3fc" };

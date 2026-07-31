@@ -21,8 +21,9 @@ import {
 const STATUS_LABEL: Record<string, string> = {
   LOADING: "装柜中",
   SEALED: "已封柜",
-  IN_TRANSIT: "运输中",
   DELAY_DEPARTED: "延迟开船",
+  IN_TRANSIT: "运输中",
+  DELAY_IN_TRANSIT: "延迟运输",
   ARRIVED: "已到港",
   CUSTOMS: "清关中",
   CUSTOMS_CLEARED: "清关已放行",
@@ -30,7 +31,8 @@ const STATUS_LABEL: Record<string, string> = {
   IN_WAREHOUSE_TH: "已到仓",
 };
 
-const STATUS_FLOW = ["LOADING", "SEALED", "IN_TRANSIT", "DELAY_DEPARTED", "ARRIVED", "CUSTOMS", "CUSTOMS_CLEARED", "UNLOADING", "IN_WAREHOUSE_TH"] as const;
+// 顺序必须与后端 containers/routes.ts 的 CONTAINER_STATUS_FLOW 一致
+const STATUS_FLOW = ["LOADING", "SEALED", "DELAY_DEPARTED", "IN_TRANSIT", "DELAY_IN_TRANSIT", "ARRIVED", "CUSTOMS", "CUSTOMS_CLEARED", "UNLOADING", "IN_WAREHOUSE_TH"] as const;
 
 const WAREHOUSE_ZH: Record<string, string> = {
   wh_yiwu_01: "义乌仓",
@@ -42,7 +44,8 @@ const WAREHOUSE_ZH: Record<string, string> = {
 const SHIPMENT_STATUS_ZH: Record<string, string> = {
   created: "已创建", pickedup: "已揽收", inwarehousecn: "国内仓已收货", receivedcn: "国内仓已收货",
   customspending: "报关中", loaded: "已装柜", delayDeparted: "延迟开船", delaydeparted: "延迟开船",
-  departed: "已开船", arrivedPort: "已到港", arrivedport: "已到港", intransit: "运输中",
+  departed: "已开船", delayInTransit: "延迟运输", delayintransit: "延迟运输",
+  arrivedPort: "已到港", arrivedport: "已到港", intransit: "运输中",
   customsTH: "清关中", customsth: "清关中", customsCleared: "清关已放行", customscleared: "清关已放行",
   inWarehouseTH: "已到仓", inwarehouseth: "已到仓", outfordelivery: "派送中", delivered: "派送完成",
   exception: "异常", returned: "已退回", cancelled: "已取消",
@@ -273,8 +276,9 @@ export default function StaffContainerLoadingPage() {
           <option value="ALL">全部状态</option>
           <option value="LOADING">装柜中</option>
           <option value="SEALED">已封柜</option>
-          <option value="IN_TRANSIT">运输中</option>
           <option value="DELAY_DEPARTED">延迟开船</option>
+          <option value="IN_TRANSIT">运输中</option>
+          <option value="DELAY_IN_TRANSIT">延迟运输</option>
           <option value="ARRIVED">已到港</option>
           <option value="CUSTOMS">清关中</option>
           <option value="CUSTOMS_CLEARED">清关已放行</option>

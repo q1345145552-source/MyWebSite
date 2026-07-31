@@ -3,6 +3,7 @@ export type ShipmentStatus =
   | "created"
   | "delayDeparted"
   | "departed"
+  | "delayInTransit"
   | "arrivedPort"
   | "customsTH"
   | "customsCleared"
@@ -18,6 +19,7 @@ export const SHIPMENT_STATUS_FLOW: ShipmentStatus[] = [
   "loaded",
   "delayDeparted",
   "departed",
+  "delayInTransit",
   "arrivedPort",
   "customsTH",
   "customsCleared",

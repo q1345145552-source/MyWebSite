@@ -6,7 +6,9 @@
 //                    │   loadedVolumeM3 + loadedPieceCount  │
 // 一票货可拆到多个柜子（N:N）；柜子的状态自成一套状态机
 //
-// 柜子状态：LOADING → SEALED → IN_TRANSIT → ARRIVED → CUSTOMS → DELIVERING → SIGNED
+// 柜子状态：LOADING → SEALED → DELAY_DEPARTED → IN_TRANSIT → DELAY_IN_TRANSIT
+//           → ARRIVED → CUSTOMS → DELIVERING → SIGNED
+//   两个「延迟」是可跳过的中间态：正常走就是 SEALED → IN_TRANSIT → ARRIVED
 
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../db/prisma";
@@ -17,8 +19,12 @@ import { canTransitLoose } from "../shipments/routes";
 const CONTAINER_STATUS_FLOW = [
   "LOADING",
   "SEALED",
-  "IN_TRANSIT",
+  // DELAY_DEPARTED（延迟开船）原来排在 IN_TRANSIT 后面，位置是错的 ——
+  // 「没准点开船」只可能发生在开船之前。2026-08-01 挪到 SEALED 和 IN_TRANSIT 中间。
   "DELAY_DEPARTED",
+  "IN_TRANSIT",
+  // 已经在海上了但延误、还没到港。和 DELAY_DEPARTED 是一对。
+  "DELAY_IN_TRANSIT",
   "ARRIVED",
   "CUSTOMS",
   "CUSTOMS_CLEARED",
@@ -31,8 +37,9 @@ const CONTAINER_STATUS_FLOW = [
 const CONTAINER_STATUS_LABEL: Record<string, string> = {
   LOADING: "装柜中",
   SEALED: "已封柜",
-  IN_TRANSIT: "运输中",
   DELAY_DEPARTED: "延迟开船",
+  IN_TRANSIT: "运输中",
+  DELAY_IN_TRANSIT: "延迟运输",
   ARRIVED: "已到港",
   CUSTOMS: "清关中",
   CUSTOMS_CLEARED: "清关已放行",
@@ -45,8 +52,9 @@ const CONTAINER_STATUS_LABEL: Record<string, string> = {
 /** 柜子状态推进时，对应推运单到什么状态 */
 const CONTAINER_TO_SHIPMENT_STATUS: Record<string, string> = {
   SEALED: "loaded",
-  IN_TRANSIT: "departed",
   DELAY_DEPARTED: "delayDeparted",
+  IN_TRANSIT: "departed",
+  DELAY_IN_TRANSIT: "delayInTransit",
   ARRIVED: "arrivedPort",
   CUSTOMS: "customsTH",
   CUSTOMS_CLEARED: "customsCleared",

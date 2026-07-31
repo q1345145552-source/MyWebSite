@@ -6,7 +6,7 @@ import type { MinimalHttpApp } from "../../server";
 import { checkRateLimit, getClientIp, rateLimitKey } from "../core/rate-limit";
 import { fail, ok, parseJsonArray, requireRole } from "../core/http-utils";
 import { loadProductImagesForOrders } from "../orders/product-images";
-import { STATUS_FLOW, EXCEPTION_STATUSES } from "./status-flow";
+import { STATUS_FLOW, EXCEPTION_STATUSES, DELAY_STATUSES } from "./status-flow";
 
 interface Kuaidi100QueryPayload {
   com?: string;
@@ -47,7 +47,13 @@ export function canTransit(fromStatus: string, toStatus: string): boolean {
   // 允许从异常状态恢复到任意正常状态（如取消→重新装柜）
   if (fromIndex < 0 && EXCEPTION_STATUSES.has(fromStatus) && toIndex >= 0) return true;
   if (fromIndex < 0 || toIndex < 0) return false;
-  return toIndex === fromIndex + 1;
+  if (toIndex <= fromIndex) return false;
+  // 一次只能往前一格，但中间隔着的如果全是「延迟」类状态，可以直接跨过去
+  // （没延误的单子不该被逼着先点一下「延迟开船」/「延迟运输」才能往下走）。
+  for (let i = fromIndex + 1; i < toIndex; i += 1) {
+    if (!DELAY_STATUSES.has(STATUS_FLOW[i]!)) return false;
+  }
+  return true;
 }
 
 /** 宽松版：只要求前进不后退，允许跳步（用于容器批量同步场景） */

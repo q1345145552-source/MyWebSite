@@ -8,6 +8,7 @@ export const SHIPMENT_STATUS_FLOW = [
   "loaded",
   "delayDeparted",
   "departed",
+  "delayInTransit",
   "arrivedPort",
   "customsTH",
   "customsCleared",
@@ -15,6 +16,9 @@ export const SHIPMENT_STATUS_FLOW = [
   "outForDelivery",
   "delivered",
 ] as const;
+
+/** 与后端 DELAY_STATUSES 一致：可跳过的中间态。 */
+export const SHIPMENT_DELAY_STATUSES = new Set(["delayDeparted", "delayInTransit"]);
 
 export const SHIPMENT_EXCEPTION_STATUSES = new Set(["exception", "returned", "cancelled"]);
 
@@ -33,6 +37,7 @@ export function shipmentStatusZh(status: string | undefined): string {
     loaded: "已装柜",
     delaydeparted: "延迟开船",
     departed: "已开船",
+    delayintransit: "延迟运输",
     arrivedport: "已到港",
     intransit: "运输中",
     customsth: "清关中",
@@ -182,8 +187,14 @@ export function getValidShipmentStatusTargets(fromStatus: string): string[] {
     return Array.from(out);
   }
   const fromIdx = SHIPMENT_STATUS_FLOW.indexOf(from as (typeof SHIPMENT_STATUS_FLOW)[number]);
-  if (fromIdx >= 0 && fromIdx + 1 < SHIPMENT_STATUS_FLOW.length) {
-    out.add(SHIPMENT_STATUS_FLOW[fromIdx + 1]!);
+  if (fromIdx >= 0) {
+    // 往后放一格；如果那一格是「延迟」类的可跳过状态，就把它后面那格也一起放出来，
+    // 否则没延误的单子会被逼着必须先点一下「延迟开船」/「延迟运输」。
+    for (let i = fromIdx + 1; i < SHIPMENT_STATUS_FLOW.length; i += 1) {
+      const candidate = SHIPMENT_STATUS_FLOW[i]!;
+      out.add(candidate);
+      if (!SHIPMENT_DELAY_STATUSES.has(candidate)) break;
+    }
   }
   SHIPMENT_EXCEPTION_STATUSES.forEach((s) => out.add(s));
   return Array.from(out);

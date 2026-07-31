@@ -455,7 +455,7 @@ export default function ClientHomePage() {
   const statusToneClass = (status?: string): string => {
     const value = (status ?? "").toLowerCase();
     if (value === "delivered" || value === "returned" || value === "cancelled") return "order-badge order-badge-land";
-    if (value === "loaded" || value === "delaydeparted" || value === "departed" || value === "arrivedport" || value === "customsth" || value === "customscleared" || value === "inwarehouseth" || value === "outfordelivery") {
+    if (value === "loaded" || value === "delaydeparted" || value === "departed" || value === "delayintransit" || value === "arrivedport" || value === "customsth" || value === "customscleared" || value === "inwarehouseth" || value === "outfordelivery") {
       return "order-badge order-badge-sea";
     }
     return "order-badge";
@@ -467,7 +467,7 @@ export default function ClientHomePage() {
     const map: Record<string, string> = {
       created: "已创建", pickedup: "已揽收", inwarehousecn: "国内仓已收货", receivedcn: "国内仓已收货",
       customspending: "报关中", loaded: "已装柜", delaydeparted: "延迟开船",
-      departed: "已开船", arrivedport: "已到港", intransit: "运输中",
+      departed: "已开船", delayintransit: "延迟运输", arrivedport: "已到港", intransit: "运输中",
       customs: "清关中", customsth: "清关中", customscleared: "清关已放行",
       inwarehouseth: "已到仓", warehouseth: "已到仓",
       loading: "装柜中", sealed: "已封柜", arrived: "已到港",
@@ -490,6 +490,7 @@ export default function ClientHomePage() {
     if (value === "loaded") return "已装柜";
     if (value === "delaydeparted") return "延迟开船";
     if (value === "departed") return "已开船";
+    if (value === "delayintransit") return "延迟运输";
     if (value === "arrivedport") return "已到港";
     if (value === "intransit") return "运输中";
     if (value === "customsth") return "清关中";
@@ -510,6 +511,8 @@ export default function ClientHomePage() {
     const value = (status ?? "").toLowerCase();
     if (!value) return "";
     if (value === "delaydeparted") return "departed";
+    // 延迟运输＝已经开船了、还没到港，时间轴停在「开船」这一格
+    if (value === "delayintransit") return "departed";
     if (value === "customscleared") return "inWarehouseTH";
     return value;
   };
@@ -1147,7 +1150,7 @@ export default function ClientHomePage() {
                 <tbody>
                   {queriedOrders.slice((currentPage - 1) * pageSize, currentPage * pageSize).map((item: any) => {
                     const st = item.currentStatus || "";
-                    const statusMap: Record<string, string> = { created: "已创建", loaded: "已装柜", departed: "已开船", arrivedPort: "已到港", customsTH: "清关中", customsCleared: "清关已放行", inWarehouseTH: "已到仓", outForDelivery: "派送中", delivered: "已签收" };
+                    const statusMap: Record<string, string> = { created: "已创建", loaded: "已装柜", delayDeparted: "延迟开船", departed: "已开船", delayInTransit: "延迟运输", arrivedPort: "已到港", customsTH: "清关中", customsCleared: "清关已放行", inWarehouseTH: "已到仓", outForDelivery: "派送中", delivered: "已签收" };
                     const dims = (item.products ?? []).map((p: any) => (p.lengthCm && p.widthCm && p.heightCm ? p.lengthCm + "×" + p.widthCm + "×" + p.heightCm : null)).filter(Boolean).join(", ");
                     const isExpanded = !!openDetailsByOrder[item.id];
                     const cargoTypeLabel = item.cargoType === "inspection" ? "商检" : item.cargoType === "sensitive" ? "敏感" : "普货";

@@ -248,7 +248,8 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
 
       // 状态同步
       const syncMap: Record<string, string> = {
-        SEALED: "loaded", IN_TRANSIT: "departed", DELAY_DEPARTED: "delayDeparted",
+        SEALED: "loaded", DELAY_DEPARTED: "delayDeparted", IN_TRANSIT: "departed",
+        DELAY_IN_TRANSIT: "delayInTransit",
         ARRIVED: "arrivedPort", CUSTOMS: "customsTH", CUSTOMS_CLEARED: "customsCleared",
         IN_WAREHOUSE_TH: "inWarehouseTH",
       };

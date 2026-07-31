@@ -10,6 +10,7 @@ export const DEFAULT_STATUS_LABELS: StatusLabelConfig[] = [
   { status: "loaded", labelZh: "已装柜" },
   { status: "delayDeparted", labelZh: "延迟开船" },
   { status: "departed", labelZh: "已开船" },
+  { status: "delayInTransit", labelZh: "延迟运输" },
   { status: "arrivedPort", labelZh: "已到港" },
   { status: "customsTH", labelZh: "清关中" },
   { status: "customsCleared", labelZh: "清关已放行" },

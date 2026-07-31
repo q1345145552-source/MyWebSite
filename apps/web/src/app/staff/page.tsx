@@ -75,7 +75,7 @@ export default function StaffHomePage() {
     { id: "wh_dongguan_01", label: "东莞仓" },
   { id: "wh_shenzhen_01", label: "深圳仓" },
   ];
-  const logisticsStatusOptions = ["已装柜", "延迟开船", "已开船", "已到港", "清关中", "清关已放行", "已到仓", "派送中", "派送完成"] as const;
+  const logisticsStatusOptions = ["已装柜", "延迟开船", "已开船", "延迟运输", "已到港", "清关中", "清关已放行", "已到仓", "派送中", "派送完成"] as const;
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [toast, setToast] = useState("");

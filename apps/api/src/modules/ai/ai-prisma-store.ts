@@ -51,13 +51,25 @@ export class PrismaStatusLabelStore implements StatusLabelStore {
     const rows = await prisma.aiStatusLabel.findMany({
       orderBy: { status: "asc" },
     });
-    return rows.map((row) => ({ status: row.status as ShipmentStatus, labelZh: row.labelZh }));
+    const result = rows.map((row) => ({ status: row.status as ShipmentStatus, labelZh: row.labelZh }));
+
+    // ensureDefaults 只在这张表「一条记录都没有」时才灌默认值。
+    // 表里已经有数据之后再往代码里加新状态（如 2026-08-01 的 delayInTransit 延迟运输），
+    // 就再也进不来了 —— 客户会看到英文状态名。所以读取时把缺的补上。
+    // 只在内存里补，不写库：用户改过的中文名一个都不会被覆盖。
+    const existing = new Set(result.map((item) => item.status));
+    for (const fallback of DEFAULT_STATUS_LABELS) {
+      if (!existing.has(fallback.status)) result.push(fallback);
+    }
+    result.sort((a, b) => a.status.localeCompare(b.status));
+    return result;
   }
 
   async getLabel(status: ShipmentStatus): Promise<string | undefined> {
     await this.ensureDefaults();
     const row = await prisma.aiStatusLabel.findUnique({ where: { status } });
-    return row?.labelZh;
+    // 同上：表里没有这条时回退到代码里的默认中文名，不要把英文状态名吐给客户
+    return row?.labelZh ?? DEFAULT_STATUS_LABELS.find((item) => item.status === status)?.labelZh;
   }
 
   async upsert(items: StatusLabelConfig[]): Promise<void> {

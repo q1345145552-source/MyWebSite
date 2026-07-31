@@ -6,6 +6,8 @@ export const STATUS_FLOW = [
   "loaded",
   "delayDeparted",
   "departed",
+  // 已开船但海上延误、还没到港。和 delayDeparted 是一对：一个是没准点开、一个是没准点到。
+  "delayInTransit",
   "arrivedPort",
   "customsTH",
   "customsCleared",
@@ -13,6 +15,15 @@ export const STATUS_FLOW = [
   "outForDelivery",
   "delivered",
 ] as const;
+
+/**
+ * 「延迟」类状态是可跳过的中间态。
+ *
+ * 状态推进的规则是「一次只能往前一格」。把 delayDeparted / delayInTransit 排进主流程后，
+ * 如果不把它们标成可跳过，就会出现「已装柜」跳不到「已开船」、「已开船」跳不到「已到港」——
+ * 没延误的单子反而卡住了。所以推进时允许跨过连续的延迟状态。
+ */
+export const DELAY_STATUSES = new Set(["delayDeparted", "delayInTransit"]);
 
 export const EXCEPTION_STATUSES = new Set(["exception", "returned", "cancelled"]);
 
