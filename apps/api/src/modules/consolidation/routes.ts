@@ -101,6 +101,20 @@ function formatTask(task: any) {
   };
 }
 
+/**
+ * 列表专用：在 formatTask 基础上摘掉付款凭证图。
+ *
+ * paymentProofBase64 是整张付款凭证（@db.Text 存 base64），
+ * formatTask 里的 ...task 会把它一并带出去。三个端的界面都只在
+ * 「详情」里显示这张图（taskDetail.paymentProofBase64），列表里从没读过。
+ * 前端拿到 undefined 走的是同一个 `&&` 判空分支，不会报错。
+ */
+function formatTaskForList(task: any) {
+  const formatted = formatTask(task);
+  delete formatted.paymentProofBase64;
+  return formatted;
+}
+
 function formatPrealert(pa: any) {
   return {
     ...pa,
@@ -190,7 +204,7 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
     const result = tasks.map((t) => {
       const volumePercent = calcVolumePercent(t);
       return {
-        ...formatTask(t),
+        ...formatTaskForList(t),
         volumePercent,
         isNearFull: volumePercent >= 85,
         prealertCount: t.prealerts.length,
@@ -801,7 +815,7 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
     });
 
     const result = tasks.map((t) => ({
-      ...formatTask(t),
+      ...formatTaskForList(t),
       clientName: t.client.name,
       clientPhone: t.client.phone,
       volumePercent: calcVolumePercent(t),
@@ -1297,7 +1311,7 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
     });
 
     const result = tasks.map((t) => ({
-      ...formatTask(t),
+      ...formatTaskForList(t),
       clientName: t.client.name,
       clientPhone: t.client.phone,
       volumePercent: calcVolumePercent(t),
