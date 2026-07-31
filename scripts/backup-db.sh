@@ -5,7 +5,9 @@ set -euo pipefail
 # crontab: 0 2 * * * /root/MyWebSite/scripts/backup-db.sh >> /root/db-backups/cron.log 2>&1
 
 BACKUP_DIR="/root/db-backups"
-RETENTION_DAYS=14
+# 日常备份保留天数。原来是 14 天，且到期一律删除，没有长期留档。
+# 现改为分层：日常留 30 天，每月第一份另存为 monthly 永久保留（见第 5 步）。
+RETENTION_DAYS=30
 TODAY=$(date +%Y%m%d)
 # 文件名默认按日期（每天定时备份用）。
 # 部署脚本会传 BACKUP_LABEL 换一个带时刻的名字，
@@ -26,7 +28,8 @@ log "========== 数据库备份开始 =========="
 AVAIL=$(df -m "$BACKUP_DIR" | tail -1 | awk '{print $4}')
 if [ "$AVAIL" -lt 500 ]; then
   log "❌ 磁盘空间不足：${AVAIL}MB，清理旧备份..."
-  find "$BACKUP_DIR" -name "*.sql.gz" -mtime +3 -delete
+  # 应急清理也必须绕开月度存档 —— 那是永久保留的，磁盘紧张也不能删
+  find "$BACKUP_DIR" -name "*.sql.gz" ! -name "*_monthly_*" -mtime +3 -delete
   AVAIL=$(df -m "$BACKUP_DIR" | tail -1 | awk '{print $4}')
   if [ "$AVAIL" -lt 200 ]; then
     log "⛔ 磁盘仍不足，放弃备份"
@@ -86,12 +89,29 @@ if [ "$SUCCESS" = false ]; then
   exit 1
 fi
 
-# 5. 清理旧备份（保留 ${RETENTION_DAYS} 天）
-DELETED=$(find "$BACKUP_DIR" -name "*.sql.gz" -mtime +${RETENTION_DAYS} -delete -print | wc -l)
-log "清理旧备份：${DELETED} 个"
+# 5. 月度存档：每月第一次备份成功后，另存一份永久保留的副本
+#
+# 分层保留策略：
+#   日常备份   保留 ${RETENTION_DAYS} 天，过期自动删
+#   月度存档   xiangtai_monthly_YYYYMM.sql.gz，永久保留，任何清理都不碰
+# 这样既能随时回到最近一个月的任意一天，也能长期留档，
+# 而磁盘增长可控（一份约 130MB，每年 12 份约 1.5GB）。
+MONTH_FILE="$BACKUP_DIR/xiangtai_monthly_$(date +%Y%m).sql.gz"
+if [ ! -f "$MONTH_FILE" ]; then
+  if cp "$FILE" "$MONTH_FILE" 2>/dev/null; then
+    log "📦 月度存档已建立：$(basename "$MONTH_FILE")（永久保留）"
+  else
+    log "⚠️ 月度存档创建失败（不影响本次备份）"
+  fi
+fi
 
-# 6. 保留至少2个备份（即使超过保留天数）
+# 6. 清理旧备份（保留 ${RETENTION_DAYS} 天，月度存档除外）
+DELETED=$(find "$BACKUP_DIR" -name "*.sql.gz" ! -name "*_monthly_*" -mtime +${RETENTION_DAYS} -delete -print | wc -l)
+log "清理旧备份：${DELETED} 个（月度存档不参与清理）"
+
+# 7. 统计
 COUNT=$(ls "$BACKUP_DIR"/xiangtai_*.sql.gz 2>/dev/null | wc -l)
-log "当前备份数：${COUNT}"
+MONTHLY=$(ls "$BACKUP_DIR"/xiangtai_monthly_*.sql.gz 2>/dev/null | wc -l)
+log "当前备份数：${COUNT}（其中月度存档 ${MONTHLY} 个）"
 
 log "========== 数据库备份完成 =========="
