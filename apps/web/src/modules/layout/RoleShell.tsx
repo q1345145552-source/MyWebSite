@@ -4,6 +4,32 @@ import { useEffect, useState, type ReactNode } from "react";
 import { clearAuthSession, getOptionalSession, type AuthRole, type AuthSession } from "../../auth/auth-session";
 import { globalMenus, roleFunctionGroups, roleMenus } from "./menu-config";
 
+const EXPANDED_GROUPS_KEY = "xt_sidebar_expanded_groups";
+
+/**
+ * 记住哪些功能分区是展开的。
+ * localStorage 本身可能抛错（Safari 无痕模式、用户关掉网站数据），
+ * 所以读写都要包起来 —— 记不住是小事，把整个工作台顶掉是大事。
+ */
+function readExpandedGroups(): string[] | null {
+  try {
+    const raw = window.localStorage.getItem(EXPANDED_GROUPS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((v) => typeof v === "string") : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveExpandedGroups(groups: Set<string>): void {
+  try {
+    window.localStorage.setItem(EXPANDED_GROUPS_KEY, JSON.stringify([...groups]));
+  } catch {
+    /* 隐私模式 / 配额满：记不住就算了，不影响使用 */
+  }
+}
+
 export default function RoleShell(props: {
   allowedRole: AuthRole | AuthRole[];
   title: string;
@@ -22,9 +48,29 @@ export default function RoleShell(props: {
     const next = getOptionalSession();
     setSession(next);
     setMounted(true);
-    setCurrentPath(window.location.pathname);
-    setCurrentHash(window.location.hash);
-  }, []);
+    const path = window.location.pathname;
+    const hash = window.location.hash;
+    setCurrentPath(path);
+    setCurrentHash(hash);
+
+    // 侧边栏菜单是真链接，点一下整页跳转，组件重新挂载，
+    // 展开状态就被重置回默认值了 —— 表现为「点完功能栏，分区自己收回去」。
+    // 这里做两件事恢复：把上次的展开状态读回来，再把当前页所在的分区强制展开。
+    const groups = roleFunctionGroups[allowedRoles[0]] ?? [];
+    const restored = new Set<string>(readExpandedGroups() ?? ["运单管理", "我的运单"]);
+    for (const g of groups) {
+      const hit = g.items.some(
+        (item) =>
+          item.href === path + hash ||
+          // 独立页面（href 里没有 #）按路径匹配即可
+          (!item.href.includes("#") && item.href === path),
+      );
+      if (hit) restored.add(g.groupLabel);
+    }
+    setExpandedGroups(restored);
+    // allowedRoles 已是稳定数组，用 join 避免引用变化导致重复执行
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allowedRoles.join(",")]);
 
   useEffect(() => {
     if (!mounted) return;
@@ -132,6 +178,8 @@ export default function RoleShell(props: {
                     const next = new Set(prev);
                     if (next.has(group.groupLabel)) next.delete(group.groupLabel);
                     else next.add(group.groupLabel);
+                    // 存下来，跳转到别的页面后还能恢复
+                    saveExpandedGroups(next);
                     return next;
                   });
                 }}
