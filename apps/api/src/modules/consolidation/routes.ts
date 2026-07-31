@@ -790,9 +790,13 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       orderBy: { createdAt: "desc" },
       include: {
         client: { select: { id: true, name: true, phone: true } },
-        prealerts: {
-          include: { products: true },
-        },
+        // 与 /client/consolidation/tasks 保持同一写法。
+        // 原来是 include: { products: true } —— 把每个任务下所有预报单的
+        // 所有商品（含 product_image_base64 整张商品照片）全都带出来。
+        // 但列表页只显示任务编号/客户/目的地/进度/状态/创建时间六列，
+        // 商品和照片是点开任务后由详情接口单独取的，列表里这份从来没被读过。
+        // 参见 CLAUDE.md 教训 #3「大数据量字段不要随列表返回」、规则 8b「三端列表条件必须一致」。
+        prealerts: { select: { id: true, status: true } },
       },
     });
 
@@ -802,10 +806,7 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       clientPhone: t.client.phone,
       volumePercent: calcVolumePercent(t),
       isNearFull: calcVolumePercent(t) >= 85,
-      prealerts: t.prealerts.map((pa) => ({
-        ...formatPrealert(pa),
-        products: pa.products.map(formatProduct),
-      })),
+      prealertCount: t.prealerts.length,
     }));
 
     ok(res, result);
@@ -1290,7 +1291,8 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       orderBy: { createdAt: "desc" },
       include: {
         client: { select: { id: true, name: true, phone: true } },
-        prealerts: { include: { products: true } },
+        // 同员工端列表：只取列表页需要的，商品和照片由详情接口单独取
+        prealerts: { select: { id: true, status: true } },
       },
     });
 
@@ -1300,10 +1302,7 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       clientPhone: t.client.phone,
       volumePercent: calcVolumePercent(t),
       isNearFull: calcVolumePercent(t) >= 85,
-      prealerts: t.prealerts.map((pa) => ({
-        ...formatPrealert(pa),
-        products: pa.products.map(formatProduct),
-      })),
+      prealertCount: t.prealerts.length,
     }));
 
     ok(res, result);
