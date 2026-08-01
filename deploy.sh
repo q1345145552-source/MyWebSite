@@ -122,20 +122,40 @@ if [ "$API_READY" = false ]; then
   note_issue "API 在 60 秒内没就绪，后续步骤可能不准"
 fi
 
-# 11a. 动数据库之前先备份
+# 11a. 这次部署到底要不要动数据库？
 #
-# 下一步会改生产库的结构。虽然换成迁移文件之后不会再有「擅自删字段」的事，
-# 但毕竟是在动生产库，备份失败就不做这一步 —— 宁可结构晚一步同步（可以事后补），
-# 也不能没退路就动。
-echo "💾 改结构前备份数据库..."
-BACKUP_OK=false
-if BACKUP_LABEL="predeploy_$(date +%Y%m%d_%H%M%S)" bash "$(dirname "$0")/scripts/backup-db.sh"; then
-  BACKUP_OK=true
+# 绝大多数部署只改代码、根本不碰数据库结构，那次备份（约 9 秒 + 130MB 磁盘）是白花的。
+# 所以先问一句 Prisma：还有没有没执行的迁移文件？
+#   没有 → 跳过备份，也跳过迁移，直接进健康检查
+#   有   → 老老实实备份再动，改结构出意外时那是唯一的退路
+#
+# 注意这里故意「问不出来就当作要动」：API 没起来、命令报错等情况一律走备份那条路。
+# 宁可白备一次，也不能在该备的时候没备。
+echo "🔍 检查这次部署要不要动数据库..."
+NEED_DB_WORK=true
+MIGRATE_STATUS=$(docker compose exec -T api npx prisma migrate status --schema=apps/api/prisma/schema.prisma 2>&1)
+if echo "$MIGRATE_STATUS" | grep -q "Database schema is up to date"; then
+  NEED_DB_WORK=false
+  echo "✅ 没有待执行的迁移，这次不动数据库（跳过备份，省下约 9 秒和 130MB）"
 else
-  note_issue "数据库备份失败 —— 已跳过数据库迁移"
+  echo "📋 有待执行的迁移，这次要改数据库结构："
+  echo "$MIGRATE_STATUS" | grep -iE "have not yet been applied|migration.*found|^  " | head -8
 fi
 
-# 11b. 执行迁移文件（原来这里是 `prisma db push --accept-data-loss`）
+# 11b. 要动数据库才备份
+BACKUP_OK=false
+if [ "$NEED_DB_WORK" = false ]; then
+  BACKUP_OK=true   # 不动数据库，不需要退路
+else
+  echo "💾 改结构前备份数据库..."
+  if BACKUP_LABEL="predeploy_$(date +%Y%m%d_%H%M%S)" bash "$(dirname "$0")/scripts/backup-db.sh"; then
+    BACKUP_OK=true
+  else
+    note_issue "数据库备份失败 —— 已跳过数据库迁移"
+  fi
+fi
+
+# 11c. 执行迁移文件（原来这里是 `prisma db push --accept-data-loss`）
 #
 # 为什么换掉 db push：它的职责是让数据库和 schema.prisma 长得一模一样 ——
 # 设计图里没有的字段会被删掉；改字段名在它眼里是「删旧的、加一个新的空的」，
@@ -143,7 +163,10 @@ fi
 # migrate deploy 只执行 apps/api/prisma/migrations/ 下写好的迁移文件，不自作主张，
 # 也不会因为设计图里少写了什么就去删东西。
 DB_SYNC_OK=false
-if [ "$BACKUP_OK" = false ]; then
+if [ "$NEED_DB_WORK" = false ]; then
+  DB_SYNC_OK=true
+  echo "⏭️  跳过数据库迁移（没有待执行的迁移）"
+elif [ "$BACKUP_OK" = false ]; then
   echo ""
   echo "⛔ 跳过数据库迁移 —— 因为备份没成功，此时改结构一旦出问题无法回退。"
   echo "   请先修好备份，再手动执行迁移。服务本身不受影响，代码已经上线。"
@@ -162,13 +185,15 @@ fi
 
 if [ "$BACKUP_OK" = true ] && [ "$DB_SYNC_OK" = false ]; then
   note_issue "数据库迁移失败 —— 如果是某个迁移文件执行到一半失败，它会挡住以后所有迁移，必须先处理（先看上面的报错，再跑 prisma migrate status 确认）"
-elif [ "$DB_SYNC_OK" = true ]; then
+elif [ "$NEED_DB_WORK" = true ] && [ "$DB_SYNC_OK" = true ]; then
+  # 只有真的改过结构才重启 API 让它重新认识数据库。
+  # 没改结构还重启，纯粹是多一次没必要的服务中断。
   echo "✅ 数据库迁移完成"
   docker compose restart api 2>&1 | tail -1
   sleep 5
 fi
 
-# 11c. 数据库结构体检（纯只读，一个字都不改）
+# 11d. 数据库结构体检（纯只读，一个字都不改）
 #
 # 换成 migrate deploy 之后，就没有「谁改了设计图但忘了写迁移文件、db push 也能自动补上」
 # 这个兜底了。所以每次部署都得体检一遍：设计图有、数据库没有的字段会被列出来。
