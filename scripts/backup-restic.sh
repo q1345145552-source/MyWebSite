@@ -17,6 +17,11 @@ set -uo pipefail
 #    （每天在跑的 backup-images.ts 备的是数据库里 base64 存的那批，
 #      那批本来就在 pg_dump 里，属于重复备份，真正该备的这批反而漏了。）
 #
+# 3) 服务器配置（.env / nginx / HTTPS 证书 / 定时任务清单）也从来没备过。
+#    数据备得再全，这些没了照样要重配一整天才能把网站搭回来。
+#
+# 4) 异地：每天同步到阿里云 OSS（泰国曼谷），换公司也换国家。
+#
 # 保留策略：**永久**。本脚本不做任何 forget/prune，快照只增不减。
 #
 # 后路：backup-db.sh 仍然每月留一份独立的 .sql.gz（不依赖 restic，
@@ -110,7 +115,80 @@ else
   FAILED=1
 fi
 
-# ---- 3. 仓库自检 ----------------------------------------------------------
+# ---- 3. 服务器配置 --------------------------------------------------------
+#
+# 光有数据还起不来网站。nginx 配置、HTTPS 证书、.env 里的各种密钥，
+# 都是服务器重装后重新搭起来时缺一不可的东西 —— 以前一样都没备。
+# 真出事的话数据一条不丢，但要重新配一整天，而且 .env 里的第三方 API 密钥
+# 丢了得去各家平台重新申请。
+#
+# 这些加起来才几 MB。
+#
+# 安全性：.env 里是密码和密钥，但 restic 仓库整个是加密的（就是那个密码文件在加密），
+# 备份里的 .env 同样是加密状态，不会明文躺在磁盘上。
+log "备份服务器配置…"
+CFG_TMP="$TMP_DIR/config"
+rm -rf "$CFG_TMP"; mkdir -p "$CFG_TMP"
+
+# 定时任务清单本身也要备 —— 它不是文件，得先导出来
+crontab -l > "$CFG_TMP/crontab.txt" 2>/dev/null || echo "(读不到 crontab)" > "$CFG_TMP/crontab.txt"
+
+CFG_PATHS=("$CFG_TMP")
+[ -f /root/MyWebSite/.env ]  && CFG_PATHS+=(/root/MyWebSite/.env)
+[ -f /root/MyWebSite/docker-compose.yml ] && CFG_PATHS+=(/root/MyWebSite/docker-compose.yml)
+[ -d /etc/nginx ]            && CFG_PATHS+=(/etc/nginx)
+[ -d /etc/letsencrypt ]      && CFG_PATHS+=(/etc/letsencrypt)
+
+if restic backup --tag config --host xiangtai "${CFG_PATHS[@]}" 2>&1 | tail -3; then
+  log "✅ 配置已存入（${#CFG_PATHS[@]} 项）"
+else
+  log "⛔ restic 存配置失败"
+  FAILED=1
+fi
+rm -rf "$CFG_TMP"
+
+# ---- 4. 同步到阿里云（异地备份）-------------------------------------------
+#
+# 上面三步备的东西全在 /root/restic-repo，还是在这一台机器上。
+# 硬盘坏、机房出事、服务商停机 —— 数据和备份一起没，等于没备。
+# 所以再往阿里云 OSS（泰国曼谷）复制一份：换了公司，也换了国家。
+#
+# 用 restic copy 而不是简单地把目录同步上去：
+#   目录同步会把本地的损坏一并同步过去，而 copy 是往云上那个独立仓库里
+#   重新写快照，云端能单独 check、单独恢复，本地烂掉不影响它。
+#
+# 加密：数据在服务器上就加密好了才上传，阿里云收到的是看不懂的密文，
+#      他们自己也打不开。唯一的钥匙是 /root/.restic-password。
+#
+# 云端凭据放在 /root/.oss-credentials（600 权限）。没有这个文件就跳过，
+# 不让缺凭据把整个备份判为失败 —— 本地那份已经好了。
+OSS_CRED=/root/.oss-credentials
+OSS_REPO='s3:https://oss-ap-southeast-7.aliyuncs.com/wuliuxitongshuju'
+
+if [ ! -s "$OSS_CRED" ]; then
+  log "⚠️  找不到 $OSS_CRED，跳过异地同步（本地备份不受影响）"
+else
+  log "同步到阿里云曼谷…"
+  # 凭据只在这个子 shell 里生效，不污染后面的步骤。
+  # 脚本开头有 pipefail，所以 restic 失败时整条管道（含 tail）就是失败，
+  # 子 shell 的退出码能如实反映出来。
+  if (
+    set -a; . "$OSS_CRED"; set +a
+    restic -r "$OSS_REPO" copy \
+      --password-file "$RESTIC_PASSWORD_FILE" \
+      --from-repo "$RESTIC_REPOSITORY" \
+      --from-password-file "$RESTIC_PASSWORD_FILE" 2>&1 | tail -3
+  ); then
+    log "✅ 已同步到阿里云"
+  else
+    # 异地这份没成不至于让整次备份算失败（本地那份是好的），
+    # 但必须报出来 —— 连续几天同步不上就等于没有异地备份。
+    log "⛔ 同步到阿里云失败 —— 本地备份是好的，但异地这份没更新，尽快查"
+    FAILED=1
+  fi
+fi
+
+# ---- 5. 仓库自检 ----------------------------------------------------------
 # 只查结构不逐块读数据（那个很慢）。去重仓库是共用数据块的，
 # 一旦坏了可能不是坏一天而是坏一片，所以每次都查一下，早发现早处理。
 log "仓库自检…"
@@ -121,7 +199,7 @@ else
   FAILED=1
 fi
 
-# ---- 4. 汇总 --------------------------------------------------------------
+# ---- 6. 汇总 --------------------------------------------------------------
 log "--- 当前占用 ---"
 restic stats --mode raw-data 2>/dev/null | grep -iE "total size|snapshot" || true
 log "快照数：$(restic snapshots --json 2>/dev/null | grep -o '"time"' | wc -l)"
