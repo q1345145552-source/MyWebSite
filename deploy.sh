@@ -148,7 +148,11 @@ if [ "$NEED_DB_WORK" = false ]; then
   BACKUP_OK=true   # 不动数据库，不需要退路
 else
   echo "💾 改结构前备份数据库..."
-  if BACKUP_LABEL="predeploy_$(date +%Y%m%d_%H%M%S)" bash "$(dirname "$0")/scripts/backup-db.sh"; then
+  # 用 $DEPLOY_SRC_DIR 而不是 $(dirname "$0")：
+  # 脚本是复制到 /tmp 跑的（见开头的自我复制保护），$0 指向 /tmp，
+  # dirname 出来就是 /tmp，找不到 scripts/backup-db.sh。
+  # 2026-08-02 部署时踩过这个坑：备份失败 → 连带跳过了数据库迁移。
+  if BACKUP_LABEL="predeploy_$(date +%Y%m%d_%H%M%S)" bash "$DEPLOY_SRC_DIR/scripts/backup-db.sh"; then
     BACKUP_OK=true
   else
     note_issue "数据库备份失败 —— 已跳过数据库迁移"
