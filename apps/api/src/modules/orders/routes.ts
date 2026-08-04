@@ -518,42 +518,7 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    // ② 状态机锁定
-    //    计费/报关依据：一旦发货或付款，客户不能再改 —— 改了就是改已成交的账。
-    //    收货人信息不锁：货在路上改收件人电话、地址是正常需求。
-    //
-    //    ⚠️ 锁的是「改动」不是「传参」。前端保存时会把整个表单原样回传（含这 7 个字段，
-    //    见 client/page.tsx 的 updateClientPrealert 调用），如果见到字段就拒，
-    //    客户只想改个收货地址也会被拦下。所以要拿新值和库里的值比，真变了才拒。
-    const billingLocked =
-      order.approvalStatus === "shipped" || order.paymentStatus === "paid";
-    const LOCKED_WHEN_BILLED = [
-      "itemName", "packageCount", "packageUnit", "weightKg",
-      "volumeM3", "transportMode", "shipDate", "domesticTrackingNo",
-    ] as const;
-    if (billingLocked) {
-      // Decimal / number / string 混着来，统一成字符串比；数值再按数值比一次，
-      // 避免 17.06 与 "17.060" 这种同值不同形被误判成改动。
-      const sameValue = (a: unknown, b: unknown): boolean => {
-        const sa = a === null || a === undefined ? "" : String(a).trim();
-        const sb = b === null || b === undefined ? "" : String(b).trim();
-        if (sa === sb) return true;
-        const na = Number(sa);
-        const nb = Number(sb);
-        return sa !== "" && sb !== "" && Number.isFinite(na) && Number.isFinite(nb) && na === nb;
-      };
-      const changed = LOCKED_WHEN_BILLED.filter(
-        (f) => body[f] !== undefined && !sameValue(body[f], (order as unknown as Record<string, unknown>)[f]),
-      );
-      if (changed.length > 0) {
-        const why = order.paymentStatus === "paid" ? "该订单已付款" : "该订单已发货";
-        fail(res, 400, "VALIDATION_ERROR",
-          `${why}，不能再修改计费与报关信息（${changed.join("、")}）。需要更正请联系客服。`);
-        return;
-      }
-    }
-
-    // ③ 输入校验
+    // ② 输入校验
     //    原来这里一个校验都没有：传 -999、1e20、或把 transportMode 传成任意字符串都能直接写库。
     //    transportMode 被写成乱码最要命 —— 计费时按它查单价规则，查不到就算不出金额。
     //
@@ -637,6 +602,48 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       receiverAddressTh: receiverAddressTh ?? order.receiverAddressTh,
       updatedAt: now,
     };
+
+    // 值是否等价。Decimal / number / string 混着来，先按字符串比，
+    // 再按数值比一次，避免 17.06 与 "17.060" 这种同值不同形被当成改动。
+    const sameValue = (a: unknown, b: unknown): boolean => {
+      const sa = a === null || a === undefined ? "" : String(a).trim();
+      const sb = b === null || b === undefined ? "" : String(b).trim();
+      if (sa === sb) return true;
+      const na = Number(sa);
+      const nb = Number(sb);
+      return sa !== "" && sb !== "" && Number.isFinite(na) && Number.isFinite(nb) && na === nb;
+    };
+
+    // ③ 状态机锁定
+    //    计费/报关依据：一旦发货或付款，客户不能再改 —— 改了就是改已成交的账。
+    //    收货人姓名/电话/地址不锁：货在路上改收件信息是正常需求。
+    //
+    //    ⚠️ 两个坑，都踩过：
+    //    1) 锁的是「改动」不是「传参」。前端保存时把整个表单原样回传
+    //       （见 client/page.tsx 的 updateClientPrealert），见字段就拒的话，
+    //       客户只想改个地址也会被拦下。
+    //    2) 必须拿**归一化之后**的最终值来比，不能比原始 body。
+    //       body 里的 null / "" 在上面已经被判定为「本次不改」，
+    //       拿原始值比会把「没改」误判成「改了」，同样拦错人。
+    //    所以这段放在 data 组装完之后，比的是「真正要写进去的值」vs「库里的值」。
+    const billingLocked =
+      order.approvalStatus === "shipped" || order.paymentStatus === "paid";
+    if (billingLocked) {
+      const LOCKED_WHEN_BILLED = [
+        "itemName", "packageCount", "packageUnit", "weightKg",
+        "volumeM3", "transportMode", "shipDate", "domesticTrackingNo",
+      ] as const;
+      const changedLocked = LOCKED_WHEN_BILLED.filter(
+        (f) => !sameValue(data[f], (order as unknown as Record<string, unknown>)[f]),
+      );
+      if (changedLocked.length > 0) {
+        const why = order.paymentStatus === "paid" ? "该订单已付款" : "该订单已发货";
+        fail(res, 400, "VALIDATION_ERROR",
+          `${why}，不能再修改计费与报关信息（${changedLocked.join("、")}）。需要更正请联系客服。`);
+        return;
+      }
+    }
+
     await prisma.order.update({ where: { id: orderId }, data });
 
     // 留痕：只记真正变了的字段，改前改后都留。
@@ -647,7 +654,7 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       for (const [k, after] of Object.entries(data)) {
         if (k === "updatedAt") continue;
         const before = (order as unknown as Record<string, unknown>)[k];
-        if (String(before ?? "") !== String(after ?? "")) changed[k] = { before, after };
+        if (!sameValue(before, after)) changed[k] = { before, after };
       }
       if (Object.keys(changed).length > 0) {
         await prisma.auditLog.create({
