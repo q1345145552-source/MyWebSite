@@ -480,28 +480,32 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
   /**
    * 客户端编辑预报单（确认收货前可编辑）。
    */
+  // 客户改自己的预报单。
+  //
+  // 2026-08-04 安全测试后加固。三层防护，缺一不可：
+  //
+  //   ① 归属校验     —— 只能改自己的单（where 里带 clientId，原来就有，别删）
+  //   ② 状态机锁定   —— 进入计费/物流流程后，锁死计费与报关依据
+  //   ③ 输入校验     —— 数值必须合法、枚举必须在范围内、字符串限长
+  //
+  // 为什么不干脆禁止客户改这些字段：这是**预报单**，客户提前申报「寄什么、多重、寄到哪」，
+  // 本来就该能自己修正。一刀切锁死等于砍功能。
+  //
+  // ② 是关键。原来只挡了 approvalStatus === "received"，于是留下两个口子：
+  //   · shipped（货已发出）—— 还能改重量、品名、运输方式
+  //   · paid（钱已付清）  —— 还能改计费依据
+  // 这两种情况下客户改计费字段，就是在动已经成交的账，必须锁。
   app.post("/client/prealerts/update", async (req, res) => {
     const auth = requireRole(req, res, ["client"]);
     if (!auth) return;
-    const body = (req.body ?? {}) as {
-      orderId?: string;
-      itemName?: string;
-      packageCount?: number;
-      packageUnit?: "bag" | "box";
-      weightKg?: number;
-      volumeM3?: number;
-      shipDate?: string;
-      domesticTrackingNo?: string;
-      transportMode?: "sea" | "land";
-      receiverNameTh?: string;
-      receiverPhoneTh?: string;
-      receiverAddressTh?: string;
-    };
-    const orderId = body.orderId?.trim();
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const orderId = typeof body.orderId === "string" ? body.orderId.trim() : "";
     if (!orderId) {
       fail(res, 400, "BAD_REQUEST", "orderId is required");
       return;
     }
+
+    // ① 归属校验：clientId 必须是自己，否则查不到（不要改成先查后比，避免信息泄露）
     const order = await prisma.order.findFirst({
       where: { id: orderId, companyId: auth.companyId, clientId: auth.userId },
     });
@@ -513,24 +517,139 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       fail(res, 400, "VALIDATION_ERROR", "已确认收货，无法编辑");
       return;
     }
+
+    // ② 状态机锁定
+    //    计费/报关依据：一旦发货或付款，客户不能再改 —— 改了就是改已成交的账。
+    //    收货人信息不锁：货在路上改收件人电话、地址是正常需求。
+    //
+    //    ⚠️ 锁的是「改动」不是「传参」。前端保存时会把整个表单原样回传（含这 7 个字段，
+    //    见 client/page.tsx 的 updateClientPrealert 调用），如果见到字段就拒，
+    //    客户只想改个收货地址也会被拦下。所以要拿新值和库里的值比，真变了才拒。
+    const billingLocked =
+      order.approvalStatus === "shipped" || order.paymentStatus === "paid";
+    const LOCKED_WHEN_BILLED = [
+      "itemName", "packageCount", "packageUnit", "weightKg",
+      "volumeM3", "transportMode", "shipDate", "domesticTrackingNo",
+    ] as const;
+    if (billingLocked) {
+      // Decimal / number / string 混着来，统一成字符串比；数值再按数值比一次，
+      // 避免 17.06 与 "17.060" 这种同值不同形被误判成改动。
+      const sameValue = (a: unknown, b: unknown): boolean => {
+        const sa = a === null || a === undefined ? "" : String(a).trim();
+        const sb = b === null || b === undefined ? "" : String(b).trim();
+        if (sa === sb) return true;
+        const na = Number(sa);
+        const nb = Number(sb);
+        return sa !== "" && sb !== "" && Number.isFinite(na) && Number.isFinite(nb) && na === nb;
+      };
+      const changed = LOCKED_WHEN_BILLED.filter(
+        (f) => body[f] !== undefined && !sameValue(body[f], (order as unknown as Record<string, unknown>)[f]),
+      );
+      if (changed.length > 0) {
+        const why = order.paymentStatus === "paid" ? "该订单已付款" : "该订单已发货";
+        fail(res, 400, "VALIDATION_ERROR",
+          `${why}，不能再修改计费与报关信息（${changed.join("、")}）。需要更正请联系客服。`);
+        return;
+      }
+    }
+
+    // ③ 输入校验
+    //    原来这里一个校验都没有：传 -999、1e20、或把 transportMode 传成任意字符串都能直接写库。
+    //    transportMode 被写成乱码最要命 —— 计费时按它查单价规则，查不到就算不出金额。
+    const num = (raw: unknown, field: string, max: number): number | null | undefined => {
+      if (raw === undefined) return undefined;
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 0 || n > max) {
+        fail(res, 400, "BAD_REQUEST", `${field} 数值不合法`);
+        return null;
+      }
+      return n;
+    };
+    const str = (raw: unknown, field: string, max: number): string | null | undefined => {
+      if (raw === undefined) return undefined;
+      if (typeof raw !== "string") { fail(res, 400, "BAD_REQUEST", `${field} 必须是文本`); return null; }
+      const s = raw.trim();
+      if (s.length > max) { fail(res, 400, "BAD_REQUEST", `${field} 超过 ${max} 字`); return null; }
+      return s;
+    };
+
+    const weightKg = num(body.weightKg, "重量", 100_000);
+    if (weightKg === null) return;
+    const volumeM3 = num(body.volumeM3, "体积", 10_000);
+    if (volumeM3 === null) return;
+    const packageCount = num(body.packageCount, "箱数", 100_000);
+    if (packageCount === null) return;
+
+    const itemName = str(body.itemName, "品名", 200);
+    if (itemName === null) return;
+    const shipDate = str(body.shipDate, "发货日期", 32);
+    if (shipDate === null) return;
+    const domesticTrackingNo = str(body.domesticTrackingNo, "国内单号", 128);
+    if (domesticTrackingNo === null) return;
+    const receiverNameTh = str(body.receiverNameTh, "收件人", 128);
+    if (receiverNameTh === null) return;
+    const receiverPhoneTh = str(body.receiverPhoneTh, "收件电话", 64);
+    if (receiverPhoneTh === null) return;
+    const receiverAddressTh = str(body.receiverAddressTh, "收货地址", 500);
+    if (receiverAddressTh === null) return;
+
+    if (body.packageUnit !== undefined && body.packageUnit !== "bag" && body.packageUnit !== "box") {
+      fail(res, 400, "BAD_REQUEST", "包装单位只能是 bag 或 box");
+      return;
+    }
+    if (body.transportMode !== undefined && body.transportMode !== "sea" && body.transportMode !== "land") {
+      fail(res, 400, "BAD_REQUEST", "运输方式只能是 sea 或 land");
+      return;
+    }
+
     const now = new Date();
-    await prisma.order.update({
-      where: { id: orderId },
-      data: {
-        itemName: body.itemName?.trim() ?? order.itemName,
-        packageCount: body.packageCount !== undefined ? Number(body.packageCount) : order.packageCount,
-        packageUnit: body.packageUnit ?? order.packageUnit,
-        weightKg: body.weightKg !== undefined ? (body.weightKg as unknown as Prisma.Decimal) : order.weightKg,
-        volumeM3: body.volumeM3 !== undefined ? (body.volumeM3 as unknown as Prisma.Decimal) : order.volumeM3,
-        shipDate: body.shipDate?.trim() ?? order.shipDate,
-        domesticTrackingNo: body.domesticTrackingNo?.trim() ?? order.domesticTrackingNo,
-        transportMode: body.transportMode ?? order.transportMode,
-        receiverNameTh: body.receiverNameTh?.trim() ?? order.receiverNameTh,
-        receiverPhoneTh: body.receiverPhoneTh?.trim() ?? order.receiverPhoneTh,
-        receiverAddressTh: body.receiverAddressTh?.trim() ?? order.receiverAddressTh,
-        updatedAt: now,
-      },
-    });
+    const data = {
+      itemName: itemName ?? order.itemName,
+      packageCount: packageCount ?? order.packageCount,
+      packageUnit: (body.packageUnit as "bag" | "box" | undefined) ?? order.packageUnit,
+      weightKg: weightKg !== undefined ? (weightKg as unknown as Prisma.Decimal) : order.weightKg,
+      volumeM3: volumeM3 !== undefined ? (volumeM3 as unknown as Prisma.Decimal) : order.volumeM3,
+      shipDate: shipDate ?? order.shipDate,
+      domesticTrackingNo: domesticTrackingNo ?? order.domesticTrackingNo,
+      transportMode: (body.transportMode as "sea" | "land" | undefined) ?? order.transportMode,
+      receiverNameTh: receiverNameTh ?? order.receiverNameTh,
+      receiverPhoneTh: receiverPhoneTh ?? order.receiverPhoneTh,
+      receiverAddressTh: receiverAddressTh ?? order.receiverAddressTh,
+      updatedAt: now,
+    };
+    await prisma.order.update({ where: { id: orderId }, data });
+
+    // 留痕：只记真正变了的字段，改前改后都留。
+    // audit_logs 表建好很久了但一直零写入，从这个接口开始用起来。
+    // 写日志失败不能影响用户改单 —— 所以整段包 try。
+    try {
+      const changed: Record<string, { before: unknown; after: unknown }> = {};
+      for (const [k, after] of Object.entries(data)) {
+        if (k === "updatedAt") continue;
+        const before = (order as unknown as Record<string, unknown>)[k];
+        if (String(before ?? "") !== String(after ?? "")) changed[k] = { before, after };
+      }
+      if (Object.keys(changed).length > 0) {
+        await prisma.auditLog.create({
+          data: {
+            companyId: auth.companyId,
+            actorId: auth.userId,
+            actorRole: "client",
+            action: "UPDATE",
+            resourceType: "Order",
+            resourceId: orderId,
+            beforeJson: JSON.stringify(Object.fromEntries(Object.entries(changed).map(([k, v]) => [k, v.before]))),
+            afterJson: JSON.stringify(Object.fromEntries(Object.entries(changed).map(([k, v]) => [k, v.after]))),
+            remark: "客户修改预报单",
+            ip: (req.headers?.["x-forwarded-for"] as string)?.split(",")[0]?.trim() ?? null,
+            userAgent: (req.headers?.["user-agent"] as string) ?? null,
+          },
+        });
+      }
+    } catch {
+      // 审计写不进去不影响业务，静默跳过
+    }
+
     ok(res, { updated: true, orderId });
   });
 
