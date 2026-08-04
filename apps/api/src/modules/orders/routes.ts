@@ -450,6 +450,16 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       fail(res, 400, "VALIDATION_ERROR", "已确认收货，无法删除");
       return;
     }
+    // 2026-08-04 加固：原来只挡了 received，客户可以把自己**已付款、已发货**的订单
+    // 整个删掉。这个删除是硬删除且级联很深——运单、状态记录、装柜明细、派送单、
+    // 签收记录、入库照片、结算分录（财务数据）全部一并清除，账单行还会变成孤儿。
+    // 也就是说：客户付了钱、货发出去了，然后一键把这笔交易从系统里抹掉。
+    // 与 prealerts/update 用同一套状态机口径：付款或发货后不可再动。
+    if (order.paymentStatus === "paid" || order.approvalStatus === "shipped") {
+      const why = order.paymentStatus === "paid" ? "该订单已付款" : "该订单已发货";
+      fail(res, 400, "VALIDATION_ERROR", `${why}，无法删除。需要取消请联系客服。`);
+      return;
+    }
     await prisma.$transaction(async (tx) => {
       // 先获取订单下所有运单，用于级联清理
       const orderShipments = await tx.shipment.findMany({
