@@ -20,14 +20,23 @@ export function registerAuthRoutes(app: MinimalHttpApp): void {
       fail(res, 429, "BAD_REQUEST", "too many login attempts, please try again later");
       return;
     }
-    const body = (req.body ?? {}) as { account?: string; password?: string; role?: string };
-    if (!body.account?.trim()) {
+    // 2026-08-04：原来直接 body.account?.trim()，账号传成数字/数组/对象时
+    // .trim 不是函数 → 抛异常 → 500（日志里 5 次 "body.account?.trim is not a function"）。
+    // 登录是完全对公网开放的入口，任何人都能随手打崩它一次，必须先卡类型。
+    const raw = (req.body ?? {}) as Record<string, unknown>;
+    const asStr = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
+    const body = {
+      account: asStr(raw.account),
+      password: typeof raw.password === "string" ? raw.password : "",
+      role: asStr(raw.role),
+    };
+    if (!body.account) {
       fail(res, 400, "BAD_REQUEST", "account is required");
       return;
     }
 
     const user = await prisma.user.findUnique({
-      where: { id: body.account.trim() },
+      where: { id: body.account },
       select: {
         id: true,
         companyId: true,
@@ -42,11 +51,11 @@ export function registerAuthRoutes(app: MinimalHttpApp): void {
       fail(res, 401, "UNAUTHORIZED", "invalid credentials");
       return;
     }
-    if (body.role?.trim() && body.role.trim() !== user.role) {
+    if (body.role && body.role !== user.role) {
       fail(res, 401, "UNAUTHORIZED", "invalid credentials");
       return;
     }
-    if (!verifyPassword(body.password ?? "", user.passwordHash)) {
+    if (!verifyPassword(body.password, user.passwordHash)) {
       fail(res, 401, "UNAUTHORIZED", "invalid credentials");
       return;
     }
