@@ -14,7 +14,7 @@
 /** 客服联系方式。只改这里，页面会同步；留空的项不会显示。 */
 const CONTACT = {
   phone: "",   // 例：+66 12 345 6789
-  wechat: "",  // 微信号
+  wechat: "ThaiAir01",  // 微信号
   line: "",    // Line ID
   email: "",   // 邮箱
 };
