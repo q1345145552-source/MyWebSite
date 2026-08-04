@@ -101,7 +101,7 @@ export default function LoginPage() {
           {message ? <p className="auth-error">{message}</p> : null}
 
           <div className="auth-foot">
-            还没有账号？<a href="/register">去注册</a>
+            还没有账号？<a href="/register">申请开通</a>
           </div>
         </div>
       </div>
