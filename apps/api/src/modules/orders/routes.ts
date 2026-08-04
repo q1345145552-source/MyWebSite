@@ -556,8 +556,21 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
     // ③ 输入校验
     //    原来这里一个校验都没有：传 -999、1e20、或把 transportMode 传成任意字符串都能直接写库。
     //    transportMode 被写成乱码最要命 —— 计费时按它查单价规则，查不到就算不出金额。
+    //
+    //    ⚠️ null / "" 一律当「本次不改这个字段」，不能当非法值拒。
+    //    因为接口返回时 decToNumber() 把空值转成 null（见本文件 decToNumber），
+    //    前端拿到 null 存进表单、保存时原样回传。线上确实有重量/体积为空的运单，
+    //    要是把 null 判成非法，这些客户的预报单会直接保存不了。
+    //
+    //    类型也要卡死：Number(true) === 1、Number(["5"]) === 5，
+    //    不限定类型的话布尔和单元素数组会被悄悄转成数字写进库。
     const num = (raw: unknown, field: string, max: number): number | null | undefined => {
-      if (raw === undefined) return undefined;
+      if (raw === undefined || raw === null) return undefined;
+      if (typeof raw === "string" && raw.trim() === "") return undefined;
+      if (typeof raw !== "number" && typeof raw !== "string") {
+        fail(res, 400, "BAD_REQUEST", `${field} 必须是数字`);
+        return null;
+      }
       const n = Number(raw);
       if (!Number.isFinite(n) || n < 0 || n > max) {
         fail(res, 400, "BAD_REQUEST", `${field} 数值不合法`);
@@ -566,7 +579,7 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       return n;
     };
     const str = (raw: unknown, field: string, max: number): string | null | undefined => {
-      if (raw === undefined) return undefined;
+      if (raw === undefined || raw === null) return undefined;
       if (typeof raw !== "string") { fail(res, 400, "BAD_REQUEST", `${field} 必须是文本`); return null; }
       const s = raw.trim();
       if (s.length > max) { fail(res, 400, "BAD_REQUEST", `${field} 超过 ${max} 字`); return null; }
@@ -593,25 +606,32 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
     const receiverAddressTh = str(body.receiverAddressTh, "收货地址", 500);
     if (receiverAddressTh === null) return;
 
-    if (body.packageUnit !== undefined && body.packageUnit !== "bag" && body.packageUnit !== "box") {
-      fail(res, 400, "BAD_REQUEST", "包装单位只能是 bag 或 box");
-      return;
-    }
-    if (body.transportMode !== undefined && body.transportMode !== "sea" && body.transportMode !== "land") {
-      fail(res, 400, "BAD_REQUEST", "运输方式只能是 sea 或 land");
-      return;
-    }
+    // 枚举同理：null / "" 当作不改，别把「本来就是空的」判成非法
+    const enumOk = (raw: unknown, allowed: readonly string[], field: string): boolean => {
+      if (raw === undefined || raw === null || raw === "") return true;
+      if (typeof raw !== "string" || !allowed.includes(raw)) {
+        fail(res, 400, "BAD_REQUEST", `${field}只能是 ${allowed.join(" 或 ")}`);
+        return false;
+      }
+      return true;
+    };
+    if (!enumOk(body.packageUnit, ["bag", "box"], "包装单位")) return;
+    if (!enumOk(body.transportMode, ["sea", "land"], "运输方式")) return;
+    // 归一化：null/""/undefined 统一成 undefined，这样下面的 ?? 才会回落到原值。
+    // 少了这一步，前端传空串会把空串直接写进库（?? 只挡 null 和 undefined）。
+    const enumVal = <T,>(raw: unknown): T | undefined =>
+      raw === undefined || raw === null || raw === "" ? undefined : (raw as T);
 
     const now = new Date();
     const data = {
       itemName: itemName ?? order.itemName,
       packageCount: packageCount ?? order.packageCount,
-      packageUnit: (body.packageUnit as "bag" | "box" | undefined) ?? order.packageUnit,
+      packageUnit: enumVal<"bag" | "box">(body.packageUnit) ?? order.packageUnit,
       weightKg: weightKg !== undefined ? (weightKg as unknown as Prisma.Decimal) : order.weightKg,
       volumeM3: volumeM3 !== undefined ? (volumeM3 as unknown as Prisma.Decimal) : order.volumeM3,
       shipDate: shipDate ?? order.shipDate,
       domesticTrackingNo: domesticTrackingNo ?? order.domesticTrackingNo,
-      transportMode: (body.transportMode as "sea" | "land" | undefined) ?? order.transportMode,
+      transportMode: enumVal<"sea" | "land">(body.transportMode) ?? order.transportMode,
       receiverNameTh: receiverNameTh ?? order.receiverNameTh,
       receiverPhoneTh: receiverPhoneTh ?? order.receiverPhoneTh,
       receiverAddressTh: receiverAddressTh ?? order.receiverAddressTh,
