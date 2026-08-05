@@ -7,7 +7,10 @@
 --   B 多余  → 数据库有、设计图没有。一旦跑 prisma db push，这些字段连同里面的数据会被删掉
 --
 -- 什么都不输出 = 完全一致，没问题。
--- 生成自 schema.prisma，共 43 张表 / 522 个字段。
+-- 生成自 schema.prisma，共 43 张表 / 523 个字段。
+--
+-- ⚠️ 这份清单是手抄的，schema.prisma 加了字段必须回来同步一行，否则部署时会报
+--    「B 多余」的假警告（2026-08-05 加 containers.transport_mode 时就漏了一次）。
 
 WITH expected(table_name, column_name) AS (VALUES
   ('users','id'),
@@ -241,6 +244,7 @@ WITH expected(table_name, column_name) AS (VALUES
   ('containers','company_id'),
   ('containers','container_no'),
   ('containers','container_type'),
+  ('containers','transport_mode'),
   ('containers','warehouse_id'),
   ('containers','carrier_name'),
   ('containers','sealed_at'),
