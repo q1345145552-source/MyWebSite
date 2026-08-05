@@ -31,9 +31,13 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
     const keyword = (req.query.query ?? "").trim();
     const trackingNo = (req.query.trackingNo ?? "").trim();
     const status = (req.query.status ?? "").trim();
+    const transportMode = (req.query.transportMode ?? "").trim();
     const where: any = { companyId: auth.companyId };
     if (keyword) where.containerNo = { contains: keyword, mode: "insensitive" };
     if (status && status !== "ALL") where.currentStatus = status;
+    // 运输方式筛选。"none" = 只看还没标运输方式的老柜子（方便员工把 9 个判不出来的补齐）
+    if (transportMode === "sea" || transportMode === "land") where.transportMode = transportMode;
+    else if (transportMode === "none") where.transportMode = null;
     // 按运单号过滤：查找包含该运单号的柜子
     if (trackingNo) {
       const matchingItems = await prisma.shipmentContainerItem.findMany({
@@ -53,6 +57,7 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
         manifestNo: c.containerNo,
         warehouse: c.warehouseId ?? "未知",
         status: c.currentStatus ?? "LOADING",
+        transportMode: c.transportMode ?? null,
         carrierInfo: c.carrierName ?? null,
         sealedAt: c.sealedAt?.toISOString() ?? null,
         totalBills: c.items.length,
@@ -65,8 +70,15 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
   app.post("/staff/loading-manifests", async (req, res) => {
     const auth = requireRole(req, res, ["staff", "admin"]);
     if (!auth) return;
-    const body = (req.body ?? {}) as { warehouse?: string; carrierInfo?: string; containerNo?: string };
+    const body = (req.body ?? {}) as { warehouse?: string; carrierInfo?: string; containerNo?: string; transportMode?: string };
     if (!body.warehouse) { fail(res, 400, "BAD_REQUEST", "仓库参数无效"); return; }
+    // 2026-08-05：新建时必须说清楚这是海运柜还是陆运柜。
+    // 老柜子允许为空（迁移里判不出来的留了 null），但新建的不再放行。
+    const transportMode = typeof body.transportMode === "string" ? body.transportMode.trim() : "";
+    if (transportMode !== "sea" && transportMode !== "land") {
+      fail(res, 400, "BAD_REQUEST", "请选择运输方式：海运或陆运");
+      return;
+    }
     const containerNo = body.containerNo?.trim() || await issueManifestNo(new Date());
     // 查重
     const existed = await prisma.container.findUnique({ where: { containerNo }, select: { id: true } });
@@ -78,6 +90,7 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
         containerNo,
         containerType: body.warehouse === "wh_dongguan_01" ? "40HQ" : "20GP",
         warehouseId: body.warehouse,
+        transportMode,
         currentStatus: "LOADING",
         carrierName: body.carrierInfo?.trim() || null,
       },
@@ -115,6 +128,7 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
       manifestNo: container.containerNo,
       warehouse: container.warehouseId,
       status: container.currentStatus ?? "LOADING",
+      transportMode: container.transportMode ?? null,
       carrierInfo: container.carrierName ?? null,
       sealedAt: container.sealedAt?.toISOString() ?? null,
       bills: container.items.map((item) => ({
@@ -270,10 +284,27 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
         await tx.shipment.update({ where: { id: shipment.id }, data: { currentStatus: parentStatus, updatedAt: now } });
       }
 
-      return { loadTrackingNo, isPartial: reqPieces < totalPkg, parentTrackingNo: shipment.trackingNo };
+      // 2026-08-05：柜子和运单的运输方式对不上时给个提醒，**但不拦**。
+      // 线上真实存在 5 个海陆混装的柜（大概率是故意拼柜），硬拦会让员工干不了活。
+      // 柜子没标运输方式的（老柜子）不提醒，免得刷屏。
+      const modeMismatch =
+        container.transportMode && locked.transportMode && container.transportMode !== locked.transportMode
+          ? { containerMode: container.transportMode, shipmentMode: locked.transportMode }
+          : null;
+
+      return { loadTrackingNo, isPartial: reqPieces < totalPkg, parentTrackingNo: shipment.trackingNo, modeMismatch };
     });
 
-    ok(res, { message: "运单已添加到装柜", trackingNo: result.loadTrackingNo, isPartial: result.isPartial, parentTrackingNo: result.parentTrackingNo });
+    const ZH: Record<string, string> = { sea: "海运", land: "陆运" };
+    ok(res, {
+      message: "运单已添加到装柜",
+      trackingNo: result.loadTrackingNo,
+      isPartial: result.isPartial,
+      parentTrackingNo: result.parentTrackingNo,
+      warning: result.modeMismatch
+        ? `这是${ZH[result.modeMismatch.containerMode] ?? result.modeMismatch.containerMode}柜，装进来的是${ZH[result.modeMismatch.shipmentMode] ?? result.modeMismatch.shipmentMode}的货`
+        : null,
+    });
     } catch (e: any) {
       fail(res, 400, "BAD_REQUEST", e.message ?? "装柜失败");
     }

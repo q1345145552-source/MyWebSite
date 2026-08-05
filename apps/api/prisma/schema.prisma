@@ -473,6 +473,10 @@ model Container {
   companyId        String    @map("company_id")
   containerNo      String    @unique @map("container_no") // 柜号
   containerType    String    @map("container_type") // 20GP | 40HQ
+  // sea = 海运 | land = 陆运。null = 2026-08-05 之前建的老柜子，判不出来，由员工自己补。
+  // 柜子和里面装的运单各有各的运输方式，允许不一致（线上真实存在 5 个海陆混装的柜），
+  // 装柜时只提醒不拦截，别改成硬校验。
+  transportMode    String?   @map("transport_mode")
   warehouseId      String?   @map("warehouse_id")
   carrierName      String?   @map("carrier_name")
   sealedAt         DateTime? @map("sealed_at")

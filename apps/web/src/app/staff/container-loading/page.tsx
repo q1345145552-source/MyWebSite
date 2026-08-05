@@ -34,6 +34,10 @@ const STATUS_LABEL: Record<string, string> = {
 // 顺序必须与后端 containers/routes.ts 的 CONTAINER_STATUS_FLOW 一致
 const STATUS_FLOW = ["LOADING", "SEALED", "DELAY_DEPARTED", "IN_TRANSIT", "DELAY_IN_TRANSIT", "ARRIVED", "CUSTOMS", "CUSTOMS_CLEARED", "UNLOADING", "IN_WAREHOUSE_TH"] as const;
 
+/** 柜子的运输方式。null = 2026-08-05 之前建的老柜子，判不出来，等员工自己补 */
+const MODE_ZH = (mode: string | null | undefined): string =>
+  mode === "sea" ? "海运" : mode === "land" ? "陆运" : "未标注";
+
 const WAREHOUSE_ZH: Record<string, string> = {
   wh_yiwu_01: "义乌仓",
   wh_guangzhou_01: "广州仓",
@@ -64,12 +68,13 @@ export default function StaffContainerLoadingPage() {
   const [query, setQuery] = useState("");
   const [searchTrackingNo, setSearchTrackingNo] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
+  const [modeFilter, setModeFilter] = useState("");
   const [list, setList] = useState<LoadingManifestItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
   const [showCreate, setShowCreate] = useState(false);
-  const [createForm, setCreateForm] = useState({ warehouse: "wh_yiwu_01", voyage: "", vesselName: "", containerNo: "" });
+  const [createForm, setCreateForm] = useState({ warehouse: "wh_yiwu_01", transportMode: "sea", voyage: "", vesselName: "", containerNo: "" });
   const [creating, setCreating] = useState(false);
   const [selectedId, setSelectedId] = useState("");
   const [detail, setDetail] = useState<LoadingManifestDetail | null>(null);
@@ -139,7 +144,7 @@ export default function StaffContainerLoadingPage() {
     setLoading(true);
     setError("");
     try {
-      const items = await fetchLoadingManifests({ query: query.trim(), trackingNo: searchTrackingNo.trim(), status: statusFilter });
+      const items = await fetchLoadingManifests({ query: query.trim(), trackingNo: searchTrackingNo.trim(), status: statusFilter, transportMode: modeFilter });
       setList(items);
       if (!selectedId && items.length > 0) setSelectedId(items[0].id);
     } catch (e) {
@@ -148,7 +153,7 @@ export default function StaffContainerLoadingPage() {
     } finally {
       setLoading(false);
     }
-  }, [query, searchTrackingNo, statusFilter, selectedId]);
+  }, [query, searchTrackingNo, statusFilter, modeFilter, selectedId]);
 
   useEffect(() => { void loadList(); }, []);
 
@@ -173,12 +178,13 @@ export default function StaffContainerLoadingPage() {
     try {
       const result = await createLoadingManifest({
         warehouse: createForm.warehouse,
+        transportMode: createForm.transportMode,
         containerNo: createForm.containerNo,
         carrierInfo: [createForm.voyage, createForm.vesselName].filter(Boolean).join(" / ") || undefined,
       });
       setToast(`装柜任务已创建: ${result.manifestNo}`);
       setShowCreate(false);
-      setCreateForm({ warehouse: "wh_yiwu_01", voyage: "", vesselName: "", containerNo: "" });
+      setCreateForm({ warehouse: "wh_yiwu_01", transportMode: "sea", voyage: "", vesselName: "", containerNo: "" });
       await loadList();
     } catch (e) {
       setError(e instanceof Error ? e.message : "创建失败");
@@ -234,16 +240,23 @@ export default function StaffContainerLoadingPage() {
     setAdding(true);
     let success = 0;
     const errors: string[] = [];
+    // 运输方式对不上的只提醒不拦（后端也不拦），线上真实存在海陆混装的柜
+    const modeWarnings: string[] = [];
     for (const [trackingNo, pieceCount] of entries) {
       if (!trackingNo) { errors.push("空运单号"); continue; }
       try {
-        await addShipmentToManifest(selectedId, trackingNo, pieceCount > 0 ? pieceCount : undefined);
+        const r = await addShipmentToManifest(selectedId, trackingNo, pieceCount > 0 ? pieceCount : undefined);
+        if (r.warning) modeWarnings.push(`${trackingNo}（${r.warning}）`);
         success++;
       } catch (e: any) {
         errors.push(`${trackingNo}: ${e.message ?? "失败"}`);
       }
     }
-    setToast(`成功添加 ${success} 个运单到装柜${errors.length > 0 ? `，失败 ${errors.length} 个：${errors.join("；")}` : ""}`);
+    setToast(
+      `成功添加 ${success} 个运单到装柜` +
+      (errors.length > 0 ? `，失败 ${errors.length} 个：${errors.join("；")}` : "") +
+      (modeWarnings.length > 0 ? `⚠️ 运输方式对不上：${modeWarnings.join("；")}（已装进去，如需调整请卸柜）` : ""),
+    );
     setSelectedShipments({});
     await loadDetail(selectedId);
     await loadShipmentList();
@@ -282,10 +295,19 @@ export default function StaffContainerLoadingPage() {
           <option value="ARRIVED">已到港</option>
           <option value="CUSTOMS">清关中</option>
           <option value="CUSTOMS_CLEARED">清关已放行</option>
+
           <option value="UNLOADING">正在卸柜</option>
           <option value="IN_WAREHOUSE_TH">已到仓</option>
           <option value="OUT_FOR_DELIVERY">派送中</option>
           <option value="SIGNED">已签收</option>
+        </select>
+        {/* 「未标注」是给老柜子补运输方式用的：2026-08-05 加这个功能时，
+            有 5 个海陆混装柜和 4 个空柜判不出来，留了空等员工自己点 */}
+        <select value={modeFilter} onChange={(e) => setModeFilter(e.target.value)} style={inputStyle}>
+          <option value="">全部运输方式</option>
+          <option value="sea">海运</option>
+          <option value="land">陆运</option>
+          <option value="none">未标注</option>
         </select>
         <button onClick={() => void loadList()} style={{ border: "none", borderRadius: 6, padding: "8px 16px", background: "#2563eb", color: "#fff", fontWeight: 500, fontSize: 13, cursor: "pointer" }}>搜索</button>
         <button onClick={() => setShowCreate(!showCreate)} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 16px", background: "#fff", fontSize: 13, cursor: "pointer", color: "#000000" }}>
@@ -297,6 +319,11 @@ export default function StaffContainerLoadingPage() {
       {showCreate && (
         <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 16, background: "#f8fafc", marginBottom: 12, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <input value={createForm.containerNo} onChange={(e) => setCreateForm((v) => ({ ...v, containerNo: e.target.value }))} placeholder="柜号" style={{ ...inputStyle, minWidth: 150 }} />
+          {/* 必选：后端只认 sea / land，不选会 400 */}
+          <select value={createForm.transportMode} onChange={(e) => setCreateForm((v) => ({ ...v, transportMode: e.target.value }))} style={inputStyle} title="这个柜子走海运还是陆运">
+            <option value="sea">海运</option>
+            <option value="land">陆运</option>
+          </select>
           <input value={createForm.voyage} onChange={(e) => setCreateForm((v) => ({ ...v, voyage: e.target.value }))} placeholder="船次" style={{ ...inputStyle, minWidth: 130 }} />
           <input value={createForm.vesselName} onChange={(e) => setCreateForm((v) => ({ ...v, vesselName: e.target.value }))} placeholder="船名" style={{ ...inputStyle, minWidth: 150 }} />
           <select value={createForm.warehouse} onChange={(e) => setCreateForm((v) => ({ ...v, warehouse: e.target.value }))} style={inputStyle}>
@@ -314,8 +341,18 @@ export default function StaffContainerLoadingPage() {
       {error && <p style={{ color: "#b91c1c", fontSize: 13, marginBottom: 8 }}>{error}</p>}
 
       <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 16, alignItems: "start" }}>
-        {/* 左侧柜列表 */}
-        <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden", background: "#fff" }}>
+        {/* 左侧柜列表
+            2026-08-05：柜里最多能装 25 张运单，右边一翻，左边这列柜号就跟着滚没了，
+            员工得翻回顶部才能换柜。改成贴住不动（sticky），自己太长时内部滚动。
+
+            ⚠️ 这两个数字是量出来的，别随手改：
+            滚动的不是窗口，是 RoleShell 的 .dashboard-content（globals.css:342，
+            height calc(100vh - 48px) + overflow-y auto），sticky 是相对它生效的。
+            它里面第一个孩子是 .glass-topbar（sticky top:12、z-index:20），实测底边在 y=56。
+            所以这里必须 top:68（56 + 12 间距），写 12 的话第一个柜号会被顶栏盖住。
+            maxHeight 用 calc(100vh - 92px) = 容器高(100vh-48) - top(68) - 底部留白(12) 的近似，
+            实测 88 个柜号时左栏自己滚、底边不越界。 */}
+        <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden", background: "#fff", position: "sticky", top: 68, maxHeight: "calc(100vh - 92px)", overflowY: "auto" }}>
           {loading ? <p style={{ padding: 20, color: "#000000", fontSize: 13 }}>加载中…</p> : list.length === 0 ? (
             <p style={{ padding: 20, color: "#000000", fontSize: 13, textAlign: "center" }}>暂无装柜任务，请先创建装柜</p>
           ) : (
@@ -326,7 +363,8 @@ export default function StaffContainerLoadingPage() {
                   <span style={{ fontSize: 11, fontWeight: 500, color: STATUS_COLOR[item.status] ?? "#000000" }}>{STATUS_LABEL[item.status] ?? item.status}</span>
                 </div>
                 <div style={{ fontSize: 12, color: "#000000", marginTop: 4 }}>
-                  {WAREHOUSE_ZH[item.warehouse] ?? item.warehouse} · {item.totalBills} 票 · {item.createdAt.slice(0, 10)}
+                  <span style={{ color: item.transportMode ? "#1e3a8a" : "#b91c1c", fontWeight: 600 }}>{MODE_ZH(item.transportMode)}</span>
+                  {" · "}{WAREHOUSE_ZH[item.warehouse] ?? item.warehouse} · {item.totalBills} 票 · {item.createdAt.slice(0, 10)}
                 </div>
               </div>
             ))
@@ -345,7 +383,8 @@ export default function StaffContainerLoadingPage() {
                   <div>
                     <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#0f172a" }}>{detail.manifestNo}</h2>
                     <div style={{ fontSize: 13, color: "#000000", marginTop: 4 }}>
-                      仓库: {WAREHOUSE_ZH[detail.warehouse] ?? detail.warehouse} · 状态: {STATUS_LABEL[detail.status] ?? detail.status}
+                      运输方式: <span style={{ color: detail.transportMode ? "#1e3a8a" : "#b91c1c", fontWeight: 600 }}>{MODE_ZH(detail.transportMode)}</span>
+                      {" · "}仓库: {WAREHOUSE_ZH[detail.warehouse] ?? detail.warehouse} · 状态: {STATUS_LABEL[detail.status] ?? detail.status}
                       {detail.carrierInfo ? ` · 船次/船名: ${detail.carrierInfo}` : ""}
                     </div>
                   </div>

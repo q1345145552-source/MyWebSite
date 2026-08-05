@@ -1447,6 +1447,8 @@ export interface LoadingManifestItem {
   manifestNo: string;
   warehouse: string;
   status: string;
+  /** sea = 海运 | land = 陆运 | null = 2026-08-05 之前建的老柜子，还没标 */
+  transportMode: string | null;
   carrierInfo: string | null;
   sealedAt: string | null;
   totalBills: number;
@@ -1477,6 +1479,8 @@ export interface LoadingManifestDetail extends LoadingManifestItem {
  */
 export async function createLoadingManifest(payload: {
   warehouse: string;
+  /** 必填，后端只认 sea / land，不传会 400 */
+  transportMode: string;
   carrierInfo?: string;
   containerNo?: string;
 }): Promise<{ manifestNo: string }> {
@@ -1495,11 +1499,13 @@ export async function createLoadingManifest(payload: {
 /**
  * 获取装柜清单列表。
  */
-export async function fetchLoadingManifests(filters?: { query?: string; trackingNo?: string; status?: string }): Promise<LoadingManifestItem[]> {
+export async function fetchLoadingManifests(filters?: { query?: string; trackingNo?: string; status?: string; transportMode?: string }): Promise<LoadingManifestItem[]> {
   const params = new URLSearchParams();
   if (filters?.query) params.set("query", filters.query);
   if (filters?.trackingNo) params.set("trackingNo", filters.trackingNo);
   if (filters?.status) params.set("status", filters.status);
+  // sea / land / none（none = 只看还没标运输方式的老柜子）
+  if (filters?.transportMode) params.set("transportMode", filters.transportMode);
   const qs = params.toString();
   const url = `${apiBaseUrl()}/staff/loading-manifests${qs ? `?${qs}` : ""}`;
   const response = await fetch(url, {
@@ -1555,7 +1561,7 @@ export async function deleteContainer(containerId: string): Promise<{ deleted: b
   return parseApiResponse(response);
 }
 
-export async function addShipmentToManifest(manifestId: string, trackingNo: string, pieceCount?: number): Promise<{ message: string; trackingNo: string; isPartial?: boolean; parentTrackingNo?: string }> {
+export async function addShipmentToManifest(manifestId: string, trackingNo: string, pieceCount?: number): Promise<{ message: string; trackingNo: string; isPartial?: boolean; parentTrackingNo?: string; warning?: string | null }> {
   const response = await fetch(`${apiBaseUrl()}/staff/loading-manifests/add-shipment?id=${manifestId}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
