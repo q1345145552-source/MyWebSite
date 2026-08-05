@@ -42,7 +42,11 @@ services:
       context: .
       dockerfile: Dockerfile.api
     ports:
-      - "3001:3001"
+      # 2026-08-05：原来是 "3001:3001"，等于对整个互联网开放。
+      # 任何人直接连 http://<服务器IP>:3001 就绕过了 nginx —— 没有 HTTPS（账号密码明文过网络），
+      # 也绕过了 nginx 填的 X-Real-IP（限流靠它认人，见 core/rate-limit.ts）。
+      # 绑到 127.0.0.1 后只有服务器自己连得上，nginx 正是从 127.0.0.1:3001 转发的，不受影响。
+      - "127.0.0.1:3001:3001"
     environment:
       AUTH_SECRET: ${AUTH_SECRET}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
@@ -73,7 +77,8 @@ services:
       args:
         NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL}
     ports:
-      - "3000:3000"
+      # 2026-08-05：同 api，改为只绑本机；nginx 从 127.0.0.1:3000 转发，不受影响
+      - "127.0.0.1:3000:3000"
     depends_on:
       - api
     environment:

@@ -2,6 +2,7 @@
 import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../db/prisma";
+import { getClientIp } from "../core/rate-limit";
 import type { MinimalHttpApp } from "../../server";
 import { DEFAULT_SHIPPING_PRICES, INSPECTION_SURCHARGE, SENSITIVE_SURCHARGE } from "../../../../../packages/shared-types/constants";
 
@@ -678,7 +679,9 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
             beforeJson: JSON.stringify(Object.fromEntries(Object.entries(changed).map(([k, v]) => [k, v.before]))),
             afterJson: JSON.stringify(Object.fromEntries(Object.entries(changed).map(([k, v]) => [k, v.after]))),
             remark: "客户修改预报单",
-            ip: (req.headers?.["x-forwarded-for"] as string)?.split(",")[0]?.trim() ?? null,
+            // 2026-08-05：原来也是取 X-Forwarded-For 第一段（客户自己填的），
+            // 留痕里的「从哪个 IP 改的单」等于对方随便编。改用统一的取法。
+            ip: getClientIp(req.headers ?? {}) || null,
             userAgent: (req.headers?.["user-agent"] as string) ?? null,
           },
         });

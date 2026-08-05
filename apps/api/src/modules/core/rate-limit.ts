@@ -55,12 +55,38 @@ export function rateLimitKey(ip: string, path: string): string {
 
 /**
  * 从请求头中提取客户端 IP。
+ *
+ * ⚠️ 2026-08-05 修的一个真漏洞：
+ * 原来先读 `X-Forwarded-For` 的**第一段**，而第一段是**请求方自己填的**。
+ * nginx 用的是 `$proxy_add_x_forwarded_for`（在客户端已有的值后面**追加**真实 IP），
+ * 所以第一段永远是外面传进来的，可以随便伪造。限流按它计数 →
+ * 每换一个假 IP 就是一个全新的计数桶 → 限流形同虚设。
+ * 本地实测：同一个假 IP 发 14 次，前 10 次放行后开始 429；每次换一个假 IP 发 14 次，全部放行。
+ *
+ * 现在的取值顺序：
+ *   ① `X-Real-IP` —— nginx 那行是 `proxy_set_header X-Real-IP $remote_addr`，
+ *      **覆盖式**赋值，客户端传什么都会被盖掉，伪造不了
+ *   ② `X-Forwarded-For` 的**最后一段** —— 那是最靠近本服务器的一跳追加上去的
+ *   ③ 都没有 → unknown
+ *
+ * ⚠️ 前提是请求经过 nginx。直接连 3001 端口的人仍可自己编 X-Real-IP——
+ * 所以同一天把 3000/3001 从公网收回了（docker-compose 改成只绑 127.0.0.1），那条路已封死。
+ * **这两处是一套的，改 docker-compose 的端口绑定前先回来看这段注释。**
  */
 export function getClientIp(headers: NodeJS.Dict<string | string[]>): string {
-  const forwarded = headers["x-forwarded-for"];
-  if (typeof forwarded === "string") return forwarded.split(",")[0].trim();
-  if (Array.isArray(forwarded)) return forwarded[0]?.trim() || "unknown";
   const realIp = headers["x-real-ip"];
-  if (typeof realIp === "string") return realIp.trim();
+  const realIpText = typeof realIp === "string" ? realIp : Array.isArray(realIp) ? realIp[realIp.length - 1] : "";
+  if (realIpText?.trim()) return realIpText.trim();
+
+  // Node 会把重复的同名头用 ", " 合成一个字符串，数组分支基本走不到，保险起见一并处理
+  const forwarded = headers["x-forwarded-for"];
+  const forwardedText =
+    typeof forwarded === "string" ? forwarded : Array.isArray(forwarded) ? forwarded[forwarded.length - 1] : "";
+  if (forwardedText) {
+    const hops = forwardedText.split(",").map((item) => item.trim()).filter(Boolean);
+    const last = hops[hops.length - 1];
+    if (last) return last;
+  }
+
   return "unknown";
 }
