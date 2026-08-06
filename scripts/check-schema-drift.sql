@@ -87,6 +87,7 @@ WITH expected(table_name, column_name) AS (VALUES
   ('status_logs','to_status'),
   ('status_logs','remark'),
   ('status_logs','changed_at'),
+  ('status_logs','next_stop'),          -- 2026-08-06 加：轨迹上的「下一站」
   ('ai_session_memory','key'),
   ('ai_session_memory','company_id'),
   ('ai_session_memory','user_id'),
@@ -245,6 +246,7 @@ WITH expected(table_name, column_name) AS (VALUES
   ('containers','container_no'),
   ('containers','container_type'),
   ('containers','transport_mode'),
+  ('containers','status_dates'),        -- 2026-08-06 加：每一步实际发生的日期
   ('containers','warehouse_id'),
   ('containers','carrier_name'),
   ('containers','sealed_at'),
