@@ -13,6 +13,14 @@ import ShipmentSearch from "../../modules/shipment/ShipmentSearch";
 import { openPrintLabel } from "../../modules/shipment/ShipmentPrintLabel";
 import { openShipmentTrack } from "../../modules/shipment/ShipmentTrackModal";
 import DetailModal from "../../modules/layout/DetailModal";
+import {
+  GridColgroup,
+  ProductDetailCell,
+  PRODUCT_DETAIL_COL_WIDTHS,
+  buildProductDetailRows,
+  gridThStyle,
+  gridTdStyle,
+} from "../../modules/shipment/ShipmentTableGrid";
 import { apiBaseUrl, authHeaders, parseApiResponse } from "../../services/core-api";
 import { DEFAULT_SHIPPING_PRICES, INSPECTION_SURCHARGE, SENSITIVE_SURCHARGE } from "../../../../../packages/shared-types/constants";
 import { shipmentStatusZh, transportModeLabel, warehouseLabelFromId } from "../../modules/staff/utils";
@@ -157,6 +165,17 @@ const WAREHOUSE_TRACKING_PREFIX_MAP: Record<string, string[]> = {
 };
 
 export const dynamic = "force-dynamic";
+
+/* 管理员端运单列表的列宽。排版规则见 modules/shipment/ShipmentTableGrid.tsx。
+   ⚠️ 第 5~10 个必须和 PRODUCT_DETAIL_COL_WIDTHS 完全一致。 */
+const ORDER_COL_WIDTHS = [
+  44, 110, 130, 110,
+  ...PRODUCT_DETAIL_COL_WIDTHS,
+  100, 90, 90, 170, 330,
+] as const;
+const ORDER_TABLE_MIN_WIDTH = ORDER_COL_WIDTHS.reduce((a, b) => a + b, 0);
+/** 弹性列＝「备注」（表头第 14 个）。操作列有 5 个按钮，宽度必须写死。 */
+const ORDER_FLEX_COL_INDEX = 13;
 
 export default function AdminHomePage() {
   const [session, setSession] = useState<AuthSession | null>(null);
@@ -1491,100 +1510,55 @@ export default function AdminHomePage() {
             </div>
           </div>
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 1700 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed", minWidth: ORDER_TABLE_MIN_WIDTH }}>
+              <GridColgroup widths={ORDER_COL_WIDTHS} flexIndex={ORDER_FLEX_COL_INDEX} />
               <thead>
-                <tr style={{ borderBottom: "2px solid #e2e8f0", textAlign: "left" }}>
-                  <th style={{ padding: "10px 8px", width: 44 }}>
+                <tr style={{ borderBottom: "2px solid #e2e8f0", textAlign: "left", background: "#f1f5f9" }}>
+                  {/* 货型跟着产品走，必须紧挨着国内单号，才能和上面 5 列绑成同一块一起滚 */}
+                  <th style={gridThStyle}>
                     <input type="checkbox" checked={selectedOrders.size === filteredOrderList.length && filteredOrderList.length > 0} onChange={toggleSelectAllOrders} style={{ cursor: "pointer" }} />
                   </th>
-                  <th style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>唛头</th>
-                  <th style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>运单号</th>
-                  <th style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>到仓日期</th>
-                  <th style={{ padding: "10px 8px", minWidth: 120 }}>品名</th>
-                  <th style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>箱数</th>
-                  <th style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>单箱数量</th>
-                  <th style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>长宽高(cm)</th>
-                  <th style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>国内单号</th>
-                  <th style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>体积</th>
-                  <th style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>重量</th>
-                  <th style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>运输方式</th>
-                  <th style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>货型</th>
-                  <th style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>备注</th><th style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>操作</th>
+                  <th style={gridThStyle}>唛头</th>
+                  <th style={gridThStyle}>运单号</th>
+                  <th style={gridThStyle}>到仓日期</th>
+                  <th style={gridThStyle}>品名</th>
+                  <th style={gridThStyle}>箱数</th>
+                  <th style={gridThStyle}>单箱数量</th>
+                  <th style={gridThStyle}>长宽高(cm)</th>
+                  <th style={gridThStyle}>国内单号</th>
+                  <th style={gridThStyle}>货型</th>
+                  <th style={gridThStyle}>体积</th>
+                  <th style={gridThStyle}>重量</th>
+                  <th style={gridThStyle}>运输方式</th>
+                  <th style={gridThStyle}>备注</th>
+                  <th style={gridThStyle}>操作</th>
                 </tr>
               </thead>
               <tbody>
-                {pagedOrders.map((o) => (
+                {pagedOrders.map((o) => {
+                  const detailRows = buildProductDetailRows(o);
+                  return (
                   <Fragment key={o.id}>
                   <tr style={{ borderBottom: "1px solid #e2e8f0", background: expandedOrderId === o.id ? "#eff6ff" : "#fff" }}>
-                    <td style={{ padding: "8px 6px", verticalAlign: "middle", whiteSpace: "nowrap" }}>
+                    <td style={gridTdStyle}>
                       <input type="checkbox" checked={selectedOrders.has(o.id)} onChange={() => toggleSelectOrder(o.id)} style={{ cursor: "pointer" }} />
                     </td>
-                    <td style={{ padding: "8px 6px", color: "#000000", fontWeight: 600 }}>{o.clientId ?? "—"}</td>
-                    <td style={{ padding: "8px 6px", fontWeight: 600, color: "#1e3a8a", whiteSpace: "nowrap" }}>
-                      {o.trackingNo ?? "—"}
+                    <td style={{ ...gridTdStyle, color: "#000000", fontWeight: 600 }}>{o.clientId ?? "—"}</td>
+                    <td style={gridTdStyle}>
+                      <div style={{ fontWeight: 600, color: "#1e3a8a" }}>{o.trackingNo ?? "—"}</div>
+                      {/* 明细块只露 3 行，这里写清楚一共几项，免得漏看 */}
+                      <div style={{ fontSize: 11, color: "#64748b", marginTop: 3 }}>共 {detailRows.length} 项</div>
                     </td>
-                    <td style={{ padding: "8px 6px", whiteSpace: "nowrap", color: "#000000" }}>
+                    <td style={{ ...gridTdStyle, color: "#000000" }}>
                       {o.shipDate ?? o.createdAt.slice(0, 10)}
                     </td>
-                    <td style={{ padding: "8px 6px", color: "#000000", minWidth: 120 }}>
-                      {(o.products?.length ?? 0) > 0
-                        ? (o.products ?? []).map((p, i) => (
-                            <div key={i} style={{ marginBottom: i < (o.products?.length ?? 0) - 1 ? 2 : 0, whiteSpace: "nowrap" }}>
-                              {p.itemName}
-                            </div>
-                          ))
-                        : (o.itemName ?? "—")}
-                    </td>
-                    <td style={{ padding: "8px 6px", whiteSpace: "nowrap" }}>
-                      {(o.products?.length ?? 0) > 0
-                        ? (o.products ?? []).map((p, i) => (
-                            <div key={i} style={{ marginBottom: i < (o.products?.length ?? 0) - 1 ? 2 : 0 }}>
-                              {p.packageCount}箱
-                            </div>
-                          ))
-                        : "—"}
-                    </td>
-                    <td style={{ padding: "8px 6px", whiteSpace: "nowrap" }}>
-                      {(o.products?.length ?? 0) > 0
-                        ? (o.products ?? []).map((p, i) => (
-                            <div key={i} style={{ marginBottom: i < (o.products?.length ?? 0) - 1 ? 2 : 0 }}>
-                              {p.productQuantity ? `${p.productQuantity}个/箱` : "—"}
-                            </div>
-                          ))
-                        : "—"}
-                    </td>
-                    <td style={{ padding: "8px 6px", whiteSpace: "nowrap" }}>
-                      {(o.products?.length ?? 0) > 0
-                        ? (o.products ?? []).map((p, i) => (
-                            <div key={i} style={{ marginBottom: i < (o.products?.length ?? 0) - 1 ? 2 : 0 }}>
-                              {p.lengthCm ? `${p.lengthCm}×${p.widthCm}×${p.heightCm}cm` : "—"}
-                            </div>
-                          ))
-                        : "—"}
-                    </td>
-                    <td style={{ padding: "8px 6px", whiteSpace: "nowrap" }}>
-                      {(o.products?.length ?? 0) > 0
-                        ? (o.products ?? []).map((p, i) => (
-                            <div key={i} style={{ marginBottom: i < (o.products?.length ?? 0) - 1 ? 2 : 0 }}>
-                              {p.domesticTrackingNo || "货拉拉"}
-                            </div>
-                          ))
-                        : (o.domesticTrackingNo || "—")}
-                    </td>
-                    <td style={{ padding: "8px 6px", whiteSpace: "nowrap" }}>{o.volumeM3 ?? "—"}</td>
-                    <td style={{ padding: "8px 6px", whiteSpace: "nowrap" }}>{o.weightKg ?? "—"}</td>
-                    <td style={{ padding: "8px 6px", whiteSpace: "nowrap" }}>{transportModeLabel(o.transportMode)}</td>
-                    <td style={{ padding: "8px 6px", whiteSpace: "nowrap", fontSize: 12 }}>
-                      {(o.products?.length ?? 0) > 0
-                        ? (o.products ?? []).map((p, i) => (
-                            <div key={i} style={{ marginBottom: i < (o.products?.length ?? 0) - 1 ? 2 : 0 }}>
-                              {((p.cargoType ?? "normal").toLowerCase() === "inspection" ? "商检" : (p.cargoType ?? "normal").toLowerCase() === "sensitive" ? "敏感" : "普货")}
-                            </div>
-                          ))
-                        : ((o.cargoType ?? "normal").toLowerCase() === "inspection" ? "商检" : (o.cargoType ?? "normal").toLowerCase() === "sensitive" ? "敏感" : "普货")}
-                    </td>
-                    <td style={{ padding: "8px 6px", fontSize: 12, maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={o.remark || ""}>{o.remark || ""}</td>
-                    <td style={{ padding: "8px 6px", whiteSpace: "nowrap" }}>
+                    {/* 品名 / 箱数 / 单箱数量 / 长宽高 / 国内单号 / 货型：合并成一块，固定高度一起滚 */}
+                    <ProductDetailCell widths={PRODUCT_DETAIL_COL_WIDTHS} rows={detailRows} />
+                    <td style={gridTdStyle}>{o.volumeM3 ?? "—"}</td>
+                    <td style={gridTdStyle}>{o.weightKg ?? "—"}</td>
+                    <td style={gridTdStyle}>{transportModeLabel(o.transportMode)}</td>
+                    <td style={{ ...gridTdStyle, fontSize: 12 }} title={o.remark || ""}>{o.remark || ""}</td>
+                    <td style={gridTdStyle}>
                       <button
                         type="button"
                         onClick={() => {
@@ -1651,7 +1625,7 @@ export default function AdminHomePage() {
                     <tr>
                       {/* 详情改成全屏弹窗：格子只作挂载点，内容用 position:fixed 铺满屏幕，
                           所以这一行不占高度，表格不会被撑开 */}
-                      <td colSpan={14} style={{ padding: 0, border: "none" }}>
+                      <td colSpan={ORDER_COL_WIDTHS.length} style={{ padding: 0, border: "none" }}>
                         <DetailModal
                           title="运单详情"
                           subtitle={o.trackingNo ?? o.orderNo ?? "—"}
@@ -1770,7 +1744,8 @@ export default function AdminHomePage() {
                     </tr>
                   ) : null}
                   </Fragment>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
