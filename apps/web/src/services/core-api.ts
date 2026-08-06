@@ -55,18 +55,76 @@ export function authHeaders(): Record<string, string> {
   };
 }
 
+/** 读令牌自带的到期时间（秒）。读不出来返回 null。⚠️ 不返回令牌内容。 */
+function readTokenExp(token: string | undefined): number | null {
+  if (!token) return null;
+  try {
+    const body = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+    return typeof body?.exp === "number" ? body.exp : null;
+  } catch {
+    return null;
+  }
+}
+
+function goToLogin() {
+  if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
+    window.location.href = "/login?expired=1";
+  }
+}
+
+/**
+ * 连续多少次「令牌看着没过期、后端却不认」就还是把人踢去重新登录。
+ * 保险丝：万一后端换了签名密钥，所有人的令牌都会变成「没过期但不被认」，
+ * 这时候如果永远不跳登录页，用户就只能一直看报错、连重新登录的入口都摸不到。
+ */
+const MAX_UNEXPLAINED_401 = 3;
+let unexplained401Count = 0;
+
 /**
  * 统一解析后端响应并在失败时抛出可读错误。
- * 401 自动跳转登录页。
+ *
+ * 401 的处理（2026-08-07 改）：
+ * 原来只要任何一个后台请求返回 401，就立刻清登录、跳登录页 ——
+ * 员工正在填的东西全没了。而且实际发生过两次「令牌明明是好的却被踢」，
+ * 查不出原因（详见下面的 console 日志）。
+ * 现在只有**本地令牌确实已经过期**（或压根没登录）才跳登录页；
+ * 令牌看着还有效的，只报错、不踢人，让用户能把手上的活保住。
  */
 export async function parseApiResponse<T>(response: Response): Promise<T> {
   if (response.status === 401) {
-    // token 过期或未登录，跳转登录页
-    if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
-      window.location.href = "/login?expired=1";
+    const session = typeof window !== "undefined" ? getOptionalSession() : null;
+    const exp = readTokenExp(session?.token);
+    const nowSec = Math.floor(Date.now() / 1000);
+    // 没登录信息、或令牌读不出到期时间、或确实过期了 → 才算「真的该重新登录」
+    const reallyExpired = !session?.token || exp == null || nowSec >= exp;
+
+    if (typeof window !== "undefined") {
+      // ⚠️ 只记有没有、到期时间，绝不打印令牌本身
+      console.warn("[接口返回 401]", {
+        接口: response.url,
+        本地有没有登录信息: !!session,
+        角色: session?.role ?? "无",
+        令牌到期: exp == null ? "读不出来" : `${new Date(exp * 1000).toLocaleString()}（${nowSec >= exp ? "已过期" : `还剩 ${Math.round((exp - nowSec) / 60)} 分钟`}）`,
+        处理: reallyExpired ? "确实过期，跳登录页" : `令牌还有效，不踢人（连续第 ${unexplained401Count + 1} 次，满 ${MAX_UNEXPLAINED_401} 次才跳）`,
+      });
     }
-    throw new Error("登录已过期，请重新登录");
+
+    if (reallyExpired) {
+      unexplained401Count = 0;
+      goToLogin();
+      throw new Error("登录已过期，请重新登录");
+    }
+
+    unexplained401Count += 1;
+    if (unexplained401Count >= MAX_UNEXPLAINED_401) {
+      unexplained401Count = 0;
+      goToLogin();
+      throw new Error("登录状态异常，请重新登录");
+    }
+    throw new Error("这一步没能通过登录校验，请重试一次；反复出现请重新登录（你填的内容还在）");
   }
+  // 有一次正常响应就说明登录是好的，把连续计数清零
+  unexplained401Count = 0;
   const text = await response.text();
   let payload: { code?: string; message?: string; data?: T } | null = null;
   try {

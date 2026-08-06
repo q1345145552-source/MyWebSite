@@ -51,6 +51,38 @@ export function signAuthToken(input: {
   return `${body}.${base64UrlEncode(sig)}`;
 }
 
+/**
+ * 令牌为什么没通过 —— 只用来写日志，不参与任何判断。
+ * 2026-08-07 加：原来认证失败一条日志都不记，出问题只能靠猜
+ * （连续两次"莫名其妙被踢回登录页"查不出原因）。
+ * ⚠️ 只返回原因，绝不返回令牌内容本身。
+ */
+export function describeTokenFailure(token: string): string {
+  const parts = token.split(".");
+  if (parts.length !== 3) return "格式不对（不是三段）";
+  const [encodedHeader, encodedPayload, encodedSig] = parts;
+  if (!encodedHeader || !encodedPayload || !encodedSig) return "格式不对（有空段）";
+  try {
+    const body = `${encodedHeader}.${encodedPayload}`;
+    const expectedSig = crypto.createHmac("sha256", tokenSecret()).update(body).digest();
+    const actualSig = base64UrlDecode(encodedSig);
+    if (expectedSig.length !== actualSig.length || !crypto.timingSafeEqual(expectedSig, actualSig)) {
+      return "签名对不上（密钥变了 / 令牌被改过）";
+    }
+  } catch {
+    return "签名校验时报错";
+  }
+  try {
+    const payload = JSON.parse(base64UrlDecode(encodedPayload).toString("utf8")) as Partial<AuthTokenPayload>;
+    if (!payload?.userId || !payload.companyId || !payload.role || !payload.exp) return "内容缺字段";
+    const now = Math.floor(Date.now() / 1000);
+    if (now >= payload.exp) return `已过期（过期于 ${new Date(payload.exp * 1000).toISOString()}，现在 ${new Date().toISOString()}）`;
+    return "未知原因";
+  } catch {
+    return "内容解析失败";
+  }
+}
+
 export function verifyAuthToken(token: string): AuthTokenPayload | null {
   const parts = token.split(".");
   if (parts.length !== 3) return null;

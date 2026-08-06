@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { URL } from "node:url";
-import { verifyAuthToken } from "./modules/auth/token";
+import { describeTokenFailure, verifyAuthToken } from "./modules/auth/token";
 import { logger } from "./modules/core/logger";
 
 export interface HttpRequest {
@@ -33,12 +33,25 @@ export interface MinimalHttpApp {
 
 type RouteTable = Record<string, Handler>;
 
-function parseAuth(headers: IncomingMessage["headers"]): HttpRequest["auth"] {
+/**
+ * 从请求头里解出登录身份。
+ * 2026-08-07：认证失败原来一声不吭，前端拿到 401 就把用户踢回登录页，
+ * 排查时完全没有线索。这里补上日志（只记原因和路径，绝不记令牌内容）。
+ */
+function parseAuth(headers: IncomingMessage["headers"], path?: string): HttpRequest["auth"] {
   const authHeader = typeof headers.authorization === "string" ? headers.authorization.trim() : "";
   const match = authHeader.match(/^Bearer\s+(.+)$/i);
-  if (!match?.[1]) return undefined;
+  if (!match?.[1]) {
+    if (authHeader) {
+      logger.warn("认证失败：Authorization 头格式不对", { path, 头长度: authHeader.length });
+    }
+    return undefined;
+  }
   const payload = verifyAuthToken(match[1].trim());
-  if (!payload) return undefined;
+  if (!payload) {
+    logger.warn("认证失败：令牌没通过", { path, 原因: describeTokenFailure(match[1].trim()) });
+    return undefined;
+  }
   return {
     userId: payload.userId,
     companyId: payload.companyId,
@@ -169,7 +182,7 @@ export function createApp(): MinimalHttpApp {
           query,
           headers: rawReq.headers,
           body: method === "POST" || method === "DELETE" ? await readJsonBody(rawReq) : undefined,
-          auth: parseAuth(rawReq.headers),
+          auth: parseAuth(rawReq.headers, path),
         };
 
         try {

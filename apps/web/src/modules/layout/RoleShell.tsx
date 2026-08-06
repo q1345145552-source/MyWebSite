@@ -86,6 +86,37 @@ export default function RoleShell(props: {
     };
   }, [mounted]);
 
+  // 2026-08-07：登录信息原来只在页面打开时读一次。之后就算它被清掉
+  // （在别的标签页退出登录、或者接口返回 401 被清），这个外壳还照常显示
+  // 用户名和菜单 —— 看着像登着，点什么都失败。
+  // 这里在「别的标签页动了登录信息」和「切回本页」时重新核对一次；
+  // 发现没了就交给下面那个 effect 跳登录页。
+  useEffect(() => {
+    if (!mounted) return;
+    const recheck = () => {
+      const next = getOptionalSession();
+      setSession((prev) => {
+        if (!next) return null;
+        // 没变化时返回原对象，避免每次核对都触发重渲染
+        if (prev && prev.token === next.token && prev.userId === next.userId && prev.role === next.role) {
+          return prev;
+        }
+        return next;
+      });
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") recheck();
+    };
+    window.addEventListener("storage", recheck);
+    window.addEventListener("focus", recheck);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("storage", recheck);
+      window.removeEventListener("focus", recheck);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [mounted]);
+
   useEffect(() => {
     if (!mounted) return;
     if (!session) {
