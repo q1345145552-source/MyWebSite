@@ -194,6 +194,17 @@ export default function StaffWhrConsolidationPage() {
   const [planList, setPlanList] = useState<PlanItem[]>([]);
   const [planDetail, setPlanDetail] = useState<PlanDetail | null>(null);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
+  // 新增 / 移除参与客户（2026-08-07）
+  const [clientOptions, setClientOptions] = useState<Array<{ id: string; name: string }>>([]);
+  const [clientsLoading, setClientsLoading] = useState(false);
+  const [showAddCustomer, setShowAddCustomer] = useState(false);
+  const [addClientId, setAddClientId] = useState("");
+  const [addSearch, setAddSearch] = useState("");
+  const [addPriceNormal, setAddPriceNormal] = useState("");
+  const [addPriceInspection, setAddPriceInspection] = useState("");
+  const [addPriceSensitive, setAddPriceSensitive] = useState("");
+  const [addSubmitting, setAddSubmitting] = useState(false);
+  const [removingCustomerId, setRemovingCustomerId] = useState("");
   const [planLoading, setPlanLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
 
@@ -240,6 +251,76 @@ export default function StaffWhrConsolidationPage() {
     } catch (e: any) { setToast(e?.message ?? "加载详情失败"); }
     finally { setDetailLoading(false); }
   }, []);
+
+  // ==========================================================================
+  // 新增 / 移除参与客户（2026-08-07）
+  // 员工端走的是 /admin/whr-consolidation/... 这组接口，后端角色已放开到 staff。
+  // ==========================================================================
+  /** 客户下拉用 /staff/clients（员工有权限），管理员端那套 /admin/users 员工调不了 */
+  const openAddCustomer = async () => {
+    setAddClientId(""); setAddSearch("");
+    setAddPriceNormal(""); setAddPriceInspection(""); setAddPriceSensitive("");
+    setShowAddCustomer(true);
+    if (clientOptions.length > 0) return;
+    setClientsLoading(true);
+    try {
+      const data = await apiRequest<{ items: Array<{ id: string; name: string }> }>(`${apiBaseUrl()}/staff/clients`);
+      setClientOptions(data.items ?? []);
+    } catch (e: any) { setToast(e?.message ?? "加载客户列表失败"); }
+    finally { setClientsLoading(false); }
+  };
+
+  const handleAddCustomer = async () => {
+    if (!selectedPlanId) return;
+    if (!addClientId) { setToast("请选择客户"); return; }
+    const checks: Array<[string, string]> = [
+      ["普货", addPriceNormal], ["商检", addPriceInspection], ["敏感货", addPriceSensitive],
+    ];
+    for (const [label, v] of checks) {
+      if (!v || Number(v) <= 0) { setToast(`${label}单价必须大于0`); return; }
+    }
+    setAddSubmitting(true);
+    try {
+      await apiRequest(`${apiBaseUrl()}/admin/whr-consolidation/customers/add`, {
+        method: "POST",
+        headers: jsonPost,
+        body: JSON.stringify({
+          planId: selectedPlanId,
+          clientId: addClientId,
+          unitPriceNormal: Number(addPriceNormal),
+          unitPriceInspection: Number(addPriceInspection),
+          unitPriceSensitive: Number(addPriceSensitive),
+        }),
+      });
+      setToast("客户已加入本计划");
+      setShowAddCustomer(false);
+      loadPlanDetail(selectedPlanId);
+    } catch (e: any) { setToast(e?.message ?? "新增失败"); }
+    finally { setAddSubmitting(false); }
+  };
+
+  /** 移除客户。名下有预报单的后端会拦住，这里先提示一次，免得白点 */
+  const handleRemoveCustomer = async (c: any) => {
+    if (!selectedPlanId) return;
+    const paCount = (c.prealerts ?? []).length;
+    if (paCount > 0) {
+      setToast(`${c.clientName} 名下还有 ${paCount} 个预报单，请先逐个取消后再移除`);
+      return;
+    }
+    if (!confirm(`确定把「${c.clientName}」从本计划移除？\n\n该客户名下没有预报单，移除后只会删掉这条参与记录。`)) return;
+    setRemovingCustomerId(c.id);
+    try {
+      await apiRequest(`${apiBaseUrl()}/admin/whr-consolidation/customers/remove`, {
+        method: "POST",
+        headers: jsonPost,
+        body: JSON.stringify({ planId: selectedPlanId, customerId: c.id }),
+      });
+      setToast(`已移除 ${c.clientName}`);
+      loadPlanDetail(selectedPlanId);
+    } catch (e: any) { setToast(e?.message ?? "移除失败"); }
+    finally { setRemovingCustomerId(""); }
+  };
+
 
   useEffect(() => {
     if (activeTab === "dispatch") loadDispatch();
@@ -877,7 +958,13 @@ export default function StaffWhrConsolidationPage() {
                     <p style={{ fontSize: 12, color: "#9ca3af", margin: "4px 0 0" }}>创建人：{planDetail.creatorName} · {formatBeijingTime(planDetail.createdAt)}</p>
                   </div>
 
-                  <h4 style={{ fontSize: 15, marginBottom: 12 }}>客户列表</h4>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+                    <h4 style={{ fontSize: 15, margin: 0 }}>客户列表</h4>
+                    {/* 计划一旦开始装柜/发运就不给再加人，后端也拦了一道 */}
+                    {["planning", "collecting"].includes(planDetail.status) && (
+                      <button onClick={openAddCustomer} style={{ ...btnGray, padding: "4px 12px", fontSize: 12 }}>新增客户</button>
+                    )}
+                  </div>
                   {planDetail.customers.map((c: any) => (
                     <div key={c.id} style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: "12px 16px", marginBottom: 12 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -887,8 +974,12 @@ export default function StaffWhrConsolidationPage() {
                         </div>
                         <span style={{ fontSize: 13, color: "#6b7280" }}>{c.totalVolumeM3}方 · {c.totalFee ? `¥${c.totalFee.toLocaleString()}` : ""}</span>
                       </div>
-                      <div style={{ fontSize: 13, color: "#6b7280", marginTop: 4 }}>
-                        普货：{c.unitPriceNormal}元/方 · 商检：{c.unitPriceInspection}元/方 · 敏感：{c.unitPriceSensitive}元/方
+                      <div style={{ fontSize: 13, color: "#6b7280", marginTop: 4, display: "flex", alignItems: "center", gap: 10 }}>
+                        <span>普货：{c.unitPriceNormal}元/方 · 商检：{c.unitPriceInspection}元/方 · 敏感：{c.unitPriceSensitive}元/方</span>
+                        {/* 已装柜/已发运的计划不给动参与名单，和「新增客户」同一条口径 */}
+                        {["planning", "collecting"].includes(planDetail.status) && (
+                          <button onClick={() => handleRemoveCustomer(c)} disabled={removingCustomerId === c.id} style={{ ...btnGray, padding: "3px 10px", fontSize: 12, color: "#b91c1c", borderColor: "#fecaca" }}>{removingCustomerId === c.id ? "移除中..." : "移除客户"}</button>
+                        )}
                       </div>
                       {c.deliveryAddress && <div style={{ fontSize: 13, color: "#6b7280", marginTop: 2 }}>收货地址：{c.deliveryAddress}</div>}
 
@@ -1239,6 +1330,60 @@ export default function StaffWhrConsolidationPage() {
             </div>
           </Modal>
         )}
+
+        {/* ================================================================ */}
+        {/* 弹窗：新增参与客户（2026-08-07）                                   */}
+        {/* ================================================================ */}
+        {showAddCustomer && selectedPlanId && planDetail && (() => {
+          // 已经在本计划里的客户不再出现在候选里，避免重复添加被后端打回
+          const joined = new Set((planDetail.customers ?? []).map((c: any) => c.clientId));
+          const q = addSearch.trim().toLowerCase();
+          const options = clientOptions.filter(cl => !joined.has(cl.id))
+            .filter(cl => !q || (cl.name ?? "").toLowerCase().includes(q));
+          return (
+            <Modal onClose={() => setShowAddCustomer(false)}>
+              <h3 style={{ marginTop: 0 }}>新增参与客户 - {planDetail.planNo}</h3>
+              <div style={{ marginTop: 10 }}>
+                <label style={fl}>选择客户</label>
+                <input value={addSearch} onChange={e => setAddSearch(e.target.value)} placeholder="搜索客户名" style={fi} />
+                <div style={{ maxHeight: 220, overflowY: "auto", border: "1px solid #e5e7eb", borderRadius: 6, marginTop: 6 }}>
+                  {clientsLoading ? (
+                    <div style={{ padding: "10px 12px", fontSize: 13, color: "#9ca3af" }}>加载客户列表中…</div>
+                  ) : options.length === 0 ? (
+                    <div style={{ padding: "10px 12px", fontSize: 13, color: "#9ca3af" }}>
+                      没有可选客户{joined.size > 0 ? "（已在本计划里的客户不会重复出现）" : ""}
+                    </div>
+                  ) : options.map(cl => (
+                    <label key={cl.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", cursor: "pointer", borderBottom: "1px solid #f3f4f6", fontSize: 13 }}>
+                      <input type="radio" name="add-whr-client-staff" checked={addClientId === cl.id} onChange={() => setAddClientId(cl.id)} />
+                      <span style={{ fontWeight: 600 }}>{cl.name}</span>
+                      <span style={{ color: "#6b7280", fontSize: 12 }}>{cl.id}</span>
+                    </label>
+                  ))}
+                </div>
+                <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>共 {options.length} 位可选</div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 12 }}>
+                <div>
+                  <label style={fl}>普货单价 (元/方)</label>
+                  <input type="number" value={addPriceNormal} onChange={e => setAddPriceNormal(e.target.value)} style={fi} />
+                </div>
+                <div>
+                  <label style={fl}>商检单价 (元/方)</label>
+                  <input type="number" value={addPriceInspection} onChange={e => setAddPriceInspection(e.target.value)} style={fi} />
+                </div>
+                <div>
+                  <label style={fl}>敏感单价 (元/方)</label>
+                  <input type="number" value={addPriceSensitive} onChange={e => setAddPriceSensitive(e.target.value)} style={fi} />
+                </div>
+              </div>
+              <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
+                <button onClick={handleAddCustomer} disabled={addSubmitting} style={btnBlue}>{addSubmitting ? "添加中..." : "确认新增"}</button>
+                <button onClick={() => setShowAddCustomer(false)} style={btnGray}>取消</button>
+              </div>
+            </Modal>
+          );
+        })()}
 
         {/* ================================================================ */}
         {/* 弹窗：图片预览 */}

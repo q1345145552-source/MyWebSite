@@ -432,6 +432,161 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
   });
 
   // ==========================================================================
+  // 4b. 给已有计划新增参与客户（2026-08-07）
+  //     原来客户只能在建计划时一次性选定，建完就再也加不进去了。
+  // ==========================================================================
+  app.post("/admin/whr-consolidation/customers/add", async (req, res) => {
+    const auth = requireRole(req, res, ["admin", "staff"]);
+    if (!auth) return;
+
+    const body = (req.body ?? {}) as {
+      planId?: string;
+      clientId?: string;
+      unitPriceNormal?: number;
+      unitPriceInspection?: number;
+      unitPriceSensitive?: number;
+    };
+
+    if (!body.planId?.trim()) {
+      fail(res, 400, "BAD_REQUEST", "planId 为必填");
+      return;
+    }
+    if (!body.clientId?.trim()) {
+      fail(res, 400, "BAD_REQUEST", "请选择客户");
+      return;
+    }
+    const clientId = body.clientId.trim();
+
+    const priceChecks: Array<[string, number | undefined]> = [
+      ["普货", body.unitPriceNormal],
+      ["商检", body.unitPriceInspection],
+      ["敏感货", body.unitPriceSensitive],
+    ];
+    for (const [label, val] of priceChecks) {
+      if (val == null || !Number.isFinite(Number(val)) || Number(val) <= 0) {
+        fail(res, 400, "BAD_REQUEST", `${label}单价必须大于 0`);
+        return;
+      }
+    }
+
+    const plan = await prisma.whrConsolidationPlan.findFirst({
+      where: { id: body.planId.trim(), companyId: auth.companyId },
+      select: { id: true, status: true },
+    });
+    if (!plan) {
+      fail(res, 404, "NOT_FOUND", "拼柜计划不存在");
+      return;
+    }
+    // 已经装柜/发运/完成/取消的计划不能再往里塞人，否则费用和方数都对不上了
+    if (!["planning", "collecting"].includes(plan.status)) {
+      fail(res, 400, "BAD_REQUEST", "该计划已开始装柜或已发运，不能再新增客户");
+      return;
+    }
+
+    const client = await prisma.user.findFirst({
+      where: { id: clientId, companyId: auth.companyId, role: "client" },
+      select: { id: true },
+    });
+    if (!client) {
+      fail(res, 400, "BAD_REQUEST", "客户不存在或不属于本公司");
+      return;
+    }
+
+    const exists = await prisma.whrConsolidationPlanCustomer.findFirst({
+      where: { planId: plan.id, clientId, companyId: auth.companyId },
+      select: { id: true },
+    });
+    if (exists) {
+      fail(res, 400, "BAD_REQUEST", "该客户已在这个计划里，不能重复添加");
+      return;
+    }
+
+    const count = await prisma.whrConsolidationPlanCustomer.count({
+      where: { planId: plan.id, companyId: auth.companyId },
+    });
+    if (count >= MAX_CUSTOMERS_PER_PLAN) {
+      fail(res, 400, "BAD_REQUEST", `一个计划最多 ${MAX_CUSTOMERS_PER_PLAN} 个客户`);
+      return;
+    }
+
+    const created = await prisma.whrConsolidationPlanCustomer.create({
+      data: {
+        planId: plan.id,
+        companyId: auth.companyId,
+        clientId,
+        unitPriceNormal: Number(body.unitPriceNormal),
+        unitPriceInspection: Number(body.unitPriceInspection),
+        unitPriceSensitive: Number(body.unitPriceSensitive),
+      },
+      select: { id: true },
+    });
+
+    ok(res, { customerId: created.id });
+  });
+
+  // ==========================================================================
+  // 4c. 从计划里移除参与客户（2026-08-07）
+  //     ⚠️ 数据库对 whr_consolidation_prealerts 设的是 onDelete: Cascade，
+  //     删这一行会把该客户的预报单、货物明细、产品图、状态日志全部级联删掉。
+  //     所以名下只要还有任何一条预报单（含已取消的）就一律不让删。
+  // ==========================================================================
+  app.post("/admin/whr-consolidation/customers/remove", async (req, res) => {
+    const auth = requireRole(req, res, ["admin", "staff"]);
+    if (!auth) return;
+
+    const body = (req.body ?? {}) as { planId?: string; customerId?: string };
+
+    if (!body.planId?.trim()) {
+      fail(res, 400, "BAD_REQUEST", "planId 为必填");
+      return;
+    }
+    if (!body.customerId?.trim()) {
+      fail(res, 400, "BAD_REQUEST", "customerId 为必填");
+      return;
+    }
+
+    const plan = await prisma.whrConsolidationPlan.findFirst({
+      where: { id: body.planId.trim(), companyId: auth.companyId },
+      select: { id: true, status: true },
+    });
+    if (!plan) {
+      fail(res, 404, "NOT_FOUND", "拼柜计划不存在");
+      return;
+    }
+    // 货已经发走了，参与名单就不该再动 —— 和「新增客户」用同一条口径
+    if (!["planning", "collecting"].includes(plan.status)) {
+      fail(res, 400, "BAD_REQUEST", "该计划已开始装柜或已发运，不能再移除客户");
+      return;
+    }
+
+    const customer = await prisma.whrConsolidationPlanCustomer.findFirst({
+      where: { id: body.customerId.trim(), planId: plan.id, companyId: auth.companyId },
+      select: { id: true, clientId: true },
+    });
+    if (!customer) {
+      fail(res, 404, "NOT_FOUND", "客户记录不存在");
+      return;
+    }
+
+    const prealertCount = await prisma.whrConsolidationPrealert.count({
+      where: { customerId: customer.id },
+    });
+    if (prealertCount > 0) {
+      fail(
+        res,
+        400,
+        "BAD_REQUEST",
+        `该客户名下还有 ${prealertCount} 个预报单，删除会把这些单据连同货物明细、产品图一起删掉。请先逐个取消这些预报单，或者保留该客户。`,
+      );
+      return;
+    }
+
+    await prisma.whrConsolidationPlanCustomer.delete({ where: { id: customer.id } });
+
+    ok(res, { removed: true, clientId: customer.clientId });
+  });
+
+  // ==========================================================================
   // 5. 审核付款（预报单级别）
   // ==========================================================================
   app.post("/admin/whr-consolidation/prealerts/review", async (req, res) => {

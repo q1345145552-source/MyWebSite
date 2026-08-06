@@ -278,6 +278,15 @@ export default function AdminWhrConsolidationPage() {
 
   // --- 改单价 ---
   const [priceTarget, setPriceTarget] = useState<CustomerDetail | null>(null);
+  // 新增 / 移除参与客户（2026-08-07）
+  const [showAddCustomer, setShowAddCustomer] = useState(false);
+  const [addClientId, setAddClientId] = useState("");
+  const [addSearch, setAddSearch] = useState("");
+  const [addPriceNormal, setAddPriceNormal] = useState("");
+  const [addPriceInspection, setAddPriceInspection] = useState("");
+  const [addPriceSensitive, setAddPriceSensitive] = useState("");
+  const [addSubmitting, setAddSubmitting] = useState(false);
+  const [removingCustomerId, setRemovingCustomerId] = useState("");
   const [editPriceNormal, setEditPriceNormal] = useState("");
   const [editPriceInspection, setEditPriceInspection] = useState("");
   const [editPriceSensitive, setEditPriceSensitive] = useState("");
@@ -486,6 +495,65 @@ export default function AdminWhrConsolidationPage() {
     finally { setPriceSubmitting(false); }
   };
 
+  /** 打开「新增客户」弹窗：客户列表是懒加载的，这里补一次 */
+  const openAddCustomer = () => {
+    setAddClientId(""); setAddSearch("");
+    setAddPriceNormal(""); setAddPriceInspection(""); setAddPriceSensitive("");
+    setShowAddCustomer(true);
+    if (clients.length === 0) loadClients();
+  };
+
+  const handleAddCustomer = async () => {
+    if (!selectedPlanId) return;
+    if (!addClientId) { setToast("请选择客户"); return; }
+    const checks: Array<[string, string]> = [
+      ["普货", addPriceNormal], ["商检", addPriceInspection], ["敏感货", addPriceSensitive],
+    ];
+    for (const [label, v] of checks) {
+      if (!v || Number(v) <= 0) { setToast(`${label}单价必须大于0`); return; }
+    }
+    setAddSubmitting(true);
+    try {
+      await apiRequest(`${apiBaseUrl()}/admin/whr-consolidation/customers/add`, {
+        method: "POST",
+        headers: jsonPost,
+        body: JSON.stringify({
+          planId: selectedPlanId,
+          clientId: addClientId,
+          unitPriceNormal: Number(addPriceNormal),
+          unitPriceInspection: Number(addPriceInspection),
+          unitPriceSensitive: Number(addPriceSensitive),
+        }),
+      });
+      setToast("客户已加入本计划");
+      setShowAddCustomer(false);
+      loadDetail(selectedPlanId);
+    } catch (e: any) { setToast(e?.message ?? "新增失败"); }
+    finally { setAddSubmitting(false); }
+  };
+
+  /** 移除客户。名下有预报单的后端会拦住，这里也先提示一次，免得白点 */
+  const handleRemoveCustomer = async (c: CustomerDetail) => {
+    if (!selectedPlanId) return;
+    const paCount = c.prealerts?.length ?? 0;
+    if (paCount > 0) {
+      setToast(`${c.clientName} 名下还有 ${paCount} 个预报单，请先逐个取消后再移除`);
+      return;
+    }
+    if (!confirm(`确定把「${c.clientName}」从本计划移除？\n\n该客户名下没有预报单，移除后只会删掉这条参与记录。`)) return;
+    setRemovingCustomerId(c.id);
+    try {
+      await apiRequest(`${apiBaseUrl()}/admin/whr-consolidation/customers/remove`, {
+        method: "POST",
+        headers: jsonPost,
+        body: JSON.stringify({ planId: selectedPlanId, customerId: c.id }),
+      });
+      setToast(`已移除 ${c.clientName}`);
+      loadDetail(selectedPlanId);
+    } catch (e: any) { setToast(e?.message ?? "移除失败"); }
+    finally { setRemovingCustomerId(""); }
+  };
+
   // ==========================================================================
   // 渲染
   // ==========================================================================
@@ -592,7 +660,13 @@ export default function AdminWhrConsolidationPage() {
                 </div>
 
                 {/* 客户卡片列表 */}
-                <h3 style={{ fontSize: 16, marginBottom: 12 }}>参与客户（{planDetail.customers.length}）</h3>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+                  <h3 style={{ fontSize: 16, margin: 0 }}>参与客户（{planDetail.customers.length}）</h3>
+                  {/* 计划一旦开始装柜/发运就不给再加人，后端也拦了一道 */}
+                  {["planning", "collecting"].includes(planDetail.status) && (
+                    <button onClick={openAddCustomer} style={{ ...btnCancel, padding: "4px 12px", fontSize: 12 }}>新增客户</button>
+                  )}
+                </div>
                 {planDetail.customers.map(c => {
                   const isExpanded = expandedCustomer === c.id;
                   return (
@@ -622,6 +696,10 @@ export default function AdminWhrConsolidationPage() {
                             <span>商检：{c.unitPriceInspection} 元/方</span>
                             <span>敏感：{c.unitPriceSensitive} 元/方</span>
                             <button onClick={(e) => { e.stopPropagation(); setPriceTarget(c); setEditPriceNormal(String(c.unitPriceNormal)); setEditPriceInspection(String(c.unitPriceInspection)); setEditPriceSensitive(String(c.unitPriceSensitive)); }} style={{ ...btnCancel, padding: "4px 12px", fontSize: 12 }}>改单价</button>
+                            {/* 已装柜/已发运的计划不给动参与名单，和「新增客户」同一条口径 */}
+                            {["planning", "collecting"].includes(planDetail.status) && (
+                              <button onClick={(e) => { e.stopPropagation(); handleRemoveCustomer(c); }} disabled={removingCustomerId === c.id} style={{ ...btnCancel, padding: "4px 12px", fontSize: 12, color: "#b91c1c", borderColor: "#fecaca" }}>{removingCustomerId === c.id ? "移除中..." : "移除客户"}</button>
+                            )}
                           </div>
 
                           {/* 总费用及其算式 */}
@@ -954,6 +1032,62 @@ export default function AdminWhrConsolidationPage() {
             </div>
           </Modal>
         )}
+
+        {/* ================================================================ */}
+        {/* 弹窗：新增参与客户（2026-08-07）                                   */}
+        {/* ================================================================ */}
+        {showAddCustomer && selectedPlanId && planDetail && (() => {
+          // 已经在本计划里的客户不再出现在候选里，避免重复添加被后端打回
+          const joined = new Set(planDetail.customers.map(c => c.clientId));
+          const q = addSearch.trim().toLowerCase();
+          const options = clients.filter(cl => !joined.has(cl.id)).filter(cl =>
+            !q || (cl.name ?? "").toLowerCase().includes(q)
+              || (cl.phone ?? "").toLowerCase().includes(q)
+              || (cl.companyName ?? "").toLowerCase().includes(q));
+          return (
+            <Modal onClose={() => setShowAddCustomer(false)}>
+              <h3 style={{ marginTop: 0 }}>新增参与客户 - {planDetail.planNo}</h3>
+              <div style={{ marginTop: 10 }}>
+                <label style={fl}>选择客户</label>
+                <input value={addSearch} onChange={e => setAddSearch(e.target.value)} placeholder="搜索客户名 / 电话 / 公司" style={fi} />
+                <div style={{ maxHeight: 220, overflowY: "auto", border: "1px solid #e5e7eb", borderRadius: 6, marginTop: 6 }}>
+                  {clientsLoading ? (
+                    <div style={{ padding: "10px 12px", fontSize: 13, color: "#9ca3af" }}>加载客户列表中…</div>
+                  ) : options.length === 0 ? (
+                    <div style={{ padding: "10px 12px", fontSize: 13, color: "#9ca3af" }}>
+                      没有可选客户{joined.size > 0 ? "（已在本计划里的客户不会重复出现）" : ""}
+                    </div>
+                  ) : options.map(cl => (
+                    <label key={cl.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", cursor: "pointer", borderBottom: "1px solid #f3f4f6", fontSize: 13 }}>
+                      <input type="radio" name="add-whr-client" checked={addClientId === cl.id} onChange={() => setAddClientId(cl.id)} />
+                      <span style={{ fontWeight: 600 }}>{cl.name}</span>
+                      <span style={{ color: "#6b7280", fontSize: 12 }}>{cl.phone}{cl.companyName ? ` · ${cl.companyName}` : ""}</span>
+                    </label>
+                  ))}
+                </div>
+                <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>共 {options.length} 位可选</div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 12 }}>
+                <div>
+                  <label style={fl}>普货单价 (元/方)</label>
+                  <input type="number" value={addPriceNormal} onChange={e => setAddPriceNormal(e.target.value)} style={fi} />
+                </div>
+                <div>
+                  <label style={fl}>商检单价 (元/方)</label>
+                  <input type="number" value={addPriceInspection} onChange={e => setAddPriceInspection(e.target.value)} style={fi} />
+                </div>
+                <div>
+                  <label style={fl}>敏感单价 (元/方)</label>
+                  <input type="number" value={addPriceSensitive} onChange={e => setAddPriceSensitive(e.target.value)} style={fi} />
+                </div>
+              </div>
+              <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
+                <button onClick={handleAddCustomer} disabled={addSubmitting} style={btnConfirm}>{addSubmitting ? "添加中..." : "确认新增"}</button>
+                <button onClick={() => setShowAddCustomer(false)} style={btnCancel}>取消</button>
+              </div>
+            </Modal>
+          );
+        })()}
 
         {/* ================================================================ */}
         {/* 弹窗：新建计划 */}
