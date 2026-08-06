@@ -40,6 +40,11 @@ export function shipmentStatusZh(status: string | undefined): string {
     delayintransit: "延迟运输",
     arrivedport: "已到港",
     intransit: "运输中",
+    // 陆运专属环节（2026-08-06）。注意这个 map 的 key 全是小写，新加的也要写小写
+    atportcn: "到达凭祥口岸",
+    exportcleared: "出口已放行",
+    invietnam: "过境越南",
+    laoscleared: "老挝边境已放行",
     customsth: "清关中",
     customscleared: "清关已放行",
     inwarehouseth: "已到仓",

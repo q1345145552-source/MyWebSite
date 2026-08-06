@@ -35,6 +35,7 @@ import {
   uploadStaffOrderProductImage,
   fetchStaffWalletBalances,
   type StaffWalletBalanceItem,
+  fetchLastmileShipments,
 } from "../../services/business-api";
 import {
   type OrderProductImagesPanelProps,
@@ -315,9 +316,11 @@ export default function StaffHomePage() {
   const [lmShipSearch, setLmShipSearch] = useState("");
   const [lmBatchInput, setLmBatchInput] = useState("");
 const loadLmShipments = async () => {
-    // 【审查问题 3】走 parseApiResponse：401 会自动跳登录页，不再只是空白列表
-    try { const r = await fetch(apiBaseUrl()+"/staff/shipments?pageSize=500&all=1",{headers:authHeaders()}); const d=await parseApiResponse<{items:any[]}>(r);
-      setLmShipments((d.items ?? []).filter((s:any)=>["inwarehouseth","outfordelivery","delivered"].includes((s.currentStatus||"").toLowerCase())).map((s:any)=>({id:s.id,trackingNo:s.trackingNo,clientId:s.clientId??"",itemName:s.itemName??"",packageCount:s.packageCount??0,containerNo:s.containerNo||undefined}))); } catch (e) { console.error(e); setMessage(`尾端运单加载失败：${e instanceof Error ? e.message : "未知错误"}`); }
+    // 2026-08-06：原来是自己拼 `?pageSize=500&all=1` 再在前端筛状态 ——
+    // 只拿到第 1 页 500 条（所有状态混着排），571 张能派送的里只到 126 张，漏了 445 张。
+    // 改为统一走 fetchLastmileShipments()：后端按状态筛 + 翻页拿完。
+    try { setLmShipments(await fetchLastmileShipments()); }
+    catch (e) { console.error(e); setMessage(`尾端运单加载失败：${e instanceof Error ? e.message : "未知错误"}`); }
   };
   const [lmOrderList, setLmOrderList] = useState<Array<{id:string;deliveryNo:string;shipmentId:string;trackingNo?:string;driverName?:string;licensePlate?:string;phoneNumber?:string;deliveryDate?:string;clientId?:string;status:string}>>([]);
   // 【审查问题 3】走 parseApiResponse：401 会自动跳登录页

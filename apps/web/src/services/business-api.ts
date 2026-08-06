@@ -863,6 +863,56 @@ export async function fetchStaffShipments(): Promise<ShipmentItem[]> {
 }
 
 
+/** 尾端派送能挑的运单状态：已到仓 / 派送中 / 已签收 */
+const LASTMILE_STATUSES = "inWarehouseTH,outForDelivery,delivered";
+
+export interface LastmileShipmentItem {
+  id: string;
+  trackingNo: string;
+  clientId: string;
+  itemName: string;
+  packageCount: number;
+  containerNo?: string;
+}
+
+/**
+ * 拉取尾端派送可选的全部运单。
+ *
+ * ⚠️ 2026-08-06 修的一个真丢货的 bug：
+ * 原来 staff 和 admin 两个页面各自写 `/staff/shipments?pageSize=500&all=1`，
+ * 拿回「按更新时间倒序的前 500 条（所有状态混在一起）」再在前端筛这三种状态。
+ * 生产实测：能派送的运单 571 张，但排进前 500 的只有 126 张 —— **445 张、5791 件货
+ * 页面上根本选不到**，粘贴运单号批量勾选时这些号码会被静默丢弃，员工以为加进去了。
+ *
+ * 现在：① 让后端按状态筛（新增 status 参数）；② 按 total 翻页拿完，不止第 1 页。
+ * 两个页面都改成调这个函数，别再各写各的。
+ */
+export async function fetchLastmileShipments(): Promise<LastmileShipmentItem[]> {
+  const pageSize = 500;
+  const collected: any[] = [];
+  let page = 1;
+  let total = 0;
+  // 最多翻 20 页兜底，防止 total 异常时死循环
+  while (page <= 20) {
+    const url = `${apiBaseUrl()}/staff/shipments?pageSize=${pageSize}&page=${page}&all=1&status=${encodeURIComponent(LASTMILE_STATUSES)}`;
+    const response = await fetch(url, { method: "GET", headers: { ...authHeaders() } });
+    const data = await parseApiResponse<{ items: any[]; total?: number }>(response);
+    const items = data.items ?? [];
+    collected.push(...items);
+    total = data.total ?? collected.length;
+    if (items.length === 0 || collected.length >= total) break;
+    page += 1;
+  }
+  return collected.map((s) => ({
+    id: s.id,
+    trackingNo: s.trackingNo,
+    clientId: s.clientId ?? "",
+    itemName: s.itemName ?? "",
+    packageCount: s.packageCount ?? 0,
+    containerNo: s.containerNo || undefined,
+  }));
+}
+
 export async function fetchShipmentImages(orderId: string): Promise<OrderProductImageItem[]> {
   const response = await fetch(`${apiBaseUrl()}/staff/shipments/images?orderId=${encodeURIComponent(orderId)}`, {
     method: "GET",
@@ -1517,6 +1567,18 @@ export async function fetchLoadingManifests(filters?: { query?: string; tracking
 }
 
 /**
+ * 改柜子的运输方式（给「未标注」的老柜子补上；状态已经走到某一方专属环节时后端会拒绝）。
+ */
+export async function setManifestTransportMode(manifestId: string, transportMode: string): Promise<{ transportMode: string }> {
+  const response = await fetch(`${apiBaseUrl()}/staff/loading-manifests/transport-mode`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ id: manifestId, transportMode }),
+  });
+  return parseApiResponse(response);
+}
+
+/**
  * 获取装柜清单详情。
  */
 export async function fetchLoadingManifestDetail(manifestId: string): Promise<LoadingManifestDetail> {
@@ -1588,6 +1650,8 @@ export async function updateContainerStatus(payload: {
   toStatus: string;
   remark?: string;
   date?: string;
+  /** 「下一站【泰国边境】」，不传则后端按状态取默认值 */
+  nextStop?: string;
 }): Promise<{ containerNo: string; fromStatus: string; toStatus: string; affectedShipmentCount: number }> {
   const response = await fetch(`${apiBaseUrl()}/admin/containers/status`, {
     method: "POST",

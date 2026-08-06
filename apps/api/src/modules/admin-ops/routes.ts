@@ -177,6 +177,21 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
       fail(res, 400, "BAD_REQUEST", "at least one shipmentId is required");
       return;
     }
+    // 2026-08-06：派送日期在库里是纯文本，原来填什么存什么 ——
+    // 生产上真出现过 WD000199 的日期是「20206-08-06」（年份多打一个 0）。
+    // 前端那个 <input type="date"> 拦不住五位数年份，只能在这里卡。
+    if (deliveryDate) {
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(deliveryDate);
+      const d = m ? new Date(`${deliveryDate}T00:00:00Z`) : null;
+      const year = m ? Number(m[1]) : 0;
+      const validCalendarDate = !!d && !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === deliveryDate;
+      // 上下界放宽到 2020～当年+2，够用又能挡住手滑（2 月 30 号这种也会被上面那句挡掉）
+      const thisYear = new Date().getUTCFullYear();
+      if (!validCalendarDate || year < 2020 || year > thisYear + 2) {
+        fail(res, 400, "VALIDATION_ERROR", `派送日期不对：${deliveryDate}。正确格式是 2026-08-06 这样的年-月-日`);
+        return;
+      }
+    }
     // 生成或复用派送单号
     let deliveryNo: string;
     if (existingDeliveryNo) {
@@ -202,28 +217,43 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
       });
     }
     
+    // 2026-08-06：原来是「一个运单一个事务」，循环里第 N 个失败时，前 N-1 个已经提交了 ——
+    // 运单状态被改成「派送中」、派送单却没建成，留下查不到派送单的孤儿运单（生产实测 3 张）。
+    // 现在整车放进**同一个事务**：要么全部成功，要么一条都不写。
     const results: Array<{ id: string; shipmentId: string }> = [];
-    for (const sid of shipmentIds) {
-      const id = `lm_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-      const now = new Date();
+    try {
       await prisma.$transaction(async (tx) => {
-        await tx.adminLastmileOrder.create({
-          data: { id, companyId: auth.companyId, deliveryNo, shipmentId: sid, carrierName: "自营", driverName, licensePlate, phoneNumber, deliveryDate, externalTrackingNo: "", status },
-        });
-        // 同步运单状态 + 日志
-        const ship = await tx.shipment.findUnique({ where: { id: sid }, select: { currentStatus: true, parentTrackingNo: true } });
-        if (ship) {
-          await tx.shipment.update({ where: { id: sid }, data: { currentStatus: "outForDelivery", updatedAt: now } });
-          await tx.statusLog.create({
-            data: { id: `sl_lm_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, companyId: auth.companyId, shipmentId: sid, operatorId: auth.userId, operatorRole: auth.role, operatorName: auth.name ?? "", fromStatus: ship.currentStatus, toStatus: "outForDelivery", remark: `尾程派送出车（${deliveryNo}）`, changedAt: now },
+        for (const sid of shipmentIds) {
+          const id = `lm_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+          const now = new Date();
+          await tx.adminLastmileOrder.create({
+            data: { id, companyId: auth.companyId, deliveryNo, shipmentId: sid, carrierName: "自营", driverName, licensePlate, phoneNumber, deliveryDate, externalTrackingNo: "", status },
           });
-          if (ship.parentTrackingNo) {
-            const parent = await tx.shipment.findFirst({ where: { trackingNo: ship.parentTrackingNo, companyId: auth.companyId }, select: { id: true } });
-            if (parent) { await tx.shipment.update({ where: { id: parent.id }, data: { currentStatus: "outForDelivery", updatedAt: now } }); }
+          // 同步运单状态 + 日志
+          const ship = await tx.shipment.findUnique({ where: { id: sid }, select: { currentStatus: true, parentTrackingNo: true } });
+          if (ship) {
+            await tx.shipment.update({ where: { id: sid }, data: { currentStatus: "outForDelivery", updatedAt: now } });
+            await tx.statusLog.create({
+              data: { id: `sl_lm_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, companyId: auth.companyId, shipmentId: sid, operatorId: auth.userId, operatorRole: auth.role, operatorName: auth.name ?? "", fromStatus: ship.currentStatus, toStatus: "outForDelivery", remark: `尾程派送出车（${deliveryNo}）`, changedAt: now },
+            });
+            if (ship.parentTrackingNo) {
+              const parent = await tx.shipment.findFirst({ where: { trackingNo: ship.parentTrackingNo, companyId: auth.companyId }, select: { id: true } });
+              if (parent) { await tx.shipment.update({ where: { id: parent.id }, data: { currentStatus: "outForDelivery", updatedAt: now } }); }
+            }
           }
+          results.push({ id, shipmentId: sid });
         }
       });
-      results.push({ id, shipmentId: sid });
+    } catch (e: any) {
+      // 重复装同一票货（(delivery_no, shipment_id) 唯一）说人话，别把 Prisma 原文抛给员工
+      // 注意：ApiCode 里没有 CONFLICT（只有 BAD_REQUEST/UNAUTHORIZED/FORBIDDEN/
+      // NOT_FOUND/VALIDATION_ERROR/INTERNAL_ERROR），别顺手写 "CONFLICT" ——
+      // 项目里已经有两处那么写、常年挂在 tsc 基线错误里了，不要再添一处
+      if (e?.code === "P2002") {
+        fail(res, 409, "VALIDATION_ERROR", "选中的运单里有已经在这张派送单里的，请去掉后重试");
+        return;
+      }
+      throw e;
     }
     ok(res, { deliveryNo, count: results.length });
   });
@@ -275,8 +305,64 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
     if (!auth) return;
     const id = req.query.id as string;
     if (!id) { fail(res, 400, "BAD_REQUEST", "id required"); return; }
-    await prisma.adminLastmileOrder.deleteMany({ where: { id, companyId: auth.companyId } });
-    ok(res, { deleted: true });
+
+    // 2026-08-06：原来只 deleteMany 一行就完事，**运单状态留在「派送中」没人管** ——
+    // 派送单没了、运单却还显示派送中，尾端派送列表里也挑不到它（那个列表只看已到仓/派送中/已签收
+    // 里能对上派送单的），等于这票货从流程里消失。生产实测 YW0001244 就是这么卡了将近一个月。
+    // 现在：删记录的同时把运单退回「已到仓」，并写一条状态轨迹说明原因。
+    const now = new Date();
+    const result = await prisma.$transaction(async (tx) => {
+      const row = await tx.adminLastmileOrder.findFirst({
+        where: { id, companyId: auth.companyId },
+        select: { id: true, shipmentId: true, deliveryNo: true },
+      });
+      if (!row) return { deleted: false, reverted: false };
+
+      await tx.adminLastmileOrder.delete({ where: { id: row.id } });
+
+      const ship = await tx.shipment.findUnique({
+        where: { id: row.shipmentId },
+        select: { id: true, currentStatus: true, parentTrackingNo: true },
+      });
+      // 只在「还在派送中」时退回。已经签收的不动 —— 货都签收了，不该因为删一张单就变回没送。
+      if (!ship || ship.currentStatus !== "outForDelivery") return { deleted: true, reverted: false };
+
+      await tx.shipment.update({ where: { id: ship.id }, data: { currentStatus: "inWarehouseTH", updatedAt: now } });
+      await tx.statusLog.create({
+        data: {
+          id: `sl_lmdel_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          companyId: auth.companyId, shipmentId: ship.id,
+          operatorId: auth.userId, operatorRole: auth.role, operatorName: auth.name ?? "",
+          fromStatus: "outForDelivery", toStatus: "inWarehouseTH",
+          remark: `删除派送单（${row.deliveryNo}），退回已到仓`, changedAt: now,
+        },
+      });
+
+      // 父单：只有当它名下**再没有**任何还在派送中或已签收的子单时才一起退回，
+      // 否则说明另一票子货还在路上/已送到，父单不该被拉回来
+      if (ship.parentTrackingNo) {
+        const parent = await tx.shipment.findFirst({
+          where: { trackingNo: ship.parentTrackingNo, companyId: auth.companyId },
+          select: { id: true, currentStatus: true },
+        });
+        if (parent && parent.currentStatus === "outForDelivery") {
+          const busySiblings = await tx.shipment.count({
+            where: {
+              parentTrackingNo: ship.parentTrackingNo, companyId: auth.companyId,
+              id: { not: ship.id },
+              currentStatus: { in: ["outForDelivery", "delivered"] },
+            },
+          });
+          if (busySiblings === 0) {
+            await tx.shipment.update({ where: { id: parent.id }, data: { currentStatus: "inWarehouseTH", updatedAt: now } });
+          }
+        }
+      }
+      return { deleted: true, reverted: true };
+    });
+
+    if (!result.deleted) { fail(res, 404, "NOT_FOUND", "派送单不存在"); return; }
+    ok(res, { deleted: true, reverted: result.reverted });
   });
 
   app.get("/admin/settlement/entries", async (req, res) => {

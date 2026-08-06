@@ -6,7 +6,7 @@ import type { MinimalHttpApp } from "../../server";
 import { checkRateLimit, getClientIp, rateLimitKey } from "../core/rate-limit";
 import { fail, ok, parseJsonArray, requireRole } from "../core/http-utils";
 import { loadProductImagesForOrders } from "../orders/product-images";
-import { STATUS_FLOW, EXCEPTION_STATUSES, DELAY_STATUSES } from "./status-flow";
+import { STATUS_FLOW, STATUS_FLOW_LAND, EXCEPTION_STATUSES, DELAY_STATUSES } from "./status-flow";
 
 interface Kuaidi100QueryPayload {
   com?: string;
@@ -60,8 +60,16 @@ export function canTransit(fromStatus: string, toStatus: string): boolean {
 export function canTransitLoose(fromStatus: string, toStatus: string): boolean {
   if (fromStatus === toStatus) return true;
   if (EXCEPTION_STATUSES.has(toStatus)) return true;
-  const fromIndex = STATUS_FLOW.indexOf(fromStatus);
-  const toIndex = STATUS_FLOW.indexOf(toStatus);
+  // 2026-08-06：海运、陆运两条流程，**任意一条能走通就算合法**。
+  // 一票货只会走其中一条（由柜子的运输方式决定），这里不需要知道是哪条 ——
+  // 「该不该走这条流程」在柜子那层已经拦过了（containers/routes.ts 的 flowOf）。
+  return canTransitInFlow(STATUS_FLOW, fromStatus, toStatus)
+    || canTransitInFlow(STATUS_FLOW_LAND, fromStatus, toStatus);
+}
+
+function canTransitInFlow(flow: readonly string[], fromStatus: string, toStatus: string): boolean {
+  const fromIndex = flow.indexOf(fromStatus);
+  const toIndex = flow.indexOf(toStatus);
   if (fromIndex < 0 && EXCEPTION_STATUSES.has(fromStatus) && toIndex >= 0) return true;
   if (fromIndex < 0 || toIndex < 0) return false;
   return toIndex > fromIndex;
@@ -446,6 +454,20 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
     const includeChildren = req.query.all === "1";
     const where: any = { companyId: auth.companyId };
     if (!includeChildren) where.parentTrackingNo = null;
+
+    // 2026-08-06：按状态筛（逗号分隔，大小写不敏感）。**尾端派送就是因为没有它才漏货的**：
+    // 页面原来拿「按更新时间排的前 500 条（所有状态混在一起）」回去自己筛，
+    // 全库 1026 张运单里能派送的有 571 张，但排进前 500 的只有 126 张 —— 78% 根本没下发。
+    // 不传这个参数时行为与以前完全一致，老调用方不受影响。
+    const statusFilter = String(req.query.status ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (statusFilter.length > 0) {
+      // 库里存的是 inWarehouseTH 这种驼峰写法，前端历史上一直用小写比对，
+      // 这里用不区分大小写的等值匹配，两边怎么写都能对上
+      where.OR = statusFilter.map((s) => ({ currentStatus: { equals: s, mode: "insensitive" } }));
+    }
 
     const [total, rows] = await Promise.all([
       prisma.shipment.count({ where }),

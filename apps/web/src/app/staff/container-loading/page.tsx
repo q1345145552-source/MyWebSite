@@ -13,6 +13,7 @@ import {
   fetchStaffShipments,
   deleteContainer,
   updateContainerStatus,
+  setManifestTransportMode,
   type LoadingManifestItem,
   type LoadingManifestDetail,
   type ShipmentItem,
@@ -29,10 +30,45 @@ const STATUS_LABEL: Record<string, string> = {
   CUSTOMS_CLEARED: "清关已放行",
   UNLOADING: "正在卸柜",
   IN_WAREHOUSE_TH: "已到仓",
+  // 这两步由尾端派送推进，装柜页不能推，但筛选下拉里要能选，所以标签必须有
+  // （2026-08-06 把筛选项改成从这张表生成后，漏了这两个会显示成英文代码）
+  OUT_FOR_DELIVERY: "派送中",
+  SIGNED: "已签收",
+  // 陆运专属环节（2026-08-06）
+  AT_PORT_CN: "到达凭祥口岸",
+  EXPORT_CLEARED: "出口已放行",
+  IN_VIETNAM: "过境越南",
+  LAOS_CLEARED: "老挝边境已放行",
 };
 
 // 顺序必须与后端 containers/routes.ts 的 CONTAINER_STATUS_FLOW 一致
 const STATUS_FLOW = ["LOADING", "SEALED", "DELAY_DEPARTED", "IN_TRANSIT", "DELAY_IN_TRANSIT", "ARRIVED", "CUSTOMS", "CUSTOMS_CLEARED", "UNLOADING", "IN_WAREHOUSE_TH"] as const;
+
+/**
+ * 陆运流程（2026-08-06）。陆运走陆路口岸，没有「开船」「到港」。
+ * 顺序必须与后端 CONTAINER_STATUS_FLOW_LAND 一致，改一边必须改另一边。
+ */
+const STATUS_FLOW_LAND = ["LOADING", "SEALED", "AT_PORT_CN", "EXPORT_CLEARED", "IN_VIETNAM", "LAOS_CLEARED", "CUSTOMS_CLEARED", "UNLOADING", "IN_WAREHOUSE_TH"] as const;
+
+/**
+ * 顶部「状态」筛选的可选项，**按运输方式分开**（2026-08-06 用户要求：
+ * 「先选择是海运还是陆运，然后再去选择对应的状态，这柜是选的陆运，那么运输状态只会出现陆运的」）。
+ * 比上面两条流程多了尾端的派送中/已签收 —— 那两个不是装柜页推进的，但可以拿来筛。
+ */
+const FILTER_STATUSES_SEA = ["LOADING", "SEALED", "DELAY_DEPARTED", "IN_TRANSIT", "DELAY_IN_TRANSIT", "ARRIVED", "CUSTOMS", "CUSTOMS_CLEARED", "UNLOADING", "IN_WAREHOUSE_TH", "OUT_FOR_DELIVERY", "SIGNED"] as const;
+const FILTER_STATUSES_LAND = ["LOADING", "SEALED", "AT_PORT_CN", "EXPORT_CLEARED", "IN_VIETNAM", "LAOS_CLEARED", "CUSTOMS_CLEARED", "UNLOADING", "IN_WAREHOUSE_TH", "OUT_FOR_DELIVERY", "SIGNED"] as const;
+
+/** 每个状态默认的下一站，与后端 CONTAINER_NEXT_STOP 一致；员工可以改 */
+const NEXT_STOP_DEFAULT: Record<string, string> = {
+  SEALED: "广西凭祥出口",
+  AT_PORT_CN: "排队出关口",
+  EXPORT_CLEARED: "过境越南",
+  IN_VIETNAM: "老挝",
+  LAOS_CLEARED: "泰国边境",
+  CUSTOMS_CLEARED: "泰国仓库",
+  IN_TRANSIT: "泰国港口",
+  ARRIVED: "泰国清关",
+};
 
 /** 柜子的运输方式。null = 2026-08-05 之前建的老柜子，判不出来，等员工自己补 */
 const MODE_ZH = (mode: string | null | undefined): string =>
@@ -53,6 +89,11 @@ const SHIPMENT_STATUS_ZH: Record<string, string> = {
   customsTH: "清关中", customsth: "清关中", customsCleared: "清关已放行", customscleared: "清关已放行",
   inWarehouseTH: "已到仓", inwarehouseth: "已到仓", outfordelivery: "派送中", delivered: "派送完成",
   exception: "异常", returned: "已退回", cancelled: "已取消",
+  // 陆运专属环节（2026-08-06）。这个 map 大小写两种 key 都收，新加的照旧两种都写
+  atPortCn: "到达凭祥口岸", atportcn: "到达凭祥口岸",
+  exportCleared: "出口已放行", exportcleared: "出口已放行",
+  inVietnam: "过境越南", invietnam: "过境越南",
+  laosCleared: "老挝边境已放行", laoscleared: "老挝边境已放行",
 };
 
 const STATUS_COLOR: Record<string, string> = {
@@ -83,6 +124,8 @@ export default function StaffContainerLoadingPage() {
   const [statusRemark, setStatusRemark] = useState("");
   const [statusDate, setStatusDate] = useState("");
   const [targetStatus, setTargetStatus] = useState("");
+  /** 下一站（2026-08-06）：选目标状态时自动填默认值，员工可改 */
+  const [nextStop, setNextStop] = useState("");
     
   // 运单列表搜索
   const [allShipments, setAllShipments] = useState<ShipmentItem[]>([]);
@@ -196,9 +239,10 @@ export default function StaffContainerLoadingPage() {
   const handlePushStatus = async (toStatus: string) => {
     if (!selectedId || !detail) return;
     try {
-      const result = await updateContainerStatus({ id: selectedId, toStatus, remark: statusRemark.trim() || undefined, date: statusDate || undefined });
+      const result = await updateContainerStatus({ id: selectedId, toStatus, remark: statusRemark.trim() || undefined, date: statusDate || undefined, nextStop: nextStop.trim() || undefined });
       setStatusRemark("");
       setStatusDate("");
+      setNextStop("");
       setToast(`柜子「${result.containerNo}」已推进至 ${STATUS_LABEL[toStatus] ?? toStatus}（影响 ${result.affectedShipmentCount} 个运单）`);
       await loadList();
       await loadDetail(selectedId);
@@ -285,30 +329,43 @@ export default function StaffContainerLoadingPage() {
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索柜号…" style={{ ...inputStyle, minWidth: 150 }} />
         <input value={searchTrackingNo} onChange={(e) => setSearchTrackingNo(e.target.value)} placeholder="搜索单号…" style={{ ...inputStyle, minWidth: 150 }} />
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={inputStyle}>
-          <option value="ALL">全部状态</option>
-          <option value="LOADING">装柜中</option>
-          <option value="SEALED">已封柜</option>
-          <option value="DELAY_DEPARTED">延迟开船</option>
-          <option value="IN_TRANSIT">运输中</option>
-          <option value="DELAY_IN_TRANSIT">延迟运输</option>
-          <option value="ARRIVED">已到港</option>
-          <option value="CUSTOMS">清关中</option>
-          <option value="CUSTOMS_CLEARED">清关已放行</option>
-
-          <option value="UNLOADING">正在卸柜</option>
-          <option value="IN_WAREHOUSE_TH">已到仓</option>
-          <option value="OUT_FOR_DELIVERY">派送中</option>
-          <option value="SIGNED">已签收</option>
-        </select>
-        {/* 「未标注」是给老柜子补运输方式用的：2026-08-05 加这个功能时，
-            有 5 个海陆混装柜和 4 个空柜判不出来，留了空等员工自己点 */}
-        <select value={modeFilter} onChange={(e) => setModeFilter(e.target.value)} style={inputStyle}>
+        {/* 先选运输方式，状态下拉再跟着变 —— 海运陆运的状态不放在一起。
+            「未标注」是给老柜子补运输方式用的：2026-08-05 加这个功能时，
+            有 5 个海陆混装柜和 4 个空柜判不出来，留了空等员工自己点。 */}
+        <select
+          value={modeFilter}
+          onChange={(e) => {
+            setModeFilter(e.target.value);
+            // 换了运输方式，原来选的状态可能压根不属于新流程，重置掉免得筛出空列表
+            setStatusFilter("ALL");
+          }}
+          style={inputStyle}
+        >
           <option value="">全部运输方式</option>
           <option value="sea">海运</option>
           <option value="land">陆运</option>
           <option value="none">未标注</option>
         </select>
+        {(() => {
+          // 陆运只给陆运的状态；海运和「未标注」（老柜子实际走海运）给海运的；
+          // 没选运输方式时不让选状态 —— 否则又变成海陆混在一张单子里
+          const modePicked = modeFilter === "sea" || modeFilter === "land" || modeFilter === "none";
+          const options = modeFilter === "land" ? FILTER_STATUSES_LAND : FILTER_STATUSES_SEA;
+          return (
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              style={{ ...inputStyle, color: modePicked ? undefined : "#9ca3af" }}
+              disabled={!modePicked}
+              title={modePicked ? "" : "先选运输方式，再选对应的状态"}
+            >
+              <option value="ALL">{modePicked ? "全部状态" : "全部状态（先选运输方式）"}</option>
+              {modePicked && options.map((s) => (
+                <option key={s} value={s}>{STATUS_LABEL[s] ?? s}</option>
+              ))}
+            </select>
+          );
+        })()}
         <button onClick={() => void loadList()} style={{ border: "none", borderRadius: 6, padding: "8px 16px", background: "#2563eb", color: "#fff", fontWeight: 500, fontSize: 13, cursor: "pointer" }}>搜索</button>
         <button onClick={() => setShowCreate(!showCreate)} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 16px", background: "#fff", fontSize: 13, cursor: "pointer", color: "#000000" }}>
           {showCreate ? "收起" : "+ 新建装柜"}
@@ -382,22 +439,74 @@ export default function StaffContainerLoadingPage() {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
                   <div>
                     <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#0f172a" }}>{detail.manifestNo}</h2>
-                    <div style={{ fontSize: 13, color: "#000000", marginTop: 4 }}>
-                      运输方式: <span style={{ color: detail.transportMode ? "#1e3a8a" : "#b91c1c", fontWeight: 600 }}>{MODE_ZH(detail.transportMode)}</span>
-                      {" · "}仓库: {WAREHOUSE_ZH[detail.warehouse] ?? detail.warehouse} · 状态: {STATUS_LABEL[detail.status] ?? detail.status}
-                      {detail.carrierInfo ? ` · 船次/船名: ${detail.carrierInfo}` : ""}
+                    <div style={{ fontSize: 13, color: "#000000", marginTop: 4, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      <span>运输方式:</span>
+                      {/* 未标注的老柜子在这里补；已经走到某一方专属环节时后端会拒绝，
+                          界面把报错原样弹出来（2026-08-06） */}
+                      <select
+                        value={detail.transportMode ?? ""}
+                        onChange={async (e) => {
+                          const mode = e.target.value;
+                          if (!mode) return;
+                          try {
+                            await setManifestTransportMode(detail.id, mode);
+                            setToast(`柜子「${detail.manifestNo}」已标为${mode === "land" ? "陆运" : "海运"}`);
+                            setTargetStatus("");
+                            setNextStop("");
+                            await loadDetail(detail.id);
+                            await loadList();
+                          } catch (err) {
+                            setError(err instanceof Error ? err.message : "改运输方式失败");
+                          }
+                        }}
+                        style={{ ...inputStyle, padding: "2px 6px", fontSize: 13, color: detail.transportMode ? "#1e3a8a" : "#b91c1c", fontWeight: 600 }}
+                      >
+                        {!detail.transportMode && <option value="">未标注（请选）</option>}
+                        <option value="sea">海运</option>
+                        <option value="land">陆运</option>
+                      </select>
+                      <span>
+                        · 仓库: {WAREHOUSE_ZH[detail.warehouse] ?? detail.warehouse} · 状态: {STATUS_LABEL[detail.status] ?? detail.status}
+                        {detail.carrierInfo ? ` · 船次/船名: ${detail.carrierInfo}` : ""}
+                      </span>
                     </div>
                   </div>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                     <input value={statusRemark} onChange={(e) => setStatusRemark(e.target.value)} placeholder="备注（选填）" style={{ ...inputStyle, minWidth: 200, flex: 1 }} />
+                    {/* 下一站：选了目标状态就自动填上默认值，员工想改可以直接改（2026-08-06） */}
+                    <input
+                      value={nextStop}
+                      onChange={(e) => setNextStop(e.target.value)}
+                      placeholder="下一站（选填）"
+                      title="客户在物流轨迹里会看到「下一站【xxx】」。选了状态会自动填，可以改"
+                      style={{ ...inputStyle, maxWidth: 160 }}
+                    />
                     <input type="date" value={statusDate} onChange={(e) => setStatusDate(e.target.value)} style={{ ...inputStyle, maxWidth: 150 }} title="选择日期（不选则为当天）" />
                     {(() => {
-                      const currentIdx = STATUS_FLOW.indexOf(detail.status as typeof STATUS_FLOW[number]);
-                      if (currentIdx < 0 || currentIdx >= STATUS_FLOW.length - 1) return null;
-                      const options = STATUS_FLOW.slice(currentIdx + 1);
+                      // 没标运输方式的柜子先别给状态选项 —— 先选海运还是陆运，
+                      // 再选对应的状态，两边的状态不放在一起（2026-08-06 用户要求）
+                      if (!detail.transportMode) {
+                        return (
+                          <span style={{ fontSize: 12, color: "#b91c1c", whiteSpace: "nowrap" }}>
+                            ← 先选运输方式，才能推进状态
+                          </span>
+                        );
+                      }
+                      const flow: readonly string[] = detail.transportMode === "land" ? STATUS_FLOW_LAND : STATUS_FLOW;
+                      const currentIdx = flow.indexOf(detail.status);
+                      if (currentIdx < 0 || currentIdx >= flow.length - 1) return null;
+                      const options = flow.slice(currentIdx + 1);
                       return (
                         <>
-                          <select value={targetStatus} onChange={(e) => setTargetStatus(e.target.value)} style={inputStyle}>
+                          <select
+                            value={targetStatus}
+                            onChange={(e) => {
+                              setTargetStatus(e.target.value);
+                              // 换目标状态时把下一站换成该状态的默认值，员工再决定要不要改
+                              setNextStop(NEXT_STOP_DEFAULT[e.target.value] ?? "");
+                            }}
+                            style={inputStyle}
+                          >
                             <option value="">选择目标状态</option>
                             {options.map((s) => (
                               <option key={s} value={s}>{STATUS_LABEL[s] ?? s}</option>

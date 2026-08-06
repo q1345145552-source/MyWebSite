@@ -19,6 +19,8 @@ export default function StaffLastmile(props: StaffLastmileProps) {
   const [lmSelected, setLmSelected] = useState<Set<string>>(new Set());
   const [lmShipSearch, setLmShipSearch] = useState("");
   const [lmBatchInput, setLmBatchInput] = useState("");
+  /** 粘贴批量勾选时没匹配上的运单号，必须显示出来，不能静默丢弃 */
+  const [lmBatchMissing, setLmBatchMissing] = useState<string[]>([]);
   const [lmDriverName, setLmDriverName] = useState("");
   const [lmLicensePlate, setLmLicensePlate] = useState("");
   const [lmPhoneNumber, setLmPhoneNumber] = useState("");
@@ -99,6 +101,14 @@ export default function StaffLastmile(props: StaffLastmileProps) {
     !lmOrderSearch || (o.deliveryNo || "").includes(lmOrderSearch) || (o.trackingNo || "").includes(lmOrderSearch) || (o.clientId || "").includes(lmOrderSearch)
   );
 
+  /** 可挑选的运单（按搜索词过滤）。抽出来是为了在下面显示「一共多少条」 */
+  const filteredLmShipments = props.lmShipments.filter(s =>
+    !lmShipSearch
+    || (s.trackingNo || "").includes(lmShipSearch)
+    || (s.clientId || "").includes(lmShipSearch)
+    || (s.itemName || "").includes(lmShipSearch)
+  );
+
   const groups: Record<string, typeof filteredOrders> = {};
   for (const o of filteredOrders) {
     if (!groups[o.deliveryNo]) groups[o.deliveryNo] = [];
@@ -113,26 +123,45 @@ export default function StaffLastmile(props: StaffLastmileProps) {
         <h4 style={{ margin: "0 0 8px", fontSize: 14 }}>创建派送单（一车多单，逗号分隔）</h4>
         <div style={{ display: "grid", gap: 6 }}>
           <div style={{ border: "1px solid #e5e7eb", borderRadius: 6, padding: 8, background: "#fff" }}>
-            <div style={{ display: "flex", gap: 4, marginBottom: 4 }}>
-              {[...new Set(props.lmShipments.map(s => s.clientId).filter(Boolean))].slice(0, 10).map(m => (
+            {/* 唛头快捷勾选。2026-08-06：原来写死 .slice(0, 10)，线上有 42 个唛头，
+                多出来的 32 个直接不显示、也没有任何提示（老板就是这么发现丢货的）。
+                现在全部显示，一行放不下就换行。 */}
+            <div style={{ display: "flex", gap: 4, marginBottom: 4, flexWrap: "wrap" }}>
+              {[...new Set(props.lmShipments.map(s => s.clientId).filter(Boolean))].map(m => (
                 <button key={m} onClick={() => { setLmShipSearch(m); const found = new Set<string>(); props.lmShipments.filter(s => s.clientId === m).forEach(s => found.add(s.id)); const n = new Set(lmSelected); found.forEach(id => n.add(id)); setLmSelected(n); }} style={{ border: "1px solid #6b21a8", borderRadius: 4, padding: "1px 6px", fontSize: 10, background: lmShipSearch === m ? "#6b21a8" : "#fff", color: lmShipSearch === m ? "#fff" : "#6b21a8", cursor: "pointer" }}>{m}</button>
               ))}
             </div>
+            {/* 粘贴运单号批量勾选。2026-08-06：原来匹配不上的号码**静默丢弃** ——
+                不勾、不报错、输入框里还留着，员工以为都加进去了，实际漏了。
+                现在把没找到的原样列出来。 */}
             <input value={lmBatchInput} onChange={e => setLmBatchInput(e.target.value)} onBlur={() => {
               const nums = lmBatchInput.split(/[,\s\n]+/).map(s => s.trim()).filter(Boolean);
               if (nums.length > 0) {
                 const found = new Set<string>();
-                props.lmShipments.forEach(s => { if (nums.includes(s.trackingNo)) found.add(s.id); });
+                const matchedNums = new Set<string>();
+                props.lmShipments.forEach(s => {
+                  if (nums.includes(s.trackingNo)) { found.add(s.id); matchedNums.add(s.trackingNo); }
+                });
                 if (found.size > 0) { const n = new Set(lmSelected); found.forEach(id => n.add(id)); setLmSelected(n); }
+                const missing = nums.filter(x => !matchedNums.has(x));
+                setLmBatchMissing(missing);
                 setLmBatchInput(nums.join(", "));
+              } else {
+                setLmBatchMissing([]);
               }
             }} placeholder="粘贴运单号批量勾选..." style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "4px 8px", fontSize: 11, width: "100%", marginBottom: 4, color: "#6b21a8" }} />
+            {lmBatchMissing.length > 0 && (
+              <div style={{ fontSize: 11, color: "#b91c1c", marginBottom: 4, lineHeight: 1.5 }}>
+                有 {lmBatchMissing.length} 个运单号没找到，<b>没有</b>加进去：{lmBatchMissing.join("、")}
+                <br />
+                （可能是单号打错了，或者这批货还没到仓 / 已经在别的派送单里）
+              </div>
+            )}
             <input value={lmShipSearch} onChange={e => setLmShipSearch(e.target.value)} onFocus={props.onLoadShipments} placeholder="搜索运单号/唛头/品名..." style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 8px", fontSize: 12, width: "100%", marginBottom: 4 }} />
+            {/* 2026-08-06：原来写死 .slice(0, 50)，超出的不显示也不提示。
+                现在全部渲染（框本身可滚动），并在下面写清楚一共多少条。 */}
             <div style={{ maxHeight: 180, overflow: "auto" }}>
-              {props.lmShipments
-                .filter(s => !lmShipSearch || (s.trackingNo||"").includes(lmShipSearch) || (s.clientId||"").includes(lmShipSearch) || (s.itemName||"").includes(lmShipSearch))
-                .slice(0, 50)
-                .map(s => (
+              {filteredLmShipments.map(s => (
                 <label key={s.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "2px 0", fontSize: 12, cursor: "pointer" }}>
                   <input type="checkbox" checked={lmSelected.has(s.id)} onChange={() => { const n = new Set(lmSelected); n.has(s.id) ? n.delete(s.id) : n.add(s.id); setLmSelected(n); }} />
                   <span style={{ fontFamily: "monospace", color: "#1e3a8a", minWidth: 150 }}>{s.trackingNo}</span>
@@ -142,7 +171,10 @@ export default function StaffLastmile(props: StaffLastmileProps) {
                 </label>
               ))}
             </div>
-            <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>已选 {lmSelected.size} 个运单</div>
+            <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>
+              已选 {lmSelected.size} 个运单 · 当前列出 {filteredLmShipments.length} 条
+              {lmShipSearch ? `（共 ${props.lmShipments.length} 条，已按「${lmShipSearch}」筛选）` : ""}
+            </div>
           </div>
           <div style={{ display: "flex", gap: 6 }}>
             <input value={lmDriverName} onChange={e => setLmDriverName(e.target.value)} placeholder="司机姓名" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 8px", fontSize: 12, flex: 1 }} />

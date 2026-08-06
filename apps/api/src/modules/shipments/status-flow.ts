@@ -17,6 +17,25 @@ export const STATUS_FLOW = [
 ] as const;
 
 /**
+ * 陆运流程（2026-08-06）。走陆路口岸，没有「开船」「到港」。
+ * ⚠️ 加了这条之后，`canTransitLoose` 必须两条流程都认 ——
+ * 只改上面那条 STATUS_FLOW 的话，陆运柜推到「到达凭祥口岸」会被判成非法流转
+ * （实测报「以下运单不允许从当前状态流转到 atPortCn」）。
+ */
+export const STATUS_FLOW_LAND = [
+  "created",
+  "loaded",
+  "atPortCn",
+  "exportCleared",
+  "inVietnam",
+  "laosCleared",
+  "customsCleared",
+  "inWarehouseTH",
+  "outForDelivery",
+  "delivered",
+] as const;
+
+/**
  * 「延迟」类状态是可跳过的中间态。
  *
  * 状态推进的规则是「一次只能往前一格」。把 delayDeparted / delayInTransit 排进主流程后，

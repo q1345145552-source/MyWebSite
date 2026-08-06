@@ -59,6 +59,7 @@ import {
   approveRecharge,
   rejectRecharge,
   type AdminWalletRechargeItem,
+  fetchLastmileShipments,
 } from "../../services/business-api";
 import {
   createKnowledgeItem,
@@ -231,10 +232,10 @@ export default function AdminHomePage() {
   const lmSignFileRef = useRef<HTMLInputElement>(null);
   const [lmSignData, setLmSignData] = useState<{id:string;base64:string}|null>(null);
   const loadLmShipments = async () => {
-    // 【审查问题 3】原来用 r.json() 自己判 code，绕过了 parseApiResponse——
-    // 登录过期(401)时既不跳登录页也不提示，页面只会一片空白。
-    try { const r = await fetch(apiBaseUrl()+"/staff/shipments?pageSize=500&all=1",{headers:authHeaders()}); const d=await parseApiResponse<{items:any[]}>(r);
-      setLmShipments((d.items ?? []).filter((s:any)=>["inwarehouseth","outfordelivery","delivered"].includes((s.currentStatus||"").toLowerCase())).map((s:any)=>({id:s.id,trackingNo:s.trackingNo,clientId:s.clientId??"",itemName:s.itemName??"",packageCount:s.packageCount??0,containerNo:s.containerNo||undefined}))); } catch (e) { console.error(e); setMessage(`尾端运单加载失败：${e instanceof Error ? e.message : "未知错误"}`); }
+    // 2026-08-06：和员工端犯的是同一个错 —— 只拿第 1 页 500 条再在前端筛状态，
+    // 能派送的 571 张里只到 126 张。改为统一走 fetchLastmileShipments()（后端按状态筛 + 翻页拿完）。
+    try { setLmShipments(await fetchLastmileShipments()); }
+    catch (e) { console.error(e); setMessage(`尾端运单加载失败：${e instanceof Error ? e.message : "未知错误"}`); }
   };
   const [lmOrders, setLmOrders] = useState<Array<{id:string;deliveryNo:string;shipmentId:string;trackingNo?:string;driverName?:string|null;licensePlate?:string|null;phoneNumber?:string|null;deliveryDate?:string|null;signImageBase64?:string|null;status:string}>>([]);
   const loadLastmileOrders = async () => {
@@ -1042,7 +1043,10 @@ export default function AdminHomePage() {
 
   useEffect(() => {
     if (activeSection === "shipping-config" && clientList.length > 0) void loadRates();
-    if (activeSection === "lastmile") loadLastmileOrders();
+    // 2026-08-06：原来只在搜索框 onFocus 时才去加载可选运单，
+    // 进到「尾端派送」不点那个框，列表就一直是空的，看起来像没数据。
+    // 改成进这个页面就连派送单一起加载。
+    if (activeSection === "lastmile") { loadLastmileOrders(); void loadLmShipments(); }
     if (activeSection === "offline-payments") loadOfflinePayments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSection, clientList]);
@@ -1823,8 +1827,9 @@ export default function AdminHomePage() {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, maxWidth: 600 }}>
             <div style={{ border: "1px solid #e5e7eb", borderRadius: 6, padding: 8, background: "#fff", gridColumn: "1/-1" }}>
               <input value={lmShipSearch} onChange={e=>setLmShipSearch(e.target.value)} onFocus={()=>loadLmShipments()} placeholder="搜索运单（已到泰国的）..." style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 8px", fontSize: 12, width: "100%", marginBottom: 4 }} />
+              {/* 2026-08-06：原来写死 .slice(0, 20)，超出的不显示也不提示 */}
               <div style={{ maxHeight: 150, overflow: "auto" }}>
-                {lmShipments.filter(s=>!lmShipSearch||(s.trackingNo||"").includes(lmShipSearch)||(s.clientId||"").includes(lmShipSearch)).slice(0,20).map(s=>(
+                {lmShipments.filter(s=>!lmShipSearch||(s.trackingNo||"").includes(lmShipSearch)||(s.clientId||"").includes(lmShipSearch)).map(s=>(
                   <label key={s.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "2px 0", fontSize: 12, cursor: "pointer" }}>
                     <input type="checkbox" checked={lmSelected.has(s.id)} onChange={()=>{const n=new Set(lmSelected);n.has(s.id)?n.delete(s.id):n.add(s.id);setLmSelected(n)}} />
                     <span style={{ fontFamily: "monospace", color: "#1e3a8a", minWidth: 150 }}>{s.trackingNo}</span>
@@ -1833,7 +1838,10 @@ export default function AdminHomePage() {
                   </label>
                 ))}
               </div>
-              <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>已选 {lmSelected.size} 个运单</div>
+              <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>
+                已选 {lmSelected.size} 个运单 · 当前列出 {lmShipments.filter(s=>!lmShipSearch||(s.trackingNo||"").includes(lmShipSearch)||(s.clientId||"").includes(lmShipSearch)).length} 条
+                {lmShipSearch ? `（共 ${lmShipments.length} 条，已按「${lmShipSearch}」筛选）` : ""}
+              </div>
             </div>
             <input value={lmForm.driverName} onChange={e => setLmForm(f => ({...f, driverName: e.target.value}))} placeholder="司机姓名" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 12px", fontSize: 13 }} />
             <input value={lmForm.licensePlate} onChange={e => setLmForm(f => ({...f, licensePlate: e.target.value}))} placeholder="车牌号" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 12px", fontSize: 13 }} />

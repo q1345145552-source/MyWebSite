@@ -12,8 +12,15 @@ export type ShipmentStatus =
   | "delivered"
   | "exception"
   | "returned"
-  | "cancelled";
+  | "cancelled"
+  // ↓ 2026-08-06 新增：陆运专属环节（凭祥口岸 → 越南 → 老挝 → 泰国）。
+  //   海运的货永远不会走到这几个状态，两条流程互不干扰。
+  | "atPortCn"
+  | "exportCleared"
+  | "inVietnam"
+  | "laosCleared";
 
+/** 海运流程（原来的唯一流程，未改动） */
 export const SHIPMENT_STATUS_FLOW: ShipmentStatus[] = [
   "created",
   "loaded",
@@ -26,6 +33,33 @@ export const SHIPMENT_STATUS_FLOW: ShipmentStatus[] = [
   "inWarehouseTH",
   "outForDelivery",
   "delivered",
+];
+
+/**
+ * 陆运流程（2026-08-06 新增）。走陆路口岸，没有「开船」「到港」这两步。
+ * 环节照用户提供的实际轨迹：
+ *   已装柜 → 到达凭祥口岸 → 出口已放行 → 过境越南 → 老挝边境已放行
+ *        → 清关已放行 → 已到仓 → 派送中 → 已签收
+ */
+export const SHIPMENT_STATUS_FLOW_LAND: ShipmentStatus[] = [
+  "created",
+  "loaded",
+  "atPortCn",
+  "exportCleared",
+  "inVietnam",
+  "laosCleared",
+  "customsCleared",
+  "inWarehouseTH",
+  "outForDelivery",
+  "delivered",
+];
+
+/** 只有陆运才会出现的状态，用来判断一票货该按哪条流程显示 */
+export const LAND_ONLY_STATUSES: ShipmentStatus[] = [
+  "atPortCn",
+  "exportCleared",
+  "inVietnam",
+  "laosCleared",
 ];
 
 export const SHIPMENT_EXCEPTION_STATUSES: ShipmentStatus[] = [

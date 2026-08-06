@@ -16,6 +16,7 @@ import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
 import { canTransitLoose } from "../shipments/routes";
 
+/** 海运流程（原来的唯一流程，一个字没改） */
 const CONTAINER_STATUS_FLOW = [
   "LOADING",
   "SEALED",
@@ -27,6 +28,34 @@ const CONTAINER_STATUS_FLOW = [
   "DELAY_IN_TRANSIT",
   "ARRIVED",
   "CUSTOMS",
+  "CUSTOMS_CLEARED",
+  "UNLOADING",
+  "IN_WAREHOUSE_TH",
+  "OUT_FOR_DELIVERY",
+  "SIGNED",
+] as const;
+
+/**
+ * 陆运流程（2026-08-06 新增）。
+ *
+ * 陆运走陆路口岸，**没有「开船」「到港」**，原来只有一条海运流程，陆运的货只能在
+ * 「已开船」「已到港」上硬爬过去 —— 客户在轨迹里看到自己的陆运货「已开船」是错的，
+ * 而且装柜到清关中间十几天一片空白。
+ *
+ * 环节照用户给的实际轨迹来（2026-08-06 他发的截图）：
+ *   已装柜 → 到达凭祥口岸 → 出口已放行 → 过境越南 → 老挝边境已放行
+ *        → 清关已放行 → 正在卸柜 → 已到仓 → 派送中 → 已签收
+ *
+ * ⚠️ 走哪条流程看柜子的 transportMode（2026-08-05 加的字段）。老柜子没标运输方式的
+ *    一律按海运处理 —— 那是原来的行为，不会把已有的柜子带偏。
+ */
+const CONTAINER_STATUS_FLOW_LAND = [
+  "LOADING",
+  "SEALED",
+  "AT_PORT_CN",
+  "EXPORT_CLEARED",
+  "IN_VIETNAM",
+  "LAOS_CLEARED",
   "CUSTOMS_CLEARED",
   "UNLOADING",
   "IN_WAREHOUSE_TH",
@@ -47,10 +76,42 @@ const CONTAINER_STATUS_LABEL: Record<string, string> = {
   IN_WAREHOUSE_TH: "已到仓",
   OUT_FOR_DELIVERY: "派送中",
   SIGNED: "已签收",
+  // 陆运专属
+  AT_PORT_CN: "到达凭祥口岸",
+  EXPORT_CLEARED: "出口已放行",
+  IN_VIETNAM: "过境越南",
+  LAOS_CLEARED: "老挝边境已放行",
 };
+
+/**
+ * 每个状态默认的「下一站」，客户在轨迹里能看到货接下来去哪。
+ * 员工推进状态时可以手动改（改了以这次填的为准），不填就用这里的默认值。
+ */
+const CONTAINER_NEXT_STOP: Record<string, string> = {
+  // 陆运
+  SEALED: "广西凭祥出口",
+  AT_PORT_CN: "排队出关口",
+  EXPORT_CLEARED: "过境越南",
+  IN_VIETNAM: "老挝",
+  LAOS_CLEARED: "泰国边境",
+  CUSTOMS_CLEARED: "泰国仓库",
+  // 海运沿用同样的思路
+  IN_TRANSIT: "泰国港口",
+  ARRIVED: "泰国清关",
+};
+
+/** 这个柜子该按哪条流程走：陆运走陆运，其余（含没标运输方式的老柜子）走海运 */
+function flowOf(transportMode: string | null | undefined): readonly string[] {
+  return transportMode === "land" ? CONTAINER_STATUS_FLOW_LAND : CONTAINER_STATUS_FLOW;
+}
 
 /** 柜子状态推进时，对应推运单到什么状态 */
 const CONTAINER_TO_SHIPMENT_STATUS: Record<string, string> = {
+  // 陆运专属四步
+  AT_PORT_CN: "atPortCn",
+  EXPORT_CLEARED: "exportCleared",
+  IN_VIETNAM: "inVietnam",
+  LAOS_CLEARED: "laosCleared",
   SEALED: "loaded",
   DELAY_DEPARTED: "delayDeparted",
   IN_TRANSIT: "departed",
@@ -63,11 +124,16 @@ const CONTAINER_TO_SHIPMENT_STATUS: Record<string, string> = {
   SIGNED: "delivered",
 };
 
-/** 判断状态切换是否合法（只能往前推进，不能倒退；可同状态续写）。 */
-function canContainerTransit(from: string, to: string): boolean {
+/**
+ * 判断状态切换是否合法（只能往前推进，不能倒退；可同状态续写）。
+ * 2026-08-06：加了 transportMode 参数 —— 陆运柜按陆运流程判断，
+ * 不传（老调用方）时行为与以前完全一致，仍按海运流程。
+ */
+function canContainerTransit(from: string, to: string, transportMode?: string | null): boolean {
   if (from === to) return true;
-  const fromIdx = CONTAINER_STATUS_FLOW.indexOf(from as typeof CONTAINER_STATUS_FLOW[number]);
-  const toIdx = CONTAINER_STATUS_FLOW.indexOf(to as typeof CONTAINER_STATUS_FLOW[number]);
+  const flow = flowOf(transportMode);
+  const fromIdx = flow.indexOf(from);
+  const toIdx = flow.indexOf(to);
   if (fromIdx < 0 || toIdx < 0) return false;
   return toIdx > fromIdx;
 }
@@ -278,15 +344,11 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
     const auth = requireRole(req, res, ["admin", "staff"]);
     if (!auth) return;
 
-    const body = (req.body ?? {}) as { id?: string; toStatus?: string; remark?: string; date?: string };
+    const body = (req.body ?? {}) as { id?: string; toStatus?: string; remark?: string; date?: string; nextStop?: string };
     const id = body.id?.trim();
     const toStatus = body.toStatus?.trim();
     if (!id || !toStatus) {
       fail(res, 400, "BAD_REQUEST", "id and toStatus are required");
-      return;
-    }
-    if (!CONTAINER_STATUS_FLOW.includes(toStatus as typeof CONTAINER_STATUS_FLOW[number])) {
-      fail(res, 400, "VALIDATION_ERROR", `invalid status: ${toStatus}`);
       return;
     }
 
@@ -299,15 +361,34 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    if (!canContainerTransit(container.currentStatus, toStatus)) {
+    // 2026-08-06：合法状态与推进规则都改为按柜子的运输方式判断。
+    // 陆运柜不能推到「已开船/已到港」，海运柜也不能推到「过境越南」这类陆运环节。
+    const flow = flowOf(container.transportMode);
+    if (!flow.includes(toStatus)) {
+      const isLand = container.transportMode === "land";
       fail(
         res,
         400,
         "VALIDATION_ERROR",
-        `invalid transition: ${container.currentStatus} → ${toStatus}`,
+        `「${CONTAINER_STATUS_LABEL[toStatus] ?? toStatus}」不属于${isLand ? "陆运" : "海运"}流程`,
       );
       return;
     }
+
+    if (!canContainerTransit(container.currentStatus, toStatus, container.transportMode)) {
+      fail(
+        res,
+        400,
+        "VALIDATION_ERROR",
+        `不能从「${CONTAINER_STATUS_LABEL[container.currentStatus] ?? container.currentStatus}」退回或跳到「${CONTAINER_STATUS_LABEL[toStatus] ?? toStatus}」`,
+      );
+      return;
+    }
+
+    // 下一站：员工填了就用他填的，没填就用这个状态的默认值（可能没有，那就不写）
+    const nextStop = typeof body.nextStop === "string" && body.nextStop.trim()
+      ? body.nextStop.trim().slice(0, 50)
+      : (CONTAINER_NEXT_STOP[toStatus] ?? null);
 
     const customDate = typeof body.date === "string" && body.date.trim()
       ? new Date(body.date.trim() + "T00:00:00")
@@ -376,6 +457,7 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
               fromStatus: statusMap.get(sid) ?? "loaded",
               toStatus: shipmentNextStatus,
               remark: body.remark?.trim() || `${CONTAINER_STATUS_LABEL[toStatus] ?? toStatus}`,
+              nextStop,
               changedAt: now,
             },
           }),
@@ -656,13 +738,15 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
       isClient ? remark.replace(/装入柜子\s*[^\s（(]+/g, "已装柜") : remark;
 
     const mapLog = (
-      log: { fromStatus: string; toStatus: string; remark: string | null; changedAt: Date; operatorRole: string; operatorName: string | null },
+      log: { fromStatus: string; toStatus: string; remark: string | null; nextStop?: string | null; changedAt: Date; operatorRole: string; operatorName: string | null },
       trackingNo: string,
     ) => ({
       trackingNo,
       fromStatus: log.fromStatus,
       toStatus: log.toStatus,
       remark: sanitizeRemark(log.remark ?? ""),
+      // 「下一站【泰国边境】」，客户看得到货接下来去哪；老轨迹没有这个字段就不显示
+      nextStop: log.nextStop ?? "",
       changedAt: log.changedAt.toISOString(),
       // 操作人是内部信息，客户端连数据都不下发（不只是前端不显示）
       operatorRole: isClient ? "" : log.operatorRole,

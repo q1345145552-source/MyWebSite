@@ -158,6 +158,9 @@ model StatusLog {
   fromStatus   String   @map("from_status")
   toStatus     String   @map("to_status")
   remark       String?
+  // 2026-08-06：轨迹上给客户看的「下一站【泰国边境】」。
+  // 推进柜子状态时按状态取默认值，员工也可以手填覆盖；空着就不显示这一行。
+  nextStop     String?  @map("next_stop")
   changedAt    DateTime @default(now()) @map("changed_at")
 
   shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
@@ -429,7 +432,12 @@ model AdminCustomsCase {
 model AdminLastmileOrder {
   id                 String   @id
   companyId          String   @map("company_id")
-  deliveryNo         String   @unique @map("delivery_no")
+  // 2026-08-06：这里原来是 @unique —— 但派送单号代表「一车」，一车拉多个运单时
+  // 每个运单存一行、共用同一个号，唯一约束直接把「一车多单」堵死了：
+  // 选 2 个及以上必定在第 2 行报 Unique constraint failed，而第 1 行已经写进去、
+  // 运单状态也已改成「派送中」，于是留下没有派送单的孤儿运单（生产实测 3 张）。
+  // 唯一性改由「同一个号 + 同一个运单不能重复」来保证，见下面的 @@unique。
+  deliveryNo         String   @map("delivery_no")
   shipmentId         String   @map("shipment_id")
   carrierName        String   @map("carrier_name")
   externalTrackingNo String   @map("external_tracking_no")
@@ -443,6 +451,8 @@ model AdminLastmileOrder {
 
   shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
 
+  // 同一张派送单里同一个运单只能出现一次（防重复点击把同一票货装两遍）
+  @@unique([deliveryNo, shipmentId])
   @@index([deliveryNo, updatedAt(sort: Desc)])
   @@index([shipmentId, updatedAt(sort: Desc)])
   @@map("admin_lastmile_orders")

@@ -12,6 +12,8 @@ interface TimelineItem {
   fromStatus: string;
   toStatus: string;
   remark: string;
+  /** 「下一站【泰国边境】」。老轨迹没有这个字段，空着就不显示 */
+  nextStop?: string;
   changedAt: string;
   operatorRole: string;
   operatorName: string;
@@ -65,6 +67,11 @@ const STATUS_CONFIG: Record<string, { zh: string; color: string; bg: string; ico
   delayintransit: { zh: "延迟运输",   color: "#b45309", bg: "#fef3c7", icon: "" },
   delay_in_transit: { zh: "延迟运输", color: "#b45309", bg: "#fef3c7", icon: "" },
   arrivedport:    { zh: "已到港",     color: "#065f46", bg: "#d1fae5", icon: "" },
+  // 陆运专属环节（2026-08-06）。key 必须小写，statusCfg 是按 toLowerCase() 查的
+  atportcn:       { zh: "到达凭祥口岸", color: "#1e40af", bg: "#dbeafe", icon: "" },
+  exportcleared:  { zh: "出口已放行", color: "#166534", bg: "#dcfce7", icon: "" },
+  invietnam:      { zh: "过境越南",   color: "#1e40af", bg: "#dbeafe", icon: "" },
+  laoscleared:    { zh: "老挝边境已放行", color: "#166534", bg: "#dcfce7", icon: "" },
   customsth:      { zh: "清关中",     color: "#92400e", bg: "#fef3c7", icon: "" },
   customscleared: { zh: "清关已放行", color: "#166534", bg: "#dcfce7", icon: "" },
   inwarehouseth:  { zh: "已到仓",     color: "#7c3aed", bg: "#ede9fe", icon: "" },
@@ -203,6 +210,14 @@ function TimelineNode({ item, isLast, isChild, index, tabTrackingNo, hideOperato
           {showOperator ? (
             <span style={{ marginLeft: showRemark ? 8 : 0 }}>{item.operatorName}</span>
           ) : null}
+        </div>
+      ) : null}
+
+      {/* 下一站（2026-08-06）。客户看得到货接下来去哪，比如「下一站【泰国边境】」。
+          老轨迹这个字段是空的，就不显示这一行。 */}
+      {item.nextStop ? (
+        <div style={{ marginTop: 2, fontSize: isChild ? 12 : 13, color: "#6b7280", lineHeight: 1.6 }}>
+          下一站【{item.nextStop}】
         </div>
       ) : null}
     </div>

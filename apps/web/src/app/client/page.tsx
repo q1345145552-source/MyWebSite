@@ -1150,7 +1150,9 @@ export default function ClientHomePage() {
                 <tbody>
                   {queriedOrders.slice((currentPage - 1) * pageSize, currentPage * pageSize).map((item: any) => {
                     const st = item.currentStatus || "";
-                    const statusMap: Record<string, string> = { created: "已创建", loaded: "已装柜", delayDeparted: "延迟开船", departed: "已开船", delayInTransit: "延迟运输", arrivedPort: "已到港", customsTH: "清关中", customsCleared: "清关已放行", inWarehouseTH: "已到仓", outForDelivery: "派送中", delivered: "已签收" };
+                    const statusMap: Record<string, string> = { created: "已创建", loaded: "已装柜", delayDeparted: "延迟开船", departed: "已开船", delayInTransit: "延迟运输", arrivedPort: "已到港", customsTH: "清关中", customsCleared: "清关已放行", inWarehouseTH: "已到仓", outForDelivery: "派送中", delivered: "已签收",
+                      // 陆运专属环节（2026-08-06）
+                      atPortCn: "到达凭祥口岸", exportCleared: "出口已放行", inVietnam: "过境越南", laosCleared: "老挝边境已放行" };
                     const dims = (item.products ?? []).map((p: any) => (p.lengthCm && p.widthCm && p.heightCm ? p.lengthCm + "×" + p.widthCm + "×" + p.heightCm : null)).filter(Boolean).join(", ");
                     const isExpanded = !!openDetailsByOrder[item.id];
                     const cargoTypeLabel = item.cargoType === "inspection" ? "商检" : item.cargoType === "sensitive" ? "敏感" : "普货";

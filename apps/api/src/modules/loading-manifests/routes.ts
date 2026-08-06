@@ -21,6 +21,17 @@ async function issueManifestNo(now: Date): Promise<string> {
 }
 
 /**
+ * 柜子状态的中文，只用于给员工看的报错文案。
+ * 权威定义在 containers/routes.ts 的 CONTAINER_STATUS_LABEL，那边加了状态这里也要加。
+ */
+const CONTAINER_STATUS_LABEL_LM: Record<string, string> = {
+  LOADING: "装柜中", SEALED: "已封柜", DELAY_DEPARTED: "延迟开船", IN_TRANSIT: "运输中",
+  DELAY_IN_TRANSIT: "延迟运输", ARRIVED: "已到港", CUSTOMS: "清关中", CUSTOMS_CLEARED: "清关已放行",
+  UNLOADING: "正在卸柜", IN_WAREHOUSE_TH: "已到仓", OUT_FOR_DELIVERY: "派送中", SIGNED: "已签收",
+  AT_PORT_CN: "到达凭祥口岸", EXPORT_CLEARED: "出口已放行", IN_VIETNAM: "过境越南", LAOS_CLEARED: "老挝边境已放行",
+};
+
+/**
  * 注册装柜管理接口。
  */
 export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
@@ -96,6 +107,52 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
       },
     });
     ok(res, { message: "装柜任务已创建", manifest: { id: container.id, manifestNo: container.containerNo } });
+  });
+
+  /**
+   * 改柜子的运输方式（2026-08-06）。
+   *
+   * 为什么要有这个：运输方式原来只能在新建时选，线上还有 9 个老柜子是「未标注」
+   * （5 个海陆混装 + 4 个空柜，迁移时判不出来故意留空的），界面上没地方补。
+   * 而状态流程是按运输方式分的 —— 不补上运输方式，这些柜子就只能按海运走。
+   *
+   * ⚠️ 只有当柜子**当前的状态在目标流程里也存在**时才允许改，
+   * 否则会出现「柜子停在『已到港』却被改成陆运」这种走不下去的死局（陆运没有到港）。
+   */
+  app.post("/staff/loading-manifests/transport-mode", async (req, res) => {
+    const auth = requireRole(req, res, ["staff", "admin"]);
+    if (!auth) return;
+    const body = (req.body ?? {}) as { id?: string; transportMode?: string };
+    const id = body.id?.trim();
+    const mode = typeof body.transportMode === "string" ? body.transportMode.trim() : "";
+    if (!id) { fail(res, 400, "BAD_REQUEST", "id is required"); return; }
+    if (mode !== "sea" && mode !== "land") {
+      fail(res, 400, "BAD_REQUEST", "请选择运输方式：海运或陆运");
+      return;
+    }
+    const container = await prisma.container.findFirst({
+      where: { id, companyId: auth.companyId },
+      select: { id: true, containerNo: true, currentStatus: true, transportMode: true },
+    });
+    if (!container) { fail(res, 404, "NOT_FOUND", "柜子不存在"); return; }
+
+    // 两条流程共有的状态才允许切换；陆运/海运专属状态上不许改
+    const SEA_ONLY = ["DELAY_DEPARTED", "IN_TRANSIT", "DELAY_IN_TRANSIT", "ARRIVED", "CUSTOMS"];
+    const LAND_ONLY = ["AT_PORT_CN", "EXPORT_CLEARED", "IN_VIETNAM", "LAOS_CLEARED"];
+    const blocked = mode === "land" ? SEA_ONLY : LAND_ONLY;
+    if (blocked.includes(container.currentStatus)) {
+      fail(
+        res,
+        400,
+        "VALIDATION_ERROR",
+        `这个柜子已经走到「${CONTAINER_STATUS_LABEL_LM[container.currentStatus] ?? container.currentStatus}」了，` +
+        `${mode === "land" ? "陆运" : "海运"}流程里没有这一步，不能改。要改就得先把柜子退回装柜中重来。`,
+      );
+      return;
+    }
+
+    await prisma.container.update({ where: { id: container.id }, data: { transportMode: mode } });
+    ok(res, { id: container.id, containerNo: container.containerNo, transportMode: mode });
   });
 
   // 装柜详情
