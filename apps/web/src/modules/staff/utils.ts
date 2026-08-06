@@ -1,3 +1,5 @@
+import { shipmentStatusZh as sharedShipmentStatusZh } from "../shipment/shipment-status";
+
 import type { ShipmentItem } from "../../services/business-api";
 import type { RepairStaffShipmentOrderLinksResult } from "../../services/business-api";
 import type { PrealertEditDraft, ShipmentOrderEditDraft } from "./types";
@@ -26,38 +28,9 @@ export const SHIPMENT_EXCEPTION_STATUSES = new Set(["exception", "returned", "ca
  * 运单系统状态转中文（列表展示）。
  */
 export function shipmentStatusZh(status: string | undefined): string {
-  if (!status) return "—";
-  const value = status.toLowerCase();
-  const map: Record<string, string> = {
-    created: "已创建",
-    pickedup: "已揽收",
-    inwarehousecn: "国内仓已收货",
-    receivedcn: "国内仓已收货",
-    customspending: "报关中",
-    loaded: "已装柜",
-    delaydeparted: "延迟开船",
-    departed: "已开船",
-    delayintransit: "延迟运输",
-    arrivedport: "已到港",
-    intransit: "运输中",
-    // 陆运专属环节（2026-08-06）。注意这个 map 的 key 全是小写，新加的也要写小写
-    atportcn: "到达凭祥口岸",
-    exportcleared: "出口已放行",
-    invietnam: "过境越南",
-    laoscleared: "老挝边境已放行",
-    borderdelay: "口岸滞留",
-    customsinspect: "海关查验",
-    customsth: "清关中",
-    customscleared: "清关已放行",
-    inwarehouseth: "已到仓",
-    warehouseth: "已到仓",
-    outfordelivery: "派送中",
-    delivered: "派送完成",
-    exception: "异常",
-    returned: "已退回",
-    cancelled: "已取消",
-  };
-  return map[value] ?? (value || "未知");
+  // 对照表挪到 modules/shipment/shipment-status.ts，三端共用一份，
+  // 免得客户端那份漏配状态时直接把英文吐给用户（2026-08-07）。
+  return sharedShipmentStatusZh(status);
 }
 
 /**

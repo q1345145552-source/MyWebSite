@@ -56,6 +56,8 @@ interface TrackData {
   } | null;
 }
 
+import { shipmentStatusZh } from "./shipment-status";
+
 // ── Status config ──
 
 const STATUS_CONFIG: Record<string, { zh: string; color: string; bg: string; icon: string }> = {
@@ -95,7 +97,15 @@ const STATUS_CONFIG: Record<string, { zh: string; color: string; bg: string; ico
 };
 
 function statusCfg(s: string) {
-  return STATUS_CONFIG[s.toLowerCase()] ?? { zh: s || "未知", color: "#6b7280", bg: "#f3f4f6", icon: "" };
+  // 颜色还是查下面这张表，中文一律走 shipment-status.ts 那一份，
+  // 免得两边文案漂移、或者查不到时把英文原样显示给客户（2026-08-07）。
+  const cfg = STATUS_CONFIG[s.toLowerCase()];
+  return {
+    zh: shipmentStatusZh(s),
+    color: cfg?.color ?? "#6b7280",
+    bg: cfg?.bg ?? "#f3f4f6",
+    icon: cfg?.icon ?? "",
+  };
 }
 
 function formatTime(iso: string): string {
