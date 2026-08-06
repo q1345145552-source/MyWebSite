@@ -336,6 +336,20 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       },
     });
 
+    // 2026-08-06：轨迹的起点。原来建单不写任何轨迹，客户查件最早只能看到「已装柜」，
+    // 前面从预报到装柜的十天半个月是空白（生产实测「已创建」轨迹条数为 0）。
+    await prisma.statusLog.create({
+      data: {
+        id: `sl_new_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        companyId: auth.companyId, shipmentId,
+        operatorId: auth.userId, operatorRole: auth.role, operatorName: auth.name ?? "",
+        fromStatus: "created", toStatus: "created",
+        remark: "客户已提交预报，等待国内仓收货",
+        nextStop: "国内仓",
+        changedAt: new Date(),
+      },
+    });
+
     ok(res, { prealertId: orderId, trackingNo: orderNo, createdAt: now });
   });
 
@@ -363,7 +377,8 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
 
     const order = await prisma.order.findFirst({
       where: { id: orderId, companyId: auth.companyId },
-      include: { shipments: { take: 1, select: { id: true } } },
+      // currentStatus 是写「国内仓已收货」轨迹时要用的 fromStatus（2026-08-06）
+      include: { shipments: { take: 1, select: { id: true, currentStatus: true } } },
     });
     if (!order) { fail(res, 404, "NOT_FOUND", "order not found"); return; }
     if (order.approvalStatus === "received") {
@@ -423,6 +438,21 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       if (body.transportMode) sUpdate.transportMode = body.transportMode;
       if (body.itemName?.trim()) sUpdate.itemName = body.itemName.trim();
       await prisma.shipment.update({ where: { id: shipment.id }, data: sUpdate });
+
+      // 2026-08-06：国内仓收到货是客户最关心的一步，原来一条轨迹都不写。
+      // ⚠️ 只写轨迹，**不动 currentStatus** —— inWarehouseCN 不在运单状态流程里（STATUS_FLOW），
+      //    真去改状态会被流转校验拦下，而且三端列表的筛选口径也会跟着变。
+      await prisma.statusLog.create({
+        data: {
+          id: `sl_rcv_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          companyId: auth.companyId, shipmentId: shipment.id,
+          operatorId: auth.userId, operatorRole: auth.role, operatorName: auth.name ?? "",
+          fromStatus: shipment.currentStatus, toStatus: "inWarehouseCN",
+          remark: "国内仓已收货，等待装柜",
+          nextStop: "装柜",
+          changedAt: now,
+        },
+      });
     }
 
     ok(res, { orderId, status: "received", updatedAt: now.toISOString() });
@@ -846,6 +876,23 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
           domesticTrackingNo: body.domesticTrackingNo ?? null,
           warehouseId: body.warehouseId,
           remark: body.remark?.trim() || null,
+        },
+      }),
+      // 2026-08-06：轨迹起点。员工直接建单的这条路原来也不写轨迹，
+      // 和客户预报那条路一样，客户查件最早只能看到「已装柜」。
+      prisma.statusLog.create({
+        data: {
+          id: `sl_new_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          companyId: auth.companyId,
+          shipmentId,
+          operatorId: auth.userId,
+          operatorRole: auth.role,
+          operatorName: auth.name ?? "",
+          fromStatus: "created",
+          toStatus: "created",
+          remark: "运单已建立",
+          nextStop: "国内仓",
+          changedAt: new Date(),
         },
       }),
     ];

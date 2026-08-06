@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import RoleShell from "../../../modules/layout/RoleShell";
 import Toast from "../../../modules/layout/Toast";
+import { openShipmentTrack } from "../../../modules/shipment/ShipmentTrackModal";
 import {
   fetchLoadingManifests,
   createLoadingManifest,
@@ -39,6 +40,8 @@ const STATUS_LABEL: Record<string, string> = {
   EXPORT_CLEARED: "出口已放行",
   IN_VIETNAM: "过境越南",
   LAOS_CLEARED: "老挝边境已放行",
+  BORDER_DELAY: "口岸滞留",
+  CUSTOMS_INSPECT: "海关查验",
 };
 
 // 顺序必须与后端 containers/routes.ts 的 CONTAINER_STATUS_FLOW 一致
@@ -48,7 +51,7 @@ const STATUS_FLOW = ["LOADING", "SEALED", "DELAY_DEPARTED", "IN_TRANSIT", "DELAY
  * 陆运流程（2026-08-06）。陆运走陆路口岸，没有「开船」「到港」。
  * 顺序必须与后端 CONTAINER_STATUS_FLOW_LAND 一致，改一边必须改另一边。
  */
-const STATUS_FLOW_LAND = ["LOADING", "SEALED", "AT_PORT_CN", "EXPORT_CLEARED", "IN_VIETNAM", "LAOS_CLEARED", "CUSTOMS_CLEARED", "UNLOADING", "IN_WAREHOUSE_TH"] as const;
+const STATUS_FLOW_LAND = ["LOADING", "SEALED", "AT_PORT_CN", "BORDER_DELAY", "EXPORT_CLEARED", "IN_VIETNAM", "LAOS_CLEARED", "CUSTOMS_INSPECT", "CUSTOMS_CLEARED", "UNLOADING", "IN_WAREHOUSE_TH"] as const;
 
 /**
  * 顶部「状态」筛选的可选项，**按运输方式分开**（2026-08-06 用户要求：
@@ -56,7 +59,7 @@ const STATUS_FLOW_LAND = ["LOADING", "SEALED", "AT_PORT_CN", "EXPORT_CLEARED", "
  * 比上面两条流程多了尾端的派送中/已签收 —— 那两个不是装柜页推进的，但可以拿来筛。
  */
 const FILTER_STATUSES_SEA = ["LOADING", "SEALED", "DELAY_DEPARTED", "IN_TRANSIT", "DELAY_IN_TRANSIT", "ARRIVED", "CUSTOMS", "CUSTOMS_CLEARED", "UNLOADING", "IN_WAREHOUSE_TH", "OUT_FOR_DELIVERY", "SIGNED"] as const;
-const FILTER_STATUSES_LAND = ["LOADING", "SEALED", "AT_PORT_CN", "EXPORT_CLEARED", "IN_VIETNAM", "LAOS_CLEARED", "CUSTOMS_CLEARED", "UNLOADING", "IN_WAREHOUSE_TH", "OUT_FOR_DELIVERY", "SIGNED"] as const;
+const FILTER_STATUSES_LAND = ["LOADING", "SEALED", "AT_PORT_CN", "BORDER_DELAY", "EXPORT_CLEARED", "IN_VIETNAM", "LAOS_CLEARED", "CUSTOMS_INSPECT", "CUSTOMS_CLEARED", "UNLOADING", "IN_WAREHOUSE_TH", "OUT_FOR_DELIVERY", "SIGNED"] as const;
 
 /** 每个状态默认的下一站，与后端 CONTAINER_NEXT_STOP 一致；员工可以改 */
 const NEXT_STOP_DEFAULT: Record<string, string> = {
@@ -65,6 +68,8 @@ const NEXT_STOP_DEFAULT: Record<string, string> = {
   EXPORT_CLEARED: "过境越南",
   IN_VIETNAM: "老挝",
   LAOS_CLEARED: "泰国边境",
+  BORDER_DELAY: "排队出关口",
+  CUSTOMS_INSPECT: "泰国仓库",
   CUSTOMS_CLEARED: "泰国仓库",
   IN_TRANSIT: "泰国港口",
   ARRIVED: "泰国清关",
@@ -94,6 +99,8 @@ const SHIPMENT_STATUS_ZH: Record<string, string> = {
   exportCleared: "出口已放行", exportcleared: "出口已放行",
   inVietnam: "过境越南", invietnam: "过境越南",
   laosCleared: "老挝边境已放行", laoscleared: "老挝边境已放行",
+  borderDelay: "口岸滞留", borderdelay: "口岸滞留",
+  customsInspect: "海关查验", customsinspect: "海关查验",
 };
 
 const STATUS_COLOR: Record<string, string> = {
@@ -554,6 +561,14 @@ export default function StaffContainerLoadingPage() {
                         <span style={{ color: "#374151" }}>{b.transportMode === "sea" ? "海运" : b.transportMode === "land" ? "陆运" : "—"}</span>
                         <span style={{ color: STATUS_COLOR[b.currentStatus ?? ""] ?? "#000000", fontWeight: 500 }}>{SHIPMENT_STATUS_ZH[b.currentStatus ?? ""] ?? b.currentStatus ?? "—"}</span>
                         <div style={{ display: "flex", gap: 4 }}>
+                          {/* 2026-08-06：这里原来只有状态文字，看不到轨迹，员工得跑回运单管理才能查 */}
+                          <button
+                            disabled={!b.trackingNo}
+                            onClick={() => b.trackingNo && openShipmentTrack(b.trackingNo)}
+                            style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "2px 6px", fontSize: 11, background: "#fff", color: b.trackingNo ? "#1e3a8a" : "#9ca3af", cursor: b.trackingNo ? "pointer" : "not-allowed", whiteSpace: "nowrap" }}
+                          >
+                            物流轨迹
+                          </button>
                           <button onClick={() => { setUnloadDialog({itemId: b.id, loadedPieces: b.loadedPieces}); setUnloadCount(String(b.loadedPieces)); }} style={{ border: "1px solid #fca5a5", borderRadius: 4, padding: "2px 6px", fontSize: 11, background: "#fff", color: "#dc2626", cursor: "pointer" }}>卸柜</button>
                         </div>
                       </div>

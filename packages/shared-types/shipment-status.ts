@@ -18,7 +18,10 @@ export type ShipmentStatus =
   | "atPortCn"
   | "exportCleared"
   | "inVietnam"
-  | "laosCleared";
+  | "laosCleared"
+  // 陆运的两个「卡住了」状态，可跳过（不堵关就直接跳过去）
+  | "borderDelay"
+  | "customsInspect";
 
 /** 海运流程（原来的唯一流程，未改动） */
 export const SHIPMENT_STATUS_FLOW: ShipmentStatus[] = [
@@ -45,9 +48,11 @@ export const SHIPMENT_STATUS_FLOW_LAND: ShipmentStatus[] = [
   "created",
   "loaded",
   "atPortCn",
+  "borderDelay",
   "exportCleared",
   "inVietnam",
   "laosCleared",
+  "customsInspect",
   "customsCleared",
   "inWarehouseTH",
   "outForDelivery",
@@ -60,6 +65,8 @@ export const LAND_ONLY_STATUSES: ShipmentStatus[] = [
   "exportCleared",
   "inVietnam",
   "laosCleared",
+  "borderDelay",
+  "customsInspect",
 ];
 
 export const SHIPMENT_EXCEPTION_STATUSES: ShipmentStatus[] = [

@@ -220,6 +220,14 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
     // 2026-08-06：原来是「一个运单一个事务」，循环里第 N 个失败时，前 N-1 个已经提交了 ——
     // 运单状态被改成「派送中」、派送单却没建成，留下查不到派送单的孤儿运单（生产实测 3 张）。
     // 现在整车放进**同一个事务**：要么全部成功，要么一条都不写。
+    // 2026-08-06：出车这条轨迹带上司机姓名和电话，客户看到的是
+    // 「司机【张三 - 0993176818】正在为您派送，请注意查收」。
+    // ⚠️ 司机信息不是必填 —— 没填就退回原来的写法，别弄出「司机【】」这种东西。
+    const driverLabel = [driverName, phoneNumber].filter(Boolean).join(" - ");
+    const departRemark = driverLabel
+      ? `司机【${driverLabel}】正在为您派送，请注意查收`
+      : `正在为您派送，请注意查收（${deliveryNo}）`;
+
     const results: Array<{ id: string; shipmentId: string }> = [];
     try {
       await prisma.$transaction(async (tx) => {
@@ -234,7 +242,7 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
           if (ship) {
             await tx.shipment.update({ where: { id: sid }, data: { currentStatus: "outForDelivery", updatedAt: now } });
             await tx.statusLog.create({
-              data: { id: `sl_lm_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, companyId: auth.companyId, shipmentId: sid, operatorId: auth.userId, operatorRole: auth.role, operatorName: auth.name ?? "", fromStatus: ship.currentStatus, toStatus: "outForDelivery", remark: `尾程派送出车（${deliveryNo}）`, changedAt: now },
+              data: { id: `sl_lm_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, companyId: auth.companyId, shipmentId: sid, operatorId: auth.userId, operatorRole: auth.role, operatorName: auth.name ?? "", fromStatus: ship.currentStatus, toStatus: "outForDelivery", remark: departRemark, changedAt: now },
             });
             if (ship.parentTrackingNo) {
               const parent = await tx.shipment.findFirst({ where: { trackingNo: ship.parentTrackingNo, companyId: auth.companyId }, select: { id: true } });

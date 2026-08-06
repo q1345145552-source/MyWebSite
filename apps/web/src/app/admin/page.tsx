@@ -1895,6 +1895,14 @@ export default function AdminHomePage() {
                           setLmSignData({id:o.id,base64:""}); lmSignFileRef.current?.click();
                         }} style={{ border: "1px solid #16a34a", borderRadius: 4, padding: "2px 8px", fontSize: 11, background: "#fff", color: "#16a34a", cursor: "pointer" }}>签收</button>
                       )}
+                      {/* 2026-08-06：这张表原来只有状态，看不到轨迹（员工端同时也补了同一处） */}
+                      <button
+                        disabled={!o.trackingNo}
+                        onClick={() => o.trackingNo && openShipmentTrack(o.trackingNo)}
+                        style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "2px 8px", fontSize: 11, background: "#fff", color: o.trackingNo ? "#1e3a8a" : "#9ca3af", cursor: o.trackingNo ? "pointer" : "not-allowed", marginLeft: 4, whiteSpace: "nowrap" }}
+                      >
+                        物流轨迹
+                      </button>
                       {/* 【审查问题 2】原来删除不看返回就弹「已删除」，删失败刷新一下单子又回来了 */}
                       <button onClick={async ()=>{if(!confirm("确定删除？"))return;try{const res=await fetch(apiBaseUrl()+"/admin/lastmile/orders?id="+o.id,{method:"DELETE",headers:authHeaders()});await parseApiResponse(res);setToast("已删除");loadLastmileOrders()}catch(e:any){setToast(e.message||"删除失败，请重试")}}} style={{ border: "1px solid #fca5a5", borderRadius: 4, padding: "2px 6px", fontSize: 11, background: "#fff", color: "#dc2626", cursor: "pointer", marginLeft: 4 }}>删除</button>
                     </td>

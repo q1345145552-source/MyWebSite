@@ -487,6 +487,10 @@ model Container {
   // 柜子和里面装的运单各有各的运输方式，允许不一致（线上真实存在 5 个海陆混装的柜），
   // 装柜时只提醒不拦截，别改成硬校验。
   transportMode    String?   @map("transport_mode")
+  // 2026-08-06：每个状态实际发生的日期，形如 {"SEALED":"2026-07-20T00:00:00.000Z",...}。
+  // 柜子原来只存了开船(departure_date)和到港(ata)两个日期，陆运那几步压根没地方存 ——
+  // 而「货到了才建柜」时要给运单补记轨迹，没有真实日期就只能瞎摊，补出来的时间是假的。
+  statusDates      String?   @map("status_dates")
   warehouseId      String?   @map("warehouse_id")
   carrierName      String?   @map("carrier_name")
   sealedAt         DateTime? @map("sealed_at")

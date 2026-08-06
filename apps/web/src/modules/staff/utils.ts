@@ -45,6 +45,8 @@ export function shipmentStatusZh(status: string | undefined): string {
     exportcleared: "出口已放行",
     invietnam: "过境越南",
     laoscleared: "老挝边境已放行",
+    borderdelay: "口岸滞留",
+    customsinspect: "海关查验",
     customsth: "清关中",
     customscleared: "清关已放行",
     inwarehouseth: "已到仓",

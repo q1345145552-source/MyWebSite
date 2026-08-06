@@ -60,6 +60,10 @@ interface TrackData {
 
 const STATUS_CONFIG: Record<string, { zh: string; color: string; bg: string; icon: string }> = {
   created:        { zh: "已创建",     color: "#6b7280", bg: "#f3f4f6", icon: "" },
+  // 前半段（2026-08-06 起才写轨迹）：客户预报 → 国内仓收货
+  inwarehousecn:  { zh: "国内仓已收货", color: "#0369a1", bg: "#e0f2fe", icon: "" },
+  receivedcn:     { zh: "国内仓已收货", color: "#0369a1", bg: "#e0f2fe", icon: "" },
+  pickedup:       { zh: "已揽收",     color: "#6b7280", bg: "#f3f4f6", icon: "" },
   loaded:         { zh: "已装柜",     color: "#0369a1", bg: "#e0f2fe", icon: "" },
   delaydeparted:  { zh: "延迟开船",   color: "#b45309", bg: "#fef3c7", icon: "" },
   delay_departed: { zh: "延迟开船",   color: "#b45309", bg: "#fef3c7", icon: "" },
@@ -72,6 +76,8 @@ const STATUS_CONFIG: Record<string, { zh: string; color: string; bg: string; ico
   exportcleared:  { zh: "出口已放行", color: "#166534", bg: "#dcfce7", icon: "" },
   invietnam:      { zh: "过境越南",   color: "#1e40af", bg: "#dbeafe", icon: "" },
   laoscleared:    { zh: "老挝边境已放行", color: "#166534", bg: "#dcfce7", icon: "" },
+  borderdelay:    { zh: "口岸滞留",   color: "#b45309", bg: "#fef3c7", icon: "" },
+  customsinspect: { zh: "海关查验",   color: "#b45309", bg: "#fef3c7", icon: "" },
   customsth:      { zh: "清关中",     color: "#92400e", bg: "#fef3c7", icon: "" },
   customscleared: { zh: "清关已放行", color: "#166534", bg: "#dcfce7", icon: "" },
   inwarehouseth:  { zh: "已到仓",     color: "#7c3aed", bg: "#ede9fe", icon: "" },

@@ -1,6 +1,13 @@
 import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
+// 柜子状态流程只在 containers/status-flow.ts 定义一处，本文件不再自己抄
+import {
+  CONTAINER_STATUS_LABEL,
+  CONTAINER_NEXT_STOP,
+  CONTAINER_TO_SHIPMENT_STATUS,
+  flowOf,
+} from "../containers/status-flow";
 
 /**
  * 生成装柜单号：CN-TH-YYYYMMDDNNN。
@@ -19,17 +26,6 @@ async function issueManifestNo(now: Date): Promise<string> {
   }
   return `${prefix}${String(max + 1).padStart(3, "0")}`;
 }
-
-/**
- * 柜子状态的中文，只用于给员工看的报错文案。
- * 权威定义在 containers/routes.ts 的 CONTAINER_STATUS_LABEL，那边加了状态这里也要加。
- */
-const CONTAINER_STATUS_LABEL_LM: Record<string, string> = {
-  LOADING: "装柜中", SEALED: "已封柜", DELAY_DEPARTED: "延迟开船", IN_TRANSIT: "运输中",
-  DELAY_IN_TRANSIT: "延迟运输", ARRIVED: "已到港", CUSTOMS: "清关中", CUSTOMS_CLEARED: "清关已放行",
-  UNLOADING: "正在卸柜", IN_WAREHOUSE_TH: "已到仓", OUT_FOR_DELIVERY: "派送中", SIGNED: "已签收",
-  AT_PORT_CN: "到达凭祥口岸", EXPORT_CLEARED: "出口已放行", IN_VIETNAM: "过境越南", LAOS_CLEARED: "老挝边境已放行",
-};
 
 /**
  * 注册装柜管理接口。
@@ -138,14 +134,14 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
 
     // 两条流程共有的状态才允许切换；陆运/海运专属状态上不许改
     const SEA_ONLY = ["DELAY_DEPARTED", "IN_TRANSIT", "DELAY_IN_TRANSIT", "ARRIVED", "CUSTOMS"];
-    const LAND_ONLY = ["AT_PORT_CN", "EXPORT_CLEARED", "IN_VIETNAM", "LAOS_CLEARED"];
+    const LAND_ONLY = ["AT_PORT_CN", "EXPORT_CLEARED", "IN_VIETNAM", "LAOS_CLEARED", "BORDER_DELAY", "CUSTOMS_INSPECT"];
     const blocked = mode === "land" ? SEA_ONLY : LAND_ONLY;
     if (blocked.includes(container.currentStatus)) {
       fail(
         res,
         400,
         "VALIDATION_ERROR",
-        `这个柜子已经走到「${CONTAINER_STATUS_LABEL_LM[container.currentStatus] ?? container.currentStatus}」了，` +
+        `这个柜子已经走到「${CONTAINER_STATUS_LABEL[container.currentStatus] ?? container.currentStatus}」了，` +
         `${mode === "land" ? "陆运" : "海运"}流程里没有这一步，不能改。要改就得先把柜子退回装柜中重来。`,
       );
       return;
@@ -317,23 +313,103 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
         throw e;
       }
 
-      // 状态同步
-      const syncMap: Record<string, string> = {
-        SEALED: "loaded", DELAY_DEPARTED: "delayDeparted", IN_TRANSIT: "departed",
-        DELAY_IN_TRANSIT: "delayInTransit",
-        ARRIVED: "arrivedPort", CUSTOMS: "customsTH", CUSTOMS_CLEARED: "customsCleared",
-        IN_WAREHOUSE_TH: "inWarehouseTH",
-      };
-      const syncStatus = syncMap[container.currentStatus] ?? null;
+      // ===== 状态同步 + 随柜补记轨迹（2026-08-06）=====
+      //
+      // 为什么要补记：柜子经常是**事后补建**的 —— 货已经到泰国仓了，员工才在系统里
+      // 建柜、把运单装进去。原来这里只写一条「当前状态」的轨迹，前面的装柜、发车、
+      // 过口岸、清关在系统里对这票货从未存在过。
+      // 生产实测：有轨迹的 515 票里 242 票（47%）轨迹是从半路开始的，
+      // 其中 74 票直接从「泰国已到仓」起步，中国段整段空白。
+      //
+      // 现在：把柜子**已经走过的每一个环节**都给这票货补一条轨迹，
+      // 时间尽量用柜子自己记的真实日期（封柜/开船/到港/清关放行），
+      // 没有对应日期的环节在前后两个已知时间之间按比例推算，备注标明是补记。
       const now = new Date();
-      if (syncStatus) {
-        await tx.shipment.update({ where: { id: loadShipmentId }, data: { currentStatus: syncStatus, updatedAt: now } });
-        await tx.statusLog.create({
-          data: { id: `sl_mnf_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, companyId: auth.companyId, shipmentId: loadShipmentId, operatorId: auth.userId, operatorRole: auth.role, operatorName: auth.name ?? "", fromStatus: "loaded", toStatus: syncStatus, remark: `装入柜子 ${container.containerNo}${reqPieces < totalPkg ? `（分装 ${reqPieces}件）` : ""}`, changedAt: now },
-        });
-      } else {
-        await tx.shipment.update({ where: { id: loadShipmentId }, data: { currentStatus: "loaded" } });
+      const flow = flowOf(container.transportMode);
+      const curIdx = flow.indexOf(container.currentStatus);
+
+      // ⚠️ 只补**柜子真的走过**的环节，不能把流程里排在前面的都补上。
+      // 实测踩过：柜子从「老挝边境已放行」直接推到「清关已放行」，跳过了「海关查验」，
+      // 但补记时按流程顺序把「海关查验」也补了 —— 等于给客户编造了没发生过的事。
+      // statusDates 记录的就是「真的推过的那几步」（2026-08-06 起有）。
+      let recordedDates: Record<string, string> = {};
+      try { recordedDates = container.statusDates ? JSON.parse(container.statusDates) : {}; } catch { recordedDates = {}; }
+      const recordedSteps = flow.filter((cs) => recordedDates[cs]);
+
+      // 「滞留 / 查验 / 延迟」这类是意外情况，没记录就绝不能凭空补
+      const NEVER_GUESS = new Set(["BORDER_DELAY", "CUSTOMS_INSPECT", "DELAY_DEPARTED", "DELAY_IN_TRANSIT"]);
+      const passed = recordedSteps.length > 0
+        ? recordedSteps
+        // 老柜子没有 statusDates（这个功能之前建的），只能按流程尽力补，但跳过意外状态
+        : (curIdx >= 0 ? flow.slice(0, curIdx + 1).filter((cs) => !NEVER_GUESS.has(cs)) : ["LOADING"]);
+
+      // 柜子身上真实记录过日期的节点，拿来当锚点。
+      // statusDates 是每次推进状态时记下的实际日期（2026-08-06 加的），最准；
+      // 另外几个老字段（封柜/开船/到港/清关放行）作为兜底。
+      const anchor: Record<string, Date | null> = {
+        LOADING: container.createdAt ?? null,
+        SEALED: container.sealedAt ?? container.loadingDate ?? null,
+        IN_TRANSIT: container.departureDate ?? null,
+        ARRIVED: container.ata ?? null,
+        CUSTOMS_CLEARED: container.customsClearedAt ?? null,
+      };
+      for (const [st, iso] of Object.entries(recordedDates)) {
+        const d = new Date(iso);
+        if (!Number.isNaN(d.getTime())) anchor[st] = d;
       }
+
+      type Step = { containerStatus: string; shipmentStatus: string; at: Date | null };
+      const steps: Step[] = passed
+        .map((cs: string) => ({ containerStatus: cs, shipmentStatus: CONTAINER_TO_SHIPMENT_STATUS[cs] ?? "", at: anchor[cs] ?? null }))
+        // LOADING / UNLOADING 不对应运单状态，跳过
+        .filter((s: Step) => s.shipmentStatus);
+      // 柜子还在装柜中：至少给一条「已装柜」，否则这票货的轨迹会完全没有起点
+      if (steps.length === 0) steps.push({ containerStatus: "SEALED", shipmentStatus: "loaded", at: container.createdAt ?? now });
+
+      // 没有真实日期的环节：在前后两个已知时间之间按比例推算；最后一步用当前时间兜底
+      const firstAt = steps.find((s) => s.at)?.at ?? container.createdAt ?? now;
+      if (!steps[0]!.at) steps[0]!.at = firstAt;
+      if (!steps[steps.length - 1]!.at) steps[steps.length - 1]!.at = now;
+      for (let i = 0; i < steps.length; i++) {
+        if (steps[i]!.at) continue;
+        let prev = i - 1; while (prev >= 0 && !steps[prev]!.at) prev--;
+        let next = i + 1; while (next < steps.length && !steps[next]!.at) next++;
+        const a = steps[prev]?.at ?? firstAt;
+        const b = steps[next]?.at ?? now;
+        const span = b.getTime() - a.getTime();
+        steps[i]!.at = new Date(a.getTime() + Math.round((span * (i - prev)) / (next - prev)));
+      }
+      // 保证严格递增，免得同一秒的几条在界面上乱序
+      for (let i = 1; i < steps.length; i++) {
+        if (steps[i]!.at!.getTime() <= steps[i - 1]!.at!.getTime()) {
+          steps[i]!.at = new Date(steps[i - 1]!.at!.getTime() + 1000);
+        }
+      }
+
+      const finalStatus = steps[steps.length - 1]!.shipmentStatus;
+      await tx.shipment.update({ where: { id: loadShipmentId }, data: { currentStatus: finalStatus, updatedAt: now } });
+
+      const partial = reqPieces < totalPkg ? `（分装 ${reqPieces}件）` : "";
+      for (let i = 0; i < steps.length; i++) {
+        const s = steps[i]!;
+        const isLast = i === steps.length - 1;
+        await tx.statusLog.create({
+          data: {
+            id: `sl_mnf_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`,
+            companyId: auth.companyId, shipmentId: loadShipmentId,
+            operatorId: auth.userId, operatorRole: auth.role, operatorName: auth.name ?? "",
+            fromStatus: i === 0 ? "loaded" : steps[i - 1]!.shipmentStatus,
+            toStatus: s.shipmentStatus,
+            // 最后一条是真的「刚装进柜子」，前面几条是随柜补上的，要标清楚别让人以为是实时记录
+            remark: isLast
+              ? `装入柜子 ${container.containerNo}${partial}`
+              : `${CONTAINER_STATUS_LABEL[s.containerStatus] ?? s.containerStatus}（随柜 ${container.containerNo} 补记）`,
+            nextStop: CONTAINER_NEXT_STOP[s.containerStatus] ?? null,
+            changedAt: s.at!,
+          },
+        });
+      }
+      const syncStatus = finalStatus;
 
       // 同步父运单状态
       if (loadShipmentId !== shipment.id) {

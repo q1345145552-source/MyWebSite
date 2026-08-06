@@ -26,9 +26,12 @@ export const STATUS_FLOW_LAND = [
   "created",
   "loaded",
   "atPortCn",
+  // 堵在口岸/被查验，都是可跳过的中间态（同海运的 delayDeparted）
+  "borderDelay",
   "exportCleared",
   "inVietnam",
   "laosCleared",
+  "customsInspect",
   "customsCleared",
   "inWarehouseTH",
   "outForDelivery",

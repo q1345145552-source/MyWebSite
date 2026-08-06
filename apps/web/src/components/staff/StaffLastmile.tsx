@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { apiBaseUrl, authHeaders, parseApiResponse } from "../../services/core-api";
+import { openShipmentTrack } from "../../modules/shipment/ShipmentTrackModal";
 
 type LmShipment = { id: string; trackingNo: string; clientId: string; itemName: string; packageCount: number; containerNo?: string };
 type LmOrderItem = { id: string; deliveryNo: string; shipmentId: string; trackingNo?: string; driverName?: string; licensePlate?: string; phoneNumber?: string; deliveryDate?: string; clientId?: string; status: string; signImageBase64?: string | null };
@@ -239,6 +240,14 @@ export default function StaffLastmile(props: StaffLastmileProps) {
                       {o.status !== "SIGNED" && (
                         <button disabled={busy} onClick={() => { setLmSignData({ id: o.id, action: "sign" }); lmSignFileRef.current?.click(); }} style={{ border: "1px solid #16a34a", borderRadius: 4, padding: "2px 6px", fontSize: 11, background: "#fff", color: "#16a34a", cursor: "pointer" }}>签收</button>
                       )}
+                      {/* 2026-08-06：这里原来只有状态文字，看不到轨迹，员工得跑回运单管理才能查 */}
+                      <button
+                        disabled={!o.trackingNo}
+                        onClick={() => o.trackingNo && openShipmentTrack(o.trackingNo)}
+                        style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "2px 6px", fontSize: 11, background: "#fff", color: o.trackingNo ? "#1e3a8a" : "#9ca3af", cursor: o.trackingNo ? "pointer" : "not-allowed", marginLeft: 4, whiteSpace: "nowrap" }}
+                      >
+                        物流轨迹
+                      </button>
                       <button onClick={() => deleteOrder(o.id)} style={{ border: "1px solid #fca5a5", borderRadius: 4, padding: "2px 4px", fontSize: 11, background: "#fff", color: "#dc2626", cursor: "pointer", marginLeft: 4 }}>删除</button>
                     </td>
                   </tr>
