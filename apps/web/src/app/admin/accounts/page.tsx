@@ -65,7 +65,11 @@ export default function AdminAccountsPage() {
   };
 
   const handleResetPwd = async () => {
-    if (!pwdModal || !newPwd.trim() || newPwd.trim().length < 6) { setPwdError("密码至少 6 位"); return; }
+    // 员工账号的密码要求比客户严：员工端能看到全部客户和运单。后端也会再校验一次。
+    const minLen = pwdModal?.role === "staff" ? 8 : 6;
+    if (!pwdModal || !newPwd.trim() || newPwd.trim().length < minLen) { setPwdError(`密码至少 ${minLen} 位`); return; }
+    if (pwdModal.role === "staff" && /^\d+$/.test(newPwd.trim())) { setPwdError("员工密码不能全是数字，请加上字母"); return; }
+    if (pwdModal.role === "staff" && newPwd.trim().toLowerCase() === pwdModal.id.toLowerCase()) { setPwdError("密码不能和账号名一样"); return; }
     if (newPwd !== confirmPwd) { setPwdError("两次密码不一致"); return; }
     setPwdSubmitting(true);
     setPwdError("");
@@ -110,7 +114,7 @@ export default function AdminAccountsPage() {
         {showCreate && (
           <div style={{ marginTop: 12, display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
             <input value={createForm.name} onChange={(e) => setCreateForm((v) => ({ ...v, name: e.target.value }))} placeholder="姓名" style={{ border: "1px solid var(--hairline)", borderRadius: "var(--radius-sm)", padding: "8px 12px", fontSize: 14 }} />
-            <input type="password" value={createForm.password} onChange={(e) => setCreateForm((v) => ({ ...v, password: e.target.value }))} placeholder="密码（至少 6 位）" style={{ border: "1px solid var(--hairline)", borderRadius: "var(--radius-sm)", padding: "8px 12px", fontSize: 14 }} />
+            <input type="password" value={createForm.password} onChange={(e) => setCreateForm((v) => ({ ...v, password: e.target.value }))} placeholder={createForm.role === "staff" ? "密码（员工：至少 8 位，不能全是数字）" : "密码（至少 6 位）"} style={{ border: "1px solid var(--hairline)", borderRadius: "var(--radius-sm)", padding: "8px 12px", fontSize: 14 }} />
             <select value={createForm.role} onChange={(e) => setCreateForm((v) => ({ ...v, role: e.target.value }))} style={{ border: "1px solid var(--hairline)", borderRadius: "var(--radius-sm)", padding: "8px 12px", fontSize: 14 }}>
               <option value="client">客户</option>
               <option value="staff">员工</option>
@@ -183,7 +187,7 @@ export default function AdminAccountsPage() {
             <h3 style={{ margin: "0 0 4px", fontSize: 16, fontWeight: 600, color: "var(--ink)" }}>修改密码</h3>
             <p style={{ margin: "0 0 16px", fontSize: 13, color: "var(--ink-mute)" }}>账号「{pwdModal.name}」将使用新密码登录</p>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <input type="password" value={newPwd} onChange={(e) => setNewPwd(e.target.value)} placeholder="新密码（至少 6 位）" style={{ border: "1px solid var(--hairline)", borderRadius: "var(--radius-sm)", padding: "8px 12px", fontSize: 14 }} />
+              <input type="password" value={newPwd} onChange={(e) => setNewPwd(e.target.value)} placeholder={pwdModal.role === "staff" ? "新密码（员工：至少 8 位，不能全是数字）" : "新密码（至少 6 位）"} style={{ border: "1px solid var(--hairline)", borderRadius: "var(--radius-sm)", padding: "8px 12px", fontSize: 14 }} />
               <input type="password" value={confirmPwd} onChange={(e) => setConfirmPwd(e.target.value)} placeholder="确认新密码" style={{ border: "1px solid var(--hairline)", borderRadius: "var(--radius-sm)", padding: "8px 12px", fontSize: 14 }} />
               {pwdError && <p style={{ color: "var(--accent-crimson)", fontSize: 13, margin: 0 }}>{pwdError}</p>}
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>

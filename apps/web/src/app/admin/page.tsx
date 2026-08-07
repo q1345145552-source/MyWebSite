@@ -1291,8 +1291,8 @@ export default function AdminHomePage() {
                       type="password"
                       value={settingPasswordValue}
                       onChange={(e) => setSettingPasswordValue(e.target.value)}
-                      placeholder="输入新密码"
-                      style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 10px", width: 180 }}
+                      placeholder="新密码：至少 8 位，不能全是数字"
+                      style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 10px", width: 240 }}
                     />
                     <button
                       type="button"
@@ -2327,7 +2327,7 @@ export default function AdminHomePage() {
               </div>
               <div>
                 <label style={{ fontSize: 12, color: "#000000", display: "block", marginBottom: 4 }}>登录密码</label>
-                <input type="password" value={staffForm.password} onChange={(e) => setStaffForm((f) => ({ ...f, password: e.target.value }))} placeholder="密码（可选）" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", width: "100%", fontSize: 13 }} />
+                <input type="password" value={staffForm.password} onChange={(e) => setStaffForm((f) => ({ ...f, password: e.target.value }))} placeholder="密码（可选，填就要至少 8 位、不能全是数字）" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", width: "100%", fontSize: 13 }} />
               </div>
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>

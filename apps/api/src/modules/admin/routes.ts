@@ -8,6 +8,7 @@ import { verifyPassword } from "../auth/crypto-utils";
 import { loadProductImagesForOrders } from "../orders/product-images";
 import { loadOrderProducts } from "../orders/routes";
 import { hashPassword } from "../auth/crypto-utils";
+import { checkPasswordStrength } from "../auth/password-policy";
 
 /** Decimal | null → number | null */
 function decToNumber(value: Prisma.Decimal | null | undefined): number | null {
@@ -574,8 +575,18 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
 
     const rawId = typeof body.id === "string" ? body.id.trim() : "";
     const id = rawId || `u_${body.role === "client" ? "client" : "staff"}_${Date.now()}`;
-    const passwordHash = typeof body.password === "string" && body.password.trim() ? hashPassword(body.password.trim()) : null;
     const targetRole = body.role === "client" ? "client" : "staff";
+    const rawPassword = typeof body.password === "string" ? body.password.trim() : "";
+
+    // 新开的员工账号不许用弱口令（客户账号不管，见 set-password 那里的说明）
+    if (targetRole === "staff" && rawPassword) {
+      const weakReason = checkPasswordStrength(rawPassword, undefined, id);
+      if (weakReason) {
+        fail(res, 400, "BAD_REQUEST", weakReason);
+        return;
+      }
+    }
+    const passwordHash = rawPassword ? hashPassword(rawPassword) : null;
 
     const existing = await prisma.user.findUnique({ where: { id }, select: { id: true } });
     if (existing) {
@@ -810,6 +821,18 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
     if (row.role !== "staff" && row.role !== "client") {
       fail(res, 403, "FORBIDDEN", "only staff or client password can be set here");
       return;
+    }
+
+    // 2026-08-07：员工账号不许再设弱口令。当天普查出 3 个员工账号的密码
+    // 是「888888」「跟账号名一样」这种，员工端能看到全部客户和运单，风险比客户账号大。
+    // ⚠️ 客户账号沿用旧规则（不校验强度）—— 用户明确要求先不动客户那边，
+    //    他们的密码普遍就是唛头本身，一刀切会让 66 个客户当场登不进去。
+    if (row.role === "staff") {
+      const weakReason = checkPasswordStrength(password, undefined, id);
+      if (weakReason) {
+        fail(res, 400, "BAD_REQUEST", weakReason);
+        return;
+      }
     }
 
     const passwordHash = hashPassword(password);

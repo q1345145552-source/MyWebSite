@@ -5,30 +5,7 @@ import { logger } from "../core/logger";
 import { checkRateLimit, getClientIp, rateLimitKey } from "../core/rate-limit";
 import { signAuthToken } from "./token";
 import { hashPassword, verifyPassword } from "./crypto-utils";
-
-/**
- * 太容易被猜到的密码，一律不让用。
- * 这个系统 2026-08-07 就是栽在 "123456" 上：管理员账号用它，而且当时代码还是公开的。
- */
-const WEAK_PASSWORDS = new Set([
-  "12345678", "123456789", "1234567890", "88888888", "66666666", "11111111",
-  "password", "password1", "passw0rd", "qwertyui", "abc12345", "admin123",
-  "administrator", "xiangtai", "xiangtai123", "wuliu123", "12341234",
-]);
-
-/**
- * 校验新密码。返回 null 表示通过，否则返回给用户看的中文原因。
- * 导出是为了能单独跑规则测试，不用真去改一个账号的密码。
- */
-export function checkNewPassword(newPassword: string, oldPassword: string): string | null {
-  if (newPassword.length < 8) return "新密码至少 8 位";
-  if (newPassword.length > 128) return "新密码太长了（最多 128 位）";
-  if (newPassword === oldPassword) return "新密码不能和旧密码一样";
-  if (WEAK_PASSWORDS.has(newPassword.toLowerCase())) return "这个密码太常见了，换一个";
-  if (/^(.)\1+$/.test(newPassword)) return "新密码不能是同一个字符重复";
-  if (/^\d+$/.test(newPassword)) return "新密码不能全是数字，请加上字母";
-  return null;
-}
+import { checkPasswordStrength } from "./password-policy";
 
 /**
  * 注册鉴权路由（登录 + 注册）
@@ -134,7 +111,7 @@ export function registerAuthRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    const invalidReason = checkNewPassword(newPassword, oldPassword);
+    const invalidReason = checkPasswordStrength(newPassword, oldPassword, auth.userId);
     if (invalidReason) {
       fail(res, 400, "BAD_REQUEST", invalidReason);
       return;
