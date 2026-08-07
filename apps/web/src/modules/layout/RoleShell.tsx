@@ -53,6 +53,8 @@ export default function RoleShell(props: {
   const [pwdError, setPwdError] = useState("");
   const [pwdSubmitting, setPwdSubmitting] = useState(false);
   const [pwdDone, setPwdDone] = useState(false);
+  // 打字时能不能看见自己输的内容。默认关，勾上才显示。
+  const [showPwd, setShowPwd] = useState(false);
 
   const openPwdModal = () => {
     setOldPwd("");
@@ -60,6 +62,8 @@ export default function RoleShell(props: {
     setConfirmPwd("");
     setPwdError("");
     setPwdDone(false);
+    // 每次重新打开都回到「看不见」，免得上次勾了这次被人瞄到
+    setShowPwd(false);
     setPwdOpen(true);
   };
 
@@ -393,7 +397,7 @@ export default function RoleShell(props: {
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 <input
-                  type="password"
+                  type={showPwd ? "text" : "password"}
                   value={oldPwd}
                   onChange={(e) => setOldPwd(e.target.value)}
                   placeholder="旧密码"
@@ -401,7 +405,7 @@ export default function RoleShell(props: {
                   style={{ border: "1px solid var(--hairline)", borderRadius: 8, padding: "8px 12px", fontSize: 14 }}
                 />
                 <input
-                  type="password"
+                  type={showPwd ? "text" : "password"}
                   value={newPwd}
                   onChange={(e) => setNewPwd(e.target.value)}
                   placeholder="新密码（至少 8 位，不能全是数字）"
@@ -409,7 +413,7 @@ export default function RoleShell(props: {
                   style={{ border: "1px solid var(--hairline)", borderRadius: 8, padding: "8px 12px", fontSize: 14 }}
                 />
                 <input
-                  type="password"
+                  type={showPwd ? "text" : "password"}
                   value={confirmPwd}
                   onChange={(e) => setConfirmPwd(e.target.value)}
                   placeholder="再输一次新密码"
@@ -417,6 +421,15 @@ export default function RoleShell(props: {
                   onKeyDown={(e) => { if (e.key === "Enter") void submitPwd(); }}
                   style={{ border: "1px solid var(--hairline)", borderRadius: 8, padding: "8px 12px", fontSize: 14 }}
                 />
+                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--ink-mute)", cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={showPwd}
+                    onChange={(e) => setShowPwd(e.target.checked)}
+                    style={{ cursor: "pointer" }}
+                  />
+                  显示密码
+                </label>
                 {pwdError ? (
                   <p style={{ margin: 0, fontSize: 13, color: "var(--danger)" }}>{pwdError}</p>
                 ) : null}
