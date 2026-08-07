@@ -275,12 +275,26 @@ export interface OrderItem {
   products?: OrderProductItem[];
 }
 
+/**
+ * ⚠️ 必须和后端 /admin/dashboard/overview 的返回逐字对齐
+ * （apps/api/src/modules/admin/routes.ts）。这里写了后端没有的字段，
+ * TypeScript 不会报错，页面上却会读到 undefined —— 2026-08-07 客户端就这么崩过一次。
+ */
 export interface AdminOverview {
   staffAccountCount: number;
   clientAccountCount: number;
   newOrderCountToday: number;
   inTransitOrderCount: number;
   receivedVolumeM3Today: number;
+  /**
+   * 柜子分段统计（2026-08-07 新增，取代前端按柜号去重的老算法）。
+   * 四段相加 = containerTotalCount，后端用减法保证不漏任何状态。
+   */
+  containerLoadingCount: number;
+  containerOnTheWayCount: number;
+  containerAtWarehouseCount: number;
+  containerDoneCount: number;
+  containerTotalCount: number;
 }
 
 export interface AdminUserItem {

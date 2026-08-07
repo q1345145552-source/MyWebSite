@@ -359,18 +359,10 @@ export default function AdminHomePage() {
     }));
   }, [orderList]);
 
-  /**
-   * 在途柜量：按批次号去重后统计未完成订单的柜子数。
-   */
-  const inTransitContainerCount = useMemo(() => {
-    const set = new Set(
-      orderList
-        .filter((item) => (item.statusGroup ?? "").toLowerCase() === "unfinished")
-        .map((item) => item.batchNo ?? "")
-        .filter((item) => item),
-    );
-    return set.size;
-  }, [orderList]);
+  // 2026-08-07 删除 inTransitContainerCount：原来按「柜号」去重数在途柜子。
+  // 那个柜号是员工在预报单审核里手填的，生产库 357 张在途单只有 1 张填了，
+  // 数出来常年 0 或 1，跟真实的 94 个柜子对不上，而且填什么就数什么。
+  // 现在改由后端直接数 containers 表，分「在路上 / 已到仓 / 已完成」三段返回。
 
   // 判断 hash 是否为有效的功能分区 id。
   const isSectionId = (value: string): value is (typeof SECTION_IDS)[number] =>
@@ -1162,7 +1154,17 @@ export default function AdminHomePage() {
               <div className="route-line route-line-sea" />
               <div className="route-line route-line-land" />
               <div className="route-point route-point-th">泰国仓</div>
-              <div className="route-counter">当前在途柜量：{inTransitContainerCount}</div>
+              {/* 2026-08-07：原来这里是「当前在途柜量：N」，N 由前端把未完成订单的
+                  「柜号」去重数出来。那个柜号是员工在预报单审核里手填的，
+                  生产库 357 张在途单里只有 1 张填了，所以这个数常年 0 或 1，
+                  跟真实柜数（94 个）对不上。改成后端直接数 containers 表，分三段。 */}
+              <div className="route-counter">
+                装柜中 {overview?.containerLoadingCount ?? "—"}
+                　·　在路上 {overview?.containerOnTheWayCount ?? "—"}
+                　·　已到仓 {overview?.containerAtWarehouseCount ?? "—"}
+                　·　已完成 {overview?.containerDoneCount ?? "—"}
+                　（共 {overview?.containerTotalCount ?? "—"} 个柜）
+              </div>
             </div>
           </div>
           <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10, background: "#f8fafc" }}>

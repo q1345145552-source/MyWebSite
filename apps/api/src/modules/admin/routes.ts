@@ -127,7 +127,31 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
 
-    const [staff, client, newOrder, inTransit, volumeAgg] = await Promise.all([
+    /**
+     * 柜子分三段统计（2026-08-07 新增）。
+     *
+     * 原来管理员端首页那行「当前在途柜量」是前端自己算的：
+     * 把未完成订单的「柜号」去重数个数。但那个柜号来自员工在「预报单审核」里
+     * 手填的「柜号（可选，装柜时填写）」框，生产库 357 张在途单里只有 1 张填了，
+     * 所以那个数常年是 0 或 1，跟真实柜数（94 个）完全不是一回事，
+     * 而且填什么就数什么（测试库里出现过「uii」「暂无」这种）。
+     *
+     * 改成直接数 containers 表，按柜子自己的状态分段：
+     *   在路上 = 已封柜出发、还没到泰国仓
+     *   已到仓 = 到了泰国仓，还没派完
+     *   已完成 = 已签收
+     * ⚠️ 状态清单跟 containers/status-flow.ts 对齐，那边加了新状态要回来同步。
+     */
+    // ⚠️ 用「减法」算在路上，不要列举状态名。
+    // 第一版是把在路上的状态一个个列出来，结果测试库 16 个柜子只数到 13 个：
+    // 漏了 LOADING（装柜中）和 DELIVERING（老状态名，现在叫 OUT_FOR_DELIVERY）。
+    // 列举法只要漏一个状态，柜子就凭空消失且没人发现（CLAUDE.md 第 19/21 条：不许静默丢数据）。
+    // 现在只精确列举「装柜中 / 已到仓 / 已完成」三类，其余一律算在路上，
+    // 以后加了新状态也不会漏掉。
+    const AT_WAREHOUSE = ["IN_WAREHOUSE_TH", "OUT_FOR_DELIVERY", "DELIVERING"];
+
+    const [staff, client, newOrder, inTransit, volumeAgg,
+           ctnTotal, ctnLoading, ctnAtWarehouse, ctnDone] = await Promise.all([
       prisma.user.count({ where: { companyId: auth.companyId, role: "staff" } }),
       prisma.user.count({ where: { companyId: auth.companyId, role: "client" } }),
       prisma.order.count({
@@ -140,7 +164,20 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
         where: { companyId: auth.companyId, updatedAt: { gte: startOfToday } },
         _sum: { volumeM3: true },
       }),
+      prisma.container.count({ where: { companyId: auth.companyId } }),
+      prisma.container.count({
+        where: { companyId: auth.companyId, currentStatus: "LOADING" },
+      }),
+      prisma.container.count({
+        where: { companyId: auth.companyId, currentStatus: { in: AT_WAREHOUSE } },
+      }),
+      prisma.container.count({
+        where: { companyId: auth.companyId, currentStatus: "SIGNED" },
+      }),
     ]);
+
+    // 剩下的全算「在路上」——这样任何没被上面三类认领的状态都不会凭空消失
+    const ctnOnWay = ctnTotal - ctnLoading - ctnAtWarehouse - ctnDone;
 
     const totalVolume = volumeAgg._sum.volumeM3 ? Number(volumeAgg._sum.volumeM3.toString()) : 0;
 
@@ -150,6 +187,11 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
       newOrderCountToday: newOrder,
       inTransitOrderCount: inTransit,
       receivedVolumeM3Today: Number(totalVolume.toFixed(3)),
+      containerLoadingCount: ctnLoading,
+      containerOnTheWayCount: ctnOnWay,
+      containerAtWarehouseCount: ctnAtWarehouse,
+      containerDoneCount: ctnDone,
+      containerTotalCount: ctnTotal,
     });
   });
 
