@@ -50,9 +50,19 @@ echo "📥 拉取最新代码..."
 git fetch origin
 NEW_COMMIT=$(git rev-parse origin/main)
 
-if [ "$OLD_COMMIT" = "$NEW_COMMIT" ]; then
+# 2026-08-07：只比对提交号会漏掉「代码拉下来了但没构建完」的半截状态 ——
+# 上一次部署中途断掉后，git 已经指向新提交，再跑这个脚本却直接说
+# 「已是最新，无需部署」，容器永远停在旧版本，靠脚本自己补不回来。
+# 加一个强制开关：FORCE_DEPLOY=1 bash deploy.sh 可以重跑一遍完整流程。
+if [ "$OLD_COMMIT" = "$NEW_COMMIT" ] && [ "${FORCE_DEPLOY:-}" != "1" ]; then
   echo "✅ 已是最新版本，无需部署"
+  echo "   如果上次部署中断、容器还是旧版本，用这个强制重跑："
+  echo "   FORCE_DEPLOY=1 bash deploy.sh"
   exit 0
+fi
+
+if [ "$OLD_COMMIT" = "$NEW_COMMIT" ]; then
+  echo "⚠️  代码已是最新，但按 FORCE_DEPLOY=1 强制重新构建部署"
 fi
 
 # 显示变更
