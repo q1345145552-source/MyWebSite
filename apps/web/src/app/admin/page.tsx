@@ -24,7 +24,6 @@ import {
 import { apiBaseUrl, authHeaders, parseApiResponse } from "../../services/core-api";
 import { DEFAULT_SHIPPING_PRICES, INSPECTION_SURCHARGE, SENSITIVE_SURCHARGE } from "../../../../../packages/shared-types/constants";
 import { shipmentStatusZh, transportModeLabel, warehouseLabelFromId } from "../../modules/staff/utils";
-import StaffLastmile from "../../components/staff/StaffLastmile";
 import ShippingConfig from "../../components/admin/ShippingConfig";
 import {
   fetchAdminOverview,

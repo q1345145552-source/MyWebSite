@@ -233,8 +233,16 @@ export function registerShippingConfigRoutes(app: MinimalHttpApp): void {
   });
 
   // 客户端获取有效价格
+  /**
+   * 查客户的运费单价。
+   *
+   * 2026-08-07：客户角色已被移出白名单 —— 用户要求「价格不要让客户看到」。
+   * 客户端那块「运费计算器」（唯一的客户侧消费方）同日整块下线，
+   * 所以这里收回客户权限不会让任何界面报错。
+   * 路径里的 /client/ 是历史命名，别据此以为客户能调。
+   */
   app.get("/client/shipping/prices", async (req, res) => {
-    const auth = requireRole(req, res, ["client", "staff", "admin"]);
+    const auth = requireRole(req, res, ["staff", "admin"]);
     if (!auth) return;
     const clientId = (req.query.clientId?.trim() || auth.userId);
 

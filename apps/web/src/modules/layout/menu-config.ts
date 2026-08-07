@@ -139,7 +139,6 @@ export const roleFunctionGroups: Record<AuthRole, MenuGroup[]> = {
       groupLabel: "其他",
       items: [
         { id: "client-func-main", label: "主页与AI", href: "/client#client-main" },
-        { id: "client-func-quote", label: "智能算费", href: "/client#client-main" },
         { id: "client-func-wallet", label: "集货余额", href: "/client/wallet" },
         { id: "client-func-address", label: "地址库", href: "/client/address-book" },
       ],
