@@ -164,13 +164,6 @@ export default function StaffPrealertList(props: StaffPrealertListProps) {
                           <input type="number" step="0.001" min="0.001" value={String(draft.volumeM3)} onChange={(e) => props.setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: { ...(prev[item.id] ?? buildPrealertDraft(item)), volumeM3: Number(e.target.value || 0) } }))} placeholder="体积" style={{ ...prealertEditInputStyle, marginBottom: 0 }} />
                           <span style={{ color: "#000000", fontSize: 13, minWidth: 30 }}>m3</span>
                         </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                          <input type="number" step="0.01" min="0.01" value={String(draft.receivableAmountCny)} onChange={(e) => props.setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: { ...(prev[item.id] ?? buildPrealertDraft(item)), receivableAmountCny: Number(e.target.value || 0) } }))} placeholder="最终应收金额" style={{ ...prealertEditInputStyle, marginBottom: 0 }} />
-                          <select value={draft.receivableCurrency} onChange={(e) => props.setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: { ...(prev[item.id] ?? buildPrealertDraft(item)), receivableCurrency: e.target.value === "THB" ? "THB" : "CNY" } }))} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", minWidth: 100 }}>
-                            <option value="CNY">CNY</option>
-                            <option value="THB">THB</option>
-                          </select>
-                        </div>
                         <input value={draft.domesticTrackingNo} onChange={(e) => props.setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: { ...(prev[item.id] ?? buildPrealertDraft(item)), domesticTrackingNo: e.target.value } }))} placeholder="国内快递单号" style={prealertEditInputStyle} />
                         <select value={draft.transportMode} onChange={(e) => props.setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: { ...(prev[item.id] ?? buildPrealertDraft(item)), transportMode: e.target.value as "sea" | "land" } }))} style={prealertEditInputStyle}>
                           <option value="sea">运输方式：海运</option>
@@ -186,9 +179,6 @@ export default function StaffPrealertList(props: StaffPrealertListProps) {
                         <InfoItem label="产品数量" value={String(displayDraft.productQuantity)} />
                         <InfoItem label="重量" value={`${displayDraft.weightKg ?? "-"} kg`} />
                         <InfoItem label="体积" value={`${displayDraft.volumeM3 ?? "-"} m3`} />
-                        {displayDraft.receivableAmountCny != null && displayDraft.receivableAmountCny > 0 ? (
-                          <InfoItem label="最终应收金额" value={displayDraft.receivableCurrency === "THB" ? `THB ${displayDraft.receivableAmountCny.toFixed(2)}` : formatCny(displayDraft.receivableAmountCny)} />
-                        ) : null}
                         <InfoItem label="国内快递单号" value={displayDraft.domesticTrackingNo ?? "-"} />
                         <InfoItem label="运输方式" value={displayDraft.transportMode === "sea" ? "海运" : "陆运"} />
                         <InfoItem label="发货日期" value={displayDraft.shipDate} />

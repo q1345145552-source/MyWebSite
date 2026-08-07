@@ -89,7 +89,6 @@ const SECTION_IDS = [
   "lastmile",
   "lastmile-address",
   "wallet-recharges",
-  "offline-payments",
 ] as const;
 
 const SECTION_LABELS: Record<(typeof SECTION_IDS)[number], string> = {
@@ -106,7 +105,6 @@ const SECTION_LABELS: Record<(typeof SECTION_IDS)[number], string> = {
   "lastmile": "尾端派送",
   "lastmile-address": "尾端地址",
   "wallet-recharges": "充值审核",
-  "offline-payments": "付款审核",
 };
 
 const sectionStyle = {
@@ -269,14 +267,6 @@ export default function AdminHomePage() {
   const [rechargeList, setRechargeList] = useState<AdminWalletRechargeItem[]>([]);
   const [rechargeStatusFilter, setRechargeStatusFilter] = useState("");
   const [rejectModalId, setRejectModalId] = useState<string | null>(null);
-  // 线下付款审核
-  const [offlinePayments, setOfflinePayments] = useState<Array<{id:string;orderId:string;trackingNo:string;clientName:string;itemName:string;amount:number;proofImage:string;submittedAt:string|null}>>([]);
-  const [offlineRejectId, setOfflineRejectId] = useState<string | null>(null);
-  const [offlineRejectRemark, setOfflineRejectRemark] = useState("");
-  const loadOfflinePayments = async () => {
-    // 【审查问题 3】同上：改走 parseApiResponse，401 会自动跳登录页
-    try { const r = await fetch(`${apiBaseUrl()}/admin/offline-payments`, { headers: authHeaders() }); const d = await parseApiResponse<{items:any[]}>(r); setOfflinePayments(d.items ?? []); } catch (e) { console.error(e); setMessage(`付款审核加载失败：${e instanceof Error ? e.message : "未知错误"}`); }
-  };
   const [rejectRemark, setRejectRemark] = useState("");
   const loadRecharges = async () => {
     try {
@@ -573,10 +563,6 @@ export default function AdminHomePage() {
         ...(changed("containerNo", orderEditForm.containerNo) ? { containerNo: orderEditForm.containerNo.trim() || "" } : {}),
         ...(changed("packageUnit", orderEditForm.packageUnit) ? { packageUnit: orderEditForm.packageUnit } : {}),
         ...(changed("cargoType", orderEditForm.cargoType) ? { cargoType: orderEditForm.cargoType } : {}),
-        ...(changed("receivableAmountCny", orderEditForm.receivableAmountCny)
-          ? { receivableAmountCny: orderEditForm.receivableAmountCny.trim() ? Number(orderEditForm.receivableAmountCny) : null } : {}),
-        ...(changed("receivableCurrency", orderEditForm.receivableCurrency) ? { receivableCurrency: orderEditForm.receivableCurrency } : {}),
-        ...(changed("paymentStatus", orderEditForm.paymentStatus) ? { paymentStatus: orderEditForm.paymentStatus } : {}),
         ...(changed("shipDate", orderEditForm.shipDate) ? { shipDate: orderEditForm.shipDate.trim() } : {}),
         ...(changed("remark", orderEditForm.remark ?? "") ? { remark: orderEditForm.remark?.trim() || null } : {}),
         // 件数/数量/重量/体积是按产品行算出来的，产品行没动就不发
@@ -1066,7 +1052,6 @@ export default function AdminHomePage() {
     // 进到「尾端派送」不点那个框，列表就一直是空的，看起来像没数据。
     // 改成进这个页面就连派送单一起加载。
     if (activeSection === "lastmile") { loadLastmileOrders(); void loadLmShipments(); }
-    if (activeSection === "offline-payments") loadOfflinePayments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSection, clientList]);
 
@@ -1637,7 +1622,6 @@ export default function AdminHomePage() {
                             <span>柜号：<strong>{o.batchNo ?? "—"}</strong></span>
                             <span>包装：<strong>{o.packageUnit === "bag" ? "袋" : "箱"}</strong></span>
                             <span>国内单号：<strong>{((o.products?.length ?? 0) > 0) ? (o.products ?? []).map(p => p.domesticTrackingNo || "货拉拉").filter((v, i, a) => a.indexOf(v) === i).join("、") : (o.domesticTrackingNo ?? "—")}</strong></span>
-                            <span>加收金额：<strong>{o.receivableAmountCny != null ? `${o.receivableAmountCny} ${o.receivableCurrency ?? "CNY"}` : "—"}</strong></span>
                             <span>收货地址：<strong>{o.receiverAddressTh ?? "—"}</strong></span>
                           </div>
                           {(o.productImages?.length ?? 0) > 0 || (orderImagesCache[o.orderId ?? o.id]?.length ?? 0) > 0 ? (
@@ -1689,9 +1673,6 @@ export default function AdminHomePage() {
                             <select value={orderEditForm.packageUnit} onChange={(e) => setOrderEditForm((v) => ({ ...v, packageUnit: e.target.value as "bag" | "box" }))} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}><option value="box">箱</option><option value="bag">袋</option></select>
                             <input value={orderEditForm.weightKg} onChange={(e) => setOrderEditForm((v) => ({ ...v, weightKg: e.target.value }))} placeholder="重量(kg)" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }} />
                             <input value={orderEditForm.volumeM3} onChange={(e) => setOrderEditForm((v) => ({ ...v, volumeM3: e.target.value }))} placeholder="体积(m³)" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }} />
-                            <input value={orderEditForm.receivableAmountCny} onChange={(e) => setOrderEditForm((v) => ({ ...v, receivableAmountCny: e.target.value }))} placeholder="应收金额(CNY)" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }} />
-                            <select value={orderEditForm.receivableCurrency} onChange={(e) => setOrderEditForm((v) => ({ ...v, receivableCurrency: e.target.value as "CNY" | "THB" }))} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}><option value="CNY">CNY</option><option value="THB">THB</option></select>
-                            <select value={orderEditForm.paymentStatus} onChange={(e) => setOrderEditForm((v) => ({ ...v, paymentStatus: e.target.value as "paid" | "unpaid" }))} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}><option value="unpaid">未支付</option><option value="paid">已支付</option></select>
                             <input type="date" value={orderEditForm.shipDate} onChange={(e) => setOrderEditForm((v) => ({ ...v, shipDate: e.target.value }))} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }} />
                           </div>
                           <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 10, background: "#f9fafb", marginTop: 8 }}>
@@ -1951,7 +1932,6 @@ export default function AdminHomePage() {
                 <tr style={{ background: "#f9fafb", borderBottom: "1px solid #e5e7eb" }}>
                   <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>时间</th>
                   <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>客户</th>
-                  <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>币种</th>
                   <th style={{ padding: "8px 10px", textAlign: "right", fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>金额</th>
                   <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>支付方式</th>
                   <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>状态</th>
@@ -1976,9 +1956,8 @@ export default function AdminHomePage() {
                         })}
                       </td>
                       <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>{r.clientName}{r.companyName ? ` (${r.companyName})` : ""}</td>
-                      <td style={{ padding: "8px 10px" }}>{r.currency}</td>
                       <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 600 }}>
-                        {r.currency === "CNY" ? "¥" : "฿"}{r.amount.toFixed(2)}
+                        ¥{r.amount.toFixed(2)}
                       </td>
                       <td style={{ padding: "8px 10px" }}>{methodLabel}</td>
                       <td style={{ padding: "8px 10px" }}>
@@ -2007,7 +1986,7 @@ export default function AdminHomePage() {
                               type="button"
                               disabled={loading}
                               onClick={async () => {
-                                if (!window.confirm(`确认通过 ${r.clientName} 的 ${r.currency} ${r.amount} 充值？`)) return;
+                                if (!window.confirm(`确认通过 ${r.clientName} 的 ¥${r.amount} 集货余额充值？\n\n通过后钱立刻进入他的集货余额。`)) return;
                                 setLoading(true);
                                 try {
                                   await approveRecharge(r.id);
@@ -2087,69 +2066,6 @@ export default function AdminHomePage() {
       )}
 
       {/* 线下付款拒绝原因弹窗 */}
-      {offlineRejectId && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.4)", padding: 16 }}>
-          <div style={{ width: "100%", maxWidth: 400, background: "#fff", borderRadius: 12, padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
-            <h3 style={{ margin: "0 0 16px", fontSize: 16 }}>拒绝付款</h3>
-            <textarea placeholder="请填写拒绝原因" value={offlineRejectRemark} onChange={(e) => setOfflineRejectRemark(e.target.value)} rows={3} style={{ width: "100%", padding: 10, border: "1px solid #d1d5db", borderRadius: 8, fontSize: 14, boxSizing: "border-box", resize: "vertical" }} />
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-              <button type="button" onClick={() => setOfflineRejectId(null)} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 16px", background: "#fff", cursor: "pointer", fontSize: 13 }}>取消</button>
-              <button type="button" onClick={async () => {
-                if (!offlineRejectRemark.trim()) { setToast("请填写拒绝原因"); return; }
-                // 【审查问题 2】同上：不确认后端结果就弹「已拒绝」，失败也看不出来
-                try { const res = await fetch(`${apiBaseUrl()}/admin/offline-payments/reject`, { method: "POST", headers: {"Content-Type":"application/json",...authHeaders()}, body: JSON.stringify({orderId: offlineRejectId, remark: offlineRejectRemark.trim()}) }); await parseApiResponse(res); setToast("已拒绝"); setOfflineRejectId(null); loadOfflinePayments(); } catch (e: any) { setToast(e.message||"操作失败，请重试"); }
-              }} style={{ border: "none", borderRadius: 8, padding: "8px 16px", background: "#dc2626", color: "#fff", fontWeight: 600, cursor: "pointer", fontSize: 13 }}>确认拒绝</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 线下付款审核 */}
-      <section id="offline-payments" style={{ ...sectionStyle, display: activeSection === "offline-payments" ? "block" : "none" }}>
-        <h2 style={{ margin: "0 0 16px", fontSize: 18 }}>{SECTION_LABELS["offline-payments"]}</h2>
-        {offlinePayments.length === 0 ? (
-          <p style={{ color: "#6b7280", fontSize: 13 }}>暂无待审核的线下付款</p>
-        ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-              <thead><tr style={{ background: "#f9fafb", borderBottom: "1px solid #e5e7eb" }}>
-                <th style={{ padding: "8px 10px", textAlign: "left" }}>运单号</th>
-                <th style={{ padding: "8px 10px", textAlign: "left" }}>客户</th>
-                <th style={{ padding: "8px 10px", textAlign: "left" }}>品名</th>
-                <th style={{ padding: "8px 10px", textAlign: "right" }}>金额</th>
-                <th style={{ padding: "8px 10px", textAlign: "left" }}>提交时间</th>
-                <th style={{ padding: "8px 10px", textAlign: "left" }}>凭证</th>
-                <th style={{ padding: "8px 10px", textAlign: "left" }}>操作</th>
-              </tr></thead>
-              <tbody>
-                {offlinePayments.map((p) => (
-                  <tr key={p.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
-                    <td style={{ padding: "8px 10px", fontFamily: "monospace" }}>{p.trackingNo || "—"}</td>
-                    <td style={{ padding: "8px 10px" }}>{p.clientName}</td>
-                    <td style={{ padding: "8px 10px" }}>{p.itemName}</td>
-                    <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 600 }}>¥{p.amount.toFixed(2)}</td>
-                    <td style={{ padding: "8px 10px", fontSize: 12 }}>{p.submittedAt ? new Date(p.submittedAt).toLocaleString("zh-CN") : "—"}</td>
-                    <td style={{ padding: "8px 10px" }}>
-                      <img src={p.proofImage} alt="凭证" onClick={() => { const w = window.open("","_blank"); if (w) w.document.write(`<img src="${p.proofImage}" style="max-width:100%"/>`); }} style={{ width: 60, height: 60, objectFit: "cover", borderRadius: 6, border: "1px solid #e5e7eb", cursor: "pointer" }} />
-                    </td>
-                    <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
-                      <button type="button" onClick={async () => {
-                        if (!confirm("确认通过？运单将标记为已付款")) return;
-                        // 【审查问题 2】原来不看返回就弹「已通过」，服务器报错也照弹。
-                        // 财务操作必须确认后端真的成功 —— parseApiResponse 失败会抛错。
-                        try { const res = await fetch(`${apiBaseUrl()}/admin/offline-payments/approve`, { method: "POST", headers: {"Content-Type":"application/json",...authHeaders()}, body: JSON.stringify({orderId: p.orderId}) }); await parseApiResponse(res); setToast("已通过"); loadOfflinePayments(); } catch (e: any) { setToast(e.message||"操作失败，请重试"); }
-                      }} style={{ border: "none", borderRadius: 6, padding: "4px 10px", background: "#16a34a", color: "#fff", cursor: "pointer", fontSize: 12, marginRight: 4 }}>通过</button>
-                      <button type="button" onClick={() => { setOfflineRejectId(p.orderId); setOfflineRejectRemark(""); }} style={{ border: "none", borderRadius: 6, padding: "4px 10px", background: "#dc2626", color: "#fff", cursor: "pointer", fontSize: 12 }}>拒绝</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      {/* 5. AI会话记忆运维 */}
       <section id="ai-memory" style={{ ...sectionStyle, display: activeSection === "ai-memory" ? "block" : "none" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
           <h2 style={{ margin: 0, fontSize: 18 }}>{SECTION_LABELS["ai-memory"]}</h2>

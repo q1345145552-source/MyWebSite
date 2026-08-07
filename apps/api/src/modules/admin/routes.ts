@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
+import { CONSOLIDATION_CURRENCY, recordRechargeCredit } from "../wallet/consolidation-balance";
 import { verifyPassword } from "../auth/crypto-utils";
 import { loadProductImagesForOrders } from "../orders/product-images";
 import { loadOrderProducts } from "../orders/routes";
@@ -307,15 +308,12 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
       packageUnit?: "bag" | "box";
       weightKg?: number | null;
       volumeM3?: number | null;
-      receivableAmountCny?: number | null;
-      receivableCurrency?: "CNY" | "THB";
       shipDate?: string | null;
       trackingNo?: string | null;
       batchNo?: string | null;
       warehouseId?: string;
       receiverAddressTh?: string;
       containerNo?: string | null;
-      paymentStatus?: "paid" | "unpaid";
       remark?: string | null;
       products?: Array<{
         /** 已有产品行的编号；不传表示这是新增的一行 */
@@ -406,24 +404,11 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    let receivableAmount: number | null | undefined = undefined;
-    if (has("receivableAmountCny")) {
-      if (body.receivableAmountCny === null) {
-        receivableAmount = null;
-      } else {
-        const amount = Number(body.receivableAmountCny);
-        if (!Number.isFinite(amount) || amount < 0) {
-          fail(res, 400, "BAD_REQUEST", "invalid receivableAmountCny");
-          return;
-        }
-        receivableAmount = amount === 0 ? null : amount;
-      }
-    }
-    const receivableCurrency = has("receivableCurrency") ? (body.receivableCurrency === "THB" ? "THB" : "CNY") : undefined;
+    /* 2026-08-07：运单不再涉及金额，应收金额/币种/付款状态不再接受修改。
+       字段还留在表里（为了保住历史数据），但没有任何接口能再写它们。 */
     const warehouseId = has("warehouseId") ? (body.warehouseId?.trim() || exists.warehouseId) : undefined;
     const batchNo = has("batchNo") ? (body.batchNo?.trim() || null) : undefined;
     const receiverAddressTh = has("receiverAddressTh") ? (body.receiverAddressTh ?? "").trim() : undefined;
-    const paymentStatus = has("paymentStatus") ? body.paymentStatus : undefined;
     // trackingNo 本次没提交就沿用现有值（查重仍要用到），但不会再写回运单
     const trackingNo = has("trackingNo") ? (body.trackingNo?.trim() || null) : (linkedShipment?.trackingNo ?? null);
     const containerNo = has("containerNo") ? (body.containerNo?.trim() || null) : undefined;
@@ -486,10 +471,7 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
           packageUnit,
           weightKg,
           volumeM3,
-          receivableAmountCny: receivableAmount,
-          receivableCurrency,
           receiverAddressTh,
-          paymentStatus,
           shipDate,
           updatedAt: now,
         },
@@ -1005,6 +987,21 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
           balance: { increment: recharge.amount },
         },
       });
+      // 2026-08-07：钱到账要记一行流水，客户才对得上账。
+      // 只有人民币才是集货余额，历史遗留的其它币种不记流水。
+      if (recharge.currency === CONSOLIDATION_CURRENCY) {
+        await recordRechargeCredit(tx as any, {
+          companyId: recharge.companyId,
+          clientId: recharge.clientId,
+          amount: Number(recharge.amount),
+          refType: "recharge",
+          refId: recharge.id,
+          refNo: recharge.id,
+          remark: "充值审核通过",
+          operatorId: auth.userId,
+          operatorName: auth.name || auth.userId,
+        });
+      }
     });
 
     ok(res, { approved: true, id });
@@ -1083,73 +1080,9 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
   });
 
   // ===== 管理员：线下付款审核列表 =====
-  app.get("/admin/offline-payments", async (req, res) => {
-    const auth = requireRole(req, res, ["admin"]);
-    if (!auth) return;
-    const rows = await prisma.order.findMany({
-      where: {
-        companyId: auth.companyId,
-        paymentProofBase64: { not: null },
-        paymentStatus: "unpaid",
-      },
-      orderBy: { paymentProofUploadedAt: "desc" },
-      select: {
-        id: true,
-        clientId: true,
-        itemName: true,
-        receivableAmountCny: true,
-        paymentProofBase64: true,
-        paymentProofUploadedAt: true,
-        shipments: { take: 1, orderBy: { updatedAt: "desc" }, select: { trackingNo: true } },
-        client: { select: { name: true, companyName: true } },
-      },
-    });
-    ok(res, {
-      items: rows.map((r) => ({
-        id: r.id,
-        orderId: r.id,
-        trackingNo: r.shipments[0]?.trackingNo ?? null,
-        clientId: r.clientId,
-        clientName: r.client.name,
-        companyName: r.client.companyName,
-        itemName: r.itemName,
-        amount: Number(r.receivableAmountCny ?? 0),
-        proofImage: r.paymentProofBase64,
-        submittedAt: r.paymentProofUploadedAt?.toISOString() ?? null,
-      })),
-    });
-  });
 
   // ===== 管理员：通过线下付款 =====
-  app.post("/admin/offline-payments/approve", async (req, res) => {
-    const auth = requireRole(req, res, ["admin"]);
-    if (!auth) return;
-    const body = (req.body ?? {}) as { orderId?: string };
-    const orderId = body.orderId?.trim();
-    if (!orderId) { fail(res, 400, "BAD_REQUEST", "缺少订单ID"); return; }
-    const order = await prisma.order.findFirst({ where: { id: orderId, companyId: auth.companyId }, select: { id: true, paymentStatus: true } });
-    if (!order) { fail(res, 404, "NOT_FOUND", "订单不存在"); return; }
-    await prisma.order.update({
-      where: { id: orderId },
-      data: { paymentStatus: "paid", paidAt: new Date(), paidBy: `管理员审核(${auth.name})` },
-    });
-    ok(res, { approved: true, orderId });
-  });
 
   // ===== 管理员：拒绝线下付款 =====
-  app.post("/admin/offline-payments/reject", async (req, res) => {
-    const auth = requireRole(req, res, ["admin"]);
-    if (!auth) return;
-    const body = (req.body ?? {}) as { orderId?: string; remark?: string };
-    const orderId = body.orderId?.trim();
-    if (!orderId) { fail(res, 400, "BAD_REQUEST", "缺少订单ID"); return; }
-    // 清除凭证，记录拒绝原因到备注
-    const remark = `[付款拒绝] ${body.remark?.trim() || "凭证不符合要求"}`;
-    await prisma.order.update({
-      where: { id: orderId, companyId: auth.companyId },
-      data: { paymentProofBase64: null, paymentProofMime: null, paymentProofFileName: null, paymentProofUploadedAt: null },
-    });
-    ok(res, { rejected: true, orderId, remark });
-  });
 
 }

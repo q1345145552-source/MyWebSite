@@ -43,7 +43,6 @@ export type ShipmentOrderEditDraft = {
 };
 
 export const STAFF_SECTION_IDS = [
-  "staff-billing",
   "staff-prealert-review",
   "staff-create-order",
   "staff-ops-tools",

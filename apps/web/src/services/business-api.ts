@@ -631,7 +631,7 @@ export async function fetchClientWalletOverview(): Promise<ClientWalletOverview>
  */
 export async function submitRecharge(payload: {
   amount: number;
-  currency: string;
+  /** 2026-08-07 起集货余额只有人民币，后端强制按 CNY 入账，这里不用再传 */
   paymentMethod: string;
   proofImage: string;
   remark?: string;
@@ -640,6 +640,31 @@ export async function submitRecharge(payload: {
     method: "POST",
     headers: { ...authHeaders(), "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+  });
+  return parseApiResponse(response);
+}
+
+/** 集货余额流水一行（2026-08-07 新增） */
+export interface ConsolidationLedgerItem {
+  id: string;
+  type: string;
+  typeLabel: string;
+  /** 正数进账、负数出账 */
+  amount: number;
+  balanceAfter: number;
+  source: string;
+  refNo: string;
+  remark: string;
+  createdAt: string;
+}
+
+/**
+ * 客户端获取集货余额流水（充值到账 / 集货付款 / 撤销退款）。
+ */
+export async function fetchConsolidationLedger(): Promise<{ items: ConsolidationLedgerItem[]; total: number }> {
+  const response = await fetch(`${apiBaseUrl()}/client/wallet/ledger`, {
+    method: "GET",
+    headers: { ...authHeaders() },
   });
   return parseApiResponse(response);
 }
@@ -792,45 +817,7 @@ export async function receiveStaffPrealert(payload: {
 }
 
 
-export async function setStaffOrderReceivable(payload: {
-  orderId: string;
-  receivableAmountCny: number;
-  receivableCurrency?: "CNY" | "THB";
-}): Promise<{ orderId: string; receivableAmountCny: number; receivableCurrency: "CNY" | "THB"; updatedAt: string }> {
-  const response = await fetch(`${apiBaseUrl()}/staff/orders/set-receivable`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeaders(),
-    },
-    body: JSON.stringify(payload),
-  });
-  return parseApiResponse(response);
-}
 
-export async function setStaffOrderPayment(payload: {
-  orderId: string;
-  paymentStatus: "paid" | "unpaid";
-  proofFileName?: string;
-  proofMime?: string;
-  proofBase64?: string;
-}): Promise<{
-  orderId: string;
-  paymentStatus: "paid" | "unpaid";
-  paidAt: string | null;
-  paidBy: string | null;
-  updatedAt: string;
-}> {
-  const response = await fetch(`${apiBaseUrl()}/staff/orders/set-payment`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeaders(),
-    },
-    body: JSON.stringify(payload),
-  });
-  return parseApiResponse(response);
-}
 
 export async function fetchClientShipments(): Promise<ShipmentItem[]> {
   const response = await fetch(`${apiBaseUrl()}/client/shipments/search`, {
@@ -1942,14 +1929,26 @@ export async function deleteConsolidationPrealert(prealertId: string): Promise<{
 }
 
 /** 付款 */
+/**
+ * 管理员撤销一笔普通版集货付款：钱退回客户的集货余额，任务回到「未付款」。
+ * 退多少由后端按流水里实际扣过的钱算。
+ */
+export async function revokeConsolidationPayment(payload: {
+  taskId: string;
+  reason?: string;
+}): Promise<{ taskId: string; refunded: number; balanceAfter: number; message: string }> {
+  return apiRequest(`${apiBaseUrl()}/admin/consolidation/payments/revoke`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+/** 2026-08-07：改成用集货余额付款，不再传付款凭证 */
 export async function payConsolidationTask(payload: {
   taskId: string;
-  proofBase64: string;
-  proofFileName?: string;
-  proofMime?: string;
-}): Promise<{ success: boolean; taskId: string }> {
+}): Promise<{ success: boolean; taskId: string; paidAmount?: number; balanceAfter?: number; message?: string }> {
   try {
-    return await apiRequest<{ success: boolean; taskId: string }>(
+    return await apiRequest<{ success: boolean; taskId: string; paidAmount?: number; balanceAfter?: number; message?: string }>(
       `${apiBaseUrl()}/client/consolidation/pay`,
       { method: "POST", body: JSON.stringify(payload) },
     );

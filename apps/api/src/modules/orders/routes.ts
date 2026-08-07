@@ -4,68 +4,13 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../db/prisma";
 import { getClientIp } from "../core/rate-limit";
 import type { MinimalHttpApp } from "../../server";
-import { DEFAULT_SHIPPING_PRICES, INSPECTION_SURCHARGE, SENSITIVE_SURCHARGE } from "../../../../../packages/shared-types/constants";
 
-/** 默认单价（元/m³） — 基价来自共享常量，加价同理 */
-const { sea, land } = DEFAULT_SHIPPING_PRICES;
-const DEFAULT_UNIT_PRICES: Record<string, number> = {
-  "sea|NORMAL": sea,
-  "sea|INSPECTION": sea + INSPECTION_SURCHARGE,
-  "sea|SENSITIVE": sea + SENSITIVE_SURCHARGE,
-  "land|NORMAL": land,
-  "land|INSPECTION": land + INSPECTION_SURCHARGE,
-  "land|SENSITIVE": land + SENSITIVE_SURCHARGE,
-} as const;
+/* 2026-08-07：运单不再涉及金额。
+   原来这里有一套「按体积×单价自动算应收金额」的代码，两个 bug 叠在一起
+   （只查通用价、但库里全是客户专属价；兜底价目表键名大小写对不上），
+   从 2026-06 起就一直算不出来。用户决定：运单金额线下算，系统不再参与，
+   钱只在两个集货拼柜板块里算。整段删除，不留半死不活的代码。 */
 
-const MIN_VOLUME_DEFAULTS: Record<string, number> = { sea: 0.5, land: 0.3 };
-
-/** 从配置表获取最低计费体积 */
-async function getMinVolume(transportMode: string): Promise<number> {
-  const row = await prisma.aiStatusLabel.findFirst({
-    where: { status: `min_volume_${transportMode}_min_volume` },
-    select: { labelZh: true },
-  });
-  if (row?.labelZh) {
-    const v = Number(row.labelZh);
-    if (Number.isFinite(v) && v > 0) return v;
-  }
-  return MIN_VOLUME_DEFAULTS[transportMode] ?? 0.5;
-}
-
-/** 计算产品总积体 */
-function calcTotalVolume(products: Array<{ packageCount: number; lengthCm?: number | null; widthCm?: number | null; heightCm?: number | null }>): number {
-  return products.reduce((sum, p) => {
-    if (p.lengthCm && p.widthCm && p.heightCm)
-      return sum + (p.lengthCm * p.widthCm * p.heightCm * p.packageCount) / 1_000_000;
-    return sum;
-  }, 0);
-}
-
-/** 按订单总积体统一计费：总积体 vs 低消，取较大值 × 单价 */
-async function calcReceivableByProducts(
-  companyId: string,
-  transportMode: string,
-  products: Array<{ packageCount: number; lengthCm?: number | null; widthCm?: number | null; heightCm?: number | null; cargoType?: string }>,
-  fallbackVolume?: number | null,
-): Promise<number | null> {
-  const totalVol = calcTotalVolume(products);
-  const effectiveVol = totalVol > 0 ? totalVol : (fallbackVolume ?? 0);
-  if (effectiveVol <= 0) return null;
-
-  const minVol = await getMinVolume(transportMode);
-  const billableVol = Math.max(effectiveVol, minVol);
-
-  const cargoType = (products.length > 0 ? products[0].cargoType?.trim() : null) || "normal";
-  const key = `${transportMode}|${cargoType}`;
-  const rule = await prisma.pricingRule.findFirst({
-    where: { companyId, transportMode, cargoType, customerId: null },
-    select: { unitPriceCny: true },
-  });
-  const unitPrice = rule ? Number(rule.unitPriceCny.toString()) : (DEFAULT_UNIT_PRICES[key] ?? null);
-  if (!unitPrice || unitPrice <= 0) return null;
-
-  return Math.round(billableVol * unitPrice * 100) / 100;
-}
 import { fail, ok, parseJsonArray, requireRole } from "../core/http-utils";
 import { loadProductImagesForOrders, MAX_ORDER_PRODUCT_IMAGES } from "./product-images";
 import { saveImageToDisk, deleteImageFile } from "./image-storage";
@@ -303,17 +248,6 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
           sortOrder: i,
         })),
       });
-    }
-
-    // 自动计算应收金额（按产品行分别计价求和）
-    if (products.length > 0) {
-      const amount = await calcReceivableByProducts(auth.companyId, body.transportMode, products, totalVol);
-      if (amount !== null) {
-        await prisma.order.update({
-          where: { id: orderId },
-          data: { receivableAmountCny: amount as unknown as Prisma.Decimal },
-        });
-      }
     }
 
     // 同步创建运单（预报单=运单号）
@@ -829,7 +763,6 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
     const packageUnit = body.packageUnit ?? "box";
 
     // 事务前计算应收金额（按产品行分别计价求和）
-    const calcAmount = await calcReceivableByProducts(auth.companyId, body.transportMode, staffProducts, volumeM3);
 
     const txOps: any[] = [
       prisma.order.create({
@@ -847,7 +780,6 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
           packageUnit,
           weightKg: prWeight > 0 ? (prWeight as unknown as Prisma.Decimal) : (weightKg as unknown as Prisma.Decimal | null),
           volumeM3: prVol > 0 ? (prVol as unknown as Prisma.Decimal) : (volumeM3 as unknown as Prisma.Decimal | null),
-          receivableAmountCny: calcAmount !== null ? (calcAmount as unknown as Prisma.Decimal) : null,
           receivableCurrency: "CNY",
           shipDate: body.arrivedAt.trim(),
           domesticTrackingNo: body.domesticTrackingNo ?? null,
@@ -922,141 +854,7 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
     ok(res, { orderId, createdAt: now });
   });
 
-  app.post("/staff/orders/set-receivable", async (req, res) => {
-    const auth = requireRole(req, res, ["staff", "admin"]);
-    if (!auth) return;
 
-    const body = (req.body ?? {}) as {
-      orderId?: string;
-      receivableAmountCny?: number;
-      receivableCurrency?: "CNY" | "THB";
-    };
-    const orderId = body.orderId?.trim();
-    const amount = body.receivableAmountCny === undefined ? NaN : Number(body.receivableAmountCny);
-    const currency = body.receivableCurrency === "THB" ? "THB" : "CNY";
-
-    if (!orderId) {
-      fail(res, 400, "BAD_REQUEST", "orderId is required");
-      return;
-    }
-    if (!Number.isFinite(amount) || amount <= 0) {
-      fail(res, 400, "BAD_REQUEST", "receivableAmountCny must be greater than 0");
-      return;
-    }
-
-    const order = await prisma.order.findFirst({
-      where: { id: orderId, companyId: auth.companyId },
-      select: { id: true, warehouseId: true },
-    });
-    if (!order) {
-      fail(res, 404, "NOT_FOUND", "order not found");
-      return;
-    }
-
-    const updated = await prisma.order.update({
-      where: { id: orderId },
-      data: {
-        receivableAmountCny: amount as unknown as Prisma.Decimal,
-        receivableCurrency: currency,
-      },
-      select: { updatedAt: true },
-    });
-
-    ok(res, {
-      orderId,
-      receivableAmountCny: amount,
-      receivableCurrency: currency,
-      updatedAt: updated.updatedAt.toISOString(),
-    });
-  });
-
-  app.post("/staff/orders/set-payment", async (req, res) => {
-    const auth = requireRole(req, res, ["staff", "admin"]);
-    if (!auth) return;
-
-    const body = (req.body ?? {}) as {
-      orderId?: string;
-      paymentStatus?: "paid" | "unpaid";
-      proofFileName?: string;
-      proofMime?: string;
-      proofBase64?: string;
-    };
-    const orderId = body.orderId?.trim();
-    const paymentStatus = body.paymentStatus === "paid" ? "paid" : body.paymentStatus === "unpaid" ? "unpaid" : null;
-    if (!orderId) {
-      fail(res, 400, "BAD_REQUEST", "orderId is required");
-      return;
-    }
-    if (!paymentStatus) {
-      fail(res, 400, "BAD_REQUEST", "paymentStatus must be 'paid' or 'unpaid'");
-      return;
-    }
-
-    const order = await prisma.order.findFirst({
-      where: { id: orderId, companyId: auth.companyId },
-      select: { id: true, warehouseId: true },
-    });
-    if (!order) {
-      fail(res, 404, "NOT_FOUND", "order not found");
-      return;
-    }
-
-    const now = new Date();
-    const nowIso = now.toISOString();
-    if (paymentStatus === "paid") {
-      const proofFileName = typeof body.proofFileName === "string" ? body.proofFileName.trim() : "";
-      const proofMime = typeof body.proofMime === "string" ? body.proofMime.trim() : "";
-      const proofBase64 = typeof body.proofBase64 === "string" ? body.proofBase64.trim() : "";
-      if (!proofFileName || !proofMime || !proofBase64) {
-        fail(res, 400, "BAD_REQUEST", "payment proof is required when marking as paid");
-        return;
-      }
-      // Basic size guard to avoid storing extremely large blobs.
-      // base64 expands ~4/3, so 4MB base64 ~= 3MB binary.
-      if (proofBase64.length > 4_000_000) {
-        fail(res, 400, "BAD_REQUEST", "payment proof is too large (max 4MB base64)");
-        return;
-      }
-      try {
-        const buf = Buffer.from(proofBase64, "base64");
-        if (buf.length === 0) {
-          fail(res, 400, "BAD_REQUEST", "invalid payment proof");
-          return;
-        }
-      } catch {
-        fail(res, 400, "BAD_REQUEST", "invalid payment proof");
-        return;
-      }
-      await prisma.order.update({
-        where: { id: orderId },
-        data: {
-          paymentStatus: "paid",
-          paidAt: now,
-          paidBy: auth.userId,
-          paymentProofFileName: proofFileName,
-          paymentProofMime: proofMime,
-          paymentProofBase64: proofBase64,
-          paymentProofUploadedAt: now,
-        },
-      });
-      ok(res, { orderId, paymentStatus: "paid", paidAt: nowIso, paidBy: auth.userId, updatedAt: nowIso });
-      return;
-    }
-
-    await prisma.order.update({
-      where: { id: orderId },
-      data: {
-        paymentStatus: "unpaid",
-        paidAt: null,
-        paidBy: null,
-        paymentProofFileName: null,
-        paymentProofMime: null,
-        paymentProofBase64: null,
-        paymentProofUploadedAt: null,
-      },
-    });
-    ok(res, { orderId, paymentStatus: "unpaid", paidAt: null, paidBy: null, updatedAt: nowIso });
-  });
 
   app.get("/client/orders", async (req, res) => {
     const auth = requireRole(req, res, ["client"]);
@@ -1186,70 +984,6 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
   });
 
   // ===== 客户端付款 =====
-  app.post("/client/orders/pay", async (req, res) => {
-    const auth = requireRole(req, res, ["client"]);
-    if (!auth) return;
-    const body = (req.body ?? {}) as { orderId?: string; method?: string; proofImage?: string };
-    const orderId = body.orderId?.trim();
-    const method = body.method?.trim();
-
-    if (!orderId) { fail(res, 400, "BAD_REQUEST", "缺少订单ID"); return; }
-    if (method !== "balance" && method !== "offline") {
-      fail(res, 400, "BAD_REQUEST", "支付方式无效，可选：balance（余额）或 offline（线下）");
-      return;
-    }
-
-    const order = await prisma.order.findFirst({
-      where: { id: orderId, clientId: auth.userId, companyId: auth.companyId },
-      select: { id: true, receivableAmountCny: true, receivableCurrency: true, paymentStatus: true },
-    });
-    if (!order) { fail(res, 404, "NOT_FOUND", "订单不存在"); return; }
-    if (order.paymentStatus === "paid") { fail(res, 400, "BAD_REQUEST", "该运单已付款"); return; }
-    const amount = Number(order.receivableAmountCny ?? 0);
-    if (amount <= 0) { fail(res, 400, "BAD_REQUEST", "该运单无应收金额"); return; }
-
-    if (method === "balance") {
-      // 余额支付：事务内原子查余额+扣款，防止并发超扣
-      try {
-        await prisma.$transaction(async (tx) => {
-          const wallet = await tx.clientWalletAccount.findUnique({
-            where: { clientId_currency: { clientId: auth.userId, currency: "CNY" } },
-            select: { balance: true },
-          });
-          const balance = Number(wallet?.balance ?? 0);
-          if (balance < amount) throw new Error("BALANCE_INSUFFICIENT");
-          await tx.clientWalletAccount.update({
-            where: { clientId_currency: { clientId: auth.userId, currency: "CNY" } },
-            data: { balance: { decrement: amount } },
-          });
-          await tx.order.update({
-            where: { id: orderId },
-            data: { paymentStatus: "paid", paidAt: new Date(), paidBy: `${auth.name}(余额)` },
-          });
-        });
-        ok(res, { success: true, method: "balance", message: `余额支付成功 ¥${amount.toFixed(2)}` });
-      } catch (e: any) {
-        if (e.message === "BALANCE_INSUFFICIENT") {
-          fail(res, 400, "BALANCE_INSUFFICIENT", `余额不足：需要 ¥${amount.toFixed(2)}`);
-        } else throw e;
-      }
-    } else {
-      // 线下支付
-      const proofImage = (body.proofImage ?? "").trim();
-      if (!proofImage) { fail(res, 400, "BAD_REQUEST", "请上传付款凭证"); return; }
-      await prisma.order.update({
-        where: { id: orderId },
-        data: {
-          paymentProofBase64: proofImage,
-          paymentProofMime: "image/png",
-          paymentProofFileName: `payment_${orderId}.png`,
-          paymentProofUploadedAt: new Date(),
-          paymentStatus: "unpaid", // 保持未付款，等管理员审核
-        },
-      });
-      ok(res, { success: true, method: "offline", message: "付款凭证已提交，等待管理员审核" });
-    }
-  });
 
   app.get("/client/prealerts", async (req, res) => {
     const auth = requireRole(req, res, ["client"]);
@@ -1646,19 +1380,7 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       shipDate = raw;
     }
 
-    let receivableAmount: number | null = decToNumber(curOrder.receivableAmountCny);
-    let currency: "CNY" | "THB" = curOrder.receivableCurrency === "THB" ? "THB" : "CNY";
-    if (body.receivableAmountCny !== undefined && body.receivableAmountCny !== null) {
-      const amt = Number(body.receivableAmountCny);
-      if (!Number.isFinite(amt) || amt < 0) {
-        fail(res, 400, "BAD_REQUEST", "invalid receivableAmountCny");
-        return;
-      }
-      receivableAmount = amt === 0 ? null : amt;
-    }
-    if (body.receivableCurrency === "THB" || body.receivableCurrency === "CNY") {
-      currency = body.receivableCurrency;
-    }
+    /* 2026-08-07：运单不再涉及金额，这个接口也不再接受/写入应收金额和币种。 */
 
     const batchNo = body.batchNo?.trim() || null;
     const domesticTrackingNo = body.domesticTrackingNo?.trim() || null;
@@ -1683,8 +1405,6 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
           transportMode,
           shipDate,
           receiverAddressTh,
-          receivableAmountCny: receivableAmount as unknown as Prisma.Decimal | null,
-          receivableCurrency: currency,
           createdAt: arrived,
         },
       }),

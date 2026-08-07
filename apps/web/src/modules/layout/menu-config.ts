@@ -22,7 +22,6 @@ export const roleMenus: Record<AuthRole, MenuItem[]> = {
   client: [
     { id: "client-home", label: "客户端工作台", href: "/client" },
     { id: "client-orders", label: "我的订单", href: "/client" },
-    { id: "client-bills", label: "账单", href: "/client/bills" },
   ],
   staff: [
     { id: "staff-home", label: "员工工作台", href: "/staff" },
@@ -69,7 +68,6 @@ export const roleFunctionGroups: Record<AuthRole, MenuGroup[]> = {
       items: [
         { id: "admin-func-lastmile", label: "尾端派送", href: "/admin#lastmile" },
         { id: "admin-func-address", label: "尾端地址", href: "/admin#lastmile-address" },
-        { id: "admin-func-offline-payments", label: "付款审核", href: "/admin#offline-payments" },
       ],
     },
     {
@@ -121,8 +119,7 @@ export const roleFunctionGroups: Record<AuthRole, MenuGroup[]> = {
     {
       groupLabel: "财务",
       items: [
-        { id: "staff-func-billing", label: "账单管理", href: "/staff#staff-billing" },
-        { id: "staff-func-wallet", label: "客户余额", href: "/staff#staff-wallet" },
+        { id: "staff-func-wallet", label: "客户集货余额", href: "/staff#staff-wallet" },
         { id: "staff-func-prices", label: "客户价格查询", href: "/staff/prices" },
       ],
     },
@@ -145,8 +142,7 @@ export const roleFunctionGroups: Record<AuthRole, MenuGroup[]> = {
       items: [
         { id: "client-func-main", label: "主页与AI", href: "/client#client-main" },
         { id: "client-func-quote", label: "智能算费", href: "/client#client-main" },
-        { id: "client-func-bills", label: "账单", href: "/client/bills" },
-        { id: "client-func-wallet", label: "余额", href: "/client/wallet" },
+        { id: "client-func-wallet", label: "集货余额", href: "/client/wallet" },
         { id: "client-func-address", label: "地址库", href: "/client/address-book" },
       ],
     },

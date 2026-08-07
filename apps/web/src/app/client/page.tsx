@@ -1238,14 +1238,6 @@ export default function ClientHomePage() {
                                 <div><span style={{ color: "#6b7280", fontSize: 12 }}>货型：</span>{cargoTypeLabel}</div>
                                 <div><span style={{ color: "#6b7280", fontSize: 12 }}>收货地址：</span>{item.receiverAddressTh || "—"}</div>
                               </div>
-                              {/* 财务信息 */}
-                              <h4 style={{ margin: "0 0 8px", fontSize: 14, color: "#374151" }}>财务信息</h4>
-                              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "6px 16px", marginBottom: 12 }}>
-                                <div><span style={{ color: "#6b7280", fontSize: 12 }}>应收金额：</span><strong>{item.receivableAmountCny != null ? `¥${Number(item.receivableAmountCny).toFixed(2)}` : "—"}</strong></div>
-                                <div><span style={{ color: "#6b7280", fontSize: 12 }}>支付状态：</span>{item.paymentStatus === "paid" ? <span style={{ color: "#16a34a" }}>已付款</span> : <span style={{ color: "#6b7280" }}>未付款</span>}</div>
-                                {item.paidAt ? <div><span style={{ color: "#6b7280", fontSize: 12 }}>付款时间：</span>{new Date(item.paidAt).toLocaleString("zh-CN")}</div> : null}
-                                {item.paidBy ? <div><span style={{ color: "#6b7280", fontSize: 12 }}>付款方式：</span>{item.paidBy.includes("余额") ? "余额支付" : item.paidBy.includes("管理员") ? "线下支付(已审核)" : item.paidBy}</div> : null}
-                              </div>
                               {/* 产品明细 */}
                               {(item.products?.length ?? 0) > 0 ? (
                                 <div style={{ marginBottom: 12 }}>

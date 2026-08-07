@@ -34,7 +34,6 @@ import {
   patchStaffShipmentOrderBundle,
   repairStaffShipmentOrderLinks,
   type RepairStaffShipmentOrderLinksResult,
-  setStaffOrderPayment,
   setStaffShipmentContainer,
   type OrderItem,
   type OrderProductImageItem,
@@ -324,7 +323,7 @@ export default function StaffHomePage() {
     contentBase64: "",
   });
   const [photoList, setPhotoList] = useState<StaffInboundPhotoItem[]>([]);
-  const [activeSection, setActiveSection] = useState<StaffSectionId>("staff-billing");
+  const [activeSection, setActiveSection] = useState<StaffSectionId>("staff-prealert-review");
 
   const [lmDriverName, setLmDriverName] = useState("");
   const [lmLicensePlate, setLmLicensePlate] = useState("");
@@ -1241,60 +1240,6 @@ const loadLmShipments = async () => {
       </p>
 
       <section
-        id="staff-billing"
-        style={{
-          display: activeSection === "staff-billing" ? "block" : "none",
-          border: "1px solid #e5e7eb",
-          borderLeft: "4px solid #0f766e",
-          borderRadius: 12,
-          padding: 16,
-          marginBottom: 18,
-          background: "#ffffff",
-          boxShadow: "0 1px 3px rgba(15,23,42,0.06)",
-        }}
-      >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-          <h2 style={{ margin: 0, fontSize: 18, color: "#111827" }}>账单管理（业务板块）</h2>
-        </div>
-        <div
-          style={{
-            border: "1px solid #e2e8f0",
-            borderRadius: 12,
-            padding: 14,
-            background: "#f8fafc",
-            color: "#000000",
-            fontSize: 14,
-            lineHeight: 1.6,
-          }}
-        >
-          应收金额、付款状态与已审核订单的产品图维护已调整为<strong>仅管理员</strong>在管理端操作。员工端运单列表中的订单信息为<strong>只读</strong>展示。
-        </div>
-      </section>
-
-      <StaffPrealertList
-        visible={activeSection === "staff-prealert-review"}
-        prealerts={prealerts}
-        filteredPrealerts={filteredPrealerts}
-        prealertSearch={prealertSearch as PrealertSearchState}
-        onPrealertSearchChange={(key, val) => setPrealertSearch((prev) => ({ ...prev, [key]: val }))}
-        prealertPanelCollapsed={prealertPanelCollapsed}
-        onToggleCollapse={() => setPrealertPanelCollapsed((v) => !v)}
-        prealertEditDrafts={prealertEditDrafts}
-        setPrealertEditDrafts={setPrealertEditDrafts}
-        prealertConfirmedDrafts={prealertConfirmedDrafts}
-        editingPrealertId={editingPrealertId}
-        setEditingPrealertId={setEditingPrealertId}
-        prealertBatchDrafts={prealertBatchDrafts}
-        setPrealertBatchDrafts={setPrealertBatchDrafts}
-        loading={loading}
-        warehouseOptions={warehouseOptions}
-        onConfirmPrealertEdit={confirmPrealertEdit}
-        onApprovePrealert={setApprovingPrealert}
-        onUploadImage={(orderId, file) => { void uploadOrderProductImageAndReload(orderId, file); }}
-        onDeleteImage={(imageId) => { void deleteOrderProductImageAndReload(imageId); }}
-      />
-
-      <section
         id="staff-create-order"
         style={{
           display: activeSection === "staff-create-order" ? "block" : "none",
@@ -2009,43 +1954,6 @@ const loadLmShipments = async () => {
                                               </label>
                                             </div>
                                           </ShipmentEditFormField>
-                                          <ShipmentEditFormField label="支付状态">
-                                            <select
-                                              value={draft.paymentStatus}
-                                              disabled={formDisabled || !item.orderId}
-                                              style={inputInCard}
-                                              onChange={async (e) => {
-                                                const v = e.target.value as "paid" | "unpaid";
-                                                if (v === "paid") {
-                                                  setMessage("标记为已付款需上传付款凭证，请使用订单管理中的付款操作后再标记。");
-                                                  return;
-                                                }
-                                                if (!item.orderId) return;
-                                                setLoading(true);
-                                                setMessage("");
-                                                try {
-                                                  await setStaffOrderPayment({ orderId: item.orderId, paymentStatus: "unpaid" });
-                                                  const items = await loadPageData();
-                                                  const u = items.find((s) => s.id === item.id);
-                                                  if (u) {
-                                                    setShipmentOrderEditDrafts((prev) => ({
-                                                      ...prev,
-                                                      [item.id]: buildShipmentOrderEditDraft(u),
-                                                    }));
-                                                  }
-                                                  setToast("支付状态已更新为未支付");
-                                                } catch (error) {
-                                                  const text = error instanceof Error ? error.message : "更新失败";
-                                                  setMessage(`支付状态更新失败：${text}`);
-                                                } finally {
-                                                  setLoading(false);
-                                                }
-                                              }}
-                                            >
-                                              <option value="unpaid">未支付</option>
-                                              <option value="paid">已支付</option>
-                                            </select>
-                                          </ShipmentEditFormField>
                                           <ShipmentEditFormField label="目的国家">
                                             <select
                                               value={draft.destinationCountry}
@@ -2078,32 +1986,6 @@ const loadLmShipments = async () => {
                                               style={inputInCard}
                                               placeholder="与总体积一致时可填相同值"
                                             />
-                                          </ShipmentEditFormField>
-                                          <ShipmentEditFormField label="加收金额">
-                                            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                                              <input
-                                                value={draft.receivableAmountCny}
-                                                onChange={(e) =>
-                                                  mergeShipmentOrderDraft(item.id, item, { receivableAmountCny: e.target.value })
-                                                }
-                                                disabled={formDisabled}
-                                                style={{ ...inputInCard, flex: 1 }}
-                                                placeholder="0"
-                                              />
-                                              <select
-                                                value={draft.receivableCurrency}
-                                                onChange={(e) =>
-                                                  mergeShipmentOrderDraft(item.id, item, {
-                                                    receivableCurrency: e.target.value as "CNY" | "THB",
-                                                  })
-                                                }
-                                                disabled={formDisabled}
-                                                style={{ ...inputInCard, flex: 0, minWidth: 72 }}
-                                              >
-                                                <option value="CNY">CNY</option>
-                                                <option value="THB">THB</option>
-                                              </select>
-                                            </div>
                                           </ShipmentEditFormField>
                                           <ShipmentEditFormField label="柜号">
                                             <input
@@ -2794,8 +2676,7 @@ const loadLmShipments = async () => {
                   <tr style={{ background: "#f9fafb", borderBottom: "1px solid #e5e7eb" }}>
                     <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#374151" }}>客户</th>
                     <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#374151" }}>公司</th>
-                    <th style={{ padding: "8px 12px", textAlign: "right", fontWeight: 600, color: "#374151" }}>人民币余额</th>
-                    <th style={{ padding: "8px 12px", textAlign: "right", fontWeight: 600, color: "#374151" }}>泰铢余额</th>
+                    <th style={{ padding: "8px 12px", textAlign: "right", fontWeight: 600, color: "#374151" }}>集货余额</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2804,7 +2685,6 @@ const loadLmShipments = async () => {
                       <td style={{ padding: "8px 12px" }}>{b.clientName}</td>
                       <td style={{ padding: "8px 12px", color: "#6b7280" }}>{b.companyName || "—"}</td>
                       <td style={{ padding: "8px 12px", textAlign: "right", fontWeight: 600 }}>¥{b.cny.toFixed(2)}</td>
-                      <td style={{ padding: "8px 12px", textAlign: "right", fontWeight: 600 }}>฿{b.thb.toFixed(2)}</td>
                     </tr>
                   ))}
                 </tbody>
