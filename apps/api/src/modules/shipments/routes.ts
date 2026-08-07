@@ -5,6 +5,7 @@ import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
 import { checkRateLimit, getClientIp, rateLimitKey } from "../core/rate-limit";
 import { fail, ok, parseJsonArray, requireRole } from "../core/http-utils";
+import { logger } from "../core/logger";
 import { loadProductImagesForOrders } from "../orders/product-images";
 import { STATUS_FLOW, STATUS_FLOW_LAND, EXCEPTION_STATUSES, DELAY_STATUSES } from "./status-flow";
 
@@ -761,6 +762,73 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
       repairedShipmentIds: [],
       skipped: [],
       note: "此功能在 Postgres 迁移后不再需要",
+    });
+  });
+
+  /**
+   * 删掉物流轨迹里写错的一条（员工和管理员都能用）。
+   *
+   * 2026-08-07 加的。柜子状态只能往前推，推错了既回不去也改不了 ——
+   * 真实案例：运单 YW0001396 已开船之后被误推成「延迟运输」，
+   * 客户看到的就是「运输中」突然变「延迟运输」。
+   *
+   * 删完把运单的当前状态退回到剩下的最后一条轨迹。
+   * ⚠️ 如果一条都不剩，当前状态**保持不动** —— 生产库里有 219 张已签收的老运单
+   * 压根没有轨迹记录，把它们重置成「已创建」比留着错状态更糟。
+   */
+  app.post("/staff/shipments/track/delete-log", async (req, res) => {
+    const auth = requireRole(req, res, ["staff", "admin"]);
+    if (!auth) return;
+
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const logId = typeof body.logId === "string" ? body.logId.trim() : "";
+    if (!logId) {
+      fail(res, 400, "BAD_REQUEST", "logId is required");
+      return;
+    }
+
+    const log = await prisma.statusLog.findFirst({
+      where: { id: logId, companyId: auth.companyId },
+      include: { shipment: { select: { id: true, trackingNo: true, currentStatus: true } } },
+    });
+    if (!log) {
+      fail(res, 404, "NOT_FOUND", "这条轨迹不存在，可能已经被删掉了");
+      return;
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.statusLog.delete({ where: { id: logId } });
+
+      // 剩下的最后一条决定当前状态；一条不剩就不动它
+      const latest = await tx.statusLog.findFirst({
+        where: { shipmentId: log.shipmentId },
+        orderBy: { changedAt: "desc" },
+        select: { toStatus: true },
+      });
+      if (latest) {
+        await tx.shipment.update({
+          where: { id: log.shipmentId },
+          data: { currentStatus: latest.toStatus, updatedAt: new Date() },
+        });
+      }
+      return { newStatus: latest?.toStatus ?? log.shipment.currentStatus, hasLogsLeft: !!latest };
+    });
+
+    // 轨迹是给客户看的记录，谁删了什么必须留痕（只记状态和时间，不记客户信息）
+    logger.warn("删除物流轨迹", {
+      操作人: auth.userId,
+      角色: auth.role,
+      运单号: log.shipment.trackingNo,
+      删掉的状态: log.toStatus,
+      那条的时间: log.changedAt.toISOString(),
+      删完当前状态: result.newStatus,
+    });
+
+    ok(res, {
+      deleted: true,
+      trackingNo: log.shipment.trackingNo,
+      currentStatus: result.newStatus,
+      hasLogsLeft: result.hasLogsLeft,
     });
   });
 }

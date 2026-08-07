@@ -2,11 +2,16 @@
 
 import { createRoot } from "react-dom/client";
 import { useCallback, useEffect, useState } from "react";
-import { authHeaders, apiBaseUrl, parseApiResponse } from "../../services/core-api";
+import { authHeaders, apiBaseUrl, apiRequest, parseApiResponse } from "../../services/core-api";
 
 // ── Types ──
 
 interface TimelineItem {
+  /**
+   * 这条记录在数据库里的 id，删「写错的一条」时靠它定位。
+   * 后端只发给员工和管理员，客户端拿到的是空字符串。
+   */
+  id?: string;
   /** 该条记录来自哪张运单。父运单标签里会混入子运单的记录，用它区分是哪一件货 */
   trackingNo?: string;
   fromStatus: string;
@@ -149,7 +154,7 @@ function LoadingSkeleton() {
  * 左侧圆点竖线，右侧「状态 + 时间」一行、备注一行，不用卡片和色块。
  * 列表是倒序渲染的（最新在最上），所以 index === 0 就是最新那条。
  */
-function TimelineNode({ item, isLast, isChild, index, tabTrackingNo, hideOperator }: { item: TimelineItem; isLast: boolean; isChild?: boolean; index: number; total: number; tabTrackingNo?: string; hideOperator?: boolean }) {
+function TimelineNode({ item, isLast, isChild, index, tabTrackingNo, hideOperator, onDelete, deleting }: { item: TimelineItem; isLast: boolean; isChild?: boolean; index: number; total: number; tabTrackingNo?: string; hideOperator?: boolean; onDelete?: (item: TimelineItem) => void; deleting?: boolean }) {
   const toCfg = statusCfg(item.toStatus);
   const isLatest = index === 0;
   // 父运单标签下混合展示了各子单的记录，标出这条属于哪个子单
@@ -216,6 +221,26 @@ function TimelineNode({ item, isLast, isChild, index, tabTrackingNo, hideOperato
         {sourceLabel && (
           <span style={{ fontSize: 12, color: "#6b7280" }}>{sourceLabel}</span>
         )}
+        {/* 删掉写错的一条（员工/管理员）。客户端后端根本不下发 id，这里不会出现 */}
+        {onDelete && item.id ? (
+          <button
+            type="button"
+            disabled={deleting}
+            onClick={() => onDelete(item)}
+            style={{
+              marginLeft: "auto",
+              border: "1px solid #e5e7eb",
+              borderRadius: 6,
+              padding: "2px 8px",
+              background: "#fff",
+              color: deleting ? "#9ca3af" : "#b91c1c",
+              fontSize: 12,
+              cursor: deleting ? "not-allowed" : "pointer",
+            }}
+          >
+            {deleting ? "删除中…" : "删除"}
+          </button>
+        ) : null}
       </div>
 
       {/* 第二行：备注（跟状态重复就不显示）+ 操作人。
@@ -240,9 +265,39 @@ function TimelineNode({ item, isLast, isChild, index, tabTrackingNo, hideOperato
   );
 }
 
-function TrackContent({ data }: { data: TrackData }) {
+function TrackContent({ data, onReload }: { data: TrackData; onReload?: () => void }) {
   const [activeTab, setActiveTab] = useState(0); // 0=父运单, 1+=子运单
   const [zoomImage, setZoomImage] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // 员工和管理员可以删掉写错的一条轨迹（客户不行，后端连 id 都不下发）
+  const canEditTimeline = data.viewerRole === "staff" || data.viewerRole === "admin";
+
+  const handleDeleteLog = async (item: TimelineItem) => {
+    if (!item.id || deletingId) return;
+    const label = statusCfg(item.toStatus).zh;
+    const ok = window.confirm(
+      `确定删掉这一条吗？\n\n　${label}　${formatTime(item.changedAt)}\n\n` +
+      `删掉之后：\n` +
+      `· 当前状态会退回到上一条\n` +
+      `· 客户看到的物流轨迹里也会消失\n` +
+      `· 删了就找不回来了`,
+    );
+    if (!ok) return;
+    setDeletingId(item.id);
+    try {
+      await apiRequest(`${apiBaseUrl()}/staff/shipments/track/delete-log`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ logId: item.id }),
+      });
+      onReload?.();
+    } catch (e) {
+      window.alert("删除失败：" + (e instanceof Error ? e.message : "请重试"));
+    } finally {
+      setDeletingId(null);
+    }
+  };
   const allTabs = [
     { trackingNo: data.trackingNo, currentStatus: data.currentStatus, timeline: data.timeline, packageCount: undefined as number | undefined },
     ...(data.children ?? []).map(c => ({ trackingNo: c.trackingNo, currentStatus: c.currentStatus, timeline: c.timeline, packageCount: c.packageCount })),
@@ -370,6 +425,8 @@ function TrackContent({ data }: { data: TrackData }) {
                 total={tab.timeline.length}
                 tabTrackingNo={tab.trackingNo}
                 hideOperator={data.viewerRole === "client"}
+                onDelete={canEditTimeline ? handleDeleteLog : undefined}
+                deleting={deletingId === item.id}
               />
             ))}
           </div>
@@ -537,7 +594,7 @@ function ShipmentTrackModal({ trackingOrId, onClose }: { trackingOrId: string; o
               <div style={{ fontSize: 12, color: "#9ca3af" }}>货物状态更新后将显示在这里</div>
             </div>
           ) : (
-            <TrackContent data={data} />
+            <TrackContent data={data} onReload={load} />
           )}
         </div>
       </div>

@@ -14,6 +14,7 @@ import {
   fetchStaffShipments,
   deleteContainer,
   updateContainerStatus,
+  undoContainerStatus,
   setManifestTransportMode,
   type LoadingManifestItem,
   type LoadingManifestDetail,
@@ -124,6 +125,7 @@ export default function StaffContainerLoadingPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [createForm, setCreateForm] = useState({ warehouse: "wh_yiwu_01", transportMode: "sea", voyage: "", vesselName: "", containerNo: "" });
   const [creating, setCreating] = useState(false);
+  const [undoing, setUndoing] = useState(false);
   const [selectedId, setSelectedId] = useState("");
   const [detail, setDetail] = useState<LoadingManifestDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
@@ -255,6 +257,35 @@ export default function StaffContainerLoadingPage() {
       await loadDetail(selectedId);
     } catch (e) {
       setError(e instanceof Error ? e.message : "状态更新失败");
+    }
+  };
+
+  /** 推错了：整柜退回上一步，柜里每张运单那一批轨迹一起删掉 */
+  const handleUndoStatus = async () => {
+    if (!selectedId || !detail || undoing) return;
+    const nowLabel = STATUS_LABEL[detail.status] ?? detail.status;
+    const ok = window.confirm(
+      `确定撤销这个柜子的「${nowLabel}」吗？\n\n` +
+      `· 柜子退回上一个状态\n` +
+      `· 柜里每张运单的这条轨迹都会删掉，客户看不到了\n` +
+      `· 每张运单的当前状态退回到它自己上一条轨迹\n` +
+      `· 撤了就找不回来了`,
+    );
+    if (!ok) return;
+    setUndoing(true);
+    try {
+      const result = await undoContainerStatus(selectedId);
+      setToast(
+        `已撤销「${STATUS_LABEL[result.undoneStatus] ?? result.undoneStatus}」，` +
+        `柜子退回「${STATUS_LABEL[result.currentStatus] ?? result.currentStatus}」` +
+        `（${result.affectedShipmentCount} 个运单，删掉 ${result.deletedLogs} 条轨迹）`,
+      );
+      await loadList();
+      await loadDetail(selectedId);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "撤销失败");
+    } finally {
+      setUndoing(false);
     }
   };
 
@@ -529,6 +560,17 @@ export default function StaffContainerLoadingPage() {
                         </>
                       );
                     })()}
+                    {/* 推错了：整柜退回上一步，柜里每张运单那批轨迹一起删掉。
+                        装柜中是第一个状态，没有上一步可退，所以不显示 */}
+                    {detail.status !== "LOADING" && (
+                      <button
+                        onClick={handleUndoStatus}
+                        disabled={undoing}
+                        style={{ border: "1px solid #e5e7eb", borderRadius: 6, padding: "8px 16px", background: "#fff", color: undoing ? "#9ca3af" : "#b91c1c", fontWeight: 500, fontSize: 13, cursor: undoing ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}
+                      >
+                        {undoing ? "撤销中…" : `撤销「${STATUS_LABEL[detail.status] ?? detail.status}」`}
+                      </button>
+                    )}
                     {detail.status === "LOADING" && (
                       <button onClick={handleDelete} style={{ border: "1px solid #fecaca", borderRadius: 6, padding: "8px 16px", background: "#fef2f2", color: "#dc2626", fontWeight: 500, fontSize: 13, cursor: "pointer" }}>删除柜子</button>
                     )}

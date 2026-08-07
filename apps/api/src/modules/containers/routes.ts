@@ -14,6 +14,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
+import { logger } from "../core/logger";
 import { canTransitLoose } from "../shipments/routes";
 // 柜子状态流程的唯一定义处，别在本文件里再抄一份
 import {
@@ -387,6 +388,168 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
     });
   });
 
+  /**
+   * 撤销这个柜子「上一次状态推进」（员工和管理员都能用）。
+   *
+   * 2026-08-07 加的。柜子状态原来只能往前推，推错了回不去 ——
+   * 真实案例：柜子已开船之后被误推成「延迟运输」，柜里每张运单都被写了一条
+   * 「延迟运输」的轨迹，客户看到的就是「运输中」突然变「延迟运输」。
+   * 一张张删要开几十次弹窗，所以在柜子这里一次撤掉整批。
+   *
+   * 怎么认出「上一次那批」：推进时整批日志用的是同一个时间戳（代码里的 now），
+   * 并且柜子的 statusDates 里记着每个状态是什么时候推的。
+   * 所以「柜里的运单 + changedAt 等于当前状态的时间戳 + toStatus 对得上」就是那一批。
+   *
+   * 撤完：
+   * - 柜子退回上一个状态（按 statusDates 里时间仅次于当前的那个）
+   * - 每张运单的当前状态按它自己剩下的最后一条轨迹重算；一条不剩就保持不动
+   * - 这次推进顺手写进柜子的开船日期/到港日期，如果就是这次写的，也一并撤掉
+   */
+  app.post("/admin/containers/status/undo", async (req, res) => {
+    const auth = requireRole(req, res, ["admin", "staff"]);
+    if (!auth) return;
+
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const id = typeof body.id === "string" ? body.id.trim() : "";
+    if (!id) {
+      fail(res, 400, "BAD_REQUEST", "id is required");
+      return;
+    }
+
+    const container = await prisma.container.findFirst({
+      where: { id, companyId: auth.companyId },
+      include: { items: { select: { shipmentId: true } } },
+    });
+    if (!container) {
+      fail(res, 404, "NOT_FOUND", "找不到这个柜子");
+      return;
+    }
+
+    let dates: Record<string, string> = {};
+    try { dates = container.statusDates ? JSON.parse(container.statusDates) : {}; } catch { dates = {}; }
+
+    const currentTs = dates[container.currentStatus];
+    if (!currentTs) {
+      fail(
+        res,
+        400,
+        "VALIDATION_ERROR",
+        `这个柜子没有记录「${CONTAINER_STATUS_LABEL[container.currentStatus] ?? container.currentStatus}」是什么时候推的（多半是很早以前推的老柜子），整柜撤不了。可以到运单的物流轨迹里一条条删。`,
+      );
+      return;
+    }
+
+    // 上一步 = statusDates 里时间仅次于当前状态的那个
+    const prevEntry = Object.entries(dates)
+      .filter(([status, ts]) => status !== container.currentStatus && new Date(ts).getTime() <= new Date(currentTs).getTime())
+      .sort((a, b) => new Date(b[1]).getTime() - new Date(a[1]).getTime())[0];
+    if (!prevEntry) {
+      fail(res, 400, "VALIDATION_ERROR", "这是这个柜子的第一个状态，没有上一步可以退。");
+      return;
+    }
+    const prevStatus = prevEntry[0];
+
+    const changedAt = new Date(currentTs);
+    const shipmentIds = container.items.map((it) => it.shipmentId);
+    const shipmentStatusOfThisPush: string | null = CONTAINER_TO_SHIPMENT_STATUS[container.currentStatus] ?? null;
+
+    const result = await prisma.$transaction(async (tx) => {
+      let deletedLogs = 0;
+      let affectedShipments = 0;
+
+      if (shipmentStatusOfThisPush && shipmentIds.length > 0) {
+        const del = await tx.statusLog.deleteMany({
+          where: {
+            companyId: auth.companyId,
+            shipmentId: { in: shipmentIds },
+            changedAt,
+            toStatus: shipmentStatusOfThisPush,
+          },
+        });
+        deletedLogs = del.count;
+
+        // 每张运单按「剩下的最后一条轨迹」重算当前状态；一条不剩的保持不动
+        const remaining = await tx.statusLog.findMany({
+          where: { shipmentId: { in: shipmentIds } },
+          orderBy: { changedAt: "asc" },
+          select: { shipmentId: true, toStatus: true },
+        });
+        const latestByShipment = new Map<string, string>();
+        for (const row of remaining) latestByShipment.set(row.shipmentId, row.toStatus);
+
+        // 按状态分组批量更新，避免几十张运单发几十条 update
+        const idsByStatus = new Map<string, string[]>();
+        for (const [sid, status] of latestByShipment) {
+          const list = idsByStatus.get(status) ?? [];
+          list.push(sid);
+          idsByStatus.set(status, list);
+        }
+        for (const [status, ids] of idsByStatus) {
+          await tx.shipment.updateMany({
+            where: { id: { in: ids }, companyId: auth.companyId },
+            data: { currentStatus: status, updatedAt: new Date() },
+          });
+          affectedShipments += ids.length;
+        }
+
+        // 父运单当初是跟着一起改的，这里也要跟着退
+        const kids = await tx.shipment.findMany({
+          where: { id: { in: shipmentIds }, companyId: auth.companyId },
+          select: { id: true, parentTrackingNo: true },
+        });
+        const parentTargets = new Map<string, string>();
+        for (const kid of kids) {
+          const newStatus = kid.parentTrackingNo ? latestByShipment.get(kid.id) : undefined;
+          if (kid.parentTrackingNo && newStatus) parentTargets.set(kid.parentTrackingNo, newStatus);
+        }
+        for (const [trackingNo, status] of parentTargets) {
+          await tx.shipment.updateMany({
+            where: { trackingNo, companyId: auth.companyId },
+            data: { currentStatus: status, updatedAt: new Date() },
+          });
+        }
+      }
+
+      delete dates[container.currentStatus];
+      const containerUpdate: Prisma.ContainerUpdateInput = {
+        currentStatus: prevStatus,
+        statusDates: JSON.stringify(dates),
+        updatedAt: new Date(),
+      };
+      // 开船/到港日期如果就是这次推进写进去的，一并撤掉
+      if (container.currentStatus === "IN_TRANSIT" && container.departureDate
+          && container.departureDate.getTime() === changedAt.getTime()) {
+        containerUpdate.departureDate = null;
+      }
+      if (container.currentStatus === "ARRIVED" && container.ata
+          && container.ata.getTime() === changedAt.getTime()) {
+        containerUpdate.ata = null;
+      }
+      await tx.container.update({ where: { id: container.id }, data: containerUpdate });
+
+      return { deletedLogs, affectedShipments };
+    });
+
+    logger.warn("撤销柜子状态推进", {
+      操作人: auth.userId,
+      角色: auth.role,
+      柜号: container.containerNo,
+      撤掉的状态: container.currentStatus,
+      退回到: prevStatus,
+      删掉轨迹条数: result.deletedLogs,
+      涉及运单数: result.affectedShipments,
+    });
+
+    ok(res, {
+      id: container.id,
+      containerNo: container.containerNo,
+      undoneStatus: container.currentStatus,
+      currentStatus: prevStatus,
+      deletedLogs: result.deletedLogs,
+      affectedShipmentCount: result.affectedShipments,
+    });
+  });
+
   // ============ 装柜（把某个运单装进某个柜子）============
   // 支持拆柜：同一 shipmentId 不能在同一柜子里出现两次（unique 约束）
   // 但可以在不同柜子里出现多次
@@ -648,10 +811,12 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
       isClient ? remark.replace(/装入柜子\s*[^\s（(]+/g, "已装柜") : remark;
 
     const mapLog = (
-      log: { fromStatus: string; toStatus: string; remark: string | null; nextStop?: string | null; changedAt: Date; operatorRole: string; operatorName: string | null },
+      log: { id: string; fromStatus: string; toStatus: string; remark: string | null; nextStop?: string | null; changedAt: Date; operatorRole: string; operatorName: string | null },
       trackingNo: string,
     ) => ({
       trackingNo,
+      // 员工/管理员删「写错的一条」时要靠它定位；跟操作人一样，客户端不下发
+      id: isClient ? "" : log.id,
       fromStatus: log.fromStatus,
       toStatus: log.toStatus,
       remark: sanitizeRemark(log.remark ?? ""),

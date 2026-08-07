@@ -1648,6 +1648,25 @@ export async function updateContainerStatus(payload: {
   return parseApiResponse(response);
 }
 
+/**
+ * 撤销这个柜子上一次的状态推进：柜子退回上一步，柜里每张运单那一批轨迹一起删掉。
+ * 推错了整柜一次撤，不用一张张运单去删。
+ */
+export async function undoContainerStatus(id: string): Promise<{
+  containerNo: string;
+  undoneStatus: string;
+  currentStatus: string;
+  deletedLogs: number;
+  affectedShipmentCount: number;
+}> {
+  const response = await fetch(`${apiBaseUrl()}/admin/containers/status/undo`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ id }),
+  });
+  return parseApiResponse(response);
+}
+
 export async function fetchShippingPrices(clientId?: string): Promise<Record<string, ShippingPriceItem>> {
   const query = clientId ? `?clientId=${encodeURIComponent(clientId)}` : "";
   const response = await fetch(`${apiBaseUrl()}/client/shipping/prices${query}`, {
