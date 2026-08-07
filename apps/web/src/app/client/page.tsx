@@ -152,7 +152,6 @@ export default function ClientHomePage() {
   const [hasQueried, setHasQueried] = useState(false);
   const [prealerts, setPrealerts] = useState<OrderItem[]>([]);
   const [dashboardOrders, setDashboardOrders] = useState<OrderItem[]>([]);
-  const [walletRateText, setWalletRateText] = useState("-");
   const [prealertSearch, setPrealertSearch] = useState("");
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingPrealert, setEditingPrealert] = useState<OrderItem  |  null>(null);
@@ -218,7 +217,12 @@ export default function ClientHomePage() {
     ]);
     if (results[0].status === "fulfilled") setPrealerts(results[0].value);
     if (results[1].status === "fulfilled") setDashboardOrders(results[1].value);
-    if (results[2].status === "fulfilled") setWalletRateText(results[2].value.exchangeRate.rate.toFixed(4));
+    // 2026-08-07 删除：这里原来读 results[2].value.exchangeRate.rate。
+    // 后端 /client/wallet/overview 在集货余额改造后已不再返回 exchangeRate
+    // （余额收窄成集货专用、只有人民币，用不着汇率），显示汇率的界面当时也一并删了，
+    // 只剩这行还在读，于是客户一打开首页就报
+    // 「Cannot read properties of undefined (reading 'rate')」。
+    // 算出来的值本来就没往页面上放，直接删掉，不要用 ?. 糊过去。
     if (results[3].status === "fulfilled") setAddressBook(results[3].value);
   };
 

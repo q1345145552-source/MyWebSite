@@ -101,17 +101,25 @@ export interface UniversalExpressTrackResult {
   }>;
 }
 
+/**
+ * ⚠️ 这个类型必须和后端 /client/wallet/overview 的返回**逐字对齐**
+ * （apps/api/src/modules/client-compliance/routes.ts）。
+ *
+ * 2026-08-07 教训：这里原来还声明着 `exchangeRate: { pair, rate, updatedAt }`，
+ * 但后端在集货余额改造时早就不返回它了。TypeScript 只信这里写的，不会去核对后端，
+ * 所以类型检查和构建全绿，客户一打开首页却报
+ * 「Cannot read properties of undefined (reading 'rate')」。
+ * 改后端返回结构时，务必回来同步这里。
+ */
 export interface ClientWalletOverview {
+  balance: number;
+  currency: string;
+  updatedAt: string | null;
   accounts: Array<{
     currency: string;
     balance: number;
     updatedAt: string;
   }>;
-  exchangeRate: {
-    pair: string;
-    rate: number;
-    updatedAt: string;
-  };
 }
 
 // ===== 充值相关类型 =====
