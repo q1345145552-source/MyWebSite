@@ -339,6 +339,29 @@ main {
   color: var(--danger);
 }
 
+/* 「修改密码」按钮：跟退出账号同样的形状，只是 hover 不是红色 */
+.dashboard-password-button {
+  width: 100%;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  background: transparent;
+  color: var(--ink-mute);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: background-color 0.15s, color 0.15s;
+}
+.dashboard-password-button:hover {
+  background: rgba(30, 58, 138, 0.06);
+  color: var(--brand);
+}
+
 .dashboard-content {
   flex: 1;
   min-width: 0;

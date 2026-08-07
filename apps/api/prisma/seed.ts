@@ -4,10 +4,11 @@
  * 用途：把原 SQLite 中所有 demo 数据（用户、订单、运单、AI 状态标签、运营数据、客户钱包）
  *      一次性写入 Postgres，并补充 P0 阶段新增的 Container/Delivery/Invoice/CustomerCredit 示例。
  *
- * 运行：npm run db:seed
+ * 运行：SEED_PASSWORD=你自己定的密码 npm run db:seed
  * 重置：npm run db:reset（会先 drop 全部表再迁移再 seed）
  *
- * 默认密码：所有 demo 账号统一为 "123456"（仅用于开发！）
+ * demo 账号的密码从环境变量 SEED_PASSWORD 读取，代码里不写死。
+ * 没设这个变量就直接退出，不建账号 —— 防止再出现「代码里能看到密码」。
  */
 import { PrismaClient } from "@prisma/client";
 import crypto from "node:crypto";
@@ -17,7 +18,14 @@ const prisma = new PrismaClient();
 // ============ 常量 ============
 const COMPANY_ID = "c_001";
 const CURRENT_WAREHOUSE_IDS = ["wh_yiwu_01", "wh_guangzhou_01", "wh_dongguan_01"];
-const DEFAULT_PASSWORD = "123456";
+
+// demo 账号密码：只从环境变量读，代码里不留明文。没设就不往下跑。
+const DEFAULT_PASSWORD = process.env.SEED_PASSWORD ?? "";
+if (!DEFAULT_PASSWORD) {
+  console.error("❌ 没有设置 SEED_PASSWORD，为避免建出弱口令账号，seed 已中止。");
+  console.error("   正确用法：SEED_PASSWORD=你自己定的密码 npm run db:seed");
+  process.exit(1);
+}
 
 function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16);
@@ -119,7 +127,7 @@ async function main() {
     },
   });
 
-  console.log("✔ 用户 seed 完成 (4 个账号，统一密码 123456)");
+  console.log("✔ 用户 seed 完成 (4 个账号，密码取自 SEED_PASSWORD)");
 
   // ---------------- AI 状态标签 ----------------
   for (const item of DEFAULT_STATUS_LABELS) {
@@ -534,10 +542,8 @@ async function main() {
   });
   console.log("✔ 运营模块 seed 完成");
 
-  console.log("\n🎉 全部 seed 完成。可用账号：");
-  console.log("  admin → 账号: u_admin_001 / 密码: 123456");
-  console.log("  staff → 账号: 888888      / 密码: 123456");
-  console.log("  client → 账号: u_client_001 / 密码: 123456");
+  console.log("\n🎉 全部 seed 完成。三个 demo 账号（admin / staff / client）的密码");
+  console.log("   就是你刚才传进来的 SEED_PASSWORD，账号名请查数据库 users 表。");
 }
 
 main()

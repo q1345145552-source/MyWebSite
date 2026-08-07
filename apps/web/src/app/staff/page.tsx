@@ -262,7 +262,7 @@ export default function StaffHomePage() {
   };
 
   const [form, setForm] = useState({
-    clientId: "u_client_001",
+    clientId: "",
     warehouseId: "wh_yiwu_01",
     batchNo: "",
     arrivedAt: new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Shanghai" }),

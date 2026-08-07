@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { clearAuthSession, getOptionalSession, type AuthRole, type AuthSession } from "../../auth/auth-session";
+import { changeOwnPassword } from "../../services/auth-api";
 import { globalMenus, roleFunctionGroups, roleMenus } from "./menu-config";
 
 const EXPANDED_GROUPS_KEY = "xt_sidebar_expanded_groups";
@@ -43,6 +44,59 @@ export default function RoleShell(props: {
   const [currentHash, setCurrentHash] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(["运单管理", "我的运单"]));
+
+  // 修改密码（三端共用，管理员/员工/客户都是改自己的）
+  const [pwdOpen, setPwdOpen] = useState(false);
+  const [oldPwd, setOldPwd] = useState("");
+  const [newPwd, setNewPwd] = useState("");
+  const [confirmPwd, setConfirmPwd] = useState("");
+  const [pwdError, setPwdError] = useState("");
+  const [pwdSubmitting, setPwdSubmitting] = useState(false);
+  const [pwdDone, setPwdDone] = useState(false);
+
+  const openPwdModal = () => {
+    setOldPwd("");
+    setNewPwd("");
+    setConfirmPwd("");
+    setPwdError("");
+    setPwdDone(false);
+    setPwdOpen(true);
+  };
+
+  const submitPwd = async () => {
+    if (pwdSubmitting) return;
+    if (!oldPwd || !newPwd) {
+      setPwdError("请把旧密码和新密码都填上");
+      return;
+    }
+    if (newPwd.length < 8) {
+      setPwdError("新密码至少 8 位");
+      return;
+    }
+    if (newPwd !== confirmPwd) {
+      setPwdError("两次输入的新密码不一样");
+      return;
+    }
+    setPwdSubmitting(true);
+    setPwdError("");
+    try {
+      await changeOwnPassword({ oldPassword: oldPwd, newPassword: newPwd });
+      // 改完必须重新登录：令牌是改密码之前签发的，后端认不出新旧，
+      // 留着容易让人误以为「没改成功」。这里直接清掉，逼一次重新登录最省事。
+      setPwdDone(true);
+      setOldPwd("");
+      setNewPwd("");
+      setConfirmPwd("");
+      window.setTimeout(() => {
+        clearAuthSession();
+        window.location.href = "/login";
+      }, 1500);
+    } catch (e) {
+      setPwdError(e instanceof Error ? e.message : "修改失败，请重试");
+    } finally {
+      setPwdSubmitting(false);
+    }
+  };
 
   useEffect(() => {
     const next = getOptionalSession();
@@ -279,6 +333,16 @@ export default function RoleShell(props: {
         <div className="dashboard-sidebar-actions">
           <button
             type="button"
+            className="dashboard-password-button"
+            onClick={() => {
+              closeSidebar();
+              openPwdModal();
+            }}
+          >
+            修改密码
+          </button>
+          <button
+            type="button"
             className="dashboard-logout-button"
             onClick={() => {
               clearAuthSession();
@@ -301,6 +365,83 @@ export default function RoleShell(props: {
         </div>
         {children}
       </div>
+
+      {/* 修改密码弹窗：三端共用，改的永远是当前登录的这个账号 */}
+      {pwdOpen && (
+        <div
+          style={{
+            position: "fixed", inset: 0, zIndex: 60, display: "flex",
+            alignItems: "center", justifyContent: "center",
+            background: "rgba(0,0,0,0.4)", padding: 16,
+          }}
+        >
+          <div
+            style={{
+              width: "100%", maxWidth: 380, background: "var(--canvas)",
+              border: "1px solid var(--hairline)", borderRadius: 10, padding: 20,
+            }}
+          >
+            <h3 style={{ margin: "0 0 4px", fontSize: 16, fontWeight: 600, color: "var(--ink)" }}>修改密码</h3>
+            <p style={{ margin: "0 0 14px", fontSize: 13, color: "var(--ink-mute)" }}>
+              当前账号：{session.userId}
+            </p>
+
+            {pwdDone ? (
+              <p style={{ margin: 0, fontSize: 14, color: "var(--ink)" }}>
+                密码已修改。正在退出，请用新密码重新登录…
+              </p>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <input
+                  type="password"
+                  value={oldPwd}
+                  onChange={(e) => setOldPwd(e.target.value)}
+                  placeholder="旧密码"
+                  autoComplete="current-password"
+                  style={{ border: "1px solid var(--hairline)", borderRadius: 8, padding: "8px 12px", fontSize: 14 }}
+                />
+                <input
+                  type="password"
+                  value={newPwd}
+                  onChange={(e) => setNewPwd(e.target.value)}
+                  placeholder="新密码（至少 8 位，不能全是数字）"
+                  autoComplete="new-password"
+                  style={{ border: "1px solid var(--hairline)", borderRadius: 8, padding: "8px 12px", fontSize: 14 }}
+                />
+                <input
+                  type="password"
+                  value={confirmPwd}
+                  onChange={(e) => setConfirmPwd(e.target.value)}
+                  placeholder="再输一次新密码"
+                  autoComplete="new-password"
+                  onKeyDown={(e) => { if (e.key === "Enter") void submitPwd(); }}
+                  style={{ border: "1px solid var(--hairline)", borderRadius: 8, padding: "8px 12px", fontSize: 14 }}
+                />
+                {pwdError ? (
+                  <p style={{ margin: 0, fontSize: 13, color: "var(--danger)" }}>{pwdError}</p>
+                ) : null}
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
+                  <button
+                    type="button"
+                    onClick={() => setPwdOpen(false)}
+                    style={{ border: "1px solid var(--hairline)", borderRadius: 8, padding: "8px 16px", fontSize: 13, background: "var(--canvas)", cursor: "pointer", color: "#000000" }}
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    disabled={pwdSubmitting}
+                    onClick={() => void submitPwd()}
+                    style={{ border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 13, background: "var(--brand)", color: "#fff", fontWeight: 500, cursor: pwdSubmitting ? "not-allowed" : "pointer" }}
+                  >
+                    {pwdSubmitting ? "提交中…" : "确认修改"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </main>
   );
 }
