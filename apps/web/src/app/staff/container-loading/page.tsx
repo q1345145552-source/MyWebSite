@@ -443,11 +443,13 @@ export default function StaffContainerLoadingPage() {
             ⚠️ 这两个数字是量出来的，别随手改：
             滚动的不是窗口，是 RoleShell 的 .dashboard-content（globals.css:342，
             height calc(100vh - 48px) + overflow-y auto），sticky 是相对它生效的。
-            它里面第一个孩子是 .glass-topbar（sticky top:12、z-index:20），实测底边在 y=56。
-            所以这里必须 top:68（56 + 12 间距），写 12 的话第一个柜号会被顶栏盖住。
-            maxHeight 用 calc(100vh - 92px) = 容器高(100vh-48) - top(68) - 底部留白(12) 的近似，
-            实测 88 个柜号时左栏自己滚、底边不越界。 */}
-        <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden", background: "#fff", position: "sticky", top: 68, maxHeight: "calc(100vh - 92px)", overflowY: "auto" }}>
+            它里面第一个孩子是 .glass-topbar（sticky、z-index:20）。
+
+            2026-08-07 顶栏从 top:12 改成 top:0（原来那 12px 缝会漏出表格内容），
+            顶栏底边跟着从 y=54 上移到 y=42，实测顶栏高 42px。
+            所以这里同步从 68 改成 56（42 + 14 间距），写小了第一个柜号会被顶栏盖住。
+            maxHeight 保持 calc(100vh - 92px) 不动：顶栏上移后可用高度只多不少，这个值仍在安全范围内。 */}
+        <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden", background: "#fff", position: "sticky", top: 56, maxHeight: "calc(100vh - 92px)", overflowY: "auto" }}>
           {loading ? <p style={{ padding: 20, color: "#000000", fontSize: 13 }}>加载中…</p> : list.length === 0 ? (
             <p style={{ padding: 20, color: "#000000", fontSize: 13, textAlign: "center" }}>暂无装柜任务，请先创建装柜</p>
           ) : (

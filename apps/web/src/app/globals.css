@@ -371,7 +371,12 @@ main {
 
 .glass-topbar {
   position: sticky;
-  top: 12px;
+  /* 2026-08-07：原来是 top:12px —— 滚动时顶栏停在距容器顶 12px 处，
+     那 12px 是空的，表格内容从这条缝里穿过去，看着像顶栏「镂空」了。
+     实测：缝里露出的就是表格单元格（"10箱"）。改成 0 贴顶，缝没了。
+     ⚠️ 改这个数字会连带影响 staff/container-loading 那个 sticky 柜号列
+     （它靠顶栏底边定位），那边的 top 也要一起调。顶栏实测高 42px。 */
+  top: 0;
   z-index: 20;
   border: 1px solid var(--hairline);
   border-radius: 12px;
