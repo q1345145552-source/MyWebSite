@@ -120,6 +120,31 @@ export default function RoleShell(props: {
   useEffect(() => {
     if (!mounted) return;
     if (!session) {
+      // 2026-08-07：踢人之前把现场记下来。反复出现「所有接口都 200、
+      // 却突然被弹回登录页」，没有日志根本查不出是哪一步把登录信息弄丢的。
+      // ⚠️ 只记有没有、长度，绝不打印令牌内容。
+      if (typeof window !== "undefined") {
+        let rawLen = -1;
+        let rawErr = "";
+        try {
+          rawLen = window.localStorage.getItem("auth_session_v1")?.length ?? 0;
+        } catch (e) {
+          rawErr = e instanceof Error ? e.message : String(e);
+        }
+        const info = {
+          页面: window.location.pathname,
+          浏览器里还有没有登录信息: rawLen > 0 ? `有（${rawLen} 字符）` : rawLen === 0 ? "没有" : "读不到",
+          读取报错: rawErr || "无",
+          再读一次的结果: getOptionalSession() ? "读到了（说明刚才是瞬时读不到）" : "还是读不到",
+        };
+        console.warn("[被踢回登录页] RoleShell 认为没登录", info);
+        // 临时排查用：跳页之后 console 会清空，写一份到 sessionStorage
+        try {
+          const prev = JSON.parse(window.sessionStorage.getItem("__xt_kick_log") || "[]");
+          prev.push(info);
+          window.sessionStorage.setItem("__xt_kick_log", JSON.stringify(prev.slice(-10)));
+        } catch { /* 存不进去就算了 */ }
+      }
       const from = encodeURIComponent(window.location.pathname);
       window.location.href = `/login?from=${from}`;
       return;
