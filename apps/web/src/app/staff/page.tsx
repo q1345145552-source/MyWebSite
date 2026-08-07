@@ -1239,6 +1239,35 @@ const loadLmShipments = async () => {
         员工可创建订单、查看运单列表中的订单信息（只读），并按状态流转规则更新物流状态；订单金额、付款及产品图（已审核订单）请在管理端维护。
       </p>
 
+      {/*
+        2026-08-07 补回：a661165「运单不再涉及金额」那次清理，把这块「预报单审核」
+        的渲染整段删掉了（组件本身和 import 都还在，只是没人再用它）。
+        结果是菜单里点「预报单审核」跳到 #staff-prealert-review，页面上却没有这个区块 ——
+        接口照常返回数据，员工看到的是一片空白。
+      */}
+      <StaffPrealertList
+        visible={activeSection === "staff-prealert-review"}
+        prealerts={prealerts}
+        filteredPrealerts={filteredPrealerts}
+        prealertSearch={prealertSearch as PrealertSearchState}
+        onPrealertSearchChange={(key, val) => setPrealertSearch((prev) => ({ ...prev, [key]: val }))}
+        prealertPanelCollapsed={prealertPanelCollapsed}
+        onToggleCollapse={() => setPrealertPanelCollapsed((v) => !v)}
+        prealertEditDrafts={prealertEditDrafts}
+        setPrealertEditDrafts={setPrealertEditDrafts}
+        prealertConfirmedDrafts={prealertConfirmedDrafts}
+        editingPrealertId={editingPrealertId}
+        setEditingPrealertId={setEditingPrealertId}
+        prealertBatchDrafts={prealertBatchDrafts}
+        setPrealertBatchDrafts={setPrealertBatchDrafts}
+        loading={loading}
+        warehouseOptions={warehouseOptions}
+        onConfirmPrealertEdit={confirmPrealertEdit}
+        onApprovePrealert={setApprovingPrealert}
+        onUploadImage={(orderId, file) => { void uploadOrderProductImageAndReload(orderId, file); }}
+        onDeleteImage={(imageId) => { void deleteOrderProductImageAndReload(imageId); }}
+      />
+
       <section
         id="staff-create-order"
         style={{
