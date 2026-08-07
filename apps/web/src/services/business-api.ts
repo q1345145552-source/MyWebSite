@@ -1127,14 +1127,11 @@ export async function createAdminStaff(payload: {
   return parseApiResponse(response);
 }
 
-export async function deleteAdminStaff(userId: string, confirmPassword?: string): Promise<{ deleted: boolean; id: string }> {
-  const response = await fetch(`${apiBaseUrl()}/admin/users?id=${encodeURIComponent(userId)}`, {
-    method: "DELETE",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify({ confirmPassword: confirmPassword || "" }),
-  });
-  return parseApiResponse(response);
-}
+// deleteAdminStaff() 已删除（2026-08-07）。
+// 账号不再支持删除，改用 toggleUserBan() 封禁：账号登不进来，但单据、图片、余额全留着。
+// 原因：数据库有 15 张表以 RESTRICT 认着账号，名下有任何一条记录就删不掉；
+// 而且这个函数删员工时漏传管理员密码，后端第一关就打回，从来没成功过。
+// 后端 DELETE /admin/users 也已停用。
 
 
 export async function deleteAdminOrder(orderId: string): Promise<{ deleted: boolean; orderId: string; itemName: string }> {
@@ -1409,56 +1406,11 @@ export async function fetchFinanceSummary(): Promise<FinanceSummary> {
 // 用户管理相关（管理员端）
 // ============================================================================
 
-export interface ManagedUser {
-  id: string;
-  companyId: string;
-  role: string;
-  name: string;
-  phone: string;
-  status: string;
-  createdAt: string;
-  companyName?: string;
-  email?: string;
-  warehouseIds?: string[];
-}
-
-/**
- * 获取用户列表（管理员）。
- */
-export async function fetchManagedUsers(): Promise<ManagedUser[]> {
-  const response = await fetch(`${apiBaseUrl()}/admin/users`, {
-    method: "GET",
-    headers: { ...authHeaders() },
-  });
-  const data = await parseApiResponse<{ items: ManagedUser[] }>(response);
-  return data.items;
-}
-
-/**
- * 创建用户（管理员）。
- */
-export async function createManagedUser(payload: {
-  role: string;
-  name: string;
-  phone: string;
-  password: string;
-  companyName?: string;
-  email?: string;
-  warehouseIds?: string[];
-}): Promise<ManagedUser> {
-  const response = await fetch(`${apiBaseUrl()}/admin/users`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeaders(),
-    },
-    body: JSON.stringify(payload),
-  });
-  return parseApiResponse(response);
-}
-
-/** @deprecated Use setAdminStaffPassword instead. Kept for backward compatibility. */
-export const resetUserPassword = setAdminStaffPassword;
+// ManagedUser / fetchManagedUsers / createManagedUser / resetUserPassword 已删除（2026-08-07）。
+// 它们只服务于「账号管理」页，而那个页面和「员工管理」「客户管理」是同一套功能、
+// 调的还是同一批接口（/admin/users、/admin/users/set-password、toggle-ban），
+// 用户要求砍掉重复入口，页面已删。
+// 员工/客户列表用 fetchAdminStaff / fetchAdminClients，改密码用 setAdminStaffPassword。
 
 /**
  * 禁用/启用用户（管理员）。

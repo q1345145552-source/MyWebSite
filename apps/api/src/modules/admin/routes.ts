@@ -4,7 +4,6 @@ import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
 import { CONSOLIDATION_CURRENCY, recordRechargeCredit } from "../wallet/consolidation-balance";
-import { verifyPassword } from "../auth/crypto-utils";
 import { loadProductImagesForOrders } from "../orders/product-images";
 import { loadOrderProducts } from "../orders/routes";
 import { hashPassword } from "../auth/crypto-utils";
@@ -743,50 +742,30 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
     });
   });
 
+  /**
+   * 删除账号 —— 已停用（2026-08-07，用户决定）。
+   *
+   * 这条路本来就走不通：数据库有 15 张表以 RESTRICT 认着账号
+   * （orders / client_addresses / client_wallet_accounts / order_product_images /
+   *   audit_logs / consolidation_* / invoices …），名下有任何一条记录就删不掉，
+   * 报出来是英文的 500，用户只看到「删除失败」。71 个客户里 62 个有订单，
+   * 员工 888888 有 60 张上传过的产品图 —— 实际上谁都删不掉。
+   *
+   * 用户要的只是「让这个账号登不进来」，那是封禁（/admin/users/toggle-ban）的事，
+   * 而且单据、图片、流水全留着，随时能解封。前端入口已改成封禁。
+   *
+   * ⚠️ 这里保留路由并明确拒绝，而不是直接删掉 —— 万一还有别的调用方，
+   * 让它得到一句看得懂的中文，而不是 404。
+   */
   app.delete("/admin/users", async (req, res) => {
     const auth = requireRole(req, res, ["admin"]);
     if (!auth) return;
-
-    const id = typeof req.query?.id === "string" ? req.query.id.trim() : "";
-    if (!id) {
-      fail(res, 400, "BAD_REQUEST", "user id is required");
-      return;
-    }
-
-    // 二次鉴权：验证管理员自己的密码
-    const body = (req.body ?? {}) as { confirmPassword?: string };
-    if (!body.confirmPassword?.trim()) {
-      fail(res, 400, "BAD_REQUEST", "confirmPassword is required for user deletion");
-      return;
-    }
-    const admin = await prisma.user.findUnique({
-      where: { id: auth.userId },
-      select: { passwordHash: true },
-    });
-    if (!admin || !verifyPassword(body.confirmPassword, admin.passwordHash ?? "")) {
-      fail(res, 403, "FORBIDDEN", "invalid admin password");
-      return;
-    }
-
-    const row = await prisma.user.findUnique({
-      where: { id },
-      select: { id: true, companyId: true, role: true },
-    });
-    if (!row) {
-      fail(res, 404, "NOT_FOUND", "user not found");
-      return;
-    }
-    if (row.companyId !== auth.companyId) {
-      fail(res, 403, "FORBIDDEN", "cannot delete user of another company");
-      return;
-    }
-    if (row.role !== "staff" && row.role !== "client") {
-      fail(res, 403, "FORBIDDEN", "only staff and client can be deleted");
-      return;
-    }
-
-    await prisma.user.delete({ where: { id } });
-    ok(res, { deleted: true, id });
+    fail(
+      res,
+      403,
+      "FORBIDDEN",
+      "账号不支持删除（名下的订单、图片、流水都认着它）。请改用「封禁」——账号立刻登不进来，数据全留着，随时可以解除。",
+    );
   });
 
   app.post("/admin/users/set-password", async (req, res) => {
@@ -856,7 +835,7 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
 
     const row = await prisma.user.findUnique({
       where: { id },
-      select: { id: true, companyId: true, status: true },
+      select: { id: true, companyId: true, status: true, role: true },
     });
     if (!row) {
       fail(res, 404, "NOT_FOUND", "user not found");
@@ -864,6 +843,13 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
     }
     if (row.companyId !== auth.companyId) {
       fail(res, 403, "FORBIDDEN", "cannot toggle user of another company");
+      return;
+    }
+    // 2026-08-07：封禁成了停用账号的唯一手段，这道保险更要紧了。
+    // 全系统只有一个管理员账号，一旦把它封了就再也登不进后台，
+    // 只能直接进数据库改状态才能救回来。管理员一律不许封。
+    if (row.role === "admin") {
+      fail(res, 403, "FORBIDDEN", "管理员账号不能封禁，否则会把自己锁在系统外面");
       return;
     }
 

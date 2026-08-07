@@ -60,7 +60,6 @@ export const roleFunctionGroups: Record<AuthRole, MenuGroup[]> = {
       items: [
         { id: "admin-func-staff", label: "员工管理", href: "/admin#staff" },
         { id: "admin-func-clients", label: "客户管理", href: "/admin#clients" },
-        { id: "admin-func-accounts", label: "账号管理", href: "/admin/accounts" },
       ],
     },
     {

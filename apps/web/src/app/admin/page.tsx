@@ -40,7 +40,7 @@ import {
   createAdminStaff,
   createAdminClient,
   updateAdminClient,
-  deleteAdminStaff,
+  toggleUserBan,
   deleteAdminOrder,
   setAdminStaffPassword,
   type AdminOverview,
@@ -311,6 +311,8 @@ export default function AdminHomePage() {
   const [editingClientId, setEditingClientId] = useState<string | null>(null);
   const [settingPasswordFor, setSettingPasswordFor] = useState<string | null>(null);
   const [settingPasswordValue, setSettingPasswordValue] = useState("");
+  // 设密码时能不能看见自己输的内容。每次换一个账号设密码都恢复成看不见，避免被旁人瞄到
+  const [showSettingPassword, setShowSettingPassword] = useState(false);
   const [memoryFilterSessionId, setMemoryFilterSessionId] = useState("");
   const [memoryFilterUserId, setMemoryFilterUserId] = useState("");
   const [activeSection, setActiveSection] = useState<(typeof SECTION_IDS)[number]>("overview");
@@ -739,39 +741,40 @@ export default function AdminHomePage() {
     }
   };
 
-  const confirmDeleteClient = async (userId: string, userName: string) => {
-    if (!window.confirm(`确定要删除客户「${userName}」吗？删除后该账号将无法登录。此操作不可撤销。`)) return;
-    // 安全问题：已移除前端硬编码二级密码，改为后端二次鉴权
-    const pwd = window.prompt("请输入您的管理员密码以确认删除：");
-    if (!pwd) {
-      setMessage("操作已取消");
-      return;
-    }
+  /**
+   * 2026-08-07：删除账号改成封禁。
+   *
+   * 原来这两个函数调的是「删除账号」，但那条路本来就走不通：
+   * 数据库有 15 张表以 RESTRICT 认着这个账号（订单、地址、钱包、产品图、审计日志…），
+   * 只要名下有一条记录就删不掉，报错还是英文的 500，用户只看到「删除失败」。
+   * 而且删员工那个函数漏传了管理员密码，后端第一关就打回，**从来没成功过**。
+   *
+   * 用户要的其实只是「让这个账号登不进来」，封禁正好就是这个，
+   * 而且单据、图片、流水全都留着，随时能解封。
+   */
+  const confirmToggleBan = async (
+    userId: string,
+    userName: string,
+    currentStatus: string,
+    reload: () => Promise<unknown>,
+    kind: "客户" | "员工",
+  ) => {
+    const banned = currentStatus === "inactive";
+    const word = banned ? "解除封禁" : "封禁";
+    const tip = banned
+      ? `确定解除「${userName}」的封禁吗？解除后这个账号可以重新登录。`
+      // 系统弹窗不认 markdown，别在这里写 ** **，会原样显示成星号
+      : `确定封禁${kind}「${userName}」吗？\n\n· 这个账号立刻登不进来\n· 他名下的订单、运单、图片、余额一条都不会动\n· 随时可以解除`;
+    if (!window.confirm(tip)) return;
     setLoading(true);
     setMessage("");
     try {
-      await deleteAdminStaff(userId, pwd);
-      setToast("客户已删除");
-      await Promise.all([loadClients(), loadOverview()]);
+      const result = await toggleUserBan(userId);
+      setToast(result.status === "active" ? "已解除封禁" : "已封禁，该账号无法再登录");
+      await Promise.all([reload(), loadOverview()]);
     } catch (error) {
-      const text = error instanceof Error ? error.message : "删除失败";
-      setMessage(`删除失败：${text}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const confirmDeleteStaff = async (userId: string, userName: string) => {
-    if (!window.confirm(`确定要删除员工「${userName}」吗？删除后该账号将无法登录。`)) return;
-    setLoading(true);
-    setMessage("");
-    try {
-      await deleteAdminStaff(userId);
-      setToast("员工已删除");
-      await Promise.all([loadStaff(), loadOverview()]);
-    } catch (error) {
-      const text = error instanceof Error ? error.message : "删除失败";
-      setMessage(`删除失败：${text}`);
+      const text = error instanceof Error ? error.message : `${word}失败`;
+      setMessage(`${word}失败：${text}`);
     } finally {
       setLoading(false);
     }
@@ -789,6 +792,7 @@ export default function AdminHomePage() {
       await setAdminStaffPassword(userId, settingPasswordValue.trim());
       setSettingPasswordFor(null);
       setSettingPasswordValue("");
+      setShowSettingPassword(false);
       setToast("密码已更新");
     } catch (error) {
       const text = error instanceof Error ? error.message : "设置失败";
@@ -1269,7 +1273,7 @@ export default function AdminHomePage() {
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     <button
                       type="button"
-                      onClick={() => setSettingPasswordFor(settingPasswordFor === u.id ? null : u.id)}
+                      onClick={() => { setShowSettingPassword(false); setSettingPasswordValue(""); setSettingPasswordFor(settingPasswordFor === u.id ? null : u.id); }}
                       disabled={loading}
                       style={{ border: "1px solid #059669", color: "#059669", borderRadius: 8, padding: "6px 10px", background: "#f0fdf4", cursor: "pointer", fontSize: 13 }}
                     >
@@ -1277,23 +1281,27 @@ export default function AdminHomePage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => void confirmDeleteStaff(u.id, u.name)}
+                      onClick={() => void confirmToggleBan(u.id, u.name, u.status, loadStaff, "员工")}
                       disabled={loading}
-                      style={{ border: "1px solid #dc2626", color: "#dc2626", borderRadius: 8, padding: "6px 10px", background: "#fef2f2", cursor: "pointer", fontSize: 13 }}
+                      style={{ border: `1px solid ${u.status === "inactive" ? "#059669" : "#dc2626"}`, color: u.status === "inactive" ? "#059669" : "#dc2626", borderRadius: 8, padding: "6px 10px", background: u.status === "inactive" ? "#f0fdf4" : "#fef2f2", cursor: "pointer", fontSize: 13 }}
                     >
-                      删除
+                      {u.status === "inactive" ? "解除封禁" : "封禁"}
                     </button>
                   </div>
                 </div>
                 {settingPasswordFor === u.id ? (
                   <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #e5e7eb", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                     <input
-                      type="password"
+                      type={showSettingPassword ? "text" : "password"}
                       value={settingPasswordValue}
                       onChange={(e) => setSettingPasswordValue(e.target.value)}
                       placeholder="新密码：至少 8 位，不能全是数字"
                       style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 10px", width: 240 }}
                     />
+                    <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13, color: "#000000", cursor: "pointer", whiteSpace: "nowrap" }}>
+                      <input type="checkbox" checked={showSettingPassword} onChange={(e) => setShowSettingPassword(e.target.checked)} style={{ cursor: "pointer" }} />
+                      显示密码
+                    </label>
                     <button
                       type="button"
                       onClick={() => void submitSetPassword(u.id)}
@@ -1304,7 +1312,7 @@ export default function AdminHomePage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => { setSettingPasswordFor(null); setSettingPasswordValue(""); }}
+                      onClick={() => { setSettingPasswordFor(null); setSettingPasswordValue(""); setShowSettingPassword(false); }}
                       style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 12px", background: "#fff", cursor: "pointer", color: "#000000" }}
                     >
                       取消
@@ -1357,7 +1365,7 @@ export default function AdminHomePage() {
                   <span style={{ color: "#000000", fontSize: 12 }}>{u.createdAt.slice(0, 10)}</span>
                   <button
                     type="button"
-                    onClick={() => setSettingPasswordFor(settingPasswordFor === u.id ? null : u.id)}
+                    onClick={() => { setShowSettingPassword(false); setSettingPasswordValue(""); setSettingPasswordFor(settingPasswordFor === u.id ? null : u.id); }}
                     disabled={loading}
                     style={{ border: "1px solid #059669", color: "#059669", borderRadius: 8, padding: "6px 10px", background: "#f0fdf4", cursor: "pointer", fontSize: 13 }}
                   >
@@ -1384,22 +1392,26 @@ export default function AdminHomePage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => confirmDeleteClient(u.id, u.name)}
+                    onClick={() => void confirmToggleBan(u.id, u.name, u.status, loadClients, "客户")}
                     disabled={loading}
-                    style={{ border: "1px solid #fca5a5", color: "#dc2626", borderRadius: 8, padding: "6px 10px", background: "#fef2f2", cursor: "pointer", fontSize: 13 }}
+                    style={{ border: `1px solid ${u.status === "inactive" ? "#059669" : "#fca5a5"}`, color: u.status === "inactive" ? "#059669" : "#dc2626", borderRadius: 8, padding: "6px 10px", background: u.status === "inactive" ? "#f0fdf4" : "#fef2f2", cursor: "pointer", fontSize: 13 }}
                   >
-                    删除
+                    {u.status === "inactive" ? "解除封禁" : "封禁"}
                   </button>
                 </div>
                 {settingPasswordFor === u.id ? (
                   <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #e5e7eb", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                     <input
-                      type="password"
+                      type={showSettingPassword ? "text" : "password"}
                       value={settingPasswordValue}
                       onChange={(e) => setSettingPasswordValue(e.target.value)}
                       placeholder="输入新密码"
                       style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 10px", width: 180 }}
                     />
+                    <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13, color: "#000000", cursor: "pointer", whiteSpace: "nowrap" }}>
+                      <input type="checkbox" checked={showSettingPassword} onChange={(e) => setShowSettingPassword(e.target.checked)} style={{ cursor: "pointer" }} />
+                      显示密码
+                    </label>
                     <button
                       type="button"
                       onClick={() => void submitSetPassword(u.id)}
@@ -1410,7 +1422,7 @@ export default function AdminHomePage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => { setSettingPasswordFor(null); setSettingPasswordValue(""); }}
+                      onClick={() => { setSettingPasswordFor(null); setSettingPasswordValue(""); setShowSettingPassword(false); }}
                       style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 12px", background: "#fff", cursor: "pointer", color: "#000000" }}
                     >
                       取消
