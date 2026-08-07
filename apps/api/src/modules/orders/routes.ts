@@ -947,7 +947,12 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
         itemName: o.itemName,
         transportMode: o.transportMode,
         domesticTrackingNo: o.domesticTrackingNo,
-        batchNo: o.batchNo,
+        // 2026-08-07 移除 batchNo：这个字段存的就是柜号（员工在「预报单审核」里填的
+        // 那个「柜号（可选，装柜时填写）」输入框），用户明确要求客户不能看到柜号。
+        // 原来这里照发，客户端运单详情直接显示成「批次号：CAB-2026-A01」—— 实测泄漏。
+        // 物流轨迹那条路早就把柜号从日志正文里抹掉了（containers/routes.ts 的 sanitizeRemark），
+        // 但这条一直没堵，等于前门锁了后门开着。
+        // ⚠️ /staff/prealerts 那处的 batchNo 要保留 —— 员工本来就该看到柜号。
         approvalStatus: o.approvalStatus,
         trackingNo: ship?.trackingNo ?? null,
         currentStatus: ship?.currentStatus ?? null,

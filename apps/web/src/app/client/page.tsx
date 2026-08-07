@@ -609,16 +609,23 @@ export default function ClientHomePage() {
   }, [dashboardOrders]);
 
   /**
-   * 客户可见在途柜量：按批次号去重统计。
+   * 客户可见「在途运单数」：还没完成的运单有几张。
+   *
+   * 2026-08-07 改。原来是「在途柜量」，写法是
+   *   filter(statusGroup === "unfinished").map(batchNo) 去重取个数
+   * 两处都是坏的：
+   *   ① **接口根本不返回 statusGroup** —— 它只是个查询参数（?statusGroup=unfinished），
+   *      不在响应字段里。所以这个筛选恒为假，「在途柜量」一直显示 0，不是今天改坏的。
+   *   ② 柜号已对客户屏蔽（用户要求），而且生产库里只有 3% 的运单填了柜号，按它算本来就不准。
+   *
+   * 现在改成按运单自己的状态判断，口径和后端一致：
+   * 后端 statusGroup 用的是 COMPLETED_STATUSES = delivered / returned / cancelled
+   *（apps/api/src/modules/shipments/status-flow.ts:52），其余都算在途。
+   * ⚠️ 后端那份清单改了，这里要跟着改。
    */
-  const clientInTransitContainerCount = useMemo(() => {
-    const set = new Set(
-      dashboardOrders
-        .filter((item) => (item.statusGroup ?? "").toLowerCase() === "unfinished")
-        .map((item) => item.batchNo ?? "")
-        .filter((item) => item),
-    );
-    return set.size;
+  const clientInTransitOrderCount = useMemo(() => {
+    const done = new Set(["delivered", "returned", "cancelled"]);
+    return dashboardOrders.filter((item) => !done.has((item.currentStatus ?? "").trim())).length;
   }, [dashboardOrders]);
 
   return (
@@ -678,7 +685,7 @@ export default function ClientHomePage() {
             <div className="route-line route-line-sea" />
             <div className="route-line route-line-land" />
             <div className="route-point route-point-th">泰国仓</div>
-            <div className="route-counter">当前在途柜量：{clientInTransitContainerCount}</div>
+            <div className="route-counter">当前在途运单：{clientInTransitOrderCount} 张</div>
           </div>
         </div>
 
@@ -1054,7 +1061,8 @@ export default function ClientHomePage() {
                               <h4 style={{ margin: "0 0 8px", fontSize: 14, color: "#374151" }}>基本信息</h4>
                               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "6px 16px", marginBottom: 12 }}>
                                 <div><span style={{ color: "#6b7280", fontSize: 12 }}>仓库：</span>{warehouseLabel(item.warehouseId)}</div>
-                                <div><span style={{ color: "#6b7280", fontSize: 12 }}>批次号：</span>{item.batchNo || "—"}</div>
+                                {/* 2026-08-07 删除「批次号」：它存的就是柜号，用户要求客户不能看到柜号。
+                                    后端 /client/orders 已同时不再下发 batchNo，两边一起改，不留半截。 */}
                                 <div><span style={{ color: "#6b7280", fontSize: 12 }}>运单号：</span>{item.trackingNo || "—"}</div>
                                 <div><span style={{ color: "#6b7280", fontSize: 12 }}>预报单号：</span>{item.orderNo || "—"}</div>
                                 <div><span style={{ color: "#6b7280", fontSize: 12 }}>审批状态：</span>{item.approvalStatus === "shipped" ? "已发货" : item.approvalStatus === "approved" ? "已审核" : item.approvalStatus || "—"}</div>
