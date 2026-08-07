@@ -278,6 +278,8 @@ export default function AdminWhrConsolidationPage() {
 
   // --- 改单价 ---
   const [priceTarget, setPriceTarget] = useState<CustomerDetail | null>(null);
+  // 撤销付款（2026-08-07）
+  const [revokingId, setRevokingId] = useState("");
   // 新增 / 移除参与客户（2026-08-07）
   const [showAddCustomer, setShowAddCustomer] = useState(false);
   const [addClientId, setAddClientId] = useState("");
@@ -493,6 +495,27 @@ export default function AdminWhrConsolidationPage() {
       loadDetail(selectedPlanId);
     } catch (e: any) { setToast(e?.message ?? "更新失败"); }
     finally { setPriceSubmitting(false); }
+  };
+
+  /**
+   * 撤销一笔集货付款：钱退回客户的集货余额，预报单回到「待付款」，客户可以重付。
+   * 退多少由后端按流水里实际扣过的钱算，前端不猜。
+   */
+  const handleRevokePayment = async (pa: any) => {
+    if (!selectedPlanId) return;
+    const reason = prompt(`撤销「${pa.trackingNo}」的付款？\n\n钱会退回客户的集货余额，单子回到「待付款」。\n请填写撤销原因（会记进流水和轨迹）：`);
+    if (reason == null) return;
+    setRevokingId(pa.id);
+    try {
+      const r = await apiRequest<any>(`${apiBaseUrl()}/admin/whr-consolidation/payments/revoke`, {
+        method: "POST",
+        headers: jsonPost,
+        body: JSON.stringify({ prealertId: pa.id, reason: reason.trim() || undefined }),
+      });
+      setToast(r?.message ?? "已撤销并退款");
+      loadDetail(selectedPlanId);
+    } catch (e: any) { setToast(e?.message ?? "撤销失败"); }
+    finally { setRevokingId(""); }
   };
 
   /** 打开「新增客户」弹窗：客户列表是懒加载的，这里补一次 */
@@ -731,6 +754,9 @@ export default function AdminWhrConsolidationPage() {
                                 // 预报单的流程状态：pa.status 是预报单级别的（pending, received_pending_payment, etc.）
                                 const paStatus = pa.status;
                                 const canReview = paStatus === "payment_submitted";
+                                // 2026-08-07：客户改成用集货余额付款、当场扣钱不可撤销，
+                                // 这里是唯一的后手：退钱 + 单子回到待付款
+                                const canRevoke = paStatus === "paid";
                                 const canCancel = !["loading", "shipped", "thailand_received", "cancelled"].includes(paStatus);
 
                                 return (
@@ -803,6 +829,11 @@ export default function AdminWhrConsolidationPage() {
                                         <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
                                           {canReview && (
                                             <button onClick={(e) => { e.stopPropagation(); setReviewTarget({ planId: selectedPlanId!, prealert: pa }); }} style={btnConfirm}>审核付款</button>
+                                          )}
+                                          {canRevoke && (
+                                            <button onClick={(e) => { e.stopPropagation(); handleRevokePayment(pa); }} disabled={revokingId === pa.id} style={{ ...btnCancel, color: "#b91c1c", borderColor: "#fecaca" }}>
+                                              {revokingId === pa.id ? "退款中..." : "撤销付款并退款"}
+                                            </button>
                                           )}
                                           {canCancel && (
                                             <button onClick={(e) => { e.stopPropagation(); setCancelTarget({ planId: selectedPlanId!, prealert: pa }); }} style={btnCancel}>取消预报单</button>

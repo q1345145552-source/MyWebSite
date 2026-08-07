@@ -241,12 +241,23 @@ export default function ClientWhrConsolidationPage() {
   // 付款上传 — 预报单级别
   const [showPay, setShowPay] = useState(false);
   const [currentPayPrealertId, setCurrentPayPrealertId] = useState<string | null>(null);
-  const [payProofs, setPayProofs] = useState<{ fileName: string; mime: string; base64: string }[]>([]);
+  // 集货余额（2026-08-07）：付款直接扣这里的钱
+  const [balance, setBalance] = useState(0);
   const [paySubmitting, setPaySubmitting] = useState(false);
 
   // ==========================================================================
   // 数据加载
   // ==========================================================================
+  /** 读集货余额。付款弹窗要用它判断够不够，付完也要刷新。 */
+  const loadBalance = useCallback(async () => {
+    try {
+      const r = await apiRequest<{ balance?: number; accounts?: { currency: string; balance: number }[] }>(
+        `${apiBaseUrl()}/client/wallet/overview`
+      );
+      setBalance(typeof r.balance === "number" ? r.balance : (r.accounts?.find(a => a.currency === "CNY")?.balance ?? 0));
+    } catch { setBalance(0); }
+  }, []);
+
   const loadPlans = useCallback(async () => {
     setLoading(true);
     try {
@@ -268,6 +279,7 @@ export default function ClientWhrConsolidationPage() {
   }, []);
 
   useEffect(() => { loadPlans(); }, [loadPlans]);
+  useEffect(() => { loadBalance(); }, [loadBalance]);
 
   // Toast 自动消失，避免旧提示一直挂在页面顶部
   useEffect(() => {
@@ -372,23 +384,31 @@ export default function ClientWhrConsolidationPage() {
   };
 
   // ==========================================================================
-  // 操作：上传付款（预报单级别）
+  // 操作：用集货余额付款（预报单级别，2026-08-07 改）
+  // 原来是上传付款凭证等审核，现在直接扣余额、当场完成。
+  // 不可撤销，所以下单前有一道确认；点错了只能找客服在管理员端撤销。
   // ==========================================================================
   const handlePay = async () => {
-    if (!selectedPlanId || !currentPayPrealertId || payProofs.length === 0) { setToast("请选择付款凭证"); return; }
+    if (!selectedPlanId || !currentPayPrealertId) return;
+    const payPa = detail?.prealerts.find(pa => pa.id === currentPayPrealertId);
+    const fee = payPa?.totalFee ?? 0;
+    if (!(fee > 0)) { setToast("这张预报单还没有计费金额，请联系客服"); return; }
+    if (balance < fee) { setToast(`集货余额不足，还差 ¥${(fee - balance).toFixed(2)}，请先去「集货余额」充值`); return; }
+    if (!confirm(`确认用集货余额支付 ¥${fee.toFixed(2)}？\n\n此次付款不可撤销，误操作请联系客服。`)) return;
     setPaySubmitting(true);
     try {
-      await apiRequest<any>(
+      const r = await apiRequest<any>(
         `${apiBaseUrl()}/client/whr-consolidation/pay`,
         {
           method: "POST", headers: jsonPost,
-          body: JSON.stringify({ planId: selectedPlanId, prealertId: currentPayPrealertId, proofs: payProofs }),
+          body: JSON.stringify({ planId: selectedPlanId, prealertId: currentPayPrealertId }),
         }
       );
-      setToast("付款凭证已提交，等待审核");
-      setShowPay(false); setPayProofs([]); setCurrentPayPrealertId(null);
+      setToast(r?.message ?? "付款成功");
+      setShowPay(false); setCurrentPayPrealertId(null);
+      loadBalance();
       loadDetail(selectedPlanId); loadPlans();
-    } catch (e: any) { setToast(e?.message ?? "提交失败"); }
+    } catch (e: any) { setToast(e?.message ?? "付款失败"); }
     finally { setPaySubmitting(false); }
   };
 
@@ -593,7 +613,7 @@ export default function ClientWhrConsolidationPage() {
                                 <button onClick={() => {
                                   if (addressMissing) { setToast("请先填写泰国收货地址"); setEditAddress(true); return; }
                                   setCurrentPayPrealertId(pa.id); setShowPay(true);
-                                }} disabled={addressMissing} style={{ ...btnBlue, marginTop: 8, opacity: addressMissing ? 0.5 : 1, cursor: addressMissing ? "not-allowed" : "pointer" }}>重新上传</button>
+                                }} disabled={addressMissing} style={{ ...btnBlue, marginTop: 8, opacity: addressMissing ? 0.5 : 1, cursor: addressMissing ? "not-allowed" : "pointer" }}>重新付款</button>
                               </div>
                             ) : (
                               <div>
@@ -605,7 +625,7 @@ export default function ClientWhrConsolidationPage() {
                                   <button onClick={() => {
                                     if (addressMissing) { setToast("请先填写泰国收货地址"); setEditAddress(true); return; }
                                     setCurrentPayPrealertId(pa.id); setShowPay(true);
-                                  }} disabled={addressMissing} style={{ ...btnBlue, opacity: addressMissing ? 0.5 : 1, cursor: addressMissing ? "not-allowed" : "pointer" }}>上传付款凭证</button>
+                                  }} disabled={addressMissing} style={{ ...btnBlue, opacity: addressMissing ? 0.5 : 1, cursor: addressMissing ? "not-allowed" : "pointer" }}>用余额付款</button>
                                   {addressMissing && <div style={{ fontSize: 12, color: "#ef4444", marginTop: 4 }}>需先填写收货地址才能付款</div>}
                                 </div>
                               </div>
@@ -862,66 +882,43 @@ export default function ClientWhrConsolidationPage() {
         {/* ================================================================ */}
         {/* 弹窗：付款上传（预报单级别） */}
         {/* ================================================================ */}
-        {showPay && (
-          <Modal onClose={() => { setShowPay(false); setPayProofs([]); setCurrentPayPrealertId(null); }}>
-            <h3 style={{ marginTop: 0 }}>上传付款凭证</h3>
-            {currentPayPrealertId && detail && (() => {
-              const payPa = detail.prealerts.find(pa => pa.id === currentPayPrealertId);
-              return (
-                <>
-                  <p style={{ fontSize: 13, color: "#6b7280", marginBottom: 8 }}>
-                    预报单：{payPa?.trackingNo ?? "—"}
-                    &nbsp;· 应付：<strong style={{ color: "#059669", fontSize: 15 }}>{payPa?.totalFee != null ? money(payPa.totalFee) : "—"}</strong>
-                  </p>
-                  <FeeBreakdownPanel bd={payPa?.feeBreakdown} title="费用是这样算出来的" />
-                  <p style={{ fontSize: 12, color: "#6b7280", marginTop: 8 }}>
-                    收货地址：{detail.deliveryAddress || "未填写"}
-                  </p>
-                </>
-              );
-            })()}
-            <div style={{ marginTop: 12 }}>
-              <label style={fl}>添加付款截图</label>
-              <input type="file" accept="image/*" multiple onChange={async e => {
-                const files = Array.from(e.target.files || []);
-                if (!files.length) return;
-                const tooBig = files.filter(f => f.size > MAX_IMAGE_BYTES);
-                if (tooBig.length > 0) {
-                  setToast(`${tooBig.map(f => f.name).join("、")} 超过 ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)}MB，请压缩后再上传`);
-                  e.target.value = "";
-                  return;
-                }
-                if (payProofs.length + files.length > 10) {
-                  setToast("一次最多上传 10 张付款凭证");
-                  e.target.value = "";
-                  return;
-                }
-                const newProofs = await Promise.all(files.map(async file => {
-                  const base64 = await new Promise<string>(r => { const fr = new FileReader(); fr.onload = () => r((fr.result as string).split(",")[1]); fr.readAsDataURL(file); });
-                  return { fileName: file.name, mime: file.type, base64 };
-                }));
-                setPayProofs([...payProofs, ...newProofs]);
-              }} />
+        {showPay && (() => {
+          const payPa = detail?.prealerts.find(pa => pa.id === currentPayPrealertId);
+          const fee = payPa?.totalFee ?? 0;
+          const enough = balance >= fee && fee > 0;
+          return (
+          <Modal onClose={() => { setShowPay(false); setCurrentPayPrealertId(null); }}>
+            <h3 style={{ marginTop: 0 }}>用集货余额付款</h3>
+            <p style={{ fontSize: 13, color: "#6b7280", marginBottom: 8 }}>
+              预报单：{payPa?.trackingNo ?? "—"}
+              &nbsp;· 应付：<strong style={{ color: "#1e3a8a", fontSize: 16 }}>{fee > 0 ? money(fee) : "—"}</strong>
+            </p>
+            <FeeBreakdownPanel bd={payPa?.feeBreakdown} title="费用是这样算出来的" />
+            <p style={{ fontSize: 12, color: "#6b7280", marginTop: 8 }}>收货地址：{detail?.deliveryAddress || "未填写"}</p>
+
+            <div style={{ marginTop: 12, padding: "10px 12px", border: "1px solid #e5e7eb", borderRadius: 6 }}>
+              <div style={{ fontSize: 13 }}>当前集货余额：<strong>¥{balance.toFixed(2)}</strong></div>
+              {fee > 0 && (
+                enough
+                  ? <div style={{ fontSize: 13, color: "#374151", marginTop: 4 }}>付款后剩余：¥{(balance - fee).toFixed(2)}</div>
+                  : <div style={{ fontSize: 13, color: "#b91c1c", marginTop: 4 }}>余额不足，还差 ¥{(fee - balance).toFixed(2)}，请先去「集货余额」充值</div>
+              )}
             </div>
-            {payProofs.length > 0 && (
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10, maxHeight: 160, overflowY: "auto" }}>
-                {payProofs.map((p, i) => (
-                  <div key={i} style={{ position: "relative", width: 80, height: 80, flexShrink: 0 }}>
-                    <img src={`data:${p.mime || "image/png"};base64,${p.base64}`} alt={`凭证 ${i + 1}`} style={{ width: 80, height: 80, objectFit: "cover", borderRadius: 4, border: "1px solid #e5e7eb" }} />
-                    <button onClick={() => setPayProofs(payProofs.filter((_, j) => j !== i))} style={{ position: "absolute", top: -6, right: -6, width: 20, height: 20, borderRadius: "50%", background: "#ef4444", color: "#fff", border: "none", cursor: "pointer", fontSize: 12, lineHeight: "20px", textAlign: "center", padding: 0 }}>×</button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 10 }}>{payProofs.length} 张图片已选</div>
+
+            {/* 不可撤销必须写清楚 —— 扣款是当场生效的 */}
+            <p style={{ fontSize: 13, color: "#b91c1c", marginTop: 12, fontWeight: 600 }}>
+              此次付款不可撤销，误操作请联系客服
+            </p>
+
             <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
-              <button onClick={handlePay} disabled={paySubmitting || payProofs.length === 0} style={{ ...btnBlue, opacity: payProofs.length === 0 ? 0.5 : 1, cursor: payProofs.length === 0 ? "not-allowed" : "pointer" }}>
-                {paySubmitting ? "提交中..." : "确认提交"}
+              <button onClick={handlePay} disabled={paySubmitting || !enough} style={{ ...btnBlue, opacity: enough ? 1 : 0.5, cursor: enough ? "pointer" : "not-allowed" }}>
+                {paySubmitting ? "付款中..." : "确认付款"}
               </button>
-              <button onClick={() => { setShowPay(false); setPayProofs([]); setCurrentPayPrealertId(null); }} style={btnGray}>取消</button>
+              <button onClick={() => { setShowPay(false); setCurrentPayPrealertId(null); }} style={btnGray}>取消</button>
             </div>
           </Modal>
-        )}
+          );
+        })()}
 
         {/* ================================================================ */}
         {/* 弹窗：删除确认 */}

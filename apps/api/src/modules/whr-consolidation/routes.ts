@@ -1,6 +1,7 @@
 import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
+import { refundToConsolidation } from "../wallet/consolidation-balance";
 import {
   NON_CANCELLABLE_STATUSES,
   buildFeeBreakdown,
@@ -584,6 +585,86 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
     await prisma.whrConsolidationPlanCustomer.delete({ where: { id: customer.id } });
 
     ok(res, { removed: true, clientId: customer.clientId });
+  });
+
+  // ==========================================================================
+  // 4d. 撤销付款并退款（2026-08-07）
+  //     客户在集货里付款是当场扣余额、不可撤销的，这里是唯一的后手：
+  //     客户点错了，管理员把钱退回集货余额、单子回到「待付款」，客户可重付。
+  //     退多少不看当前报价，看流水里**实际扣过**的钱 —— 报价后来改过也不会退错。
+  // ==========================================================================
+  app.post("/admin/whr-consolidation/payments/revoke", async (req, res) => {
+    const auth = requireRole(req, res, ["admin"]);
+    if (!auth) return;
+
+    const body = (req.body ?? {}) as { prealertId?: string; reason?: string };
+    if (!body.prealertId?.trim()) {
+      fail(res, 400, "BAD_REQUEST", "prealertId 为必填");
+      return;
+    }
+
+    const prealert = await prisma.whrConsolidationPrealert.findFirst({
+      where: { id: body.prealertId.trim(), companyId: auth.companyId },
+      include: { planCustomer: { select: { clientId: true } } },
+    });
+    if (!prealert) {
+      fail(res, 404, "NOT_FOUND", "预报单不存在");
+      return;
+    }
+    if (prealert.status !== "paid") {
+      fail(res, 400, "BAD_REQUEST", "只有「已付款」的预报单能撤销；已装柜或已发运的不能退");
+      return;
+    }
+
+    // 实际净扣金额 = 流水里这单的 pay（负数）和 refund（正数）相加后取反
+    const rows = await prisma.consolidationBalanceLedger.findMany({
+      where: { refType: "whr", refId: prealert.id },
+      select: { amount: true },
+    });
+    const refundable = -rows.reduce((sum, r) => sum + Number(r.amount), 0);
+    if (!(refundable > 0)) {
+      fail(res, 400, "BAD_REQUEST", "这张预报单没有可退的金额（可能已经退过了）");
+      return;
+    }
+
+    const balanceAfter = await prisma.$transaction(async (tx) => {
+      const after = await refundToConsolidation(tx as any, {
+        companyId: auth.companyId,
+        clientId: prealert.planCustomer.clientId,
+        amount: refundable,
+        refType: "whr",
+        refId: prealert.id,
+        refNo: prealert.trackingNo,
+        remark: body.reason?.trim() ? `管理员撤销付款：${body.reason.trim()}` : "管理员撤销付款",
+        operatorId: auth.userId,
+        operatorName: auth.name || auth.userId,
+      });
+      await tx.whrConsolidationPrealert.update({
+        where: { id: prealert.id },
+        data: { status: "received_pending_payment", paymentReviewedAt: null } as any,
+      });
+      await tx.whrConsolidationStatusLog.create({
+        data: {
+          prealertId: prealert.id,
+          companyId: auth.companyId,
+          operatorId: auth.userId,
+          operatorRole: "admin",
+          operatorName: auth.name || auth.userId,
+          fromStatus: "paid",
+          toStatus: "received_pending_payment",
+          remark: `管理员撤销付款，退回集货余额 ¥${refundable.toFixed(2)}${body.reason?.trim() ? `（${body.reason.trim()}）` : ""}`,
+        },
+      });
+      return after;
+    });
+
+    ok(res, {
+      prealertId: prealert.id,
+      refunded: refundable,
+      balanceAfter,
+      status: "received_pending_payment",
+      message: `已退回 ¥${refundable.toFixed(2)} 到客户集货余额，单子回到待付款`,
+    });
   });
 
   // ==========================================================================

@@ -1,6 +1,7 @@
 import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
+import { InsufficientBalanceError, chargeForConsolidation } from "../wallet/consolidation-balance";
 import { saveImageToDisk, deleteImageFile } from "../orders/image-storage";
 import {
   ACTIVE_PREALERT_WHERE,
@@ -461,15 +462,17 @@ export function registerWhrConsolidationClientRoutes(app: MinimalHttpApp): void 
   // =======================================================================
   // 4. 上传付款凭证（预报单级别）
   // =======================================================================
+  // ==========================================================================
+  // 客户付款：用集货余额直接扣（2026-08-07 改）
+  // 原来是上传付款凭证 → 等管理员审核。现在改成余额支付：当场扣钱、当场完成，
+  // 不用传水单、不用审核。水单只在充值那一步传一次。
+  // 误操作由管理员端「撤销付款」兜底（退钱 + 单子回到待付款）。
+  // ==========================================================================
   app.post("/client/whr-consolidation/pay", async (req, res) => {
     const auth = requireRole(req, res, ["client"]);
     if (!auth) return;
 
-    const body = (req.body ?? {}) as {
-      planId?: string;
-      prealertId?: string;
-      proofs?: { fileName?: string; mime?: string; base64?: string }[];
-    };
+    const body = (req.body ?? {}) as { planId?: string; prealertId?: string };
     if (!body.planId?.trim()) {
       fail(res, 400, "BAD_REQUEST", "planId 为必填");
       return;
@@ -495,78 +498,36 @@ export function registerWhrConsolidationClientRoutes(app: MinimalHttpApp): void 
       fail(res, 400, "BAD_REQUEST", "当前状态不可付款，仅待付款状态可操作");
       return;
     }
-    // 收货地址必填
     if (!prealert.planCustomer.deliveryAddress?.trim()) {
-      fail(res, 400, "BAD_REQUEST", "请先填写泰国收货地址，再上传付款凭证");
+      fail(res, 400, "BAD_REQUEST", "请先填写泰国收货地址，再付款");
       return;
     }
 
-    const proofs = Array.isArray(body.proofs) ? body.proofs : [];
-    if (proofs.length === 0) {
-      fail(res, 400, "BAD_REQUEST", "请至少上传一张付款凭证");
+    const amount = prealert.totalFee == null ? 0 : Number(prealert.totalFee);
+    if (!(amount > 0)) {
+      fail(res, 400, "BAD_REQUEST", "这张预报单还没有计费金额，请联系客服核对后再付款");
       return;
     }
-    if (proofs.length > MAX_PAYMENT_PROOFS) {
-      fail(res, 400, "BAD_REQUEST", `一次最多上传 ${MAX_PAYMENT_PROOFS} 张付款凭证`);
-      return;
-    }
-    for (let i = 0; i < proofs.length; i++) {
-      const b64 = proofs[i]?.base64;
-      if (!isValidBase64(b64)) {
-        fail(res, 400, "BAD_REQUEST", `第 ${i + 1} 张付款凭证内容为空或格式不正确`);
-        return;
-      }
-      if (b64.length > MAX_IMAGE_BASE64_LENGTH) {
-        fail(res, 400, "BAD_REQUEST", `第 ${i + 1} 张付款凭证过大，请压缩后再上传`);
-        return;
-      }
-    }
 
-    // 旧凭证路径，事务成功后再删文件
-    const oldProofPaths = (Array.isArray(prealert.paymentProofs) ? prealert.paymentProofs : [])
-      .map((p: any) => p?.base64Path)
-      .filter((p: any): p is string => typeof p === "string" && p.startsWith("/images/"));
-
-    const now = new Date();
-    const savedProofs: any[] = [];
-    const cleanupSaved = () => {
-      for (const s of savedProofs) {
-        try {
-          deleteImageFile(s.base64Path);
-        } catch {
-          /* ignore */
-        }
-      }
-    };
     try {
-      for (const [i, p] of proofs.entries()) {
-        const imgPath = saveImageToDisk(
-          `whr_payment_${prealert.id}_${i}_${Date.now()}`,
-          p.mime || "image/png",
-          (p.base64 as string).trim(),
-        );
-        savedProofs.push({
-          fileName: p.fileName || imgPath.split("/").pop() || "payment.png",
-          mime: p.mime || "image/png",
-          base64Path: imgPath,
-          uploadedAt: now.toISOString(),
+      const balanceAfter = await prisma.$transaction(async (tx) => {
+        // 扣钱和改状态必须在同一个事务里，不能出现「钱扣了单子没付上」
+        const after = await chargeForConsolidation(tx as any, {
+          companyId: auth.companyId,
+          clientId: auth.userId,
+          amount,
+          refType: "whr",
+          refId: prealert.id,
+          refNo: prealert.trackingNo,
+          remark: "仓库版集货付款",
+          operatorId: auth.userId,
+          operatorName: auth.name || auth.userId,
         });
-      }
-    } catch {
-      cleanupSaved();
-      fail(res, 400, "BAD_REQUEST", "付款凭证保存失败，请重试");
-      return;
-    }
-
-    try {
-      await prisma.$transaction(async (tx) => {
         await tx.whrConsolidationPrealert.update({
           where: { id: prealert.id },
           data: {
-            status: "payment_submitted",
-            paymentProofs: savedProofs as any,
-            paymentProofUploadedAt: now,
-            paymentReviewedAt: null,
+            status: "paid",
+            paymentReviewedAt: new Date(),
             paymentReviewedBy: null,
             paymentRejectReason: null,
           } as any,
@@ -579,31 +540,27 @@ export function registerWhrConsolidationClientRoutes(app: MinimalHttpApp): void 
             operatorRole: "client",
             operatorName: auth.name || auth.userId,
             fromStatus: "received_pending_payment",
-            toStatus: "payment_submitted",
-            remark: "客户上传付款凭证",
+            toStatus: "paid",
+            remark: `客户用集货余额付款 ¥${amount.toFixed(2)}`,
           },
         });
-        return true;
+        return after;
+      });
+
+      ok(res, {
+        prealertId: prealert.id,
+        status: "paid",
+        paidAmount: amount,
+        balanceAfter,
+        message: `付款成功，已扣 ¥${amount.toFixed(2)}，集货余额剩余 ¥${balanceAfter.toFixed(2)}`,
       });
     } catch (e) {
-      cleanupSaved();
+      if (e instanceof InsufficientBalanceError) {
+        fail(res, 400, "BAD_REQUEST", e.message);
+        return;
+      }
       throw e;
     }
-
-    for (const oldPath of oldProofPaths) {
-      try {
-        deleteImageFile(oldPath);
-      } catch {
-        /* ignore */
-      }
-    }
-
-    ok(res, {
-      prealertId: prealert.id,
-      status: "payment_submitted",
-      paymentProofUploadedAt: now.toISOString(),
-      proofCount: savedProofs.length,
-    });
   });
 
   // =======================================================================

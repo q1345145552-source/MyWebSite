@@ -2,7 +2,7 @@
 import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
-import { refreshCnyThbRateIfStale } from "../exchange-rate/rate-sync";
+import { CONSOLIDATION_CURRENCY } from "../wallet/consolidation-balance";
 
 /**
  * 注册多币种账户接口。
@@ -12,23 +12,22 @@ export function registerClientComplianceRoutes(app: MinimalHttpApp): void {
   app.get("/client/wallet/overview", async (req, res) => {
     const auth = requireRole(req, res, ["client"]);
     if (!auth) return;
-    const rateSnapshot = await refreshCnyThbRateIfStale();
+    // 2026-08-07：集货余额只有人民币，历史遗留的其它币种不再下发给前端
     const accountRows = await prisma.clientWalletAccount.findMany({
-      where: { companyId: auth.companyId, clientId: auth.userId },
-      orderBy: { currency: "asc" },
+      where: { companyId: auth.companyId, clientId: auth.userId, currency: CONSOLIDATION_CURRENCY },
       select: { currency: true, balance: true, updatedAt: true },
     });
+    const balance = accountRows[0] ? Number(accountRows[0].balance.toString()) : 0;
     ok(res, {
+      balance,
+      currency: CONSOLIDATION_CURRENCY,
+      updatedAt: accountRows[0]?.updatedAt.toISOString() ?? null,
+      // 兼容老前端：仍然给一个 accounts 数组，但只有人民币这一条
       accounts: accountRows.map((item) => ({
         currency: item.currency,
         balance: Number(item.balance.toString()),
         updatedAt: item.updatedAt.toISOString(),
       })),
-      exchangeRate: {
-        pair: "CNY/THB",
-        rate: rateSnapshot.rate,
-        updatedAt: rateSnapshot.updatedAt,
-      },
     });
   });
 
@@ -48,11 +47,9 @@ export function registerClientComplianceRoutes(app: MinimalHttpApp): void {
       fail(res, 400, "BAD_REQUEST", "请输入有效的充值金额");
       return;
     }
-    const currency = (body.currency ?? "").toUpperCase();
-    if (currency !== "CNY" && currency !== "THB") {
-      fail(res, 400, "BAD_REQUEST", "币种只能是CNY或THB");
-      return;
-    }
+    // 2026-08-07：集货余额只有人民币，泰铢已废弃。
+    // 老前端可能还会传 currency，一律忽略，强制按人民币入账。
+    const currency = CONSOLIDATION_CURRENCY;
     const paymentMethod = body.paymentMethod ?? "";
     const validMethods = ["WECHAT", "ALIPAY", "BANK_TRANSFER"];
     if (!validMethods.includes(paymentMethod)) {
@@ -80,7 +77,40 @@ export function registerClientComplianceRoutes(app: MinimalHttpApp): void {
     ok(res, {
       id: recharge.id,
       status: recharge.status,
-      message: "充值申请已提交，等待管理员审核",
+      message: "充值申请已提交，等待管理员审核，通过后才会进集货余额",
+    });
+  });
+
+  // ===== 客户端：集货余额流水（2026-08-07 新增）=====
+  // 充值到账、集货付款、管理员退款，每一笔都在这里，客户能自己对账。
+  app.get("/client/wallet/ledger", async (req, res) => {
+    const auth = requireRole(req, res, ["client"]);
+    if (!auth) return;
+    const take = Math.min(Number((req.query as any)?.pageSize) || 200, 500);
+    const rows = await prisma.consolidationBalanceLedger.findMany({
+      where: { companyId: auth.companyId, clientId: auth.userId },
+      orderBy: { createdAt: "desc" },
+      take,
+      select: {
+        id: true, type: true, amount: true, balanceAfter: true,
+        refType: true, refNo: true, remark: true, createdAt: true,
+      },
+    });
+    const typeZh: Record<string, string> = { recharge: "充值到账", pay: "集货付款", refund: "撤销退款" };
+    const refZh: Record<string, string> = { whr: "仓库版集货", normal: "普通版集货", recharge: "充值单" };
+    ok(res, {
+      items: rows.map((r) => ({
+        id: r.id,
+        type: r.type,
+        typeLabel: typeZh[r.type] ?? r.type,
+        amount: Number(r.amount),
+        balanceAfter: Number(r.balanceAfter),
+        source: r.refType ? (refZh[r.refType] ?? r.refType) : "",
+        refNo: r.refNo ?? "",
+        remark: r.remark ?? "",
+        createdAt: r.createdAt.toISOString(),
+      })),
+      total: rows.length,
     });
   });
 

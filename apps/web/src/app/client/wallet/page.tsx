@@ -5,6 +5,8 @@ import RoleShell from "../../../modules/layout/RoleShell";
 import {
   fetchClientWalletOverview,
   fetchClientWalletRecharges,
+  fetchConsolidationLedger,
+  type ConsolidationLedgerItem,
   submitRecharge,
   type ClientWalletOverview,
   type WalletRechargeItem,
@@ -45,7 +47,6 @@ export default function ClientWalletPage() {
   // 充值相关状态
   const [showRechargeModal, setShowRechargeModal] = useState(false);
   const [rechargeAmount, setRechargeAmount] = useState("");
-  const [rechargeCurrency, setRechargeCurrency] = useState("CNY");
   const [rechargeMethod, setRechargeMethod] = useState("WECHAT");
   const [rechargeRemark, setRechargeRemark] = useState("");
   const [rechargeProof, setRechargeProof] = useState<string | null>(null);
@@ -55,16 +56,20 @@ export default function ClientWalletPage() {
 
   // 充值记录
   const [recharges, setRecharges] = useState<WalletRechargeItem[]>([]);
+  // 集货余额流水（充值到账 / 集货付款 / 撤销退款）
+  const [ledger, setLedger] = useState<ConsolidationLedgerItem[]>([]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [overview, recs] = await Promise.all([
+      const [overview, recs, led] = await Promise.all([
         fetchClientWalletOverview(),
         fetchClientWalletRecharges(),
+        fetchConsolidationLedger(),
       ]);
       setData(overview);
       setRecharges(recs.recharges);
+      setLedger(led.items);
     } catch (error) {
       const text = error instanceof Error ? error.message : "加载失败";
       setMessage(`加载失败：${text}`);
@@ -106,7 +111,6 @@ export default function ClientWalletPage() {
     try {
       await submitRecharge({
         amount,
-        currency: rechargeCurrency,
         paymentMethod: rechargeMethod,
         proofImage: rechargeProof,
         remark: rechargeRemark.trim() || undefined,
@@ -124,44 +128,32 @@ export default function ClientWalletPage() {
 
   const resetRechargeForm = () => {
     setRechargeAmount("");
-    setRechargeCurrency("CNY");
     setRechargeMethod("WECHAT");
     setRechargeRemark("");
     setRechargeProof(null);
     setRechargeError("");
   };
 
-  /**
-   * 计算 THB 与 CNY 的折算总额。
-   */
-  const summary = useMemo(() => {
-    if (!data) return null;
-    const cny = data.accounts.find((item) => item.currency === "CNY")?.balance ?? 0;
-    const thb = data.accounts.find((item) => item.currency === "THB")?.balance ?? 0;
-    const rate = data.exchangeRate.rate;
-    return {
-      cny,
-      thb,
-      pair: data.exchangeRate.pair,
-      rate,
-      totalCny: cny + thb / rate,
-      totalThb: thb + cny * rate,
-    };
+  /** 集货余额只有人民币（2026-08-07 起泰铢废弃） */
+  const balance = useMemo(() => {
+    if (!data) return 0;
+    if (typeof (data as any).balance === "number") return (data as any).balance as number;
+    return data.accounts.find((item) => item.currency === "CNY")?.balance ?? 0;
   }, [data]);
 
   return (
-    <RoleShell allowedRole="client" title="余额">
+    <RoleShell allowedRole="client" title="集货余额">
       {/* 余额卡片 */}
       <section style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 16, background: "#fff", marginBottom: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-          <h2 style={{ margin: 0 }}>账户余额（CNY / THB）</h2>
+          <h2 style={{ margin: 0 }}>集货余额</h2>
           <button
             onClick={() => setShowRechargeModal(true)}
             style={{
               border: "none",
               borderRadius: 8,
               padding: "8px 20px",
-              background: "#2563eb",
+              background: "#1e3a8a",
               color: "#fff",
               fontWeight: 600,
               fontSize: 14,
@@ -172,26 +164,49 @@ export default function ClientWalletPage() {
           </button>
         </div>
         {loading ? <p style={{ color: "#000000" }}>加载中...</p> : null}
-        {summary ? (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 10 }}>
-            <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10, background: "#f8fafc" }}>
-              <div style={{ color: "#000000", fontSize: 12 }}>人民币余额</div>
-              <div style={{ fontSize: 24, fontWeight: 700 }}>¥{summary.cny.toFixed(2)}</div>
-            </div>
-            <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10, background: "#f8fafc" }}>
-              <div style={{ color: "#000000", fontSize: 12 }}>泰铢余额</div>
-              <div style={{ fontSize: 24, fontWeight: 700 }}>฿{summary.thb.toFixed(2)}</div>
-            </div>
-            <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10, background: "#f8fafc" }}>
-              <div style={{ color: "#000000", fontSize: 12 }}>汇率（{summary.pair}）</div>
-              <div style={{ fontSize: 20, fontWeight: 700 }}>{summary.rate.toFixed(4)}</div>
-            </div>
-            <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10, background: "#f8fafc" }}>
-              <div style={{ color: "#000000", fontSize: 12 }}>折算总额（THB）</div>
-              <div style={{ fontSize: 28, fontWeight: 700 }}>฿{summary.totalThb.toFixed(2)}</div>
-            </div>
+        <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: "14px 16px", background: "#f8fafc", maxWidth: 320 }}>
+          <div style={{ color: "#000000", fontSize: 12 }}>可用余额（人民币）</div>
+          <div style={{ fontSize: 30, fontWeight: 700 }}>¥{balance.toFixed(2)}</div>
+          <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>只能用于集货拼柜付款</div>
+        </div>
+      </section>
+
+      {/* 余额流水（2026-08-07 新增）：每一笔进出都在这里，客户能自己对账 */}
+      <section style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 16, background: "#fff", marginBottom: 14 }}>
+        <h3 style={{ margin: "0 0 12px" }}>余额流水</h3>
+        {ledger.length === 0 ? (
+          <p style={{ color: "#6b7280", fontSize: 13 }}>暂无流水</p>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: "#f1f5f9", borderBottom: "1px solid #e5e7eb" }}>
+                  {["时间", "类型", "来源", "单号", "金额", "余额", "备注"].map((h, i) => (
+                    <th key={h} style={{ padding: "8px 12px", textAlign: i === 4 || i === 5 ? "right" : "left", fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {ledger.map((r) => (
+                  <tr key={r.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                    <td style={{ padding: "8px 12px", whiteSpace: "nowrap" }}>
+                      {new Date(r.createdAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                    </td>
+                    <td style={{ padding: "8px 12px", whiteSpace: "nowrap" }}>{r.typeLabel}</td>
+                    <td style={{ padding: "8px 12px", whiteSpace: "nowrap" }}>{r.source || "—"}</td>
+                    <td style={{ padding: "8px 12px", whiteSpace: "nowrap", fontFamily: "monospace", fontSize: 12 }}>{r.refNo || "—"}</td>
+                    {/* 进账带 +、出账带 −，一眼看得出是加钱还是扣钱 */}
+                    <td style={{ padding: "8px 12px", textAlign: "right", fontWeight: 600, whiteSpace: "nowrap" }}>
+                      {r.amount >= 0 ? "+" : "−"}¥{Math.abs(r.amount).toFixed(2)}
+                    </td>
+                    <td style={{ padding: "8px 12px", textAlign: "right", whiteSpace: "nowrap", color: "#6b7280" }}>¥{r.balanceAfter.toFixed(2)}</td>
+                    <td style={{ padding: "8px 12px", color: "#6b7280", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.remark}>{r.remark || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        ) : null}
+        )}
       </section>
 
       {/* 充值记录 */}
@@ -205,7 +220,6 @@ export default function ClientWalletPage() {
               <thead>
                 <tr style={{ background: "#f9fafb", borderBottom: "1px solid #e5e7eb" }}>
                   <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#374151" }}>时间</th>
-                  <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#374151" }}>币种</th>
                   <th style={{ padding: "8px 12px", textAlign: "right", fontWeight: 600, color: "#374151" }}>金额</th>
                   <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#374151" }}>支付方式</th>
                   <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#374151" }}>状态</th>
@@ -225,9 +239,8 @@ export default function ClientWalletPage() {
                           minute: "2-digit",
                         })}
                       </td>
-                      <td style={{ padding: "8px 12px" }}>{r.currency}</td>
                       <td style={{ padding: "8px 12px", textAlign: "right", fontWeight: 600 }}>
-                        {r.currency === "CNY" ? "¥" : "฿"}{r.amount.toFixed(2)}
+                        ¥{r.amount.toFixed(2)}
                       </td>
                       <td style={{ padding: "8px 12px" }}>{PAYMENT_METHOD_LABELS[r.paymentMethod] ?? r.paymentMethod}</td>
                       <td style={{ padding: "8px 12px" }}>
@@ -260,8 +273,9 @@ export default function ClientWalletPage() {
       <section style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 16, background: "#fff" }}>
         <h3 style={{ marginTop: 0 }}>说明</h3>
         <ul style={{ margin: 0, paddingLeft: 18, color: "#000000" }}>
-          <li>支持人民币（CNY）和泰铢（THB）充值，提交后由管理员审核。</li>
-          <li>每天 0 点自动更新实时汇率，人民币和泰铢余额互相折算显示。</li>
+          <li>集货余额<strong>只能用于集货拼柜（普通版和仓库版）付款</strong>，不能用于普通运单。</li>
+          <li>充值只收人民币。提交充值申请并上传水单后，由管理员审核，通过才会到账。</li>
+          <li>在集货拼柜里付款时<strong>直接扣余额、当场完成</strong>，不用再传水单。付款不可自行撤销，点错了请联系客服。</li>
           <li>如有疑问请联系客服。</li>
         </ul>
         {message ? <p style={{ marginTop: 10, color: "#b91c1c" }}>{message}</p> : null}
@@ -300,33 +314,6 @@ export default function ClientWalletPage() {
             }}
           >
             <h3 style={{ margin: "0 0 20px", fontSize: 18, fontWeight: 600 }}>充值申请</h3>
-
-            {/* 币种选择 */}
-            <div style={{ marginBottom: 16 }}>
-              <label style={{ display: "block", marginBottom: 6, fontWeight: 500, fontSize: 14, color: "#374151" }}>充值币种</label>
-              <div style={{ display: "flex", gap: 8 }}>
-                {["CNY", "THB"].map((cur) => (
-                  <button
-                    key={cur}
-                    type="button"
-                    onClick={() => setRechargeCurrency(cur)}
-                    style={{
-                      flex: 1,
-                      padding: "10px 16px",
-                      borderRadius: 8,
-                      border: rechargeCurrency === cur ? "2px solid #2563eb" : "1px solid #d1d5db",
-                      background: rechargeCurrency === cur ? "#eff6ff" : "#fff",
-                      color: rechargeCurrency === cur ? "#2563eb" : "#374151",
-                      fontWeight: 600,
-                      fontSize: 14,
-                      cursor: "pointer",
-                    }}
-                  >
-                    {cur === "CNY" ? "¥ 人民币" : "฿ 泰铢"}
-                  </button>
-                ))}
-              </div>
-            </div>
 
             {/* 金额 */}
             <div style={{ marginBottom: 16 }}>

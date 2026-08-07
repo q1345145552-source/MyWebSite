@@ -39,6 +39,7 @@ model User {
   documents                    ClientDocument[]
   walletAccounts               ClientWalletAccount[]
   walletRecharges              WalletRecharge[]               @relation("WalletRechargeClient")
+  consolidationLedger          ConsolidationBalanceLedger[]
   reviewedRecharges            WalletRecharge[]               @relation("WalletRechargeReviewer")
   aiAuditLogs                  AiAuditLog[]
   inboundPhotos                StaffInboundPhoto[]            @relation("OperatorInboundPhotos")
@@ -80,18 +81,18 @@ model Order {
   paymentProofUploadedAt DateTime? @map("payment_proof_uploaded_at")
 
   // 付款凭证（多张，JSON 数组）
-  paymentProofs Json @default("[]") @map("payment_proofs") @db.JsonB
-  shipDate               String?   @map("ship_date")
-  domesticTrackingNo     String?   @map("domestic_tracking_no")
-  transportMode          String    @map("transport_mode")
-  receiverNameTh         String    @map("receiver_name_th")
-  receiverPhoneTh        String    @map("receiver_phone_th")
-  receiverAddressTh      String    @map("receiver_address_th")
-  statusGroup            String    @default("unfinished") @map("status_group")
+  paymentProofs      Json     @default("[]") @map("payment_proofs") @db.JsonB
+  shipDate           String?  @map("ship_date")
+  domesticTrackingNo String?  @map("domestic_tracking_no")
+  transportMode      String   @map("transport_mode")
+  receiverNameTh     String   @map("receiver_name_th")
+  receiverPhoneTh    String   @map("receiver_phone_th")
+  receiverAddressTh  String   @map("receiver_address_th")
+  statusGroup        String   @default("unfinished") @map("status_group")
   // ⭐ 新增字段：货物类型（普货/商检/敏感），用于差异化计费
-  cargoType              String    @default("normal") @map("cargo_type")
-  createdAt              DateTime  @default(now()) @map("created_at")
-  updatedAt              DateTime  @updatedAt @map("updated_at")
+  cargoType          String   @default("normal") @map("cargo_type")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
 
   // 关联
   client            User                   @relation("ClientOrders", fields: [clientId], references: [id])
@@ -327,6 +328,38 @@ model WalletRecharge {
   @@index([companyId, status])
   @@index([clientId])
   @@map("wallet_recharges")
+}
+
+/// 集货余额流水（2026-08-07）
+/// 「余额」现在只服务两个集货板块（仓库版 / 普通版），普通运单不再能用余额付。
+/// 每一笔充值、付款、退款都在这里记一行，客户能看到自己的完整账目。
+/// 只有人民币，没有币种列 —— 泰铢余额已废弃。
+model ConsolidationBalanceLedger {
+  id           String   @id @default(cuid())
+  companyId    String   @map("company_id")
+  clientId     String   @map("client_id")
+  /// recharge=充值到账 | pay=集货付款 | refund=管理员撤销退款
+  type         String
+  /// 正数进账、负数出账，单位元
+  amount       Decimal  @db.Decimal(14, 2)
+  /// 这一笔之后的余额，客户对账时不用自己累加
+  balanceAfter Decimal  @map("balance_after") @db.Decimal(14, 2)
+  /// 关联单据：whr=仓库版预报单 | normal=普通版任务 | recharge=充值单
+  refType      String?  @map("ref_type")
+  refId        String?  @map("ref_id")
+  /// 给客户看的单号（预报单号 / 计划号等）
+  refNo        String?  @map("ref_no")
+  remark       String?
+  /// 谁操作的：客户自己付款就是客户，审核/撤销就是管理员
+  operatorId   String?  @map("operator_id")
+  operatorName String?  @map("operator_name")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  client User @relation(fields: [clientId], references: [id])
+
+  @@index([companyId, clientId, createdAt])
+  @@index([refType, refId])
+  @@map("consolidation_balance_ledger")
 }
 
 // ============================================================================
@@ -930,9 +963,9 @@ model WhrConsolidationPlanCustomer {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  plan       WhrConsolidationPlan        @relation(fields: [planId], references: [id], onDelete: Cascade)
-  client     User                        @relation(fields: [clientId], references: [id])
-  prealerts  WhrConsolidationPrealert[]
+  plan      WhrConsolidationPlan       @relation(fields: [planId], references: [id], onDelete: Cascade)
+  client    User                       @relation(fields: [clientId], references: [id])
+  prealerts WhrConsolidationPrealert[]
 
   @@index([companyId, clientId])
   @@index([companyId, planId])
@@ -940,12 +973,12 @@ model WhrConsolidationPlanCustomer {
 }
 
 model WhrConsolidationPrealert {
-  id         String    @id @default(cuid())
-  customerId String    @map("customer_id")
-  companyId  String    @map("company_id")
-  trackingNo String    @unique @map("tracking_no") // WHRP + 4位数字
-  expressNo  String?   @map("express_no")
-  mark       String    @map("mark")
+  id         String  @id @default(cuid())
+  customerId String  @map("customer_id")
+  companyId  String  @map("company_id")
+  trackingNo String  @unique @map("tracking_no") // WHRP + 4位数字
+  expressNo  String? @map("express_no")
+  mark       String  @map("mark")
 
   // 预报单状态流转: pending → received_pending_payment → payment_submitted → paid → loading → shipped → thailand_received
   // 任意节点可 → cancelled
@@ -953,13 +986,13 @@ model WhrConsolidationPrealert {
   receivedAt DateTime? @map("received_at")
 
   // 仓库签收
-  signedAt                  DateTime? @map("signed_at")
-  warehouseReceiptProofs    Json      @default("[]") @map("warehouse_receipt_proofs") @db.JsonB
+  signedAt               DateTime? @map("signed_at")
+  warehouseReceiptProofs Json      @default("[]") @map("warehouse_receipt_proofs") @db.JsonB
 
   // 付款凭证（多张，JSON 数组）
-  paymentProofs          Json       @default("[]") @map("payment_proofs") @db.JsonB
-  paymentProofUploadedAt DateTime?  @map("payment_proof_uploaded_at")
-  totalFee Decimal? @map("total_fee") @db.Decimal(12, 2)
+  paymentProofs          Json      @default("[]") @map("payment_proofs") @db.JsonB
+  paymentProofUploadedAt DateTime? @map("payment_proof_uploaded_at")
+  totalFee               Decimal?  @map("total_fee") @db.Decimal(12, 2)
 
   // 管理员审核
   paymentReviewedAt   DateTime? @map("payment_reviewed_at")
@@ -967,15 +1000,15 @@ model WhrConsolidationPrealert {
   paymentRejectReason String?   @map("payment_reject_reason") @db.Text
 
   // 泰国签收单
-  thailandReceiptProofs    Json      @default("[]") @map("thailand_receipt_proofs") @db.JsonB
-  thailandReceivedAt       DateTime? @map("thailand_received_at")
+  thailandReceiptProofs Json      @default("[]") @map("thailand_receipt_proofs") @db.JsonB
+  thailandReceivedAt    DateTime? @map("thailand_received_at")
 
   // 取消
   cancelReason String?   @map("cancel_reason") @db.Text
   cancelledAt  DateTime? @map("cancelled_at")
 
-  createdAt  DateTime  @default(now()) @map("created_at")
-  updatedAt  DateTime  @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   planCustomer WhrConsolidationPlanCustomer   @relation(fields: [customerId], references: [id], onDelete: Cascade)
   items        WhrConsolidationPrealertItem[]

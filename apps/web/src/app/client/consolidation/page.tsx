@@ -13,7 +13,7 @@ import {
   type ConsolidationTaskItem,
   type ConsolidationPrealertItem,
   type ConsolidationProductItem,
-} from "../../../services/business-api";
+  fetchClientWalletOverview,} from "../../../services/business-api";
 import { formatBeijingTime } from "../../../modules/staff/utils";
 
 // ============================================================================
@@ -105,7 +105,8 @@ export default function ClientConsolidationPage() {
   const [prealertSubmitting, setPrealertSubmitting] = useState(false);
 
   const [showPay, setShowPay] = useState(false);
-  const [payProofBase64, setPayProofBase64] = useState("");
+  // 集货余额（2026-08-07）：付款直接扣这里的钱
+  const [balance, setBalance] = useState(0);
   const [payProofFileName, setPayProofFileName] = useState("");
   const [payProofMime, setPayProofMime] = useState("");
   const [payLoading, setPayLoading] = useState(false);
@@ -119,6 +120,14 @@ export default function ClientConsolidationPage() {
   const [showAllProducts, setShowAllProducts] = useState(false);
 
   // ---- 数据加载 ----
+  /** 读集货余额。付款弹窗用它判断够不够，付完刷新。 */
+  const loadBalance = useCallback(async () => {
+    try {
+      const r = await fetchClientWalletOverview();
+      setBalance(typeof (r as any).balance === "number" ? (r as any).balance : (r.accounts?.find(a => a.currency === "CNY")?.balance ?? 0));
+    } catch { setBalance(0); }
+  }, []);
+
   const loadTasks = useCallback(async () => {
     setLoading(true);
     try {
@@ -144,6 +153,7 @@ export default function ClientConsolidationPage() {
   }, []);
 
   useEffect(() => { loadTasks(); }, [loadTasks]);
+  useEffect(() => { loadBalance(); }, [loadBalance]);
 
   useEffect(() => {
     if (selectedTaskId) {
@@ -274,15 +284,20 @@ export default function ClientConsolidationPage() {
     }
   };
 
-  // ---- 付款 ----
+  // ---- 付款：用集货余额直接扣（2026-08-07 改）----
+  // 原来是上传付款凭证等审核，现在当场扣余额、当场付清。
+  // 不可撤销，所以先弹一道确认；点错了只能找客服在管理员端撤销。
   const handlePay = async () => {
-    if (!payProofBase64) { setToast("请上传付款凭证"); return; }
+    const fee = taskDetail?.totalFee ?? 0;
+    if (!(fee > 0)) { setToast("这个任务还没有报价金额，请联系客服"); return; }
+    if (balance < fee) { setToast(`集货余额不足，还差 ¥${(fee - balance).toFixed(2)}，请先去「集货余额」充值`); return; }
+    if (!confirm(`确认用集货余额支付 ¥${fee.toFixed(2)}？\n\n此次付款不可撤销，误操作请联系客服。`)) return;
     setPayLoading(true);
     try {
-      await payConsolidationTask({ taskId: selectedTaskId!, proofBase64: payProofBase64, proofFileName: payProofFileName, proofMime: payProofMime });
+      const r = await payConsolidationTask({ taskId: selectedTaskId! });
       setShowPay(false);
-      setPayProofBase64("");
-      setToast("付款凭证已提交，等待员工审核");
+      setToast(r?.message ?? "付款成功");
+      await loadBalance();
       if (selectedTaskId) await loadDetail(selectedTaskId);
       await loadTasks();
     } catch (e: any) {
@@ -576,7 +591,7 @@ export default function ClientConsolidationPage() {
                     <div style={{ marginTop: 8, padding: "12px 16px", background: "#fee2e2", borderRadius: 8, border: "1px solid #ef4444" }}>
                       <div style={{ color: "#991b1b", fontWeight: 600, marginBottom: 4 }}>付款审核不通过</div>
                       <div style={{ color: "#7f1d1d", fontSize: 13, marginBottom: 8 }}>{taskDetail.paymentRejectReason}</div>
-                      <button onClick={() => setShowPay(true)} style={{ padding: "6px 16px", background: "#2563eb", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>重新上传付款凭证</button>
+                      <button onClick={() => setShowPay(true)} style={{ padding: "6px 16px", background: "#2563eb", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>去付款</button>
                     </div>
                   )}
                 </div>
@@ -713,24 +728,31 @@ export default function ClientConsolidationPage() {
       {/* ======== 弹窗：付款 ======== */}
       {showPay && (
         <Modal onClose={() => setShowPay(false)}>
-          <h3 style={{ marginTop: 0 }}>确认付款</h3>
-          <p style={{ fontSize: 24, fontWeight: 700, color: "#10b981", margin: "12px 0" }}>¥{taskDetail?.totalFee?.toLocaleString()}</p>
-          <label style={formLabel}>上传付款截图</label>
-          <input type="file" accept="image/*" onChange={async (e) => {
-            const file = e.target.files?.[0];
-            if (!file) return;
-            setPayProofFileName(file.name);
-            setPayProofMime(file.type);
-            const base64 = await new Promise<string>((resolve) => {
-              const reader = new FileReader();
-              reader.onload = () => resolve((reader.result as string).split(",")[1]);
-              reader.readAsDataURL(file);
-            });
-            setPayProofBase64(base64);
-          }} style={{ marginTop: 4, marginBottom: 14 }} />
-          <button onClick={handlePay} disabled={payLoading} style={{ padding: "10px 28px", background: "#2563eb", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600, fontSize: 15 }}>
-            {payLoading ? "提交中..." : "确认付款"}
-          </button>
+          {(() => {
+            const fee = taskDetail?.totalFee ?? 0;
+            const enough = balance >= fee && fee > 0;
+            return (
+              <>
+                <h3 style={{ marginTop: 0 }}>用集货余额付款</h3>
+                <p style={{ fontSize: 24, fontWeight: 700, color: "#1e3a8a", margin: "12px 0" }}>¥{fee.toLocaleString()}</p>
+                <div style={{ padding: "10px 12px", border: "1px solid #e5e7eb", borderRadius: 6, marginBottom: 12 }}>
+                  <div style={{ fontSize: 13 }}>当前集货余额：<strong>¥{balance.toFixed(2)}</strong></div>
+                  {fee > 0 && (
+                    enough
+                      ? <div style={{ fontSize: 13, color: "#374151", marginTop: 4 }}>付款后剩余：¥{(balance - fee).toFixed(2)}</div>
+                      : <div style={{ fontSize: 13, color: "#b91c1c", marginTop: 4 }}>余额不足，还差 ¥{(fee - balance).toFixed(2)}，请先去「集货余额」充值</div>
+                  )}
+                </div>
+                {/* 不可撤销必须写清楚 —— 扣款是当场生效的 */}
+                <p style={{ fontSize: 13, color: "#b91c1c", marginBottom: 14, fontWeight: 600 }}>
+                  此次付款不可撤销，误操作请联系客服
+                </p>
+                <button onClick={handlePay} disabled={payLoading || !enough} style={{ padding: "10px 28px", background: enough ? "#1e3a8a" : "#9ca3af", color: "#fff", border: "none", borderRadius: 8, cursor: enough ? "pointer" : "not-allowed", fontWeight: 600, fontSize: 15 }}>
+                  {payLoading ? "付款中..." : "确认付款"}
+                </button>
+              </>
+            );
+          })()}
         </Modal>
       )}
 

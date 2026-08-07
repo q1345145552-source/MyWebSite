@@ -1,6 +1,7 @@
 import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
+import { InsufficientBalanceError, chargeForConsolidation, refundToConsolidation } from "../wallet/consolidation-balance";
 import { saveImageToDisk, readImageAsBase64 } from "../orders/image-storage";
 import * as XLSX from "xlsx";
 
@@ -600,23 +601,19 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
   });
 
   // 8) 提交付款凭证（客户上传截图 → 待员工审核）
+  // ==========================================================================
+  // 客户付款：用集货余额直接扣（2026-08-07 改）
+  // 原来是上传付款凭证 → 等员工审核。现在改成余额支付：当场扣钱、当场付清，
+  // 不用传水单、不用审核。水单只在充值那一步传一次。
+  // 误操作由管理员端「撤销付款」兜底（退钱 + 回到未付款）。
+  // ==========================================================================
   app.post("/client/consolidation/pay", async (req, res) => {
     const auth = requireRole(req, res, ["client"]);
     if (!auth) return;
 
-    const body = (req.body ?? {}) as {
-      taskId?: string;
-      proofBase64?: string;
-      proofFileName?: string;
-      proofMime?: string;
-    };
-
+    const body = (req.body ?? {}) as { taskId?: string };
     if (!body.taskId?.trim()) {
       fail(res, 400, "BAD_REQUEST", "taskId 为必填");
-      return;
-    }
-    if (!body.proofBase64?.trim()) {
-      fail(res, 400, "BAD_REQUEST", "付款凭证为必填");
       return;
     }
 
@@ -626,48 +623,71 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       return;
     }
     if (task.status !== "quoted") {
-      fail(res, 400, "BAD_REQUEST", "只有已报价的任务才能提交付款");
+      fail(res, 400, "BAD_REQUEST", "只有已报价的任务才能付款");
       return;
     }
-    // 允许 unpaid 和 pending_review（被拒绝后重新提交）
-    if (task.paymentStatus !== "unpaid" && task.paymentStatus !== "pending_review") {
-      fail(res, 400, "BAD_REQUEST", "当前状态不允许提交付款");
+    if (task.paymentStatus === "paid") {
+      fail(res, 400, "BAD_REQUEST", "该任务已付款，不用重复付");
       return;
     }
 
-    const now = new Date();
+    const amount = task.totalFee == null ? 0 : Number(task.totalFee);
+    if (!(amount > 0)) {
+      fail(res, 400, "BAD_REQUEST", "这个任务还没有报价金额，请联系客服核对后再付款");
+      return;
+    }
 
-    await prisma.$transaction(async (tx) => {
-      await tx.consolidationTask.update({
-        where: { id: body.taskId },
-        data: {
-          paymentStatus: "pending_review",
-          paymentProofFileName: body.proofFileName?.trim() || null,
-          paymentProofMime: body.proofMime?.trim() || null,
-          paymentProofBase64: body.proofBase64!.trim(),
-          paymentProofUploadedAt: now,
-          paymentRejectReason: null, // 清除旧的拒绝原因
-          // 任务状态保持 quoted，不推进到 paid
-        },
-      });
-
-      await tx.consolidationStatusLog.create({
-        data: {
-          taskId: body.taskId!,
+    try {
+      const balanceAfter = await prisma.$transaction(async (tx) => {
+        // 扣钱和改状态必须在同一个事务里
+        const after = await chargeForConsolidation(tx as any, {
           companyId: auth.companyId,
+          clientId: auth.userId,
+          amount,
+          refType: "normal",
+          refId: task.id,
+          refNo: task.taskNo,
+          remark: "普通版集货付款",
           operatorId: auth.userId,
-          operatorRole: auth.role,
           operatorName: auth.name || auth.userId,
-          fromStatus: task.paymentStatus === "pending_review" ? "quoted" : "quoted",
-          toStatus: "quoted", // 状态不变，只记日志
-          remark: "客户提交付款凭证，等待审核",
-        },
+        });
+        await tx.consolidationTask.update({
+          where: { id: task.id },
+          data: {
+            paymentStatus: "paid",
+            paymentProofUploadedAt: new Date(),
+            paymentRejectReason: null,
+          },
+        });
+        await tx.consolidationStatusLog.create({
+          data: {
+            taskId: task.id,
+            companyId: auth.companyId,
+            operatorId: auth.userId,
+            operatorRole: auth.role,
+            operatorName: auth.name || auth.userId,
+            fromStatus: "quoted",
+            toStatus: "quoted", // 任务流程状态不变，只是付款状态变了
+            remark: `客户用集货余额付款 ¥${amount.toFixed(2)}`,
+          },
+        });
+        return after;
       });
 
-      return null;
-    });
-
-    ok(res, { success: true, taskId: body.taskId });
+      ok(res, {
+        success: true,
+        taskId: task.id,
+        paidAmount: amount,
+        balanceAfter,
+        message: `付款成功，已扣 ¥${amount.toFixed(2)}，集货余额剩余 ¥${balanceAfter.toFixed(2)}`,
+      });
+    } catch (e) {
+      if (e instanceof InsufficientBalanceError) {
+        fail(res, 400, "BAD_REQUEST", e.message);
+        return;
+      }
+      throw e;
+    }
   });
 
   // ==========================================================================
@@ -1345,6 +1365,83 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
   });
 
   // 3) 管理员强制编辑预报单
+  // ==========================================================================
+  // 撤销付款并退款（2026-08-07）
+  // 客户在集货里付款是当场扣余额、不可撤销的，这里是唯一的后手。
+  // 退多少不看当前报价，看流水里**实际扣过**的钱。
+  // ==========================================================================
+  app.post("/admin/consolidation/payments/revoke", async (req, res) => {
+    const auth = requireRole(req, res, ["admin"]);
+    if (!auth) return;
+
+    const body = (req.body ?? {}) as { taskId?: string; reason?: string };
+    if (!body.taskId?.trim()) {
+      fail(res, 400, "BAD_REQUEST", "taskId 为必填");
+      return;
+    }
+
+    const task = await prisma.consolidationTask.findFirst({
+      where: { id: body.taskId.trim(), companyId: auth.companyId },
+    });
+    if (!task) {
+      fail(res, 404, "NOT_FOUND", "集货任务不存在");
+      return;
+    }
+    if (task.paymentStatus !== "paid") {
+      fail(res, 400, "BAD_REQUEST", "只有「已付款」的任务能撤销");
+      return;
+    }
+
+    const rows = await prisma.consolidationBalanceLedger.findMany({
+      where: { refType: "normal", refId: task.id },
+      select: { amount: true },
+    });
+    const refundable = -rows.reduce((sum, r) => sum + Number(r.amount), 0);
+    if (!(refundable > 0)) {
+      fail(res, 400, "BAD_REQUEST", "这个任务没有可退的金额（可能已经退过了）");
+      return;
+    }
+
+    const balanceAfter = await prisma.$transaction(async (tx) => {
+      const after = await refundToConsolidation(tx as any, {
+        companyId: auth.companyId,
+        clientId: task.clientId,
+        amount: refundable,
+        refType: "normal",
+        refId: task.id,
+        refNo: task.taskNo,
+        remark: body.reason?.trim() ? `管理员撤销付款：${body.reason.trim()}` : "管理员撤销付款",
+        operatorId: auth.userId,
+        operatorName: auth.name || auth.userId,
+      });
+      await tx.consolidationTask.update({
+        where: { id: task.id },
+        data: { paymentStatus: "unpaid", paymentProofUploadedAt: null },
+      });
+      await tx.consolidationStatusLog.create({
+        data: {
+          taskId: task.id,
+          companyId: auth.companyId,
+          operatorId: auth.userId,
+          operatorRole: "admin",
+          operatorName: auth.name || auth.userId,
+          fromStatus: task.status,
+          toStatus: task.status,
+          remark: `管理员撤销付款，退回集货余额 ¥${refundable.toFixed(2)}${body.reason?.trim() ? `（${body.reason.trim()}）` : ""}`,
+        },
+      });
+      return after;
+    });
+
+    ok(res, {
+      taskId: task.id,
+      refunded: refundable,
+      balanceAfter,
+      paymentStatus: "unpaid",
+      message: `已退回 ¥${refundable.toFixed(2)} 到客户集货余额，任务回到未付款`,
+    });
+  });
+
   app.post("/admin/consolidation/prealerts/force-edit", async (req, res) => {
     const auth = requireRole(req, res, ["admin"]);
     if (!auth) return;

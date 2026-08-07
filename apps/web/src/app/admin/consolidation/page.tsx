@@ -10,6 +10,7 @@ import {
   adminDeleteConsolidationPrealert,
   reviewConsolidationPayment,
   rejectConsolidationPayment,
+  revokeConsolidationPayment,
   type ConsolidationTaskItem,
   type ConsolidationPrealertItem,
   type ConsolidationProductItem,
@@ -150,6 +151,27 @@ export default function AdminConsolidationPage() {
       if (selectedTaskId === tid) setSelectedTaskId(null);
       await loadTasks();
     } catch (e: any) { setToast(e.message); } finally { setDeleteTaskSubmitting(false); }
+  };
+
+  // 撤销付款（2026-08-07）
+  const [revoking, setRevoking] = useState(false);
+
+  /**
+   * 撤销这笔集货付款：钱退回客户的集货余额，任务回到「未付款」。
+   * 退多少由后端按流水里实际扣过的钱算。
+   */
+  const handleRevokePayment = async () => {
+    if (!selectedTaskId) return;
+    const reason = prompt("撤销这笔付款？\n\n钱会退回客户的集货余额，任务回到「未付款」。\n请填写撤销原因（会记进流水和日志）：");
+    if (reason == null) return;
+    setRevoking(true);
+    try {
+      const r = await revokeConsolidationPayment({ taskId: selectedTaskId, reason: reason.trim() || undefined });
+      setToast(r?.message ?? "已撤销并退款");
+      await loadDetail(selectedTaskId);
+      await loadTasks();
+    } catch (e: any) { setToast(e?.message ?? "撤销失败"); }
+    finally { setRevoking(false); }
   };
 
   const handleApprovePayment = async () => {
@@ -374,6 +396,20 @@ export default function AdminConsolidationPage() {
                 {taskDetail.loadingDate && <div><span style={{ fontSize: 12, color: "#6b7280" }}>装柜日期</span><div style={{ fontWeight: 600 }}>{taskDetail.loadingDate}</div></div>}
                 <div><span style={{ fontSize: 12, color: "#6b7280" }}>物流状态</span><div style={{ fontWeight: 600 }}>{STATUS_ZH[taskDetail.status]}</div></div>
               </div>
+            </div>
+          )}
+
+          {/* 已付款：撤销并退款（2026-08-07）
+              客户改成用集货余额付款、当场扣钱不可撤销，这里是唯一的后手 */}
+          {taskDetail.paymentStatus === "paid" && (
+            <div style={{ marginBottom: 20, padding: "12px 16px", border: "1px solid #e5e7eb", borderRadius: 8 }}>
+              <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 6 }}>已付款</div>
+              <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 10 }}>
+                客户用集货余额支付。客户点错了可以在这里撤销：钱退回他的集货余额，任务回到「未付款」。
+              </div>
+              <button onClick={handleRevokePayment} disabled={revoking} style={{ padding: "8px 16px", border: "1px solid #fecaca", color: "#b91c1c", background: "#fff", borderRadius: 6, cursor: revoking ? "not-allowed" : "pointer", fontWeight: 600 }}>
+                {revoking ? "退款中..." : "撤销付款并退款"}
+              </button>
             </div>
           )}
 
