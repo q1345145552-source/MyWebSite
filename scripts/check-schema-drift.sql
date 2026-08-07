@@ -537,7 +537,21 @@ WITH expected(table_name, column_name) AS (VALUES
   ('whr_consolidation_status_logs','from_status'),
   ('whr_consolidation_status_logs','to_status'),
   ('whr_consolidation_status_logs','remark'),
-  ('whr_consolidation_status_logs','created_at')
+  ('whr_consolidation_status_logs','created_at'),
+  -- 集货余额流水（2026-08-07 新增）
+  ('consolidation_balance_ledger','id'),
+  ('consolidation_balance_ledger','company_id'),
+  ('consolidation_balance_ledger','client_id'),
+  ('consolidation_balance_ledger','type'),
+  ('consolidation_balance_ledger','amount'),
+  ('consolidation_balance_ledger','balance_after'),
+  ('consolidation_balance_ledger','ref_type'),
+  ('consolidation_balance_ledger','ref_id'),
+  ('consolidation_balance_ledger','ref_no'),
+  ('consolidation_balance_ledger','remark'),
+  ('consolidation_balance_ledger','operator_id'),
+  ('consolidation_balance_ledger','operator_name'),
+  ('consolidation_balance_ledger','created_at')
 ),
 actual AS (
   SELECT c.table_name::text AS table_name, c.column_name::text AS column_name
