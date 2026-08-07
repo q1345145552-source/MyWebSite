@@ -787,20 +787,6 @@ export default function ClientHomePage() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
           <h2 style={{ margin: 0, fontSize: 20 }}>我的运单查询</h2>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <a
-              href="/client/bills"
-              style={{
-                border: "1px solid #bfdbfe",
-                borderRadius: 8,
-                padding: "6px 10px",
-                color: "#1d4ed8",
-                background: "#eff6ff",
-                fontWeight: 800,
-                textDecoration: "none",
-              }}
-            >
-              账单
-            </a>
             <button
               type="button"
               onClick={() => setQueryPanelCollapsed((v) => !v)}
