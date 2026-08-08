@@ -4,9 +4,17 @@ import { useEffect, useState, useCallback } from "react";
 import RoleShell from "../../../modules/layout/RoleShell";
 import { apiBaseUrl, apiRequest } from "../../../services/core-api";
 import { formatBeijingTime } from "../../../modules/staff/utils";
+import { base64Bytes, compressImageForUpload, formatBytes } from "../../../modules/shared/image-compress";
 
-// 单张图片上传上限（原图字节），和后端 MAX_IMAGE_BASE64_LENGTH 对齐留出余量
+// 选文件时的原图上限。超过这个的多半是选错了（视频/超大扫描件），先挡掉再说。
+const MAX_SOURCE_BYTES = 30 * 1024 * 1024;
+// 压缩之后单张仍然不许超过这个（后端 MAX_IMAGE_BASE64_LENGTH 是 8MB，这里留足余量）
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+// 一次「保存全部」会把多款货品的图片一起发出去，整个请求体的上限。
+// 真正的天花板是 10 MiB —— 不是 nginx 也不是后端，是中间 Next.js 转发那一跳的硬限制
+// （2026-08-08 实测：10.4MB 还通，10.8MB 就变成一句光秃秃的 500）。
+// 这里取 8MB，给 JSON 里的其他字段和 base64 的换算误差留足余量。
+const MAX_UPLOAD_TOTAL_BYTES = 8 * 1024 * 1024;
 
 const jsonPost = { "Content-Type": "application/json" } as const;
 
@@ -216,6 +224,8 @@ export default function ClientWhrConsolidationPage() {
   const [showItemForm, setShowItemForm] = useState(false);
   const [itemForms, setItemForms] = useState<ProductFormRow[]>([emptyItemForm()]);
   const [itemSubmitting, setItemSubmitting] = useState(false);
+  // 正在压缩图片的那一行（压的时候把这一行的选图框禁掉，避免连点）
+  const [compressingRow, setCompressingRow] = useState<number | null>(null);
   // 弹窗当前编辑的是哪张预报单 —— 不再依赖 expandedPrealert，避免弹窗开着时展开状态变了保存到别的单上
   const [itemFormPrealertId, setItemFormPrealertId] = useState<string | null>(null);
   // 打开弹窗时这张单已有几行货品，用于在弹窗里给出提示
@@ -328,6 +338,13 @@ export default function ClientWhrConsolidationPage() {
       }
       if (!r.material.trim()) { setToast(`第${i + 1}行材质为必填`); return; }
       if (!r.cargoValue.trim()) { setToast(`第${i + 1}行货值为必填`); return; }
+    }
+    // 多款货品的图片是一起发出去的，整批超上限就当场说清楚，
+    // 别让请求发出去被服务器挡掉（那样浏览器只会报 413，客户看不懂）
+    const totalBytes = rows.reduce((s, r) => s + (r.imageFile ? base64Bytes(r.imageFile.base64) : 0), 0);
+    if (totalBytes > MAX_UPLOAD_TOTAL_BYTES) {
+      setToast(`这 ${rows.length} 款货品的图片共 ${formatBytes(totalBytes)}，超过 ${formatBytes(MAX_UPLOAD_TOTAL_BYTES)}，请分两次保存`);
+      return;
     }
     setItemSubmitting(true);
     try {
@@ -846,18 +863,27 @@ export default function ClientWhrConsolidationPage() {
                           <img src={row.existingImageBase64} alt="已有图片" style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 4, border: "1px solid #e5e7eb" }} />
                         </div>
                       )}
-                      <input type="file" accept="image/*" onChange={async e => {
-                        const file = e.target.files?.[0]; if (!file) return;
-                        if (file.size > MAX_IMAGE_BYTES) {
-                          setToast(`图片 ${file.name} 超过 ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)}MB，请压缩后再上传`);
-                          e.target.value = "";
+                      <input type="file" accept="image/*" disabled={compressingRow === idx} onChange={async e => {
+                        const file = e.target.files?.[0];
+                        e.target.value = "";
+                        if (!file) return;
+                        if (file.size > MAX_SOURCE_BYTES) {
+                          setToast(`图片 ${file.name} 有 ${formatBytes(file.size)}，超过 ${formatBytes(MAX_SOURCE_BYTES)}，请换一张`);
                           return;
                         }
-                        const base64 = await new Promise<string>(r => { const fr = new FileReader(); fr.onload = () => r((fr.result as string).split(",")[1]); fr.readAsDataURL(file); });
-                        const cp = [...itemForms];
-                        cp[idx] = { ...cp[idx], imageFile: { fileName: file.name, mime: file.type, base64 }, existingImageBase64: undefined };
-                        setItemForms(cp);
+                        setCompressingRow(idx);
+                        try {
+                          const img = await compressImageForUpload(file);
+                          if (base64Bytes(img.base64) > MAX_IMAGE_BYTES) {
+                            setToast(`图片 ${file.name} 压缩后仍有 ${formatBytes(base64Bytes(img.base64))}，请换一张`);
+                            return;
+                          }
+                          setItemForms(prev => prev.map((row, i) => (
+                            i === idx ? { ...row, imageFile: img, existingImageBase64: undefined } : row
+                          )));
+                        } finally { setCompressingRow(null); }
                       }} style={{ marginTop: 2 }} />
+                      {compressingRow === idx && <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>正在处理图片，请稍候…</div>}
                     </div>
                   </div>
                 );

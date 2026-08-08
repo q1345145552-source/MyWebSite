@@ -4,10 +4,47 @@ import { useEffect, useState, useCallback } from "react";
 import RoleShell from "../../../modules/layout/RoleShell";
 import { apiBaseUrl, apiRequest } from "../../../services/core-api";
 import { formatBeijingTime } from "../../../modules/staff/utils";
+import { base64Bytes, compressImageForUpload, formatBytes } from "../../../modules/shared/image-compress";
 
-// 单张凭证上传上限（原图字节）
+// 选文件时的原图上限。超过这个的多半是选错了（视频/超大扫描件），先挡掉再说。
+const MAX_SOURCE_BYTES = 30 * 1024 * 1024;
+// 压缩之后单张仍然不许超过这个（后端 MAX_IMAGE_BASE64_LENGTH 是 8MB，这里留足余量）
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+// 整个请求体的上限。
+// 真正的天花板是 10 MiB —— 不是 nginx 也不是后端，是中间 Next.js 转发那一跳的硬限制
+// （2026-08-08 实测：10.4MB 还通，10.8MB 就变成一句光秃秃的 500）。
+// 这里取 8MB，给 JSON 里的其他字段和 base64 的换算误差留足余量。
+const MAX_UPLOAD_TOTAL_BYTES = 8 * 1024 * 1024;
 const jsonPost = { "Content-Type": "application/json" } as const;
+
+/**
+ * 多张图片选完后统一压缩。返回压好的列表 + 被跳过的文件说明。
+ * 被跳过的一定要显式告诉用户，不能静默丢掉。
+ */
+async function prepareUploadFiles(
+  files: File[],
+): Promise<{ ready: { base64: string; fileName: string; mime: string }[]; skipped: string[] }> {
+  const ready: { base64: string; fileName: string; mime: string }[] = [];
+  const skipped: string[] = [];
+  for (const file of files) {
+    if (file.size > MAX_SOURCE_BYTES) {
+      skipped.push(`${file.name}（原图 ${formatBytes(file.size)}，超过 ${formatBytes(MAX_SOURCE_BYTES)}）`);
+      continue;
+    }
+    const img = await compressImageForUpload(file);
+    if (base64Bytes(img.base64) > MAX_IMAGE_BYTES) {
+      skipped.push(`${file.name}（压缩后仍有 ${formatBytes(base64Bytes(img.base64))}）`);
+      continue;
+    }
+    ready.push({ base64: img.base64, fileName: img.fileName, mime: img.mime });
+  }
+  return { ready, skipped };
+}
+
+/** 这一批图片加起来会占多大请求体 */
+function totalUploadBytes(files: { base64: string }[]): number {
+  return files.reduce((s, f) => s + base64Bytes(f.base64), 0);
+}
 
 /** 把接口返回的图片字段（可能是 /images 路径、data URL 或裸 base64）统一成可用的 src */
 function toImageSrc(src: unknown, mime?: string): string {
@@ -175,11 +212,13 @@ export default function StaffWhrConsolidationPage() {
   const [thailandTarget, setThailandTarget] = useState<{ planId: string; prealertId: string; planNo: string; trackingNo: string; clientName: string; volumeM3: number } | null>(null);
   const [thailandFiles, setThailandFiles] = useState<{ base64: string; fileName: string; mime: string }[]>([]);
   const [thailandSubmitting, setThailandSubmitting] = useState(false);
+  const [thailandCompressing, setThailandCompressing] = useState(false);
 
   // ---- 仓库签收 ----
   const [signTarget, setSignTarget] = useState<{ planId: string; prealertId: string; planNo: string; trackingNo: string; mark: string; clientName: string; clientPhone?: string; clientCompany?: string; deliveryAddress: string | null; items?: any[]; loading?: boolean } | null>(null);
   const [signFiles, setSignFiles] = useState<{ base64: string; fileName: string; mime: string }[]>([]);
   const [signSubmitting, setSignSubmitting] = useState(false);
+  const [signCompressing, setSignCompressing] = useState(false);
 
   // ---- 审核付款 ----
   const [reviewTarget, setReviewTarget] = useState<any>(null);
@@ -391,6 +430,12 @@ export default function StaffWhrConsolidationPage() {
 
   const handleWarehouseSign = async () => {
     if (!signTarget || signFiles.length === 0) { setToast("请上传收货凭证照片"); return; }
+    // 整批超上限就当场说清楚，别让请求发出去被服务器挡掉（那样浏览器只会报 413，员工看不懂）
+    const signTotal = totalUploadBytes(signFiles);
+    if (signTotal > MAX_UPLOAD_TOTAL_BYTES) {
+      setToast(`这 ${signFiles.length} 张照片共 ${formatBytes(signTotal)}，超过 ${formatBytes(MAX_UPLOAD_TOTAL_BYTES)}，请先删掉几张再提交`);
+      return;
+    }
     setSignSubmitting(true);
     try {
       await apiRequest<any>(
@@ -524,6 +569,11 @@ export default function StaffWhrConsolidationPage() {
   // ---- 泰国签收 ----
   const handleThailandSign = async () => {
     if (!thailandTarget || thailandFiles.length === 0) { setToast("请选择签收单文件"); return; }
+    const thailandTotal = totalUploadBytes(thailandFiles);
+    if (thailandTotal > MAX_UPLOAD_TOTAL_BYTES) {
+      setToast(`这 ${thailandFiles.length} 张照片共 ${formatBytes(thailandTotal)}，超过 ${formatBytes(MAX_UPLOAD_TOTAL_BYTES)}，请先删掉几张再提交`);
+      return;
+    }
     setThailandSubmitting(true);
     try {
       await apiRequest<any>(
@@ -1142,24 +1192,21 @@ export default function StaffWhrConsolidationPage() {
 
             <div style={{ marginTop: 14 }}>
               <label style={fl}>收货凭证照片 *（支持多张）</label>
-              <input type="file" accept="image/*" multiple onChange={async e => {
+              <input type="file" accept="image/*" multiple disabled={signCompressing} onChange={async e => {
                 const files = Array.from(e.target.files ?? []);
-                if (files.length === 0) return;
-                const newFiles: { base64: string; fileName: string; mime: string }[] = [];
-                for (const file of files) {
-                  if (file.size > MAX_IMAGE_BYTES) {
-                    setToast(`${file.name} 超过 ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)}MB，已跳过`);
-                    continue;
-                  }
-                  const base64 = await new Promise<string>(r => { const fr = new FileReader(); fr.onload = () => r((fr.result as string).split(",")[1]); fr.readAsDataURL(file); });
-                  newFiles.push({ base64, fileName: file.name, mime: file.type });
-                }
-                if (newFiles.length > 0) setSignFiles(prev => [...prev, ...newFiles]);
                 e.target.value = "";
+                if (files.length === 0) return;
+                setSignCompressing(true);
+                try {
+                  const { ready, skipped } = await prepareUploadFiles(files);
+                  if (ready.length > 0) setSignFiles(prev => [...prev, ...ready]);
+                  if (skipped.length > 0) setToast(`以下照片没能加进来：${skipped.join("；")}`);
+                } finally { setSignCompressing(false); }
               }} style={{ marginTop: 4 }} />
+              {signCompressing && <div style={{ marginTop: 4, fontSize: 12, color: "#6b7280" }}>正在处理照片，请稍候…</div>}
               {signFiles.length > 0 && (
                 <div style={{ marginTop: 4, fontSize: 12 }}>
-                  <span style={{ color: "#10b981" }}>已选择 {signFiles.length} 张照片</span>
+                  <span style={{ color: "#10b981" }}>已选择 {signFiles.length} 张照片（共 {formatBytes(totalUploadBytes(signFiles))}）</span>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
                     {signFiles.map((f, i) => (
                       <div key={i} style={{ display: "flex", alignItems: "center", gap: 4, background: "#f3f4f6", padding: "2px 8px", borderRadius: 4 }}>
@@ -1293,24 +1340,21 @@ export default function StaffWhrConsolidationPage() {
             <p style={{ fontSize: 13, color: "#6b7280" }}>{thailandTarget.planNo} · 预报单：{thailandTarget.trackingNo} · {thailandTarget.volumeM3}方</p>
             <div style={{ marginTop: 14 }}>
               <label style={fl}>签收单文件 *（支持多张）</label>
-              <input type="file" accept="image/*" multiple onChange={async e => {
+              <input type="file" accept="image/*" multiple disabled={thailandCompressing} onChange={async e => {
                 const files = Array.from(e.target.files ?? []);
-                if (files.length === 0) return;
-                const newFiles: { base64: string; fileName: string; mime: string }[] = [];
-                for (const file of files) {
-                  if (file.size > MAX_IMAGE_BYTES) {
-                    setToast(`${file.name} 超过 ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)}MB，已跳过`);
-                    continue;
-                  }
-                  const base64 = await new Promise<string>(r => { const fr = new FileReader(); fr.onload = () => r((fr.result as string).split(",")[1]); fr.readAsDataURL(file); });
-                  newFiles.push({ base64, fileName: file.name, mime: file.type });
-                }
-                if (newFiles.length > 0) setThailandFiles(prev => [...prev, ...newFiles]);
                 e.target.value = "";
+                if (files.length === 0) return;
+                setThailandCompressing(true);
+                try {
+                  const { ready, skipped } = await prepareUploadFiles(files);
+                  if (ready.length > 0) setThailandFiles(prev => [...prev, ...ready]);
+                  if (skipped.length > 0) setToast(`以下照片没能加进来：${skipped.join("；")}`);
+                } finally { setThailandCompressing(false); }
               }} style={{ marginTop: 4 }} />
+              {thailandCompressing && <div style={{ marginTop: 4, fontSize: 12, color: "#6b7280" }}>正在处理照片，请稍候…</div>}
               {thailandFiles.length > 0 && (
                 <div style={{ marginTop: 4, fontSize: 12 }}>
-                  <span style={{ color: "#10b981" }}>已选择 {thailandFiles.length} 张照片</span>
+                  <span style={{ color: "#10b981" }}>已选择 {thailandFiles.length} 张照片（共 {formatBytes(totalUploadBytes(thailandFiles))}）</span>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
                     {thailandFiles.map((f, i) => (
                       <div key={i} style={{ display: "flex", alignItems: "center", gap: 4, background: "#f3f4f6", padding: "2px 8px", borderRadius: 4 }}>
