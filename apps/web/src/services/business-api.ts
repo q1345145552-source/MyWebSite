@@ -2138,6 +2138,10 @@ export interface ConsolidationDeletePreview {
   planNo?: string;
   willDelete: Record<string, number>;
   blockers: string[];
+  /** 删除时会退回客户集货余额的总金额（元）。2026-08-08 新增 */
+  refundTotal?: number;
+  /** 会退给几位客户 */
+  refundCount?: number;
 }
 
 /**

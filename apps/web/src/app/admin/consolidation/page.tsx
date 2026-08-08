@@ -143,7 +143,7 @@ export default function AdminConsolidationPage() {
   // 原来这里直接调删除，而且调的接口后端根本不存在（DELETE /admin/consolidation/tasks），
   // 点了必然失败。现在改成：打开弹窗先预检，把「会连带删掉什么」摆出来；
   // 后端拦住时（已收货 / 已开始走流程）再要求输管理员密码强删。
-  const [deletePreview, setDeletePreview] = useState<{ willDelete: Record<string, number>; blockers: string[] } | null>(null);
+  const [deletePreview, setDeletePreview] = useState<{ willDelete: Record<string, number>; blockers: string[]; refundTotal?: number; refundCount?: number } | null>(null);
   const [deletePassword, setDeletePassword] = useState("");
   const [deleteError, setDeleteError] = useState("");
 
@@ -155,7 +155,7 @@ export default function AdminConsolidationPage() {
     setDeleteError("");
     try {
       const r = await deleteAdminConsolidationTask(tid, { dryRun: true });
-      setDeletePreview({ willDelete: r.willDelete, blockers: r.blockers });
+      setDeletePreview({ willDelete: r.willDelete, blockers: r.blockers, refundTotal: r.refundTotal, refundCount: r.refundCount });
     } catch (e: any) {
       setDeleteError(e?.message ?? "预检失败");
     }
@@ -542,6 +542,12 @@ export default function AdminConsolidationPage() {
                   <li key={k}>{k}：{v} 条</li>
                 ))}
               </ul>
+              {(deletePreview.refundTotal ?? 0) > 0 && (
+                <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 6, padding: 10, marginBottom: 12, fontSize: 13, color: "#166534" }}>
+                  删除时会把已付的 <b>¥{(deletePreview.refundTotal ?? 0).toFixed(2)}</b>
+                  {" "}退回给 {deletePreview.refundCount} 位客户的集货余额。
+                </div>
+              )}
               {deletePreview.blockers.length > 0 && (
                 <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 6, padding: 10, marginBottom: 12 }}>
                   <div style={{ fontSize: 13, color: "#b91c1c", fontWeight: 600, marginBottom: 4 }}>这个任务已经开始走流程了：</div>

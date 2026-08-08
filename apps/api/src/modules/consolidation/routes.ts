@@ -3,7 +3,13 @@ import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
 import { logger } from "../core/logger";
 import { verifyPassword } from "../auth/crypto-utils";
-import { InsufficientBalanceError, chargeForConsolidation, refundToConsolidation } from "../wallet/consolidation-balance";
+import {
+  InsufficientBalanceError,
+  chargeForConsolidation,
+  computePendingRefunds,
+  refundPendingOnDelete,
+  refundToConsolidation,
+} from "../wallet/consolidation-balance";
 import { saveImageToDisk, readImageAsBase64 } from "../orders/image-storage";
 import * as XLSX from "xlsx";
 
@@ -1659,8 +1665,13 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       状态日志: logCount,
     };
 
+    // 客户已经付过的钱，删之前要退回去（2026-08-08 补）。
+    // 普通版是整个任务一次性付款，流水记的是 refType=normal / refId=任务id。
+    const pendingRefunds = await computePendingRefunds(prisma, [{ refType: "normal", refId: task.id }]);
+    const refundTotal = pendingRefunds.reduce((s, r) => s + r.amount, 0);
+
     if (body.dryRun) {
-      ok(res, { taskNo: task.taskNo, willDelete, blockers });
+      ok(res, { taskNo: task.taskNo, willDelete, blockers, refundTotal, refundCount: pendingRefunds.length });
       return;
     }
 
@@ -1680,13 +1691,31 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       }
     }
 
-    await prisma.consolidationTask.delete({ where: { id: taskId } });
+    // 退款和删除必须在同一个事务里：不然会出现「钱退了单子还在」或者反过来
+    await prisma.$transaction(async (tx) => {
+      if (pendingRefunds.length > 0) {
+        await refundPendingOnDelete(tx as any, {
+          companyId: auth.companyId,
+          refType: "normal",
+          refId: task.id,
+          refunds: pendingRefunds,
+          remark: `管理员删除集货任务 ${task.taskNo}，退回已付款项`,
+          operatorId: auth.userId,
+          operatorName: auth.name || auth.userId,
+        });
+      }
+      await tx.consolidationTask.delete({ where: { id: taskId } });
+    });
 
     logger.warn("删除集货任务", {
       操作人: auth.userId, 任务号: task.taskNo, 任务状态: task.status,
       连带删除: willDelete, 是否强删: blockers.length > 0,
+      退款客户数: pendingRefunds.length, 退款总额: refundTotal,
     });
 
-    ok(res, { deleted: true, taskNo: task.taskNo, willDelete, forced: blockers.length > 0 });
+    ok(res, {
+      deleted: true, taskNo: task.taskNo, willDelete, forced: blockers.length > 0,
+      refundTotal, refundCount: pendingRefunds.length,
+    });
   });
 }

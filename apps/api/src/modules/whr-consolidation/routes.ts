@@ -3,7 +3,11 @@ import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
 import { logger } from "../core/logger";
 import { verifyPassword } from "../auth/crypto-utils";
-import { refundToConsolidation } from "../wallet/consolidation-balance";
+import {
+  computePendingRefunds,
+  refundPendingOnDelete,
+  refundToConsolidation,
+} from "../wallet/consolidation-balance";
 import {
   NON_CANCELLABLE_STATUSES,
   buildFeeBreakdown,
@@ -993,8 +997,16 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
       状态日志: logCount,
     };
 
+    // 客户已经付过的钱，删之前要退回去（2026-08-08 补）。
+    // 不退的话单子删了钱还挂在客户账上，客户来问都查不到 —— 实测确认过这个洞。
+    const pendingRefunds = await computePendingRefunds(
+      prisma,
+      allPrealerts.map((p) => ({ refType: "whr", refId: p.id })),
+    );
+    const refundTotal = pendingRefunds.reduce((s, r) => s + r.amount, 0);
+
     if (body.dryRun) {
-      ok(res, { planNo: plan.planNo, willDelete, blockers });
+      ok(res, { planNo: plan.planNo, willDelete, blockers, refundTotal, refundCount: pendingRefunds.length });
       return;
     }
 
@@ -1014,13 +1026,31 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
       }
     }
 
-    await prisma.whrConsolidationPlan.delete({ where: { id: planId } });
+    // 退款和删除必须在同一个事务里：不然会出现「钱退了单子还在」或者反过来
+    await prisma.$transaction(async (tx) => {
+      if (pendingRefunds.length > 0) {
+        await refundPendingOnDelete(tx as any, {
+          companyId: auth.companyId,
+          refType: "whr",
+          refId: plan.id,
+          refunds: pendingRefunds,
+          remark: `管理员删除集货计划 ${plan.planNo}，退回已付款项`,
+          operatorId: auth.userId,
+          operatorName: auth.name || auth.userId,
+        });
+      }
+      await tx.whrConsolidationPlan.delete({ where: { id: planId } });
+    });
 
     logger.warn("删除集货计划（仓库版）", {
       操作人: auth.userId, 计划号: plan.planNo, 计划状态: plan.status,
       连带删除: willDelete, 是否强删: blockers.length > 0,
+      退款客户数: pendingRefunds.length, 退款总额: refundTotal,
     });
 
-    ok(res, { deleted: true, planNo: plan.planNo, willDelete, forced: blockers.length > 0 });
+    ok(res, {
+      deleted: true, planNo: plan.planNo, willDelete, forced: blockers.length > 0,
+      refundTotal, refundCount: pendingRefunds.length,
+    });
   });
 }

@@ -343,7 +343,7 @@ export default function AdminWhrConsolidationPage() {
   // 所以点删除先向后端预检，把「会连带删掉什么」摆给人看；
   // 已付款/已发货的后端会拦住，要输管理员密码才放行。
   const [deletePlanId, setDeletePlanId] = useState<string | null>(null);
-  const [deletePlanPreview, setDeletePlanPreview] = useState<{ willDelete: Record<string, number>; blockers: string[] } | null>(null);
+  const [deletePlanPreview, setDeletePlanPreview] = useState<{ willDelete: Record<string, number>; blockers: string[]; refundTotal?: number; refundCount?: number } | null>(null);
   const [deletePlanPassword, setDeletePlanPassword] = useState("");
   const [deletePlanError, setDeletePlanError] = useState("");
   const [deletePlanSubmitting, setDeletePlanSubmitting] = useState(false);
@@ -354,11 +354,11 @@ export default function AdminWhrConsolidationPage() {
     setDeletePlanPassword("");
     setDeletePlanError("");
     try {
-      const r = await apiRequest<{ willDelete: Record<string, number>; blockers: string[] }>(
+      const r = await apiRequest<{ willDelete: Record<string, number>; blockers: string[]; refundTotal?: number; refundCount?: number }>(
         `${apiBaseUrl()}/admin/whr-consolidation/plans/delete`,
         { method: "POST", headers: jsonPost, body: JSON.stringify({ planId, dryRun: true }) },
       );
-      setDeletePlanPreview({ willDelete: r.willDelete, blockers: r.blockers });
+      setDeletePlanPreview({ willDelete: r.willDelete, blockers: r.blockers, refundTotal: r.refundTotal, refundCount: r.refundCount });
     } catch (e: any) {
       setDeletePlanError(e?.message ?? "预检失败");
     }
@@ -1311,6 +1311,12 @@ export default function AdminWhrConsolidationPage() {
                     <li key={k}>{k}：{v} 条</li>
                   ))}
                 </ul>
+                {(deletePlanPreview.refundTotal ?? 0) > 0 && (
+                  <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 6, padding: 10, marginBottom: 12, fontSize: 13, color: "#166534" }}>
+                    删除时会把已付的 <b>¥{(deletePlanPreview.refundTotal ?? 0).toFixed(2)}</b>
+                    {" "}退回给 {deletePlanPreview.refundCount} 位客户的集货余额。
+                  </div>
+                )}
                 {deletePlanPreview.blockers.length > 0 && (
                   <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 6, padding: 10, marginBottom: 12 }}>
                     <div style={{ fontSize: 13, color: "#b91c1c", fontWeight: 600, marginBottom: 4 }}>这个计划已经开始走流程了：</div>

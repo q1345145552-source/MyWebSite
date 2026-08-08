@@ -142,3 +142,106 @@ async function writeLedger(
 function round2(n: number): number {
   return Math.round(Number(n) * 100) / 100;
 }
+
+/* --------------------------------------------------------------------------
+   删除单据时的退款（2026-08-08）
+   ------------------------------------------------------------------------
+   背景：管理员端新加的「删除集货任务 / 删除集货计划」是级联删除，
+   单子删掉之后，客户已经付的钱本来会一直挂在他账上不见 —— 实测确认过：
+   付了 8.5 元，强删之后余额没变，单子却没了，客户来问都查不到。
+
+   这里的两个函数就是补这个洞：删之前先算出「这张单实际净扣了多少」，
+   照「撤销付款」那条路原样退回客户的集货余额，并记一笔流水说明是删除退款。
+
+   净额算法跟「撤销付款」保持一致：把这张单的 pay(负数) 和 refund(正数)
+   加起来再取反 —— 已经退过的不会重复退。
+   -------------------------------------------------------------------------- */
+
+/** 某个客户在某张单上实际还欠退的金额 */
+export interface PendingRefund {
+  clientId: string;
+  /** 正数，单位元 */
+  amount: number;
+  /** 给客户看的单号，取流水里记着的那个 */
+  refNo: string | null;
+}
+
+type LedgerReader = {
+  consolidationBalanceLedger: {
+    findMany: (args: any) => Promise<any[]>;
+  };
+};
+
+/**
+ * 算出一批单据上还需要退给客户的钱，按客户分组。
+ *
+ * 一张单可能涉及多个客户（仓库版一个计划下有多个客户各付各的），
+ * 所以按 clientId 分开算，一个客户一笔退款。
+ *
+ * @param refs 要查的单据，如 [{ refType: "whr", refId: "预报单id" }, ...]
+ */
+export async function computePendingRefunds(
+  db: LedgerReader,
+  refs: { refType: string; refId: string }[],
+): Promise<PendingRefund[]> {
+  if (refs.length === 0) return [];
+
+  const rows = await db.consolidationBalanceLedger.findMany({
+    where: { OR: refs.map((r) => ({ refType: r.refType, refId: r.refId })) },
+    select: { clientId: true, amount: true, refNo: true },
+  });
+
+  const byClient = new Map<string, { sum: number; refNo: string | null }>();
+  for (const row of rows) {
+    const prev = byClient.get(row.clientId) ?? { sum: 0, refNo: null };
+    byClient.set(row.clientId, {
+      sum: prev.sum + Number(row.amount),
+      refNo: prev.refNo ?? row.refNo ?? null,
+    });
+  }
+
+  const result: PendingRefund[] = [];
+  for (const [clientId, v] of byClient) {
+    // pay 是负数，取反才是「已经净扣走的钱」
+    const amount = round2(-v.sum);
+    if (amount > 0) result.push({ clientId, amount, refNo: v.refNo });
+  }
+  return result;
+}
+
+/**
+ * 把上面算出来的钱真退回去。必须和删除操作在同一个事务里，
+ * 否则会出现「钱退了单子没删」或者反过来。
+ *
+ * @returns 实际退出去的总金额
+ */
+export async function refundPendingOnDelete(
+  tx: Tx,
+  args: {
+    companyId: string;
+    refType: string;
+    /** 记在退款流水上的单据 id，用哪个都行，取被删的那张主单最直观 */
+    refId: string;
+    refunds: PendingRefund[];
+    remark: string;
+    operatorId?: string | null;
+    operatorName?: string | null;
+  },
+): Promise<number> {
+  let total = 0;
+  for (const r of args.refunds) {
+    await refundToConsolidation(tx, {
+      companyId: args.companyId,
+      clientId: r.clientId,
+      amount: r.amount,
+      refType: args.refType,
+      refId: args.refId,
+      refNo: r.refNo,
+      remark: args.remark,
+      operatorId: args.operatorId ?? null,
+      operatorName: args.operatorName ?? null,
+    });
+    total = round2(total + r.amount);
+  }
+  return total;
+}
