@@ -1,6 +1,8 @@
 import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
+import { logger } from "../core/logger";
+import { verifyPassword } from "../auth/crypto-utils";
 import { refundToConsolidation } from "../wallet/consolidation-balance";
 import {
   NON_CANCELLABLE_STATUSES,
@@ -921,5 +923,104 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
       customerTotalFee: totals.totalFee,
       customerPrealerts: totals.totalPrealerts,
     });
+  });
+
+  /**
+   * 删除整个集货计划（仓库版，管理员，2026-08-07 新增）。
+   *
+   * ⚠️ 级联链最长的一个：
+   *   计划 → 计划客户(Cascade) → 预报单(Cascade) → 货物明细 + 状态日志(Cascade)
+   * 删一个计划 = 上面全部一起没。CLAUDE.md 第 2.6 条特意警告过这条链。
+   *
+   * 安全规则（用户 2026-08-07 定）：默认拦住已经开始走流程的，
+   * 要删必须带管理员密码强删。判定复用 NON_CANCELLABLE_STATUSES
+   * （loading / shipped / thailand_received / cancelled）再加上已付款相关状态。
+   *
+   * dryRun 只预检不删，界面靠它显示「会删掉几个客户、几张预报单」。
+   */
+  app.post("/admin/whr-consolidation/plans/delete", async (req, res) => {
+    const auth = requireRole(req, res, ["admin"]);
+    if (!auth) return;
+
+    const body = (req.body ?? {}) as { planId?: string; confirmPassword?: string; dryRun?: boolean };
+    const planId = typeof body.planId === "string" ? body.planId.trim() : "";
+    if (!planId) {
+      fail(res, 400, "BAD_REQUEST", "planId 为必填");
+      return;
+    }
+
+    const plan = await prisma.whrConsolidationPlan.findFirst({
+      where: { id: planId, companyId: auth.companyId },
+      include: {
+        customers: {
+          select: {
+            id: true,
+            prealerts: { select: { id: true, status: true, trackingNo: true } },
+          },
+        },
+      },
+    });
+    if (!plan) {
+      fail(res, 404, "NOT_FOUND", "集货计划不存在");
+      return;
+    }
+
+    const allPrealerts = plan.customers.flatMap((c) => c.prealerts);
+    const [itemCount, logCount] = await Promise.all([
+      prisma.whrConsolidationPrealertItem.count({
+        where: { prealertId: { in: allPrealerts.map((p) => p.id) } },
+      }),
+      prisma.whrConsolidationStatusLog.count({
+        where: { prealertId: { in: allPrealerts.map((p) => p.id) } },
+      }),
+    ]);
+
+    // 已经收过钱或已发货的，算「开始走流程了」
+    const STARTED = ["payment_submitted", "paid", "loading", "shipped", "thailand_received"];
+    const started = allPrealerts.filter((p) => STARTED.includes(p.status));
+    const blockers = [];
+    if (started.length > 0) {
+      blockers.push(`有 ${started.length} 张预报单已付款或已发货（${started.slice(0, 3).map((p) => p.trackingNo).join("、")}${started.length > 3 ? " 等" : ""}）`);
+    }
+    if (!["planning", "collecting", "cancelled"].includes(plan.status)) {
+      blockers.push(`计划状态已是「${plan.status}」，不是计划中/收货中`);
+    }
+
+    const willDelete = {
+      计划客户: plan.customers.length,
+      预报单: allPrealerts.length,
+      货物明细: itemCount,
+      状态日志: logCount,
+    };
+
+    if (body.dryRun) {
+      ok(res, { planNo: plan.planNo, willDelete, blockers });
+      return;
+    }
+
+    if (blockers.length > 0) {
+      if (!body.confirmPassword?.trim()) {
+        fail(res, 409, "VALIDATION_ERROR",
+          `这个集货计划不能直接删除：${blockers.join("；")}。确实要删请输入管理员密码。`);
+        return;
+      }
+      const admin = await prisma.user.findUnique({
+        where: { id: auth.userId },
+        select: { passwordHash: true },
+      });
+      if (!admin || !verifyPassword(body.confirmPassword, admin.passwordHash ?? "")) {
+        fail(res, 403, "FORBIDDEN", "管理员密码不对，没有删除");
+        return;
+      }
+    }
+
+    await prisma.whrConsolidationPlan.delete({ where: { id: planId } });
+
+    logger.warn("删除集货计划（仓库版）", {
+      操作人: auth.userId, 计划号: plan.planNo, 计划状态: plan.status,
+      连带删除: willDelete, 是否强删: blockers.length > 0,
+    });
+
+    ok(res, { deleted: true, planNo: plan.planNo, willDelete, forced: blockers.length > 0 });
   });
 }

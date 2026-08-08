@@ -1,6 +1,8 @@
 import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
+import { logger } from "../core/logger";
+import { verifyPassword } from "../auth/crypto-utils";
 import { InsufficientBalanceError, chargeForConsolidation, refundToConsolidation } from "../wallet/consolidation-balance";
 import { saveImageToDisk, readImageAsBase64 } from "../orders/image-storage";
 import * as XLSX from "xlsx";
@@ -1599,5 +1601,92 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
     await recalcTaskTotals(pa.taskId);
 
     ok(res, { deleted: true, prealertId: body.prealertId });
+  });
+
+  /**
+   * 删除整个集货任务（管理员，2026-08-07 新增）。
+   *
+   * ⚠️ 这是级联删除。数据库里 ConsolidationPrealert / ConsolidationStatusLog
+   * 对 task 都是 onDelete: Cascade，预报单下面的货物明细又对预报单 Cascade。
+   * 也就是删一个任务 = 任务 + 它的全部预报单 + 货物明细 + 状态日志 一起没。
+   *
+   * 安全规则（用户 2026-08-07 定）：
+   *   默认拦住「已经开始走流程」的任务 —— 里面有预报单已收货，或任务本身已确认/装柜/
+   *   已发货/已完成。要删必须带管理员密码强删。
+   *   没带密码时返回 409 + 拦截原因，让界面把话说清楚再让人决定。
+   *
+   * 不带 confirmPassword 时只做预检、不删，界面靠它显示「会删掉几张预报单」。
+   */
+  app.post("/admin/consolidation/tasks/delete", async (req, res) => {
+    const auth = requireRole(req, res, ["admin"]);
+    if (!auth) return;
+
+    const body = (req.body ?? {}) as { taskId?: string; confirmPassword?: string; dryRun?: boolean };
+    const taskId = typeof body.taskId === "string" ? body.taskId.trim() : "";
+    if (!taskId) {
+      fail(res, 400, "BAD_REQUEST", "taskId 为必填");
+      return;
+    }
+
+    const task = await prisma.consolidationTask.findFirst({
+      where: { id: taskId, companyId: auth.companyId },
+      include: { prealerts: { select: { id: true, status: true, trackingNo: true } } },
+    });
+    if (!task) {
+      fail(res, 404, "NOT_FOUND", "集货任务不存在");
+      return;
+    }
+
+    const [productCount, logCount] = await Promise.all([
+      prisma.consolidationPrealertProduct.count({
+        where: { prealertId: { in: task.prealerts.map((p) => p.id) } },
+      }),
+      prisma.consolidationStatusLog.count({ where: { taskId } }),
+    ]);
+
+    // 哪些情况算「已经开始走流程」
+    const startedPrealerts = task.prealerts.filter((p) => p.status !== "pending");
+    const taskStarted = !["collecting", "cancelled"].includes(task.status);
+    const blockers: string[] = [];
+    if (startedPrealerts.length > 0) {
+      blockers.push(`有 ${startedPrealerts.length} 张预报单已收货（${startedPrealerts.slice(0, 3).map((p) => p.trackingNo).join("、")}${startedPrealerts.length > 3 ? " 等" : ""}）`);
+    }
+    if (taskStarted) blockers.push(`任务状态已是「${task.status}」，不是收货中`);
+
+    const willDelete = {
+      预报单: task.prealerts.length,
+      货物明细: productCount,
+      状态日志: logCount,
+    };
+
+    if (body.dryRun) {
+      ok(res, { taskNo: task.taskNo, willDelete, blockers });
+      return;
+    }
+
+    if (blockers.length > 0) {
+      if (!body.confirmPassword?.trim()) {
+        fail(res, 409, "VALIDATION_ERROR",
+          `这个集货任务不能直接删除：${blockers.join("；")}。确实要删请输入管理员密码。`);
+        return;
+      }
+      const admin = await prisma.user.findUnique({
+        where: { id: auth.userId },
+        select: { passwordHash: true },
+      });
+      if (!admin || !verifyPassword(body.confirmPassword, admin.passwordHash ?? "")) {
+        fail(res, 403, "FORBIDDEN", "管理员密码不对，没有删除");
+        return;
+      }
+    }
+
+    await prisma.consolidationTask.delete({ where: { id: taskId } });
+
+    logger.warn("删除集货任务", {
+      操作人: auth.userId, 任务号: task.taskNo, 任务状态: task.status,
+      连带删除: willDelete, 是否强删: blockers.length > 0,
+    });
+
+    ok(res, { deleted: true, taskNo: task.taskNo, willDelete, forced: blockers.length > 0 });
   });
 }

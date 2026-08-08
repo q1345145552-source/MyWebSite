@@ -139,18 +139,43 @@ export default function AdminConsolidationPage() {
     return list;
   }, [tasks, searchText]);
 
-  // ======== 删除任务 ========
+  // ======== 删除任务（2026-08-07 重做）========
+  // 原来这里直接调删除，而且调的接口后端根本不存在（DELETE /admin/consolidation/tasks），
+  // 点了必然失败。现在改成：打开弹窗先预检，把「会连带删掉什么」摆出来；
+  // 后端拦住时（已收货 / 已开始走流程）再要求输管理员密码强删。
+  const [deletePreview, setDeletePreview] = useState<{ willDelete: Record<string, number>; blockers: string[] } | null>(null);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteError, setDeleteError] = useState("");
+
+  /** 打开删除弹窗时先问后端：这个任务删了会带走什么、有没有被拦 */
+  const openDeleteTask = async (tid: string) => {
+    setDeleteTaskId(tid);
+    setDeletePreview(null);
+    setDeletePassword("");
+    setDeleteError("");
+    try {
+      const r = await deleteAdminConsolidationTask(tid, { dryRun: true });
+      setDeletePreview({ willDelete: r.willDelete, blockers: r.blockers });
+    } catch (e: any) {
+      setDeleteError(e?.message ?? "预检失败");
+    }
+  };
+
   const handleDeleteTask = async () => {
     const tid = deleteTaskId;
     if (!tid) return;
     setDeleteTaskSubmitting(true);
+    setDeleteError("");
     try {
-      await deleteAdminConsolidationTask(tid);
+      await deleteAdminConsolidationTask(tid, deletePassword.trim() ? { confirmPassword: deletePassword.trim() } : undefined);
       setToast("任务已删除");
       setDeleteTaskId(null);
+      setDeletePassword("");
       if (selectedTaskId === tid) setSelectedTaskId(null);
       await loadTasks();
-    } catch (e: any) { setToast(e.message); } finally { setDeleteTaskSubmitting(false); }
+    } catch (e: any) {
+      setDeleteError(e?.message ?? "删除失败");
+    } finally { setDeleteTaskSubmitting(false); }
   };
 
   // 撤销付款（2026-08-07）
@@ -344,7 +369,7 @@ export default function AdminConsolidationPage() {
                       </td>
                       <td onClick={() => setSelectedTaskId(t.id)} style={{ ...tdS, whiteSpace: "nowrap", minWidth: 100 }}>{formatBeijingTime(t.createdAt)}</td>
                       <td style={{ ...tdS, textAlign: "right" }}>
-                        <button onClick={(e) => { e.stopPropagation(); setDeleteTaskId(t.id); }} style={{ padding: "3px 10px", border: "1px solid #ef4444", color: "#ef4444", background: "#fff", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>删除</button>
+                        <button onClick={(e) => { e.stopPropagation(); void openDeleteTask(t.id); }} style={{ padding: "3px 10px", border: "1px solid #ef4444", color: "#ef4444", background: "#fff", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>删除</button>
                       </td>
                     </tr>
                   ))}
@@ -365,7 +390,7 @@ export default function AdminConsolidationPage() {
             <span style={{ color: "#6b7280", fontSize: 13 }}>{taskDetail.clientName}</span>
             <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 4, background: "#dbeafe", color: "#1e40af" }}>{STATUS_ZH[taskDetail.status] || taskDetail.status}</span>
             <div style={{ flex: 1 }} />
-            <button onClick={() => { if (taskDetail) { setDeleteTaskId(taskDetail.id); setSelectedTaskId(null); } }} style={{ padding: "6px 14px", border: "1px solid #ef4444", color: "#ef4444", background: "#fff", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>删除任务</button>
+            <button onClick={() => { if (taskDetail) { void openDeleteTask(taskDetail.id); setSelectedTaskId(null); } }} style={{ padding: "6px 14px", border: "1px solid #ef4444", color: "#ef4444", background: "#fff", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>删除任务</button>
           </div>
 
           {/* 进度条 */}
@@ -508,9 +533,39 @@ export default function AdminConsolidationPage() {
       {/* ======== 弹窗：删除任务确认 ======== */}
       {deleteTaskId && (
         <Modal onClose={() => setDeleteTaskId(null)}>
-          <p style={{ marginTop: 0 }}>确定要删除该任务吗？将级联删除任务下所有预报单、产品数据，不可恢复。</p>
+          <p style={{ marginTop: 0, fontWeight: 600 }}>删除这个集货任务？</p>
+          {deletePreview ? (
+            <>
+              <p style={{ margin: "0 0 8px", fontSize: 13, color: "#374151" }}>会连带删掉：</p>
+              <ul style={{ margin: "0 0 12px", paddingLeft: 20, fontSize: 13, color: "#374151" }}>
+                {Object.entries(deletePreview.willDelete).map(([k, v]) => (
+                  <li key={k}>{k}：{v} 条</li>
+                ))}
+              </ul>
+              {deletePreview.blockers.length > 0 && (
+                <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 6, padding: 10, marginBottom: 12 }}>
+                  <div style={{ fontSize: 13, color: "#b91c1c", fontWeight: 600, marginBottom: 4 }}>这个任务已经开始走流程了：</div>
+                  <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: "#b91c1c" }}>
+                    {deletePreview.blockers.map((b, i) => <li key={i}>{b}</li>)}
+                  </ul>
+                  <div style={{ fontSize: 12, color: "#7f1d1d", marginTop: 6 }}>确实要删，请输入你的管理员密码：</div>
+                  <input
+                    type="password"
+                    value={deletePassword}
+                    onChange={(e) => setDeletePassword(e.target.value)}
+                    placeholder="管理员密码"
+                    style={{ marginTop: 6, width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
+                  />
+                </div>
+              )}
+              <p style={{ margin: "0 0 12px", fontSize: 12, color: "#6b7280" }}>删了找不回来。</p>
+            </>
+          ) : (
+            <p style={{ fontSize: 13, color: "#6b7280" }}>正在查这个任务下面有多少东西…</p>
+          )}
+          {deleteError && <p style={{ color: "#b91c1c", fontSize: 13, margin: "0 0 10px" }}>{deleteError}</p>}
           <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={handleDeleteTask} disabled={deleteTaskSubmitting} style={{ padding: "8px 16px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}>{deleteTaskSubmitting ? "删除中..." : "确认删除"}</button>
+            <button onClick={handleDeleteTask} disabled={deleteTaskSubmitting || !deletePreview} style={{ padding: "8px 16px", background: deletePreview ? "#ef4444" : "#d1d5db", color: "#fff", border: "none", borderRadius: 6, cursor: deletePreview ? "pointer" : "not-allowed" }}>{deleteTaskSubmitting ? "删除中..." : "确认删除"}</button>
             <button onClick={() => setDeleteTaskId(null)} style={{ padding: "8px 16px", border: "1px solid #d1d5db", background: "#fff", color: "#6b7280", borderRadius: 6, cursor: "pointer" }}>取消</button>
           </div>
         </Modal>

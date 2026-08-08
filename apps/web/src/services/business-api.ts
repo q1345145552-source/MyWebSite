@@ -2132,15 +2132,49 @@ export async function fetchAdminConsolidationTasks(status?: string): Promise<Con
 }
 
 /** 管理员删除任务（级联删除） */
-export async function deleteAdminConsolidationTask(taskId: string): Promise<{ deleted: boolean; taskId: string }> {
-  try {
-    return await apiRequest<{ deleted: boolean; taskId: string }>(
-      `${apiBaseUrl()}/admin/consolidation/tasks?taskId=${encodeURIComponent(taskId)}`,
-      { method: "DELETE" },
-    );
-  } catch (error) {
-    throw new Error(`删除任务失败：${error instanceof Error ? error.message : "未知错误"}`);
-  }
+/** 删除集货任务时，后端返回的连带删除清单 */
+export interface ConsolidationDeletePreview {
+  taskNo?: string;
+  planNo?: string;
+  willDelete: Record<string, number>;
+  blockers: string[];
+}
+
+/**
+ * 删除整个集货任务（管理员）。
+ *
+ * ⚠️ 2026-08-07 修：这个函数原来调的是 DELETE /admin/consolidation/tasks，
+ * 而后端从来没有这个接口（只有 GET）—— 页面上的「删除任务」按钮点了必然失败。
+ * 现在改调 POST /admin/consolidation/tasks/delete。
+ *
+ * dryRun=true 只预检不删，用来告诉用户「会连带删掉几张预报单」。
+ * 已收货 / 任务已开始走流程时后端会拦（409），要带 confirmPassword 才放行。
+ */
+export async function deleteAdminConsolidationTask(
+  taskId: string,
+  opts?: { dryRun?: boolean; confirmPassword?: string },
+): Promise<ConsolidationDeletePreview & { deleted?: boolean; forced?: boolean }> {
+  return apiRequest(`${apiBaseUrl()}/admin/consolidation/tasks/delete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ taskId, ...opts }),
+  });
+}
+
+/**
+ * 删除整个集货计划（仓库版，管理员，2026-08-07 新增）。
+ * 级联链最长：计划 → 计划客户 → 预报单 → 货物明细 + 状态日志。
+ * 用法与 deleteAdminConsolidationTask 一致：先 dryRun 预检，被拦时带 confirmPassword 强删。
+ */
+export async function deleteAdminWhrConsolidationPlan(
+  planId: string,
+  opts?: { dryRun?: boolean; confirmPassword?: string },
+): Promise<ConsolidationDeletePreview & { deleted?: boolean; forced?: boolean }> {
+  return apiRequest(`${apiBaseUrl()}/admin/whr-consolidation/plans/delete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ planId, ...opts }),
+  });
 }
 
 /** 管理员强制编辑预报单 */

@@ -338,6 +338,50 @@ export default function AdminWhrConsolidationPage() {
   }, []);
 
   useEffect(() => { loadPlans(); }, [loadPlans]);
+  // ======== 删除整个集货计划（2026-08-07 新增）========
+  // 级联链最长：计划 → 计划客户 → 预报单 → 货物明细 + 状态日志。
+  // 所以点删除先向后端预检，把「会连带删掉什么」摆给人看；
+  // 已付款/已发货的后端会拦住，要输管理员密码才放行。
+  const [deletePlanId, setDeletePlanId] = useState<string | null>(null);
+  const [deletePlanPreview, setDeletePlanPreview] = useState<{ willDelete: Record<string, number>; blockers: string[] } | null>(null);
+  const [deletePlanPassword, setDeletePlanPassword] = useState("");
+  const [deletePlanError, setDeletePlanError] = useState("");
+  const [deletePlanSubmitting, setDeletePlanSubmitting] = useState(false);
+
+  const openDeletePlan = async (planId: string) => {
+    setDeletePlanId(planId);
+    setDeletePlanPreview(null);
+    setDeletePlanPassword("");
+    setDeletePlanError("");
+    try {
+      const r = await apiRequest<{ willDelete: Record<string, number>; blockers: string[] }>(
+        `${apiBaseUrl()}/admin/whr-consolidation/plans/delete`,
+        { method: "POST", headers: jsonPost, body: JSON.stringify({ planId, dryRun: true }) },
+      );
+      setDeletePlanPreview({ willDelete: r.willDelete, blockers: r.blockers });
+    } catch (e: any) {
+      setDeletePlanError(e?.message ?? "预检失败");
+    }
+  };
+
+  const handleDeletePlan = async () => {
+    if (!deletePlanId) return;
+    setDeletePlanSubmitting(true);
+    setDeletePlanError("");
+    try {
+      await apiRequest(`${apiBaseUrl()}/admin/whr-consolidation/plans/delete`, {
+        method: "POST", headers: jsonPost,
+        body: JSON.stringify({ planId: deletePlanId, ...(deletePlanPassword.trim() ? { confirmPassword: deletePlanPassword.trim() } : {}) }),
+      });
+      setToast("集货计划已删除");
+      if (selectedPlanId === deletePlanId) setSelectedPlanId(null);
+      setDeletePlanId(null);
+      setDeletePlanPassword("");
+      await loadPlans();
+    } catch (e: any) {
+      setDeletePlanError(e?.message ?? "删除失败");
+    } finally { setDeletePlanSubmitting(false); }
+  };
 
   // Toast 自动消失
   useEffect(() => {
@@ -617,6 +661,7 @@ export default function AdminWhrConsolidationPage() {
                     <th style={thS}>状态</th>
                     <th style={thS}>创建人</th>
                     <th style={thS}>创建时间</th>
+                    <th style={thS}>操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -637,6 +682,12 @@ export default function AdminWhrConsolidationPage() {
                       </td>
                       <td style={tdS}>{p.creatorName}</td>
                       <td style={{ ...tdS, fontSize: 12 }}>{formatBeijingTime(p.createdAt)}</td>
+                      <td style={tdS}>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); void openDeletePlan(p.id); }}
+                          style={{ padding: "3px 10px", border: "1px solid #ef4444", color: "#ef4444", background: "#fff", borderRadius: 4, cursor: "pointer", fontSize: 11 }}
+                        >删除</button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -1246,6 +1297,51 @@ export default function AdminWhrConsolidationPage() {
           <div onClick={() => setPreviewImage(null)} style={{ position: "fixed", inset: 0, zIndex: 10000, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center" }}>
             <img src={previewImage} alt="预览" style={{ maxWidth: "90vw", maxHeight: "90vh", borderRadius: 8 }} />
           </div>
+        )}
+
+        {/* ======== 弹窗：删除集货计划（2026-08-07 新增）======== */}
+        {deletePlanId && (
+          <Modal onClose={() => setDeletePlanId(null)}>
+            <p style={{ marginTop: 0, fontWeight: 600 }}>删除这个集货计划？</p>
+            {deletePlanPreview ? (
+              <>
+                <p style={{ margin: "0 0 8px", fontSize: 13, color: "#374151" }}>会连带删掉：</p>
+                <ul style={{ margin: "0 0 12px", paddingLeft: 20, fontSize: 13, color: "#374151" }}>
+                  {Object.entries(deletePlanPreview.willDelete).map(([k, v]) => (
+                    <li key={k}>{k}：{v} 条</li>
+                  ))}
+                </ul>
+                {deletePlanPreview.blockers.length > 0 && (
+                  <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 6, padding: 10, marginBottom: 12 }}>
+                    <div style={{ fontSize: 13, color: "#b91c1c", fontWeight: 600, marginBottom: 4 }}>这个计划已经开始走流程了：</div>
+                    <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: "#b91c1c" }}>
+                      {deletePlanPreview.blockers.map((b, i) => <li key={i}>{b}</li>)}
+                    </ul>
+                    <div style={{ fontSize: 12, color: "#7f1d1d", marginTop: 6 }}>确实要删，请输入你的管理员密码：</div>
+                    <input
+                      type="password"
+                      value={deletePlanPassword}
+                      onChange={(e) => setDeletePlanPassword(e.target.value)}
+                      placeholder="管理员密码"
+                      style={{ marginTop: 6, width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
+                    />
+                  </div>
+                )}
+                <p style={{ margin: "0 0 12px", fontSize: 12, color: "#6b7280" }}>删了找不回来。</p>
+              </>
+            ) : (
+              <p style={{ fontSize: 13, color: "#6b7280" }}>正在查这个计划下面有多少东西…</p>
+            )}
+            {deletePlanError && <p style={{ color: "#b91c1c", fontSize: 13, margin: "0 0 10px" }}>{deletePlanError}</p>}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={handleDeletePlan} disabled={deletePlanSubmitting || !deletePlanPreview}
+                style={{ padding: "8px 16px", background: deletePlanPreview ? "#ef4444" : "#d1d5db", color: "#fff", border: "none", borderRadius: 6, cursor: deletePlanPreview ? "pointer" : "not-allowed" }}>
+                {deletePlanSubmitting ? "删除中..." : "确认删除"}
+              </button>
+              <button onClick={() => setDeletePlanId(null)}
+                style={{ padding: "8px 16px", border: "1px solid #d1d5db", background: "#fff", color: "#6b7280", borderRadius: 6, cursor: "pointer" }}>取消</button>
+            </div>
+          </Modal>
         )}
       </div>
     </RoleShell>
