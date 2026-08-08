@@ -50,15 +50,15 @@ export default function ClientAddressBookPage() {
 
   return (
     <RoleShell allowedRole="client" title="常用地址库">
-      <section style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 16, background: "#fff", marginBottom: 14 }}>
+      <section style={{ border: "1px solid var(--l-soft)", borderRadius: 12, padding: 16, background: "var(--white)", marginBottom: 14 }}>
         <h2 style={{ marginTop: 0 }}>地址簿管理</h2>
-        <p style={{ color: "#000000", marginTop: 0 }}>保存收件信息后，可在客户端下单页一键填充。</p>
+        <p style={{ color: "var(--t-strong)", marginTop: 0 }}>保存收件信息后，可在客户端下单页一键填充。</p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 8 }}>
-          <input value={form.label} onChange={(e) => setForm((v) => ({ ...v, label: e.target.value }))} placeholder="标签（如：曼谷店）" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }} />
-          <input value={form.contactName} onChange={(e) => setForm((v) => ({ ...v, contactName: e.target.value }))} placeholder="联系人" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }} />
-          <input value={form.contactPhone} onChange={(e) => setForm((v) => ({ ...v, contactPhone: e.target.value }))} placeholder="联系电话" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }} />
-          <input value={form.lat} onChange={(e) => setForm((v) => ({ ...v, lat: e.target.value }))} placeholder="纬度（可选）" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }} />
-          <input value={form.lng} onChange={(e) => setForm((v) => ({ ...v, lng: e.target.value }))} placeholder="经度（可选）" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }} />
+          <input value={form.label} onChange={(e) => setForm((v) => ({ ...v, label: e.target.value }))} placeholder="标签（如：曼谷店）" style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }} />
+          <input value={form.contactName} onChange={(e) => setForm((v) => ({ ...v, contactName: e.target.value }))} placeholder="联系人" style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }} />
+          <input value={form.contactPhone} onChange={(e) => setForm((v) => ({ ...v, contactPhone: e.target.value }))} placeholder="联系电话" style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }} />
+          <input value={form.lat} onChange={(e) => setForm((v) => ({ ...v, lat: e.target.value }))} placeholder="纬度（可选）" style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }} />
+          <input value={form.lng} onChange={(e) => setForm((v) => ({ ...v, lng: e.target.value }))} placeholder="经度（可选）" style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }} />
           <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14 }}>
             <input type="checkbox" checked={form.isDefault} onChange={(e) => setForm((v) => ({ ...v, isDefault: e.target.checked }))} />
             设为默认地址
@@ -69,7 +69,7 @@ export default function ClientAddressBookPage() {
           onChange={(e) => setForm((v) => ({ ...v, addressDetail: e.target.value }))}
           placeholder="详细地址"
           rows={3}
-          style={{ width: "100%", marginTop: 8, border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", resize: "vertical" }}
+          style={{ width: "100%", marginTop: 8, border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px", resize: "vertical" }}
         />
         <div style={{ marginTop: 10 }}>
           <button
@@ -106,27 +106,27 @@ export default function ClientAddressBookPage() {
                 setLoading(false);
               }
             }}
-            style={{ border: "none", borderRadius: 8, padding: "8px 12px", background: "#2563eb", color: "#fff" }}
+            style={{ border: "none", borderRadius: 8, padding: "8px 12px", background: "var(--c-blue)", color: "var(--white)" }}
           >
             保存地址
           </button>
         </div>
       </section>
 
-      <section style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 16, background: "#fff" }}>
+      <section style={{ border: "1px solid var(--l-soft)", borderRadius: 12, padding: 16, background: "var(--white)" }}>
         <h3 style={{ marginTop: 0 }}>已保存地址</h3>
         {items.length === 0 ? (
-          <p style={{ color: "#000000" }}>暂无地址</p>
+          <p style={{ color: "var(--t-strong)" }}>暂无地址</p>
         ) : (
           <div style={{ display: "grid", gap: 8 }}>
             {items.map((item) => (
-              <div key={item.id} style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10, background: "#f8fafc" }}>
+              <div key={item.id} style={{ border: "1px solid var(--l-cool)", borderRadius: 10, padding: 10, background: "var(--s-cool)" }}>
                 <div style={{ fontWeight: 700 }}>
                   {item.label?.trim() || item.contactName}
                   {item.isDefault ? "（默认）" : ""}
                 </div>
-                <div style={{ color: "#000000", marginTop: 4 }}>{item.contactName} / {item.contactPhone}</div>
-                <div style={{ color: "#000000", marginTop: 4 }}>{item.addressDetail}</div>
+                <div style={{ color: "var(--t-strong)", marginTop: 4 }}>{item.contactName} / {item.contactPhone}</div>
+                <div style={{ color: "var(--t-strong)", marginTop: 4 }}>{item.addressDetail}</div>
                 <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
                   <button
                     type="button"
@@ -140,7 +140,7 @@ export default function ClientAddressBookPage() {
                         setLoading(false);
                       }
                     }}
-                    style={{ border: "1px solid #000000", borderRadius: 8, padding: "6px 10px", background: "#fff" }}
+                    style={{ border: "1px solid var(--t-strong)", borderRadius: 8, padding: "6px 10px", background: "var(--white)" }}
                   >
                     设为默认
                   </button>
@@ -156,7 +156,7 @@ export default function ClientAddressBookPage() {
                         setLoading(false);
                       }
                     }}
-                    style={{ border: "1px solid #fecaca", borderRadius: 8, padding: "6px 10px", background: "#fff1f2", color: "#b91c1c" }}
+                    style={{ border: "1px solid #fecaca", borderRadius: 8, padding: "6px 10px", background: "#fff1f2", color: "var(--c-red-deep)" }}
                   >
                     删除
                   </button>
@@ -165,7 +165,7 @@ export default function ClientAddressBookPage() {
             ))}
           </div>
         )}
-        {message ? <p style={{ marginTop: 10, color: message.includes("失败") ? "#b91c1c" : "#166534" }}>{message}</p> : null}
+        {message ? <p style={{ marginTop: 10, color: message.includes("失败") ? "var(--c-red-deep)" : "var(--c-green-dark)" }}>{message}</p> : null}
       </section>
     </RoleShell>
   );

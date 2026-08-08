@@ -16,18 +16,18 @@ export default function ForbiddenPage() {
       <p style={{ color: "#4b5563", marginBottom: 8 }}>
         当前登录角色无权访问该页面。
       </p>
-      <p style={{ color: "#000000", marginBottom: 16 }}>来源页面：{from}</p>
+      <p style={{ color: "var(--t-strong)", marginBottom: 16 }}>来源页面：{from}</p>
       <div style={{ display: "flex", gap: 10 }}>
-        <a href="/login" style={{ color: "#2563eb", textDecoration: "none" }}>
+        <a href="/login" style={{ color: "var(--c-blue)", textDecoration: "none" }}>
           返回登录切换角色
         </a>
-        <a href="/client" style={{ color: "#2563eb", textDecoration: "none" }}>
+        <a href="/client" style={{ color: "var(--c-blue)", textDecoration: "none" }}>
           去客户端
         </a>
-        <a href="/staff" style={{ color: "#2563eb", textDecoration: "none" }}>
+        <a href="/staff" style={{ color: "var(--c-blue)", textDecoration: "none" }}>
           去员工端
         </a>
-        <a href="/admin" style={{ color: "#2563eb", textDecoration: "none" }}>
+        <a href="/admin" style={{ color: "var(--c-blue)", textDecoration: "none" }}>
           去管理员端
         </a>
       </div>

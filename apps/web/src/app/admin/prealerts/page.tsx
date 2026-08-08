@@ -27,7 +27,7 @@ type PrealertEditDraft = {
 };
 
 const prealertEditInputStyle: React.CSSProperties = {
-  border: "1px solid #d1d5db",
+  border: "1px solid var(--l-strong)",
   borderRadius: 6,
   padding: "6px 8px",
   fontSize: 12,
@@ -151,16 +151,16 @@ export default function AdminPrealertsPage() {
       <Toast open={toast.length > 0} message={toast} />
       <div style={{ maxWidth: 1400, margin: "0 auto", padding: "24px 16px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "#111827" }}>预报单收货确认</h1>
-          <button onClick={() => loadPrealerts()} disabled={loading} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 12px", background: "#fff", cursor: "pointer", color: "#000" }}>刷新</button>
+          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "var(--t-heading)" }}>预报单收货确认</h1>
+          <button onClick={() => loadPrealerts()} disabled={loading} style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "6px 12px", background: "var(--white)", cursor: "pointer", color: "var(--t-strong)" }}>刷新</button>
         </div>
-        {message ? <div style={{ marginBottom: 12, padding: 10, background: "#fef2f2", borderRadius: 8, color: "#b91c1c", fontSize: 13 }}>{message}</div> : null}
+        {message ? <div style={{ marginBottom: 12, padding: 10, background: "#fef2f2", borderRadius: 8, color: "var(--c-red-deep)", fontSize: 13 }}>{message}</div> : null}
         <PrealertSearch
           value={prealertSearch}
           onChange={(key, val) => setPrealertSearch((prev) => ({ ...prev, [key]: val }))}
           onSearch={() => {}}
           warehouseOptions={warehouseOptions}
-          inputStyle={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", fontSize: 13, width: "100%" }}
+          inputStyle={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", fontSize: 13, width: "100%" }}
         />
         <div style={{ marginTop: 16 }}>
           {prealerts.length === 0 ? (
@@ -175,14 +175,14 @@ export default function AdminPrealertsPage() {
                 const confirmedDraft = prealertConfirmedDrafts[item.id] ?? buildPrealertDraft(item);
                 const displayDraft = isEditing ? draft : confirmedDraft;
                 return (
-                  <div key={item.id} style={{ border: "1px solid #e5e7eb", borderRadius: 6, padding: 12, background: "#fff" }}>
-                    <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6, color: "#000" }}>
+                  <div key={item.id} style={{ border: "1px solid var(--l-soft)", borderRadius: 6, padding: 12, background: "var(--white)" }}>
+                    <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6, color: "var(--t-strong)" }}>
                       <span style={{ fontFamily: "monospace" }}>{item.trackingNo || item.orderNo || "—"}</span>
                       {" · "}{item.clientName ?? item.clientId ?? "-"}
                       {" · "}{item.createdAt.slice(0, 10)}
                     </div>
                     {(item.products?.length ?? 0) > 1 && (
-                      <div style={{ fontSize: 11, color: "#000", marginBottom: 6, background: "#fefce8", borderRadius: 4, padding: "3px 6px" }}>
+                      <div style={{ fontSize: 11, color: "var(--t-strong)", marginBottom: 6, background: "#fefce8", borderRadius: 4, padding: "3px 6px" }}>
                         {(item.products ?? []).map((p) => `${p.itemName}×${p.packageCount}箱`).join(" | ")}
                       </div>
                     )}
@@ -231,13 +231,13 @@ export default function AdminPrealertsPage() {
                           <button onClick={() => {
                             setPrealertConfirmedDrafts((prev) => ({ ...prev, [item.id]: draft }));
                             setEditingPrealertId(null);
-                          }} style={{ border: "1px solid #059669", borderRadius: 6, padding: "4px 12px", background: "#f0fdf4", color: "#059669", cursor: "pointer", fontSize: 12 }}>确认修改</button>
-                          <button onClick={() => { setEditingPrealertId(null); }} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "4px 12px", background: "#fff", cursor: "pointer", fontSize: 12, color: "#000" }}>取消</button>
+                          }} style={{ border: "1px solid var(--c-green)", borderRadius: 6, padding: "4px 12px", background: "#f0fdf4", color: "var(--c-green)", cursor: "pointer", fontSize: 12 }}>确认修改</button>
+                          <button onClick={() => { setEditingPrealertId(null); }} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 12px", background: "var(--white)", cursor: "pointer", fontSize: 12, color: "var(--t-strong)" }}>取消</button>
                         </>
                       ) : (
                         <>
-                          <button onClick={() => setEditingPrealertId(item.id)} style={{ border: "1px solid #2563eb", borderRadius: 6, padding: "4px 12px", background: "#eff6ff", color: "#2563eb", cursor: "pointer", fontSize: 12 }}>编辑</button>
-                          <button disabled={loading} onClick={() => handleReceive(item)} style={{ border: "none", borderRadius: 6, padding: "4px 12px", background: "#16a34a", color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>确认收货</button>
+                          <button onClick={() => setEditingPrealertId(item.id)} style={{ border: "1px solid var(--c-blue)", borderRadius: 6, padding: "4px 12px", background: "var(--c-blue-bg)", color: "var(--c-blue)", cursor: "pointer", fontSize: 12 }}>编辑</button>
+                          <button disabled={loading} onClick={() => handleReceive(item)} style={{ border: "none", borderRadius: 6, padding: "4px 12px", background: "var(--c-green-3)", color: "var(--white)", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>确认收货</button>
                         </>
                       )}
                     </div>

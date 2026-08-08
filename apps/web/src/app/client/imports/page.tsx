@@ -198,25 +198,25 @@ export default function ClientImportsPage() {
 
   return (
     <RoleShell allowedRole="client" title="客户端批量下单">
-      <section style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 16, background: "#fff" }}>
+      <section style={{ border: "1px solid var(--l-soft)", borderRadius: 12, padding: 16, background: "var(--white)" }}>
         <h2 style={{ marginTop: 0 }}>智能下单系统（批量导入）</h2>
-        <p style={{ color: "#000000", marginTop: 0 }}>
+        <p style={{ color: "var(--t-strong)", marginTop: 0 }}>
           支持 Excel 批量导入预报单。建议先下载模板，按字段填好后上传。
         </p>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12, alignItems: "center" }}>
           <button
             type="button"
             onClick={downloadTemplate}
-            style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 12px", background: "#fff", color: "#000000", cursor: "pointer" }}
+            style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 12px", background: "var(--white)", color: "var(--t-strong)", cursor: "pointer" }}
           >
             下载模板
           </button>
           <label
             style={{
-              border: "1px solid #2563eb",
+              border: "1px solid var(--c-blue)",
               borderRadius: 8,
               padding: "8px 12px",
-              background: "#eff6ff",
+              background: "var(--c-blue-bg)",
               color: "#1d4ed8",
               cursor: "pointer",
             }}
@@ -232,8 +232,8 @@ export default function ClientImportsPage() {
               border: "none",
               borderRadius: 8,
               padding: "8px 12px",
-              background: loading || rows.length === 0 ? "#9ca3af" : "#2563eb",
-              color: "#fff",
+              background: loading || rows.length === 0 ? "var(--t-faint)" : "var(--c-blue)",
+              color: "var(--white)",
               cursor: loading || rows.length === 0 ? "not-allowed" : "pointer",
             }}
           >
@@ -243,23 +243,23 @@ export default function ClientImportsPage() {
 
         {/* 进度：只用文字报数，不放进度条动画 */}
         {loading && (
-          <div style={{ marginBottom: 12, display: "flex", justifyContent: "space-between", fontSize: 13, color: "#000000" }}>
+          <div style={{ marginBottom: 12, display: "flex", justifyContent: "space-between", fontSize: 13, color: "var(--t-strong)" }}>
             <span>正在提交第 {current}/{rows.length} 条…</span>
             <span>
               成功 {successCount} 条
-              {failCount > 0 ? <span style={{ color: "#b91c1c" }}>　失败 {failCount} 条</span> : null}
+              {failCount > 0 ? <span style={{ color: "var(--c-red-deep)" }}>　失败 {failCount} 条</span> : null}
             </span>
           </div>
         )}
 
         {/* 完成汇总 */}
         {done && (
-          <div style={{ marginBottom: 12, padding: 12, border: "1px solid #e5e7eb", background: "#fff" }}>
-            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4, color: "#000000" }}>
+          <div style={{ marginBottom: 12, padding: 12, border: "1px solid var(--l-soft)", background: "var(--white)" }}>
+            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4, color: "var(--t-strong)" }}>
               批量下单完成：成功 {successCount} 条 / 失败 {failCount} 条
             </div>
             {errors.length > 0 && (
-              <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, color: "#b91c1c" }}>
+              <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, color: "var(--c-red-deep)" }}>
                 {errors.map((e, i) => <li key={i}>{e}</li>)}
               </ul>
             )}
@@ -267,17 +267,17 @@ export default function ClientImportsPage() {
         )}
 
         {/* 单条消息 */}
-        {message && !done && <p style={{ marginBottom: 10, color: "#000000", fontSize: 13 }}>{message}</p>}
+        {message && !done && <p style={{ marginBottom: 10, color: "var(--t-strong)", fontSize: 13 }}>{message}</p>}
 
         {/* 预览表格 */}
         {rows.length > 0 && (
-          <div style={{ marginBottom: 10, fontSize: 13, color: "#000000" }}>当前有效行：{validCount}</div>
+          <div style={{ marginBottom: 10, fontSize: 13, color: "var(--t-strong)" }}>当前有效行：{validCount}</div>
         )}
         {rows.length > 0 ? (
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
-                <tr style={{ borderBottom: "1px solid #e2e8f0" }}>
+                <tr style={{ borderBottom: "1px solid var(--l-cool)" }}>
                   <th style={th}>#</th>
                   <th style={th}>仓库ID</th>
                   <th style={th}>品名</th>
@@ -288,7 +288,7 @@ export default function ClientImportsPage() {
               </thead>
               <tbody>
                 {rows.map((row, idx) => (
-                  <tr key={`${row.itemName}-${idx}`} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                  <tr key={`${row.itemName}-${idx}`} style={{ borderBottom: "1px solid var(--s-cool-2)" }}>
                     <td style={td}>{idx + 1}</td>
                     <td style={td}>{row.warehouseId}</td>
                     <td style={td}>{row.itemName}</td>

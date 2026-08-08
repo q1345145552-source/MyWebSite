@@ -1003,13 +1003,13 @@ const loadLmShipments = async () => {
   }) => (
     <div
       style={{
-        border: "1px solid #e5e7eb",
+        border: "1px solid var(--l-soft)",
         borderRadius: 10,
         padding: 10,
-        background: "#ffffff",
+        background: "var(--white)",
       }}
     >
-      <div style={{ color: "#000000", fontSize: 12, marginBottom: 6 }}>{label}</div>
+      <div style={{ color: "var(--t-strong)", fontSize: 12, marginBottom: 6 }}>{label}</div>
       {children}
     </div>
   );
@@ -1017,19 +1017,19 @@ const loadLmShipments = async () => {
   const InfoItem = ({ label, value }: { label: string; value: string }) => (
     <div
       style={{
-        border: "1px solid #e5e7eb",
+        border: "1px solid var(--l-soft)",
         borderRadius: 6,
-        background: "#f9fafb",
+        background: "var(--s-alt)",
         padding: "3px 6px",
       }}
     >
-      <div style={{ fontSize: 10, color: "#000000" }}>{label}</div>
-      <div style={{ fontSize: 12, color: "#000000", fontWeight: 600 }}>{value}</div>
+      <div style={{ fontSize: 10, color: "var(--t-strong)" }}>{label}</div>
+      <div style={{ fontSize: 12, color: "var(--t-strong)", fontWeight: 600 }}>{value}</div>
     </div>
   );
 
   const prealertEditInputStyle = {
-    border: "1px solid #d1d5db",
+    border: "1px solid var(--l-strong)",
     borderRadius: 6,
     padding: "5px 8px",
     width: "100%",
@@ -1160,7 +1160,7 @@ const loadLmShipments = async () => {
   };
 
   const orderCreateInputStyle = {
-    border: "1px solid #d1d5db",
+    border: "1px solid var(--l-strong)",
     borderRadius: 8,
     padding: "8px 10px",
     width: "100%",
@@ -1272,8 +1272,8 @@ const loadLmShipments = async () => {
         id="staff-create-order"
         style={{
           display: activeSection === "staff-create-order" ? "block" : "none",
-          border: "1px solid #e5e7eb",
-          borderLeft: "4px solid #d1d5db",
+          border: "1px solid var(--l-soft)",
+          borderLeft: "4px solid var(--l-strong)",
           borderRadius: 12,
           padding: 16,
           marginBottom: 18,
@@ -1281,7 +1281,7 @@ const loadLmShipments = async () => {
           boxShadow: "0 1px 3px rgba(15,23,42,0.06)",
         }}
       >
-        <h2 style={{ marginTop: 0, fontSize: 18, color: "#111827", marginBottom: 12 }}>创建订单（员工）</h2>
+        <h2 style={{ marginTop: 0, fontSize: 18, color: "var(--t-heading)", marginBottom: 12 }}>创建订单（员工）</h2>
         <div style={{ display: "grid", gap: 0, maxWidth: 760 }}>
           <div style={{ position: "relative" }}>
             <input
@@ -1308,7 +1308,7 @@ const loadLmShipments = async () => {
           <input
             value={allClientOptions.find((c) => c.id === form.clientId)?.id ?? form.clientId}
             readOnly
-            style={{ ...orderCreateInputStyle, background: "#f8fafc", color: "#000000", fontWeight: 600 }}
+            style={{ ...orderCreateInputStyle, background: "var(--s-cool)", color: "var(--t-strong)", fontWeight: 600 }}
             placeholder="已选唛头"
           />
           <select
@@ -1325,8 +1325,8 @@ const loadLmShipments = async () => {
           <input value={form.trackingNo} onChange={(e) => setForm((v) => ({ ...v, trackingNo: e.target.value }))} placeholder="运单号 *" style={orderCreateInputStyle} />
           <input value={form.batchNo} onChange={(e) => setForm((v) => ({ ...v, batchNo: e.target.value }))} placeholder="柜号（可选）" style={orderCreateInputStyle} />
           <input value={form.itemName} onChange={(e) => setForm((v) => ({ ...v, itemName: e.target.value }))} placeholder="品名 *" style={orderCreateInputStyle} />
-          <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 10, background: "#f9fafb" }}>
-            <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: "#000000" }}>产品列表</div>
+          <div style={{ border: "1px solid var(--l-soft)", borderRadius: 8, padding: 10, background: "var(--s-alt)" }}>
+            <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: "var(--t-strong)" }}>产品列表</div>
             {staffFormProducts.length === 0 ? (
               <input value={form.itemName} onChange={(e) => setForm((v) => ({ ...v, itemName: e.target.value }))} placeholder="品名 *" style={orderCreateInputStyle} />
             ) : null}
@@ -1340,22 +1340,22 @@ const loadLmShipments = async () => {
             const prodWt = pWt * pPkg;
             return (
               <div key={i} style={{ display: "grid", gridTemplateColumns: "2.5fr 0.45fr 0.35fr 0.35fr 0.35fr 0.4fr 0.42fr 0.7fr 0.8fr 0.6fr 0.6fr auto", gap: 2, marginBottom: 3, alignItems: "center" }}>
-                <input value={p.itemName} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], itemName: e.target.value }; setStaffFormProducts(n); }} placeholder="品名" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "3px 4px", fontSize: 11 }} />
-                <input type="number" value={p.packageCount} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], packageCount: e.target.value }; setStaffFormProducts(n); }} placeholder="箱数" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "3px 4px", fontSize: 11, minWidth: 0 }} />
-                <input type="number" step="0.01" value={p.lengthCm} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], lengthCm: e.target.value }; setStaffFormProducts(n); }} placeholder="长" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "3px 4px", fontSize: 11, minWidth: 0 }} />
-                <input type="number" step="0.01" value={p.widthCm} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], widthCm: e.target.value }; setStaffFormProducts(n); }} placeholder="宽" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "3px 4px", fontSize: 11, minWidth: 0 }} />
-                <input type="number" step="0.01" value={p.heightCm} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], heightCm: e.target.value }; setStaffFormProducts(n); }} placeholder="高" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "3px 4px", fontSize: 11, minWidth: 0 }} />
-                <input type="number" value={p.productQuantity} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], productQuantity: e.target.value }; setStaffFormProducts(n); }} placeholder="单箱数量" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "3px 4px", fontSize: 11, minWidth: 0 }} />
-                <input type="number" step="0.01" value={p.weightKg} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], weightKg: e.target.value }; setStaffFormProducts(n); }} placeholder="单箱重kg" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "3px 4px", fontSize: 11, minWidth: 0 }} />
-                <select value={(p.cargoType || "normal").toLowerCase()} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], cargoType: e.target.value }; setStaffFormProducts(n); }} style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "3px 2px", fontSize: 11, background: "#fff", minWidth: 0 }}>
+                <input value={p.itemName} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], itemName: e.target.value }; setStaffFormProducts(n); }} placeholder="品名" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "3px 4px", fontSize: 11 }} />
+                <input type="number" value={p.packageCount} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], packageCount: e.target.value }; setStaffFormProducts(n); }} placeholder="箱数" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "3px 4px", fontSize: 11, minWidth: 0 }} />
+                <input type="number" step="0.01" value={p.lengthCm} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], lengthCm: e.target.value }; setStaffFormProducts(n); }} placeholder="长" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "3px 4px", fontSize: 11, minWidth: 0 }} />
+                <input type="number" step="0.01" value={p.widthCm} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], widthCm: e.target.value }; setStaffFormProducts(n); }} placeholder="宽" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "3px 4px", fontSize: 11, minWidth: 0 }} />
+                <input type="number" step="0.01" value={p.heightCm} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], heightCm: e.target.value }; setStaffFormProducts(n); }} placeholder="高" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "3px 4px", fontSize: 11, minWidth: 0 }} />
+                <input type="number" value={p.productQuantity} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], productQuantity: e.target.value }; setStaffFormProducts(n); }} placeholder="单箱数量" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "3px 4px", fontSize: 11, minWidth: 0 }} />
+                <input type="number" step="0.01" value={p.weightKg} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], weightKg: e.target.value }; setStaffFormProducts(n); }} placeholder="单箱重kg" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "3px 4px", fontSize: 11, minWidth: 0 }} />
+                <select value={(p.cargoType || "normal").toLowerCase()} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], cargoType: e.target.value }; setStaffFormProducts(n); }} style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "3px 2px", fontSize: 11, background: "var(--white)", minWidth: 0 }}>
                   <option value="normal">普货</option>
                   <option value="inspection">商检</option>
                   <option value="sensitive">敏感</option>
                 </select>
-                <input value={p.domesticTrackingNo || ""} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], domesticTrackingNo: e.target.value }; setStaffFormProducts(n); }} placeholder="货拉拉" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "3px 4px", fontSize: 11, minWidth: 0 }} />
-                <span style={{ fontSize: 10, color: prodVol > 0 ? "#2563eb" : "#9ca3af", textAlign: "right", padding: "0 2px", whiteSpace: "nowrap" }}>{prodVol > 0 ? prodVol.toFixed(3) + "m³" : "—"}</span>
-                <span style={{ fontSize: 10, color: prodWt > 0 ? "#2563eb" : "#9ca3af", textAlign: "right", padding: "0 2px", whiteSpace: "nowrap" }}>{prodWt > 0 ? prodWt.toFixed(1) + "kg" : "—"}</span>
-                <button type="button" onClick={() => setStaffFormProducts((v) => v.filter((_, j) => j !== i))} style={{ border: "1px solid #fca5a5", borderRadius: 4, padding: "2px 4px", fontSize: 10, background: "#fff", color: "#dc2626", cursor: "pointer", minWidth: 20 }}>×</button>
+                <input value={p.domesticTrackingNo || ""} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], domesticTrackingNo: e.target.value }; setStaffFormProducts(n); }} placeholder="货拉拉" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "3px 4px", fontSize: 11, minWidth: 0 }} />
+                <span style={{ fontSize: 10, color: prodVol > 0 ? "var(--c-blue)" : "var(--t-faint)", textAlign: "right", padding: "0 2px", whiteSpace: "nowrap" }}>{prodVol > 0 ? prodVol.toFixed(3) + "m³" : "—"}</span>
+                <span style={{ fontSize: 10, color: prodWt > 0 ? "var(--c-blue)" : "var(--t-faint)", textAlign: "right", padding: "0 2px", whiteSpace: "nowrap" }}>{prodWt > 0 ? prodWt.toFixed(1) + "kg" : "—"}</span>
+                <button type="button" onClick={() => setStaffFormProducts((v) => v.filter((_, j) => j !== i))} style={{ border: "1px solid #fca5a5", borderRadius: 4, padding: "2px 4px", fontSize: 10, background: "var(--white)", color: "var(--c-red-2)", cursor: "pointer", minWidth: 20 }}>×</button>
               </div>
             );})}
             {(() => {
@@ -1372,14 +1372,14 @@ const loadLmShipments = async () => {
                 return s + wt * pkg;
               }, 0);
               return (
-                <div style={{ fontSize: 12, fontWeight: 600, padding: "4px 0", color: "#2563eb", textAlign: "right" }}>
+                <div style={{ fontSize: 12, fontWeight: 600, padding: "4px 0", color: "var(--c-blue)", textAlign: "right" }}>
                   合计：总体积 {totalVol.toFixed(6)}m³  |  总重量 {totalWt.toFixed(2)}kg
                 </div>
               );
             })()}
-            <button type="button" onClick={() => setStaffFormProducts((v) => [...v, { itemName: "", packageCount: "", lengthCm: "", widthCm: "", heightCm: "", productQuantity: "", weightKg: "", cargoType: "normal", domesticTrackingNo: "" }])} style={{ border: "1px dashed #2563eb", borderRadius: 4, padding: "4px 10px", fontSize: 12, background: "#fff", color: "#2563eb", cursor: "pointer", marginTop: 4 }}>+ 添加产品</button>
+            <button type="button" onClick={() => setStaffFormProducts((v) => [...v, { itemName: "", packageCount: "", lengthCm: "", widthCm: "", heightCm: "", productQuantity: "", weightKg: "", cargoType: "normal", domesticTrackingNo: "" }])} style={{ border: "1px dashed var(--c-blue)", borderRadius: 4, padding: "4px 10px", fontSize: 12, background: "var(--white)", color: "var(--c-blue)", cursor: "pointer", marginTop: 4 }}>+ 添加产品</button>
           </div>
-          <div style={{ fontSize: 12, color: "#000000", marginTop: 4 }}>
+          <div style={{ fontSize: 12, color: "var(--t-strong)", marginTop: 4 }}>
             输入长宽高和单箱重量后，体积和总重量在前端实时自动计算
           </div>
           <input type="number" value={form.packageCount} onChange={(e) => updateOrderDimensions({ packageCount: e.target.value })} placeholder="包裹数量" style={orderCreateInputStyle} />
@@ -1413,27 +1413,27 @@ const loadLmShipments = async () => {
               style={orderCreateInputStyle}
             />
           </div>
-          <div style={{ fontSize: 12, color: "#000000", marginTop: -4, marginBottom: 4 }}>尺寸：厘米；体积（m³）= 长×宽×高 ÷ 1,000,000，自动填入下方。</div>
+          <div style={{ fontSize: 12, color: "var(--t-strong)", marginTop: -4, marginBottom: 4 }}>尺寸：厘米；体积（m³）= 长×宽×高 ÷ 1,000,000，自动填入下方。</div>
           <input type="number" step="0.01" value={form.weightKg} readOnly={staffFormProducts.length > 0} onChange={(e) => setForm((v) => ({ ...v, weightKg: e.target.value }))} placeholder="重量（kg）" style={orderCreateInputStyle} />
           <input
             type="text"
             readOnly
             value={form.volumeM3}
             placeholder="体积（m³，根据长宽高自动生成）"
-            style={{ ...orderCreateInputStyle, color: "#000000", background: "#f8fafc" }}
+            style={{ ...orderCreateInputStyle, color: "var(--t-strong)", background: "var(--s-cool)" }}
           />
           <div style={{ display: "grid", gap: 4 }}>
             <input type="date" value={form.arrivedAt} onChange={(e) => setForm((v) => ({ ...v, arrivedAt: e.target.value }))} style={orderCreateInputStyle} />
-            <div style={{ fontSize: 12, color: "#000000", marginTop: -6, marginBottom: 8 }}>说明：该日期为到仓日期</div>
+            <div style={{ fontSize: 12, color: "var(--t-strong)", marginTop: -6, marginBottom: 8 }}>说明：该日期为到仓日期</div>
           </div>
         </div>
         <div style={{ gridColumn: "1/-1", marginTop: 4 }}>
-          <div style={{ fontSize: 11, color: "#000000", marginBottom: 4 }}>备注</div>
+          <div style={{ fontSize: 11, color: "var(--t-strong)", marginBottom: 4 }}>备注</div>
           <input value={form.remark} onChange={(e) => setForm((v) => ({ ...v, remark: e.target.value }))} placeholder="备注（可选）" style={{ ...orderCreateInputStyle, width: "100%" }} />
         </div>
 
         <div style={{ marginTop: 10 }}>
-          <button type="button" disabled={loading} onClick={() => void submitOrder()} style={{ border: "none", borderRadius: 8, padding: "8px 14px", color: "#fff", background: "#000000" }}>
+          <button type="button" disabled={loading} onClick={() => void submitOrder()} style={{ border: "none", borderRadius: 8, padding: "8px 14px", color: "var(--white)", background: "var(--t-strong)" }}>
             创建订单
           </button>
         </div>
@@ -1443,18 +1443,18 @@ const loadLmShipments = async () => {
         id="staff-ops-tools"
         style={{
           display: activeSection === "staff-ops-tools" ? "block" : "none",
-          border: "1px solid #e5e7eb",
+          border: "1px solid var(--l-soft)",
           borderLeft: "4px solid #0f766e",
           borderRadius: 12,
           padding: 16,
           marginBottom: 18,
-          background: "#ffffff",
+          background: "var(--white)",
           boxShadow: "0 1px 3px rgba(15,23,42,0.06)",
         }}
       >
-        <h2 style={{ marginTop: 0, fontSize: 18, color: "#111827", marginBottom: 12 }}>入库与标签工具</h2>
+        <h2 style={{ marginTop: 0, fontSize: 18, color: "var(--t-heading)", marginBottom: 12 }}>入库与标签工具</h2>
         <div style={{ display: "grid", gap: 12 }}>
-          <div style={{ border: "1px solid #d1fae5", borderRadius: 10, padding: 10, background: "#ecfdf5" }}>
+          <div style={{ border: "1px solid var(--c-green-bg)", borderRadius: 10, padding: 10, background: "#ecfdf5" }}>
             <div style={{ fontWeight: 700, marginBottom: 8 }}>体积重量自动核算</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 8 }}>
               <input value={sizeDraft.lengthCm} onChange={(e) => setSizeDraft((v) => ({ ...v, lengthCm: e.target.value }))} placeholder="长(cm)" style={orderCreateInputStyle} />
@@ -1462,13 +1462,13 @@ const loadLmShipments = async () => {
               <input value={sizeDraft.heightCm} onChange={(e) => setSizeDraft((v) => ({ ...v, heightCm: e.target.value }))} placeholder="高(cm)" style={orderCreateInputStyle} />
               <input value={sizeDraft.actualWeightKg} onChange={(e) => setSizeDraft((v) => ({ ...v, actualWeightKg: e.target.value }))} placeholder="实重(kg)" style={orderCreateInputStyle} />
             </div>
-            <div style={{ marginTop: 6, fontSize: 13, color: "#065f46" }}>
+            <div style={{ marginTop: 6, fontSize: 13, color: "var(--c-green-deep)" }}>
               体积重 = L×W×H/6000 = {volumetricWeightKg.toFixed(3)} kg；计费重 = Max(实重, 体积重) ={" "}
               <strong>{chargeableWeightKg.toFixed(3)} kg</strong>
             </div>
           </div>
 
-          <div style={{ border: "1px solid #dbeafe", borderRadius: 10, padding: 10, background: "#eff6ff" }}>
+          <div style={{ border: "1px solid var(--c-blue-bg-2)", borderRadius: 10, padding: 10, background: "var(--c-blue-bg)" }}>
             <div style={{ fontWeight: 700, marginBottom: 8 }}>标签打印系统</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 8 }}>
               <input value={labelDraft.orderOrShipmentId} onChange={(e) => setLabelDraft((v) => ({ ...v, orderOrShipmentId: e.target.value }))} placeholder="订单号/运单号" style={orderCreateInputStyle} />
@@ -1494,7 +1494,7 @@ const loadLmShipments = async () => {
                   printWindow.document.close();
                   printWindow.print();
                 }}
-                style={{ border: "none", borderRadius: 8, padding: "8px 14px", color: "#fff", background: "#2563eb" }}
+                style={{ border: "none", borderRadius: 8, padding: "8px 14px", color: "var(--white)", background: "var(--c-blue)" }}
               >
                 一键打印标签
               </button>
@@ -1525,7 +1525,7 @@ const loadLmShipments = async () => {
                     setLoading(false);
                   }
                 }}
-                style={{ border: "none", borderRadius: 8, padding: "8px 14px", color: "#fff", background: "#a16207" }}
+                style={{ border: "none", borderRadius: 8, padding: "8px 14px", color: "var(--white)", background: "#a16207" }}
               >
                 保存装柜号
               </button>
@@ -1580,7 +1580,7 @@ const loadLmShipments = async () => {
                     setLoading(false);
                   }
                 }}
-                style={{ border: "none", borderRadius: 8, padding: "8px 14px", color: "#fff", background: photoDraft.shipmentId.trim() && photoDraft.fileName && photoDraft.contentBase64 ? "#dc2626" : "#000000" }}
+                style={{ border: "none", borderRadius: 8, padding: "8px 14px", color: "var(--white)", background: photoDraft.shipmentId.trim() && photoDraft.fileName && photoDraft.contentBase64 ? "var(--c-red-2)" : "var(--t-strong)" }}
               >
                 上传入库照片
               </button>
@@ -1597,7 +1597,7 @@ const loadLmShipments = async () => {
                     setLoading(false);
                   }
                 }}
-                style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 14px", background: "#fff" }}
+                style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 14px", background: "var(--white)" }}
               >
                 查询该运单照片
               </button>
@@ -1605,8 +1605,8 @@ const loadLmShipments = async () => {
             {photoList.length > 0 ? (
               <div style={{ marginTop: 8, display: "grid", gap: 8 }}>
                 {photoList.map((item) => (
-                  <div key={item.id} style={{ border: "1px solid #fecdd3", borderRadius: 8, padding: 8, background: "#fff" }}>
-                    <div style={{ fontSize: 12, color: "#000000" }}>
+                  <div key={item.id} style={{ border: "1px solid #fecdd3", borderRadius: 8, padding: 8, background: "var(--white)" }}>
+                    <div style={{ fontSize: 12, color: "var(--t-strong)" }}>
                       {item.fileName} / {item.createdAt} / 操作员 {item.operatorId}
                     </div>
                     <img src={`data:${item.mime};base64,${item.contentBase64}`} alt={item.fileName} style={{ maxWidth: "100%", maxHeight: 160, marginTop: 6, borderRadius: 6 }} />
@@ -1623,8 +1623,8 @@ const loadLmShipments = async () => {
         id="staff-order-shipment"
         style={{
           display: activeSection === "staff-order-shipment" ? "block" : "none",
-          border: "1px solid #e5e7eb",
-          borderLeft: "4px solid #d1d5db",
+          border: "1px solid var(--l-soft)",
+          borderLeft: "4px solid var(--l-strong)",
           borderRadius: 12,
           padding: 16,
           background: "#fcfcfd",
@@ -1633,45 +1633,45 @@ const loadLmShipments = async () => {
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10, gap: 12 }}>
           <div style={{ flex: 1 }}>
-            <h2 style={{ margin: 0, fontSize: 18, color: "#111827" }}>运单管理</h2>
-            <p style={{ margin: "6px 0 8px", fontSize: 12, color: "#000000" }}>
+            <h2 style={{ margin: 0, fontSize: 18, color: "var(--t-heading)" }}>运单管理</h2>
+            <p style={{ margin: "6px 0 8px", fontSize: 12, color: "var(--t-strong)" }}>
               表格展示运单号、用户、状态、加收金额、运输方式、发货时间、件重体、仓库与地址；点击「详情」打开运单详情与物流轨迹。
             </p>
         <ShipmentSearch value={shipmentSearch} onChange={(key, val) => setShipmentSearch((prev) => ({ ...prev, [key]: val }))} onSearch={runShipmentListSearch} warehouseOptions={warehouseOptions} logisticsStatusOptions={logisticsStatusOptions} inputStyle={orderCreateInputStyle} />
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 2, flexWrap: "wrap" }}>
             <input type="date" value={exportDateFrom} onChange={e => setExportDateFrom(e.target.value)}
-              style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 8px", fontSize: 12 }} title="导出日期从" />
-            <span style={{ fontSize: 12, color: "#9ca3af" }}>至</span>
+              style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "6px 8px", fontSize: 12 }} title="导出日期从" />
+            <span style={{ fontSize: 12, color: "var(--t-faint)" }}>至</span>
             <input type="date" value={exportDateTo} onChange={e => setExportDateTo(e.target.value)}
-              style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 8px", fontSize: 12 }} title="导出日期到" />
+              style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "6px 8px", fontSize: 12 }} title="导出日期到" />
             <button type="button" onClick={exportShipmentsToExcel}
-              style={{ border: "1px solid #2563eb", borderRadius: 8, padding: "8px 16px", color: "#2563eb", background: "#fff", cursor: "pointer", fontWeight: 600, whiteSpace: "nowrap", fontSize: 14 }}>
+              style={{ border: "1px solid var(--c-blue)", borderRadius: 8, padding: "8px 16px", color: "var(--c-blue)", background: "var(--white)", cursor: "pointer", fontWeight: 600, whiteSpace: "nowrap", fontSize: 14 }}>
               导出Excel
             </button>
             <button
               type="button"
               onClick={() => setShowCreateModal(true)}
-              style={{ border: "none", borderRadius: 8, padding: "8px 16px", color: "#fff", background: "#2563eb", cursor: "pointer", fontWeight: 600, whiteSpace: "nowrap", fontSize: 14 }}
+              style={{ border: "none", borderRadius: 8, padding: "8px 16px", color: "var(--white)", background: "var(--c-blue)", cursor: "pointer", fontWeight: 600, whiteSpace: "nowrap", fontSize: 14 }}
             >
               创建订单
             </button>
             <button
               type="button"
               onClick={() => setShowBatchImport(true)}
-              style={{ border: "1px solid #2563eb", borderRadius: 8, padding: "8px 16px", color: "#2563eb", background: "#fff", cursor: "pointer", fontWeight: 600, whiteSpace: "nowrap", fontSize: 14 }}
+              style={{ border: "1px solid var(--c-blue)", borderRadius: 8, padding: "8px 16px", color: "var(--c-blue)", background: "var(--white)", cursor: "pointer", fontWeight: 600, whiteSpace: "nowrap", fontSize: 14 }}
             >
               批量创建
             </button>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <span style={{ fontSize: 13, color: "#111827", fontWeight: 500 }}>
+            <span style={{ fontSize: 13, color: "var(--t-heading)", fontWeight: 500 }}>
               共 {filteredShipmentList.length} 条 · 第 {currentPage}/{totalPages} 页
             </span>
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <button onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} disabled={currentPage <= 1} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "4px 12px", background: currentPage <= 1 ? "#f3f4f6" : "#fff", color: currentPage <= 1 ? "#9ca3af" : "#111827", cursor: currentPage <= 1 ? "default" : "pointer", fontSize: 13, fontWeight: 500 }}>上一页</button>
-              <button onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "4px 12px", background: currentPage >= totalPages ? "#f3f4f6" : "#fff", color: currentPage >= totalPages ? "#9ca3af" : "#111827", cursor: currentPage >= totalPages ? "default" : "pointer", fontSize: 13, fontWeight: 500 }}>下一页</button>
-              <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "4px 8px", fontSize: 13, color: "#111827" }}>
+              <button onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} disabled={currentPage <= 1} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 12px", background: currentPage <= 1 ? "var(--s-sunken)" : "var(--white)", color: currentPage <= 1 ? "var(--t-faint)" : "var(--t-heading)", cursor: currentPage <= 1 ? "default" : "pointer", fontSize: 13, fontWeight: 500 }}>上一页</button>
+              <button onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 12px", background: currentPage >= totalPages ? "var(--s-sunken)" : "var(--white)", color: currentPage >= totalPages ? "var(--t-faint)" : "var(--t-heading)", cursor: currentPage >= totalPages ? "default" : "pointer", fontSize: 13, fontWeight: 500 }}>下一页</button>
+              <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 8px", fontSize: 13, color: "var(--t-heading)" }}>
                 {[20, 50, 100, 200].map((n) => <option key={n} value={n}>{n}条/页</option>)}
               </select>
             </div>
@@ -1685,12 +1685,12 @@ const loadLmShipments = async () => {
             ) : (
               <div
                 className="table-card"
-                style={{ overflowX: "auto", border: "1px solid #e2e8f0", borderRadius: 10, background: "#fff" }}
+                style={{ overflowX: "auto", border: "1px solid var(--l-cool)", borderRadius: 10, background: "var(--white)" }}
               >
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed", minWidth: SHIPMENT_TABLE_MIN_WIDTH }}>
                   <GridColgroup widths={SHIPMENT_COL_WIDTHS} flexIndex={SHIPMENT_FLEX_COL_INDEX} />
                   <thead>
-                    <tr style={{ background: "#f1f5f9", textAlign: "left", borderBottom: "2px solid #e2e8f0" }}>
+                    <tr style={{ background: "var(--s-cool-2)", textAlign: "left", borderBottom: "2px solid var(--l-cool)" }}>
                       {/* 货型跟着产品走，必须紧挨着国内单号，才能和上面 5 列绑成同一块一起滚 */}
                       <th style={gridThStyle}>
                         <input type="checkbox" checked={selectedForExport.size === filteredShipmentList.length && filteredShipmentList.length > 0} onChange={toggleSelectAll} style={{ cursor: "pointer" }} />
@@ -1716,13 +1716,13 @@ const loadLmShipments = async () => {
                       const detailRows = buildProductDetailRows(item);
                       return (
                       <Fragment key={item.id}>
-                        <tr style={{ borderBottom: "1px solid #e2e8f0", background: shipmentTableExpandedId === item.id ? "#eff6ff" : "#fff" }}>
+                        <tr style={{ borderBottom: "1px solid var(--l-cool)", background: shipmentTableExpandedId === item.id ? "var(--c-blue-bg)" : "var(--white)" }}>
                           <td style={gridTdStyle}>
                             <input type="checkbox" checked={selectedForExport.has(item.trackingNo)} onChange={() => toggleSelectShipment(item.trackingNo)} style={{ cursor: "pointer" }} />
                           </td>
                           <td style={{ ...gridTdStyle, fontWeight: 600, color: "#6b21a8", fontFamily: "monospace", fontSize: 12 }}>{item.clientId ?? "—"}</td>
                           <td style={gridTdStyle}>
-                            <div style={{ fontWeight: 600, color: "#1e3a8a" }}>{item.orderNo || item.trackingNo}</div>
+                            <div style={{ fontWeight: 600, color: "var(--c-navy)" }}>{item.orderNo || item.trackingNo}</div>
                             {/* 明细块只露 3 行，这里写清楚一共几项，免得员工不知道下面还有货 */}
                             <div style={{ fontSize: 11, color: "#64748b", marginTop: 3 }}>共 {detailRows.length} 项</div>
                           </td>
@@ -1731,7 +1731,7 @@ const loadLmShipments = async () => {
                           <td style={gridTdStyle}>{formatMetric(item.volumeM3, 6)}</td>
                           <td style={gridTdStyle}>{formatMetric(item.weightKg, 2)}</td>
                           <td style={gridTdStyle}>{transportModeLabel(item.transportMode)}</td>
-                          <td style={{ ...gridTdStyle, color: "#000000" }}>
+                          <td style={{ ...gridTdStyle, color: "var(--t-strong)" }}>
                             {item.shipDate ?? formatDateTime(item.arrivedAt)}
                           </td>
                           <td style={gridTdStyle} title={item.remark || ""}>
@@ -1833,15 +1833,15 @@ const loadLmShipments = async () => {
                                           {(item.products?.length ?? 0) > 1 && (
                                         /* 原来是一行用「|」隔开的长串，43 个产品时根本读不了，改成一张表 */
                                         <div style={{ marginBottom: 12 }}>
-                                          <div style={{ fontWeight: 600, color: "#000000", fontSize: 12, marginBottom: 6 }}>
+                                          <div style={{ fontWeight: 600, color: "var(--t-strong)", fontSize: 12, marginBottom: 6 }}>
                                             货物明细 共 {detailRows.length} 项
                                           </div>
-                                          <div style={{ maxHeight: 320, overflowY: "auto", border: "1px solid #e2e8f0" }}>
+                                          <div style={{ maxHeight: 320, overflowY: "auto", border: "1px solid var(--l-cool)" }}>
                                             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                                               <thead>
-                                                <tr style={{ background: "#f1f5f9", textAlign: "left" }}>
+                                                <tr style={{ background: "var(--s-cool-2)", textAlign: "left" }}>
                                                   {["#", ...PRODUCT_DETAIL_HEADS].map((h) => (
-                                                    <th key={h} style={{ padding: "4px 8px", border: "1px solid #e2e8f0", whiteSpace: "nowrap", fontWeight: 600 }}>{h}</th>
+                                                    <th key={h} style={{ padding: "4px 8px", border: "1px solid var(--l-cool)", whiteSpace: "nowrap", fontWeight: 600 }}>{h}</th>
                                                   ))}
                                                 </tr>
                                               </thead>
@@ -1849,7 +1849,7 @@ const loadLmShipments = async () => {
                                                 {detailRows.map((r, i) => (
                                                   <tr key={i}>
                                                     {[String(i + 1), ...r].map((v, j) => (
-                                                      <td key={j} style={{ padding: "4px 8px", border: "1px solid #e2e8f0", whiteSpace: "nowrap", color: "#000000" }}>{v}</td>
+                                                      <td key={j} style={{ padding: "4px 8px", border: "1px solid var(--l-cool)", whiteSpace: "nowrap", color: "var(--t-strong)" }}>{v}</td>
                                                     ))}
                                                   </tr>
                                                 ))}
@@ -1877,7 +1877,7 @@ const loadLmShipments = async () => {
                                                     gap: 6,
                                                     cursor: formDisabled ? "not-allowed" : "pointer",
                                                     fontSize: 13,
-                                                    color: "#000000",
+                                                    color: "var(--t-strong)",
                                                   }}
                                                 >
                                                   <input
@@ -2030,7 +2030,7 @@ const loadLmShipments = async () => {
                                             <input
                                               value={item.clientName ?? item.clientId ?? "—"}
                                               readOnly
-                                              style={{ ...inputInCard, color: "#000000", background: "#f8fafc" }}
+                                              style={{ ...inputInCard, color: "var(--t-strong)", background: "var(--s-cool)" }}
                                             />
                                           </ShipmentEditFormField>
                                           <ShipmentEditFormField label="运输方式" required>
@@ -2121,7 +2121,7 @@ const loadLmShipments = async () => {
                                               <input
                                                 type="file"
                                                 accept="image/*"
-                                                style={{ fontSize: 12, color: "#000000" }}
+                                                style={{ fontSize: 12, color: "var(--t-strong)" }}
                                                 onChange={async (ev) => {
                                                   const f = ev.target.files?.[0] ?? null;
                                                   ev.target.value = "";
@@ -2149,7 +2149,7 @@ const loadLmShipments = async () => {
                                                   }
                                                 }}
                                               />
-                                              <span style={{ fontSize: 11, color: "#000000" }}>上传后写入入库拍照记录</span>
+                                              <span style={{ fontSize: 11, color: "var(--t-strong)" }}>上传后写入入库拍照记录</span>
                                             </div>
                                           </ShipmentEditFormField>
                                           <ShipmentEditFormField label="备注">
@@ -2191,8 +2191,8 @@ const loadLmShipments = async () => {
                                           border: "none",
                                           borderRadius: 8,
                                           padding: "8px 14px",
-                                          color: "#fff",
-                                          background: item.orderId ? "#059669" : "#000000",
+                                          color: "var(--white)",
+                                          background: item.orderId ? "var(--c-green)" : "var(--t-strong)",
                                           cursor: item.orderId ? "pointer" : "not-allowed",
                                           fontWeight: 600,
                                         }}
@@ -2205,7 +2205,7 @@ const loadLmShipments = async () => {
                                     type="button"
                                     disabled={loading}
                                     onClick={() => setShipmentTableExpandedId(null)}
-                                    style={{ border: "1px solid #d8d6d1", borderRadius: 6, padding: "8px 16px", background: "#fff", color: "#1a1a1e" }}
+                                    style={{ border: "1px solid #d8d6d1", borderRadius: 6, padding: "8px 16px", background: "var(--white)", color: "#1a1a1e" }}
                                   >
                                     关闭
                                   </button>
@@ -2237,8 +2237,8 @@ const loadLmShipments = async () => {
         id="staff-address"
         style={{
           display: activeSection === "staff-address" ? "block" : "none",
-          border: "1px solid #e5e7eb",
-          borderLeft: "4px solid #d1d5db",
+          border: "1px solid var(--l-soft)",
+          borderLeft: "4px solid var(--l-strong)",
           borderRadius: 12,
           padding: 16,
           marginBottom: 18,
@@ -2246,65 +2246,65 @@ const loadLmShipments = async () => {
           boxShadow: "0 1px 3px rgba(15,23,42,0.06)",
         }}
       >
-        <h2 style={{ marginTop: 0, fontSize: 18, color: "#111827", marginBottom: 12 }}>尾端地址</h2>
-        <p style={{ fontSize: 12, color: "#000000", marginBottom: 10 }}>客户端注册后自动同步唛头与派送地址。</p>
+        <h2 style={{ marginTop: 0, fontSize: 18, color: "var(--t-heading)", marginBottom: 12 }}>尾端地址</h2>
+        <p style={{ fontSize: 12, color: "var(--t-strong)", marginBottom: 10 }}>客户端注册后自动同步唛头与派送地址。</p>
         <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
           <input value={addrKeyword} onChange={e => { setAddrKeyword(e.target.value); if(!e.target.value) loadAddrAddresses(""); }} onKeyDown={e => { if(e.key==="Enter") loadAddrAddresses(addrKeyword); }} placeholder="搜索唛头或客户名"
-            style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", fontSize: 13, flex: 1 }} />
+            style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", fontSize: 13, flex: 1 }} />
           <button type="button" onClick={() => { setAddrKeyword(""); loadAddrAddresses(""); }}
-            style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 12px", fontSize: 13, background: "#fff", color: "#000000", cursor: "pointer" }}>重置</button>
+            style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 12px", fontSize: 13, background: "var(--white)", color: "var(--t-strong)", cursor: "pointer" }}>重置</button>
         </div>
-        {addrLoading ? <div style={{ color: "#000000", fontSize: 13, padding: "20px 0", textAlign: "center" }}>加载中…</div>
-        : addrItems.length === 0 ? <div style={{ color: "#000000", fontSize: 13, padding: "20px 0", textAlign: "center" }}>暂无客户数据</div>
+        {addrLoading ? <div style={{ color: "var(--t-strong)", fontSize: 13, padding: "20px 0", textAlign: "center" }}>加载中…</div>
+        : addrItems.length === 0 ? <div style={{ color: "var(--t-strong)", fontSize: 13, padding: "20px 0", textAlign: "center" }}>暂无客户数据</div>
         : (<div style={{ display: "grid", gap: 10 }}>
             {addrItems.filter(c => !addrKeyword || c.id.toLowerCase().includes(addrKeyword.toLowerCase()) || c.name.toLowerCase().includes(addrKeyword.toLowerCase())).map(client => (
-              <div key={client.id} style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 12, background: "#fff" }}>
+              <div key={client.id} style={{ border: "1px solid var(--l-cool)", borderRadius: 8, padding: 12, background: "var(--white)" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                   <div><span style={{ fontWeight: 700, fontSize: 15, color: "#6b21a8", fontFamily: "monospace" }}>{client.id}</span>
-                    <span style={{ marginLeft: 8, fontSize: 13, color: "#000000" }}>{client.name}</span></div>
-                  <span style={{ fontSize: 12, color: "#000000" }}>{client.phone}</span>
+                    <span style={{ marginLeft: 8, fontSize: 13, color: "var(--t-strong)" }}>{client.name}</span></div>
+                  <span style={{ fontSize: 12, color: "var(--t-strong)" }}>{client.phone}</span>
                 </div>
-                {client.addresses.length === 0 ? <div style={{ fontSize: 12, color: "#000000" }}>暂无地址</div>
+                {client.addresses.length === 0 ? <div style={{ fontSize: 12, color: "var(--t-strong)" }}>暂无地址</div>
                 : client.addresses.map(addr => (
-                  <div key={addr.id} style={{ padding: "6px 8px", background: "#f8fafc", borderRadius: 6, marginBottom: 4, border: addr.isDefault ? "1px solid #bbf7d0" : "1px solid #f1f5f9", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div key={addr.id} style={{ padding: "6px 8px", background: "var(--s-cool)", borderRadius: 6, marginBottom: 4, border: addr.isDefault ? "1px solid #bbf7d0" : "1px solid var(--s-cool-2)", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 12, color: "#000000" }}>{addr.isDefault ? <span style={{ color: "#16a34a", fontWeight: 600 }}>[默认]</span> : null}{addr.contactName} | {addr.contactPhone}</div>
-                      <div style={{ fontSize: 11, color: "#000000", marginTop: 2 }}>{addr.addressDetail}</div>
+                      <div style={{ fontSize: 12, color: "var(--t-strong)" }}>{addr.isDefault ? <span style={{ color: "var(--c-green-3)", fontWeight: 600 }}>[默认]</span> : null}{addr.contactName} | {addr.contactPhone}</div>
+                      <div style={{ fontSize: 11, color: "var(--t-strong)", marginTop: 2 }}>{addr.addressDetail}</div>
                     </div>
-                    <button type="button" onClick={() => { if(!confirm("确定删除该地址？")) return; deleteAddr(addr.id); }} style={{ border: "1px solid #fca5a5", borderRadius: 4, padding: "2px 5px", fontSize: 10, background: "#fff", color: "#dc2626", cursor: "pointer", marginLeft: 8 }}>删除</button>
+                    <button type="button" onClick={() => { if(!confirm("确定删除该地址？")) return; deleteAddr(addr.id); }} style={{ border: "1px solid #fca5a5", borderRadius: 4, padding: "2px 5px", fontSize: 10, background: "var(--white)", color: "var(--c-red-2)", cursor: "pointer", marginLeft: 8 }}>删除</button>
                   </div>
                 ))}
                 <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
                   <button type="button" onClick={() => { setShowAddAddress(client.id); setAddrForm({ contactName: "", contactPhone: "", addressDetail: "", label: "" }); }}
-                    style={{ border: "1px solid #2563eb", borderRadius: 4, padding: "4px 8px", fontSize: 11, background: "#eff6ff", color: "#2563eb", cursor: "pointer" }}>添加地址</button>
+                    style={{ border: "1px solid var(--c-blue)", borderRadius: 4, padding: "4px 8px", fontSize: 11, background: "var(--c-blue-bg)", color: "var(--c-blue)", cursor: "pointer" }}>添加地址</button>
                   <button type="button" onClick={() => setEditingNote({ clientId: client.id, content: clientNotes[client.id]?.content ?? "" })}
                     style={{ border: "1px solid #8b5cf6", borderRadius: 4, padding: "4px 8px", fontSize: 11, background: "#f5f3ff", color: "#8b5cf6", cursor: "pointer" }}>编辑备注</button>
                 </div>
                 {showAddAddress === client.id && (
                   <div style={{ marginTop: 6, padding: 8, background: "#f0f9ff", borderRadius: 6, border: "1px solid #bae6fd" }}>
                     <div style={{ display: "grid", gap: 4 }}>
-                      <input value={addrForm.contactName} onChange={e => setAddrForm(v => ({...v, contactName: e.target.value}))} placeholder="联系人姓名" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "4px 6px", fontSize: 11 }} />
-                      <input value={addrForm.contactPhone} onChange={e => setAddrForm(v => ({...v, contactPhone: e.target.value}))} placeholder="联系电话" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "4px 6px", fontSize: 11 }} />
-                      <input value={addrForm.addressDetail} onChange={e => setAddrForm(v => ({...v, addressDetail: e.target.value}))} placeholder="详细地址" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "4px 6px", fontSize: 11 }} />
+                      <input value={addrForm.contactName} onChange={e => setAddrForm(v => ({...v, contactName: e.target.value}))} placeholder="联系人姓名" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "4px 6px", fontSize: 11 }} />
+                      <input value={addrForm.contactPhone} onChange={e => setAddrForm(v => ({...v, contactPhone: e.target.value}))} placeholder="联系电话" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "4px 6px", fontSize: 11 }} />
+                      <input value={addrForm.addressDetail} onChange={e => setAddrForm(v => ({...v, addressDetail: e.target.value}))} placeholder="详细地址" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "4px 6px", fontSize: 11 }} />
                       <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
-                        <button type="button" onClick={() => setShowAddAddress(null)} style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "3px 8px", fontSize: 11, background: "#fff", cursor: "pointer" }}>取消</button>
-                        <button type="button" onClick={() => saveAddr(client.id)} style={{ border: "none", borderRadius: 4, padding: "3px 8px", fontSize: 11, background: "#2563eb", color: "#fff", cursor: "pointer" }}>保存</button>
+                        <button type="button" onClick={() => setShowAddAddress(null)} style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "3px 8px", fontSize: 11, background: "var(--white)", cursor: "pointer" }}>取消</button>
+                        <button type="button" onClick={() => saveAddr(client.id)} style={{ border: "none", borderRadius: 4, padding: "3px 8px", fontSize: 11, background: "var(--c-blue)", color: "var(--white)", cursor: "pointer" }}>保存</button>
                       </div>
                     </div>
                   </div>
                 )}
                 {editingNote?.clientId === client.id && (
                   <div style={{ marginTop: 6, padding: 8, background: "#faf5ff", borderRadius: 6, border: "1px solid #e9d5ff" }}>
-                    <textarea value={editingNote.content} onChange={e => setEditingNote(v => v ? {...v, content: e.target.value} : null)} rows={3} placeholder="输入备注..." style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "4px 6px", fontSize: 11, width: "100%", resize: "vertical" }} />
+                    <textarea value={editingNote.content} onChange={e => setEditingNote(v => v ? {...v, content: e.target.value} : null)} rows={3} placeholder="输入备注..." style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "4px 6px", fontSize: 11, width: "100%", resize: "vertical" }} />
                     <div style={{ display: "flex", gap: 4, justifyContent: "flex-end", marginTop: 4 }}>
-                      <button type="button" onClick={() => setEditingNote(null)} style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "3px 8px", fontSize: 11, background: "#fff", cursor: "pointer" }}>取消</button>
-                      <button type="button" onClick={() => saveNote(client.id, editingNote.content)} style={{ border: "none", borderRadius: 4, padding: "3px 8px", fontSize: 11, background: "#8b5cf6", color: "#fff", cursor: "pointer" }}>保存</button>
+                      <button type="button" onClick={() => setEditingNote(null)} style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "3px 8px", fontSize: 11, background: "var(--white)", cursor: "pointer" }}>取消</button>
+                      <button type="button" onClick={() => saveNote(client.id, editingNote.content)} style={{ border: "none", borderRadius: 4, padding: "3px 8px", fontSize: 11, background: "#8b5cf6", color: "var(--white)", cursor: "pointer" }}>保存</button>
                     </div>
                   </div>
                 )}
-                <div style={{ marginTop: 8, borderTop: "1px solid #e5e7eb", paddingTop: 8 }}>
-                  <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>备注</div>
-                  <div style={{ fontSize: 12, color: clientNotes[client.id]?.content ? "#000000" : "#9ca3af", whiteSpace: "pre-wrap" }}>{clientNotes[client.id]?.content || "暂无备注"}</div>
+                <div style={{ marginTop: 8, borderTop: "1px solid var(--l-soft)", paddingTop: 8 }}>
+                  <div style={{ fontSize: 11, color: "var(--t-muted)", marginBottom: 4 }}>备注</div>
+                  <div style={{ fontSize: 12, color: clientNotes[client.id]?.content ? "var(--t-strong)" : "var(--t-faint)", whiteSpace: "pre-wrap" }}>{clientNotes[client.id]?.content || "暂无备注"}</div>
                 </div>
               </div>
             ))}
@@ -2313,26 +2313,26 @@ const loadLmShipments = async () => {
       </section>
 
 
-      {message ? <p style={{ marginTop: 12, color: message.includes("失败") ? "#b91c1c" : "#065f46" }}>{message}</p> : null}
+      {message ? <p style={{ marginTop: 12, color: message.includes("失败") ? "var(--c-red-deep)" : "var(--c-green-deep)" }}>{message}</p> : null}
             <input ref={lmSignFileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={async (e: any) => { const f = e.target.files?.[0]; e.target.value = ""; if (!f || !lmSignData) return; const rdr = new FileReader(); rdr.onload = async () => { const b64 = (rdr.result as string).split(",")[1] || ""; try { const res = await fetch(apiBaseUrl()+"/admin/lastmile/status", { method: "POST", headers: {"Content-Type":"application/json",...authHeaders()}, body: JSON.stringify({ id: lmSignData.id, status: lmSignData.action === "sign" ? "SIGNED" : undefined, signImageBase64: b64 }) }); /* 【审查问题 3】原来只看 res.ok，200 但业务失败照样弹「已签收」；也不跳登录页 */ await parseApiResponse(res); setToast(lmSignData.action === "sign" ? "已签收" : "图片已上传"); loadLmOrders(); } catch(e: any) { setToast(e.message||"操作失败，请重试"); } setLmSignData(null); }; rdr.readAsDataURL(f); }} />
 <Toast open={toast.length > 0} message={toast} />
       {/* 预报单审核弹窗 */}
       {approvingPrealert && (
         <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.4)", padding: 16 }}>
-          <div style={{ width: "100%", maxWidth: 560, maxHeight: "90vh", overflow: "auto", background: "#fff", borderRadius: 12, padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+          <div style={{ width: "100%", maxWidth: 560, maxHeight: "90vh", overflow: "auto", background: "var(--white)", borderRadius: 12, padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
             <h3 style={{ margin: "0 0 16px", fontSize: 18, fontWeight: 600 }}>审核预报单</h3>
-            <div style={{ color: "#000000", fontSize: 13, marginBottom: 12 }}>
+            <div style={{ color: "var(--t-strong)", fontSize: 13, marginBottom: 12 }}>
               客户：{approvingPrealert.clientName ?? "-"} · {approvingPrealert.createdAt.slice(0, 10)}
             </div>
             {(approvingPrealert.products?.length ?? 0) > 1 && (
               <div style={{ marginBottom: 10, background: "#fefce8", borderRadius: 6, padding: "8px 10px", fontSize: 12 }}>
-                <div style={{ fontWeight: 600, marginBottom: 4, color: "#000000" }}>产品列表</div>
+                <div style={{ fontWeight: 600, marginBottom: 4, color: "var(--t-strong)" }}>产品列表</div>
                 {(approvingPrealert.products ?? []).map((p) => (
-                  <div key={p.id} style={{ color: "#000000" }}>{p.itemName} ×{p.packageCount}箱{p.lengthCm ? ` (${p.lengthCm}×${p.widthCm}×${p.heightCm}cm)` : ""}</div>
+                  <div key={p.id} style={{ color: "var(--t-strong)" }}>{p.itemName} ×{p.packageCount}箱{p.lengthCm ? ` (${p.lengthCm}×${p.widthCm}×${p.heightCm}cm)` : ""}</div>
                 ))}
               </div>
             )}
-            <div style={{ display: "grid", gap: 6, fontSize: 13, color: "#000000", marginBottom: 16 }}>
+            <div style={{ display: "grid", gap: 6, fontSize: 13, color: "var(--t-strong)", marginBottom: 16 }}>
               <div>仓库：{warehouseOptions.find((w) => w.id === (prealertEditDrafts[approvingPrealert.id]?.warehouseId ?? approvingPrealert.warehouseId))?.label ?? "-"}</div>
               <div>品名：{prealertEditDrafts[approvingPrealert.id]?.itemName ?? approvingPrealert.itemName}</div>
               <div>件数：{prealertEditDrafts[approvingPrealert.id]?.packageCount ?? approvingPrealert.packageCount} {prealertEditDrafts[approvingPrealert.id]?.packageUnit ?? approvingPrealert.packageUnit}</div>
@@ -2342,17 +2342,17 @@ const loadLmShipments = async () => {
               <div>国内单号：{prealertEditDrafts[approvingPrealert.id]?.domesticTrackingNo ?? approvingPrealert.domesticTrackingNo ?? "-"}</div>
               <div>运输方式：{(prealertEditDrafts[approvingPrealert.id]?.transportMode ?? approvingPrealert.transportMode) === "sea" ? "海运" : "陆运"}</div>
               <div>发货日期：{prealertEditDrafts[approvingPrealert.id]?.shipDate ?? approvingPrealert.shipDate ?? approvingPrealert.createdAt.slice(0, 10)}</div>
-              <div style={{ marginTop: 8, borderTop: "1px solid #e5e7eb", paddingTop: 8 }}>
-                <div style={{ fontSize: 12, color: "#000000", marginBottom: 4 }}>应收金额（必填）</div>
+              <div style={{ marginTop: 8, borderTop: "1px solid var(--l-soft)", paddingTop: 8 }}>
+                <div style={{ fontSize: 12, color: "var(--t-strong)", marginBottom: 4 }}>应收金额（必填）</div>
                 <input type="number" step="0.01" value={prealertEditDrafts[approvingPrealert.id]?.receivableAmountCny ?? approvingPrealert.receivableAmountCny ?? ""} onChange={(e) => setPrealertEditDrafts((prev) => ({ ...prev, [approvingPrealert.id]: { ...(prev[approvingPrealert.id] ?? buildPrealertDraft(approvingPrealert)), receivableAmountCny: +e.target.value } }))} placeholder="输入应收金额" style={prealertEditInputStyle} />
               </div>
               <div>
-                <div style={{ fontSize: 12, color: "#000000", marginBottom: 4 }}>柜号（可选）</div>
+                <div style={{ fontSize: 12, color: "var(--t-strong)", marginBottom: 4 }}>柜号（可选）</div>
                 <input value={prealertBatchDrafts[approvingPrealert.id] ?? ""} onChange={(e) => setPrealertBatchDrafts((prev) => ({ ...prev, [approvingPrealert.id]: e.target.value }))} placeholder="柜号（装柜时填写）" style={prealertEditInputStyle} />
               </div>
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-              <button type="button" onClick={() => setApprovingPrealert(null)} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: "#fff", cursor: "pointer", color: "#000000" }}>取消</button>
+              <button type="button" onClick={() => setApprovingPrealert(null)} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: "var(--white)", cursor: "pointer", color: "var(--t-strong)" }}>取消</button>
               <button type="button" onClick={async () => {
                 const item = approvingPrealert;
                 const draft = prealertEditDrafts[item.id] ?? buildPrealertDraft(item);
@@ -2376,7 +2376,7 @@ const loadLmShipments = async () => {
                   setToast("确认收货失败：" + text);
                 }
                 setApprovingPrealert(null);
-              }} style={{ border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: "#2563eb", color: "#fff", fontWeight: 500, cursor: "pointer" }}>确认收货</button>
+              }} style={{ border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: "var(--c-blue)", color: "var(--white)", fontWeight: 500, cursor: "pointer" }}>确认收货</button>
             </div>
           </div>
         </div>
@@ -2385,7 +2385,7 @@ const loadLmShipments = async () => {
       {/* 创建订单弹窗 */}
       {showCreateModal ? (
         <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.4)", padding: 16 }}>
-          <div style={{ width: "100%", maxWidth: 1320, maxHeight: "90vh", overflow: "auto", background: "#fff", borderRadius: 12, padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+          <div style={{ width: "100%", maxWidth: 1320, maxHeight: "90vh", overflow: "auto", background: "var(--white)", borderRadius: 12, padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
             <h3 style={{ margin: "0 0 16px", fontSize: 18, fontWeight: 600 }}>创建订单</h3>
             <div style={{ display: "grid", gap: 8 }}>
               <div style={{ position: "relative" }}>
@@ -2396,7 +2396,7 @@ const loadLmShipments = async () => {
                   ))}
                 </datalist>
               </div>
-              <input value={allClientOptions.find((c) => c.id === form.clientId)?.id ?? form.clientId} readOnly style={{ ...orderCreateInputStyle, background: "#f8fafc", color: "#000000", fontWeight: 600 }} placeholder="已选唛头" />
+              <input value={allClientOptions.find((c) => c.id === form.clientId)?.id ?? form.clientId} readOnly style={{ ...orderCreateInputStyle, background: "var(--s-cool)", color: "var(--t-strong)", fontWeight: 600 }} placeholder="已选唛头" />
               <select value={form.warehouseId} onChange={(e) => setForm((v) => ({ ...v, warehouseId: e.target.value }))} style={orderCreateInputStyle}>
                 {warehouseOptions.map((item) => (
                   <option key={item.id} value={item.id}>仓库：{item.label}</option>
@@ -2404,8 +2404,8 @@ const loadLmShipments = async () => {
               </select>
               <input value={form.trackingNo} onChange={(e) => setForm((v) => ({ ...v, trackingNo: e.target.value }))} placeholder="运单号 *" style={orderCreateInputStyle} />
               <input value={form.batchNo} onChange={(e) => setForm((v) => ({ ...v, batchNo: e.target.value }))} placeholder="柜号（可选）" style={orderCreateInputStyle} />
-              <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 10, background: "#f9fafb" }}>
-                <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: "#000000" }}>产品列表</div>
+              <div style={{ border: "1px solid var(--l-soft)", borderRadius: 8, padding: 10, background: "var(--s-alt)" }}>
+                <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: "var(--t-strong)" }}>产品列表</div>
                 {staffFormProducts.length === 0 ? (
                   <input value={form.itemName} onChange={(e) => setForm((v) => ({ ...v, itemName: e.target.value }))} placeholder="品名 *" style={orderCreateInputStyle} />
                 ) : null}
@@ -2419,22 +2419,22 @@ const loadLmShipments = async () => {
                   const prodWt = pWt * pPkg;
                   return (
                   <div key={i} style={{ display: "grid", gridTemplateColumns: "2.5fr 0.45fr 0.35fr 0.35fr 0.35fr 0.4fr 0.42fr 0.7fr 0.8fr 0.6fr 0.6fr auto", gap: 2, marginBottom: 3, alignItems: "center" }}>
-                    <input value={p.itemName} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], itemName: e.target.value }; setStaffFormProducts(n); }} placeholder="品名" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "3px 4px", fontSize: 11 }} />
-                    <input type="number" value={p.packageCount} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], packageCount: e.target.value }; setStaffFormProducts(n); }} placeholder="箱数" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "3px 4px", fontSize: 11, minWidth: 0 }} />
-                    <input type="number" step="0.01" value={p.lengthCm} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], lengthCm: e.target.value }; setStaffFormProducts(n); }} placeholder="长" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "3px 4px", fontSize: 11, minWidth: 0 }} />
-                    <input type="number" step="0.01" value={p.widthCm} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], widthCm: e.target.value }; setStaffFormProducts(n); }} placeholder="宽" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "3px 4px", fontSize: 11, minWidth: 0 }} />
-                    <input type="number" step="0.01" value={p.heightCm} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], heightCm: e.target.value }; setStaffFormProducts(n); }} placeholder="高" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "3px 4px", fontSize: 11, minWidth: 0 }} />
-                    <input type="number" value={p.productQuantity} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], productQuantity: e.target.value }; setStaffFormProducts(n); }} placeholder="单箱数量" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "3px 4px", fontSize: 11, minWidth: 0 }} />
-                    <input type="number" step="0.01" value={p.weightKg} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], weightKg: e.target.value }; setStaffFormProducts(n); }} placeholder="单箱重kg" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "3px 4px", fontSize: 11, minWidth: 0 }} />
-                    <select value={(p.cargoType || "normal").toLowerCase()} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], cargoType: e.target.value }; setStaffFormProducts(n); }} style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "3px 2px", fontSize: 11, background: "#fff", minWidth: 0 }}>
+                    <input value={p.itemName} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], itemName: e.target.value }; setStaffFormProducts(n); }} placeholder="品名" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "3px 4px", fontSize: 11 }} />
+                    <input type="number" value={p.packageCount} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], packageCount: e.target.value }; setStaffFormProducts(n); }} placeholder="箱数" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "3px 4px", fontSize: 11, minWidth: 0 }} />
+                    <input type="number" step="0.01" value={p.lengthCm} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], lengthCm: e.target.value }; setStaffFormProducts(n); }} placeholder="长" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "3px 4px", fontSize: 11, minWidth: 0 }} />
+                    <input type="number" step="0.01" value={p.widthCm} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], widthCm: e.target.value }; setStaffFormProducts(n); }} placeholder="宽" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "3px 4px", fontSize: 11, minWidth: 0 }} />
+                    <input type="number" step="0.01" value={p.heightCm} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], heightCm: e.target.value }; setStaffFormProducts(n); }} placeholder="高" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "3px 4px", fontSize: 11, minWidth: 0 }} />
+                    <input type="number" value={p.productQuantity} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], productQuantity: e.target.value }; setStaffFormProducts(n); }} placeholder="单箱数量" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "3px 4px", fontSize: 11, minWidth: 0 }} />
+                    <input type="number" step="0.01" value={p.weightKg} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], weightKg: e.target.value }; setStaffFormProducts(n); }} placeholder="单箱重kg" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "3px 4px", fontSize: 11, minWidth: 0 }} />
+                    <select value={(p.cargoType || "normal").toLowerCase()} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], cargoType: e.target.value }; setStaffFormProducts(n); }} style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "3px 2px", fontSize: 11, background: "var(--white)", minWidth: 0 }}>
                       <option value="normal">普货</option>
                       <option value="inspection">商检</option>
                       <option value="sensitive">敏感</option>
                     </select>
-                    <input value={p.domesticTrackingNo || ""} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], domesticTrackingNo: e.target.value }; setStaffFormProducts(n); }} placeholder="货拉拉" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "3px 4px", fontSize: 11, minWidth: 0 }} />
-                    <span style={{ fontSize: 10, color: prodVol > 0 ? "#2563eb" : "#9ca3af", textAlign: "right", padding: "0 2px", whiteSpace: "nowrap" }}>{prodVol > 0 ? prodVol.toFixed(3) + "m³" : "—"}</span>
-                    <span style={{ fontSize: 10, color: prodWt > 0 ? "#2563eb" : "#9ca3af", textAlign: "right", padding: "0 2px", whiteSpace: "nowrap" }}>{prodWt > 0 ? prodWt.toFixed(1) + "kg" : "—"}</span>
-                    <button type="button" onClick={() => setStaffFormProducts((v) => v.filter((_, j) => j !== i))} style={{ border: "1px solid #fca5a5", borderRadius: 4, padding: "2px 4px", fontSize: 10, background: "#fff", color: "#dc2626", cursor: "pointer", minWidth: 20 }}>×</button>
+                    <input value={p.domesticTrackingNo || ""} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], domesticTrackingNo: e.target.value }; setStaffFormProducts(n); }} placeholder="货拉拉" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "3px 4px", fontSize: 11, minWidth: 0 }} />
+                    <span style={{ fontSize: 10, color: prodVol > 0 ? "var(--c-blue)" : "var(--t-faint)", textAlign: "right", padding: "0 2px", whiteSpace: "nowrap" }}>{prodVol > 0 ? prodVol.toFixed(3) + "m³" : "—"}</span>
+                    <span style={{ fontSize: 10, color: prodWt > 0 ? "var(--c-blue)" : "var(--t-faint)", textAlign: "right", padding: "0 2px", whiteSpace: "nowrap" }}>{prodWt > 0 ? prodWt.toFixed(1) + "kg" : "—"}</span>
+                    <button type="button" onClick={() => setStaffFormProducts((v) => v.filter((_, j) => j !== i))} style={{ border: "1px solid #fca5a5", borderRadius: 4, padding: "2px 4px", fontSize: 10, background: "var(--white)", color: "var(--c-red-2)", cursor: "pointer", minWidth: 20 }}>×</button>
                   </div>
                 );})}
                 {(() => {
@@ -2451,14 +2451,14 @@ const loadLmShipments = async () => {
                     return s + wt * pkg;
                   }, 0);
                   return (
-                    <div style={{ fontSize: 12, fontWeight: 600, padding: "4px 0", color: "#2563eb", textAlign: "right" }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, padding: "4px 0", color: "var(--c-blue)", textAlign: "right" }}>
                       合计：总体积 {totalVol.toFixed(6)}m³  |  总重量 {totalWt.toFixed(2)}kg
                     </div>
                   );
                 })()}
-                <button type="button" onClick={() => setStaffFormProducts((v) => [...v, { itemName: "", packageCount: "", lengthCm: "", widthCm: "", heightCm: "", productQuantity: "", weightKg: "", cargoType: "normal", domesticTrackingNo: "" }])} style={{ border: "1px dashed #2563eb", borderRadius: 4, padding: "4px 10px", fontSize: 12, background: "#fff", color: "#2563eb", cursor: "pointer", marginTop: 4 }}>+ 添加产品</button>
+                <button type="button" onClick={() => setStaffFormProducts((v) => [...v, { itemName: "", packageCount: "", lengthCm: "", widthCm: "", heightCm: "", productQuantity: "", weightKg: "", cargoType: "normal", domesticTrackingNo: "" }])} style={{ border: "1px dashed var(--c-blue)", borderRadius: 4, padding: "4px 10px", fontSize: 12, background: "var(--white)", color: "var(--c-blue)", cursor: "pointer", marginTop: 4 }}>+ 添加产品</button>
               </div>
-              <div style={{ fontSize: 12, color: "#000000", marginTop: 4 }}>
+              <div style={{ fontSize: 12, color: "var(--t-strong)", marginTop: 4 }}>
                 输入长宽高和单箱重量后，体积和总重量在前端实时自动计算
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
@@ -2474,12 +2474,12 @@ const loadLmShipments = async () => {
                 <option value="land">陆运</option>
               </select>
               <input type="date" value={form.arrivedAt} onChange={(e) => setForm((v) => ({ ...v, arrivedAt: e.target.value }))} style={orderCreateInputStyle} />
-              <div style={{ fontSize: 11, color: "#000000", marginTop: -4 }}>到仓日期 *</div>
-              <hr style={{ border: "none", borderTop: "1px solid #e5e7eb", margin: "8px 0" }} />
+              <div style={{ fontSize: 11, color: "var(--t-strong)", marginTop: -4 }}>到仓日期 *</div>
+              <hr style={{ border: "none", borderTop: "1px solid var(--l-soft)", margin: "8px 0" }} />
             </div>
             {/* 产品图片上传 */}
-            <div style={{ marginTop: 10, border: "1px dashed #d1d5db", borderRadius: 8, padding: 10 }}>
-              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6, color: "#000000" }}>产品图片（可选，可多选）</div>
+            <div style={{ marginTop: 10, border: "1px dashed var(--l-strong)", borderRadius: 8, padding: 10 }}>
+              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6, color: "var(--t-strong)" }}>产品图片（可选，可多选）</div>
               <input type="file" multiple accept="image/*" onChange={(e) => {
                 const files = Array.from(e.target.files || []);
                 setOrderImageFiles(prev => [...prev, ...files]);
@@ -2489,11 +2489,11 @@ const loadLmShipments = async () => {
                 <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
                   {orderImagePreviews.map((url, i) => (
                     <div key={i} style={{ position: "relative" }}>
-                      <img src={url} style={{ width: 60, height: 60, objectFit: "cover", borderRadius: 4, border: "1px solid #e5e7eb" }} />
+                      <img src={url} style={{ width: 60, height: 60, objectFit: "cover", borderRadius: 4, border: "1px solid var(--l-soft)" }} />
                       <button type="button" onClick={() => {
                         setOrderImageFiles(f => f.filter((_, j) => j !== i));
                         setOrderImagePreviews(p => p.filter((_, j) => j !== i));
-                      }} style={{ position: "absolute", top: -6, right: -6, border: "1px solid #fca5a5", borderRadius: 10, width: 18, height: 18, fontSize: 10, background: "#fff", color: "#dc2626", cursor: "pointer", padding: 0, lineHeight: 1 }}>×</button>
+                      }} style={{ position: "absolute", top: -6, right: -6, border: "1px solid #fca5a5", borderRadius: 10, width: 18, height: 18, fontSize: 10, background: "var(--white)", color: "var(--c-red-2)", cursor: "pointer", padding: 0, lineHeight: 1 }}>×</button>
                     </div>
                   ))}
                 </div>
@@ -2501,17 +2501,17 @@ const loadLmShipments = async () => {
             </div>
             </div>
             <div style={{ marginTop: 12 }}>
-              <div style={{ fontSize: 12, color: "#000000", marginBottom: 4 }}>备注</div>
-              <input value={form.remark} onChange={(e) => setForm((v) => ({ ...v, remark: e.target.value }))} placeholder="备注（可选）" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13 }} />
+              <div style={{ fontSize: 12, color: "var(--t-strong)", marginBottom: 4 }}>备注</div>
+              <input value={form.remark} onChange={(e) => setForm((v) => ({ ...v, remark: e.target.value }))} placeholder="备注（可选）" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13 }} />
 
             {message && message.includes("失败") ? (
-              <p style={{ marginTop: 8, color: "#b91c1c", fontSize: 13 }}>{message}</p>
+              <p style={{ marginTop: 8, color: "var(--c-red-deep)", fontSize: 13 }}>{message}</p>
             ) : message && !message.includes("失败") && showCreateModal ? (
-              <p style={{ marginTop: 8, color: "#065f46", fontSize: 13 }}>{message}</p>
+              <p style={{ marginTop: 8, color: "var(--c-green-deep)", fontSize: 13 }}>{message}</p>
             ) : null}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-              <button type="button" onClick={() => { setShowCreateModal(false); setMessage(""); setOrderImageFiles([]); setOrderImagePreviews([]); }} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: "#fff", cursor: "pointer", color: "#000000" }}>取消</button>
-              <button type="button" disabled={loading} onClick={() => void submitOrder()} style={{ border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: loading ? "#000000" : "#2563eb", color: "#fff", fontWeight: 500, cursor: loading ? "not-allowed" : "pointer" }}>{loading ? "提交中…" : "创建订单"}</button>
+              <button type="button" onClick={() => { setShowCreateModal(false); setMessage(""); setOrderImageFiles([]); setOrderImagePreviews([]); }} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: "var(--white)", cursor: "pointer", color: "var(--t-strong)" }}>取消</button>
+              <button type="button" disabled={loading} onClick={() => void submitOrder()} style={{ border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: loading ? "var(--t-strong)" : "var(--c-blue)", color: "var(--white)", fontWeight: 500, cursor: loading ? "not-allowed" : "pointer" }}>{loading ? "提交中…" : "创建订单"}</button>
             </div>
           </div>
         </div>
@@ -2520,20 +2520,20 @@ const loadLmShipments = async () => {
       {/* 批量上传弹窗 */}
       {showBatchImport ? (
         <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.4)", padding: 16 }}>
-          <div style={{ width: "100%", maxWidth: 900, maxHeight: "90vh", overflow: "auto", background: "#fff", borderRadius: 12, padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+          <div style={{ width: "100%", maxWidth: 900, maxHeight: "90vh", overflow: "auto", background: "var(--white)", borderRadius: 12, padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
             <h3 style={{ margin: "0 0 16px", fontSize: 18, fontWeight: 600 }}>批量创建订单</h3>
-            <p style={{ fontSize: 13, color: "#000000", margin: "0 0 12px" }}>
+            <p style={{ fontSize: 13, color: "var(--t-strong)", margin: "0 0 12px" }}>
               支持 Excel 批量导入订单。建议先下载模板，按字段填好后上传。
             </p>
             {batchFileName && (
-              <div style={{ marginBottom: 12, padding: "10px 14px", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 14, color: "#000000" }}>
+              <div style={{ marginBottom: 12, padding: "10px 14px", background: "var(--white)", border: "1px solid var(--l-soft)", borderRadius: 8, fontSize: 14, color: "var(--t-strong)" }}>
                 已上传: <strong>{batchFileName}</strong> — 有效数据 <strong>{batchRows.length}</strong> 条
-                {batchRows.length === 0 && <span style={{ color: "#dc2626", marginLeft: 8 }}>无有效数据，请检查模板格式</span>}
+                {batchRows.length === 0 && <span style={{ color: "var(--c-red-2)", marginLeft: 8 }}>无有效数据，请检查模板格式</span>}
               </div>
             )}
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12, alignItems: "center" }}>
-              <button type="button" onClick={downloadStaffBatchTemplate} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 12px", background: "#fff", color: "#000000", cursor: "pointer" }}>下载模板</button>
-              <label style={{ border: "1px solid #2563eb", borderRadius: 8, padding: "8px 12px", background: "#eff6ff", color: "#1d4ed8", cursor: "pointer" }}>
+              <button type="button" onClick={downloadStaffBatchTemplate} style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 12px", background: "var(--white)", color: "var(--t-strong)", cursor: "pointer" }}>下载模板</button>
+              <label style={{ border: "1px solid var(--c-blue)", borderRadius: 8, padding: "8px 12px", background: "var(--c-blue-bg)", color: "#1d4ed8", cursor: "pointer" }}>
                 上传 Excel
                 <input type="file" accept=".xlsx,.xls" style={{ display: "none" }} onChange={(e) => {
                   const file = e.target.files?.[0];
@@ -2553,40 +2553,40 @@ const loadLmShipments = async () => {
                 }} />
               </label>
               {!batchConfirmed && batchRows.length > 0 && !batchLoading && batchProgress.current === 0 && (
-                <button type="button" onClick={() => { setBatchConfirmed(true); void submitStaffBatch(); }} style={{ border: "none", borderRadius: 8, padding: "8px 16px", background: "#2563eb", color: "#fff", cursor: "pointer", fontWeight: 600, fontSize: 14 }}>
+                <button type="button" onClick={() => { setBatchConfirmed(true); void submitStaffBatch(); }} style={{ border: "none", borderRadius: 8, padding: "8px 16px", background: "var(--c-blue)", color: "var(--white)", cursor: "pointer", fontWeight: 600, fontSize: 14 }}>
                   确认上传 {batchRows.length} 条
                 </button>
               )}
             </div>
             {/* 进度：只用文字报数，不放进度条动画 */}
             {batchLoading && (
-              <div style={{ marginBottom: 12, display: "flex", justifyContent: "space-between", fontSize: 13, color: "#000000" }}>
+              <div style={{ marginBottom: 12, display: "flex", justifyContent: "space-between", fontSize: 13, color: "var(--t-strong)" }}>
                 <span>正在提交第 {batchProgress.current}/{batchRows.length} 条…</span>
                 <span>
                   成功 {batchProgress.success} 条
-                  {batchProgress.fail > 0 ? <span style={{ color: "#b91c1c" }}>　失败 {batchProgress.fail} 条</span> : null}
+                  {batchProgress.fail > 0 ? <span style={{ color: "var(--c-red-deep)" }}>　失败 {batchProgress.fail} 条</span> : null}
                 </span>
               </div>
             )}
             {batchErrors.length > 0 && !batchLoading && (
               <div style={{ marginBottom: 12, padding: 12, borderRadius: 8, background: "#fef2f2", border: "1px solid #fecaca" }}>
-                <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4, color: "#b91c1c" }}>失败明细：</div>
-                <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, color: "#b91c1c" }}>
+                <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4, color: "var(--c-red-deep)" }}>失败明细：</div>
+                <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, color: "var(--c-red-deep)" }}>
                   {batchErrors.map((e, i) => <li key={i}>{e}</li>)}
                 </ul>
               </div>
             )}
             {!batchLoading && batchProgress.current > 0 && batchErrors.length === 0 && (
-              <div style={{ marginBottom: 12, padding: 12, border: "1px solid #e5e7eb", background: "#fff" }}>
-                <div style={{ fontWeight: 600, fontSize: 14, color: "#000000" }}>全部提交成功：{batchProgress.success} 条</div>
+              <div style={{ marginBottom: 12, padding: 12, border: "1px solid var(--l-soft)", background: "var(--white)" }}>
+                <div style={{ fontWeight: 600, fontSize: 14, color: "var(--t-strong)" }}>全部提交成功：{batchProgress.success} 条</div>
               </div>
             )}
             {batchRows.length > 0 && (
               <div style={{ overflowX: "auto", marginBottom: 12 }}>
-                <div style={{ fontSize: 13, marginBottom: 4, color: "#000000" }}>预览：有效行 {batchRows.length} 条</div>
+                <div style={{ fontSize: 13, marginBottom: 4, color: "var(--t-strong)" }}>预览：有效行 {batchRows.length} 条</div>
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                   <thead>
-                    <tr style={{ borderBottom: "1px solid #e2e8f0", background: "#f8fafc" }}>
+                    <tr style={{ borderBottom: "1px solid var(--l-cool)", background: "var(--s-cool)" }}>
                       <th style={{ textAlign: "left", padding: "6px 4px" }}>#</th>
                       <th style={{ textAlign: "left", padding: "6px 4px" }}>客户ID</th>
                       <th style={{ textAlign: "left", padding: "6px 4px" }}>仓库</th>
@@ -2598,7 +2598,7 @@ const loadLmShipments = async () => {
                   </thead>
                   <tbody>
                     {batchRows.map((row, idx) => (
-                      <tr key={idx} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                      <tr key={idx} style={{ borderBottom: "1px solid var(--s-cool-2)" }}>
                         <td style={{ padding: "6px 4px" }}>{idx + 1}</td>
                         <td style={{ padding: "6px 4px" }}>{allClientOptions.find((c) => c.id === row.clientId)?.name ?? row.clientId}</td>
                         <td style={{ padding: "6px 4px" }}>{row.trackingNo ?? "—"}</td>
@@ -2614,7 +2614,7 @@ const loadLmShipments = async () => {
               </div>
             )}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-              <button type="button" onClick={() => { setShowBatchImport(false); setBatchRows([]); setBatchErrors([]); setBatchProgress({ current: 0, success: 0, fail: 0 }); setBatchFileName(""); setBatchConfirmed(false); }} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: "#fff", cursor: "pointer", color: "#000000" }}>关闭</button>
+              <button type="button" onClick={() => { setShowBatchImport(false); setBatchRows([]); setBatchErrors([]); setBatchProgress({ current: 0, success: 0, fail: 0 }); setBatchFileName(""); setBatchConfirmed(false); }} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: "var(--white)", cursor: "pointer", color: "var(--t-strong)" }}>关闭</button>
             </div>
           </div>
         </div>
@@ -2623,19 +2623,19 @@ const loadLmShipments = async () => {
       {/* 分柜弹窗 */}
       {splittingShipment ? (
         <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.4)", padding: 16 }}>
-          <div style={{ width: "100%", maxWidth: 540, maxHeight: "90vh", overflow: "auto", background: "#fff", borderRadius: 12, padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+          <div style={{ width: "100%", maxWidth: 540, maxHeight: "90vh", overflow: "auto", background: "var(--white)", borderRadius: 12, padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
             <h3 style={{ margin: "0 0 12px", fontSize: 18, fontWeight: 600 }}>运单分柜</h3>
-            <div style={{ fontSize: 13, color: "#000000", marginBottom: 12 }}>
+            <div style={{ fontSize: 13, color: "var(--t-strong)", marginBottom: 12 }}>
               运单号：{splittingShipment.trackingNo} ｜ 当前总件数：<strong>{splittingShipment.packageCount ?? "—"}</strong>
             </div>
-            <div style={{ fontSize: 12, color: "#000000", marginBottom: 12 }}>
+            <div style={{ fontSize: 12, color: "var(--t-strong)", marginBottom: 12 }}>
               已分配：{splitRows.reduce((sum, r) => sum + (Number(r.packageCount) || 0), 0)} 件
               ｜ 剩余：{(splittingShipment.packageCount ?? 0) - splitRows.reduce((sum, r) => sum + (Number(r.packageCount) || 0), 0)} 件
             </div>
             <div style={{ display: "grid", gap: 12 }}>
               {splitRows.map((row, i) => (
-                <div key={i} style={{ padding: 12, border: "1px solid #e5e7eb", borderRadius: 8, background: "#fafafa" }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: "#000000", marginBottom: 6 }}>分柜 {i + 1}</div>
+                <div key={i} style={{ padding: 12, border: "1px solid var(--l-soft)", borderRadius: 8, background: "#fafafa" }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: "var(--t-strong)", marginBottom: 6 }}>分柜 {i + 1}</div>
                   <div style={{ display: "grid", gap: 6 }}>
                     <input value={row.trackingNo} onChange={(e) => setSplitRows((prev) => prev.map((r, j) => j === i ? { ...r, trackingNo: e.target.value } : r))} placeholder="运单号 *" style={orderCreateInputStyle} />
                     <input value={row.batchNo} onChange={(e) => setSplitRows((prev) => prev.map((r, j) => j === i ? { ...r, batchNo: e.target.value } : r))} placeholder="柜号 *" style={orderCreateInputStyle} />
@@ -2646,13 +2646,13 @@ const loadLmShipments = async () => {
               ))}
             </div>
             <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-              <button type="button" onClick={() => setSplitRows((prev) => [...prev, { trackingNo: "", batchNo: "", itemName: splittingShipment.itemName ?? "", packageCount: "" }])} style={{ border: "1px dashed #d1d5db", borderRadius: 6, padding: "6px 12px", fontSize: 12, background: "#fff", cursor: "pointer", color: "#000000" }}>添加分柜</button>
+              <button type="button" onClick={() => setSplitRows((prev) => [...prev, { trackingNo: "", batchNo: "", itemName: splittingShipment.itemName ?? "", packageCount: "" }])} style={{ border: "1px dashed var(--l-strong)", borderRadius: 6, padding: "6px 12px", fontSize: 12, background: "var(--white)", cursor: "pointer", color: "var(--t-strong)" }}>添加分柜</button>
             </div>
             {message && message.includes("分柜") ? (
-              <p style={{ marginTop: 8, color: message.includes("失败") ? "#b91c1c" : "#065f46", fontSize: 13 }}>{message}</p>
+              <p style={{ marginTop: 8, color: message.includes("失败") ? "var(--c-red-deep)" : "var(--c-green-deep)", fontSize: 13 }}>{message}</p>
             ) : null}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-              <button type="button" onClick={() => { setSplittingShipment(null); setMessage(""); }} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: "#fff", cursor: "pointer", color: "#000000" }}>取消</button>
+              <button type="button" onClick={() => { setSplittingShipment(null); setMessage(""); }} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: "var(--white)", cursor: "pointer", color: "var(--t-strong)" }}>取消</button>
               <button type="button" disabled={loading} onClick={async () => {
                 const validRows = splitRows.filter((r) => r.trackingNo.trim() && r.batchNo.trim() && Number(r.packageCount) > 0);
                 if (validRows.length === 0) { setMessage("分柜失败：请至少填写运单号、柜号和件数"); return; }
@@ -2673,7 +2673,7 @@ const loadLmShipments = async () => {
                   const text = error instanceof Error ? error.message : "分柜失败";
                   setMessage(`分柜失败：${text}`);
                 } finally { setLoading(false); }
-              }} style={{ border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: loading ? "#000000" : "#d97706", color: "#fff", fontWeight: 500, cursor: loading ? "not-allowed" : "pointer" }}>{loading ? "提交中…" : "确认分柜"}</button>
+              }} style={{ border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: loading ? "var(--t-strong)" : "#d97706", color: "var(--white)", fontWeight: 500, cursor: loading ? "not-allowed" : "pointer" }}>{loading ? "提交中…" : "确认分柜"}</button>
             </div>
           </div>
         </div>
@@ -2685,34 +2685,34 @@ const loadLmShipments = async () => {
       </section>
 
       {activeSection === "staff-wallet" && (
-        <section style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 16, background: "#fff", marginTop: 16 }}>
+        <section style={{ border: "1px solid var(--l-soft)", borderRadius: 12, padding: 16, background: "var(--white)", marginTop: 16 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
             <h2 style={{ margin: 0, fontSize: 18 }}>客户余额</h2>
             <button
               type="button"
               onClick={loadWalletBalances}
-              style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 14px", background: "#fff", cursor: "pointer", fontSize: 13 }}
+              style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "6px 14px", background: "var(--white)", cursor: "pointer", fontSize: 13 }}
             >
               刷新
             </button>
           </div>
           {walletBalances.length === 0 ? (
-            <p style={{ color: "#6b7280", fontSize: 13 }}>暂无数据，点击刷新加载</p>
+            <p style={{ color: "var(--t-muted)", fontSize: 13 }}>暂无数据，点击刷新加载</p>
           ) : (
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
-                  <tr style={{ background: "#f9fafb", borderBottom: "1px solid #e5e7eb" }}>
-                    <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#374151" }}>客户</th>
-                    <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#374151" }}>公司</th>
-                    <th style={{ padding: "8px 12px", textAlign: "right", fontWeight: 600, color: "#374151" }}>集货余额</th>
+                  <tr style={{ background: "var(--s-alt)", borderBottom: "1px solid var(--l-soft)" }}>
+                    <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "var(--t-body)" }}>客户</th>
+                    <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "var(--t-body)" }}>公司</th>
+                    <th style={{ padding: "8px 12px", textAlign: "right", fontWeight: 600, color: "var(--t-body)" }}>集货余额</th>
                   </tr>
                 </thead>
                 <tbody>
                   {walletBalances.map((b) => (
-                    <tr key={b.clientId} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                    <tr key={b.clientId} style={{ borderBottom: "1px solid var(--s-sunken)" }}>
                       <td style={{ padding: "8px 12px" }}>{b.clientName}</td>
-                      <td style={{ padding: "8px 12px", color: "#6b7280" }}>{b.companyName || "—"}</td>
+                      <td style={{ padding: "8px 12px", color: "var(--t-muted)" }}>{b.companyName || "—"}</td>
                       <td style={{ padding: "8px 12px", textAlign: "right", fontWeight: 600 }}>¥{b.cny.toFixed(2)}</td>
                     </tr>
                   ))}

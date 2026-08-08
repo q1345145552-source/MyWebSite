@@ -235,7 +235,7 @@ export default function RoleShell(props: {
     return (
       <main style={{ padding: 24 }}>
         <h1 className="biz-title" style={{ fontSize: 28, marginBottom: 8 }}>{title}</h1>
-        <p style={{ color: "#b91c1c" }}>
+        <p style={{ color: "var(--c-red-deep)" }}>
           当前未登录，正在跳转到登录页...
         </p>
       </main>
@@ -246,7 +246,7 @@ export default function RoleShell(props: {
     return (
       <main style={{ padding: 24 }}>
         <h1 className="biz-title" style={{ fontSize: 28, marginBottom: 8 }}>{title}</h1>
-        <p style={{ color: "#b91c1c" }}>
+        <p style={{ color: "var(--c-red-deep)" }}>
           当前身份为 {session.role}，无权访问该页面，正在跳转到 403 页面...
         </p>
       </main>
@@ -437,7 +437,7 @@ export default function RoleShell(props: {
                   <button
                     type="button"
                     onClick={() => setPwdOpen(false)}
-                    style={{ border: "1px solid var(--hairline)", borderRadius: 8, padding: "8px 16px", fontSize: 13, background: "var(--canvas)", cursor: "pointer", color: "#000000" }}
+                    style={{ border: "1px solid var(--hairline)", borderRadius: 8, padding: "8px 16px", fontSize: 13, background: "var(--canvas)", cursor: "pointer", color: "var(--t-strong)" }}
                   >
                     取消
                   </button>
@@ -445,7 +445,7 @@ export default function RoleShell(props: {
                     type="button"
                     disabled={pwdSubmitting}
                     onClick={() => void submitPwd()}
-                    style={{ border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 13, background: "var(--brand)", color: "#fff", fontWeight: 500, cursor: pwdSubmitting ? "not-allowed" : "pointer" }}
+                    style={{ border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 13, background: "var(--brand)", color: "var(--white)", fontWeight: 500, cursor: pwdSubmitting ? "not-allowed" : "pointer" }}
                   >
                     {pwdSubmitting ? "提交中…" : "确认修改"}
                   </button>

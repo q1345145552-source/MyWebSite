@@ -23,7 +23,7 @@ export const DETAIL_ROW_HEIGHT = 24;
 /** 不点开时露几行产品 */
 export const DETAIL_VISIBLE_ROWS = 3;
 
-const GRID_LINE = "1px solid #e2e8f0";
+const GRID_LINE = "1px solid var(--l-cool)";
 
 /** 表头格子：四边都有框线 */
 export const gridThStyle = {
@@ -53,8 +53,8 @@ const detailCellStyle = {
   overflow: "hidden",
   textOverflow: "ellipsis",
   borderRight: GRID_LINE,
-  borderBottom: "1px solid #f1f5f9",
-  color: "#000000",
+  borderBottom: "1px solid var(--s-cool-2)",
+  color: "var(--t-strong)",
 } as const;
 
 const detailLastCellStyle = { ...detailCellStyle, borderRight: "none" } as const;

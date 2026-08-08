@@ -60,7 +60,7 @@ export type StaffPrealertListProps = {
 };
 
 const prealertEditInputStyle = {
-  border: "1px solid #d1d5db",
+  border: "1px solid var(--l-strong)",
   borderRadius: 6,
   padding: "5px 8px",
   width: "100%",
@@ -71,8 +71,8 @@ const prealertEditInputStyle = {
 function InfoItem({ label, value }: { label: string; value: string }) {
   return (
     <div style={{ padding: 4 }}>
-      <div style={{ fontSize: 10, color: "#000000", marginBottom: 2 }}>{label}</div>
-      <div style={{ fontSize: 12, fontWeight: 500, color: "#000000" }} title={value}>
+      <div style={{ fontSize: 10, color: "var(--t-strong)", marginBottom: 2 }}>{label}</div>
+      <div style={{ fontSize: 12, fontWeight: 500, color: "var(--t-strong)" }} title={value}>
         {value.length > 18 ? `${value.slice(0, 18)}…` : value}
       </div>
     </div>
@@ -87,26 +87,26 @@ export default function StaffPrealertList(props: StaffPrealertListProps) {
       id="staff-prealert-review"
       style={{
         display: "block",
-        border: "1px solid #e5e7eb",
-        borderLeft: "4px solid #d1d5db",
+        border: "1px solid var(--l-soft)",
+        borderLeft: "4px solid var(--l-strong)",
         borderRadius: 12,
         padding: 16,
         marginBottom: 18,
-        background: "#ffffff",
+        background: "var(--white)",
         boxShadow: "0 1px 3px rgba(15,23,42,0.06)",
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-        <h2 style={{ margin: 0, fontSize: 18, color: "#111827" }}>预报单收货确认</h2>
+        <h2 style={{ margin: 0, fontSize: 18, color: "var(--t-heading)" }}>预报单收货确认</h2>
         <button
           type="button"
           onClick={props.onToggleCollapse}
           style={{
-            border: "1px solid #d1d5db",
+            border: "1px solid var(--l-strong)",
             borderRadius: 8,
             padding: "6px 10px",
-            color: "#000000",
-            background: "#fff",
+            color: "var(--t-strong)",
+            background: "var(--white)",
             fontWeight: 600,
           }}
         >
@@ -117,7 +117,7 @@ export default function StaffPrealertList(props: StaffPrealertListProps) {
           onChange={props.onPrealertSearchChange}
           onSearch={() => {}}
           warehouseOptions={props.warehouseOptions}
-          inputStyle={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", fontSize: 13, width: "100%" }}
+          inputStyle={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", fontSize: 13, width: "100%" }}
         />
       </div>
       <>
@@ -133,12 +133,12 @@ export default function StaffPrealertList(props: StaffPrealertListProps) {
               const confirmedDraft = props.prealertConfirmedDrafts[item.id] ?? buildPrealertDraft(item);
               const displayDraft = isEditing ? draft : confirmedDraft;
               return (
-                <div key={item.id} style={{ border: "1px solid #e5e7eb", borderRadius: 6, padding: 8, background: "#fff" }}>
-                  <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 4, color: "#000000" }}>
+                <div key={item.id} style={{ border: "1px solid var(--l-soft)", borderRadius: 6, padding: 8, background: "var(--white)" }}>
+                  <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 4, color: "var(--t-strong)" }}>
                     <span style={{ fontFamily: "monospace" }}>{item.orderNo || item.id}</span> · {item.clientName ?? item.clientId ?? "-"} · {item.createdAt.slice(0, 10)}
                   </div>
                   {(item.products?.length ?? 0) > 1 && (
-                    <div style={{ fontSize: 11, color: "#000000", marginBottom: 6, background: "#fefce8", borderRadius: 4, padding: "3px 6px" }}>
+                    <div style={{ fontSize: 11, color: "var(--t-strong)", marginBottom: 6, background: "#fefce8", borderRadius: 4, padding: "3px 6px" }}>
                       {(item.products ?? []).map((p: any) => `${p.itemName}×${p.packageCount}箱`).join(" | ")}
                     </div>
                   )}
@@ -158,11 +158,11 @@ export default function StaffPrealertList(props: StaffPrealertListProps) {
                         <input type="number" value={String(draft.productQuantity)} onChange={(e) => props.setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: { ...(prev[item.id] ?? buildPrealertDraft(item)), productQuantity: Number(e.target.value || 0) } }))} placeholder="产品数量" style={prealertEditInputStyle} />
                         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                           <input type="number" step="0.01" min="0.01" value={String(draft.weightKg)} onChange={(e) => props.setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: { ...(prev[item.id] ?? buildPrealertDraft(item)), weightKg: Number(e.target.value || 0) } }))} placeholder="重量" style={{ ...prealertEditInputStyle, marginBottom: 0 }} />
-                          <span style={{ color: "#000000", fontSize: 13, minWidth: 26 }}>kg</span>
+                          <span style={{ color: "var(--t-strong)", fontSize: 13, minWidth: 26 }}>kg</span>
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                           <input type="number" step="0.001" min="0.001" value={String(draft.volumeM3)} onChange={(e) => props.setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: { ...(prev[item.id] ?? buildPrealertDraft(item)), volumeM3: Number(e.target.value || 0) } }))} placeholder="体积" style={{ ...prealertEditInputStyle, marginBottom: 0 }} />
-                          <span style={{ color: "#000000", fontSize: 13, minWidth: 30 }}>m3</span>
+                          <span style={{ color: "var(--t-strong)", fontSize: 13, minWidth: 30 }}>m3</span>
                         </div>
                         <input value={draft.domesticTrackingNo} onChange={(e) => props.setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: { ...(prev[item.id] ?? buildPrealertDraft(item)), domesticTrackingNo: e.target.value } }))} placeholder="国内快递单号" style={prealertEditInputStyle} />
                         <select value={draft.transportMode} onChange={(e) => props.setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: { ...(prev[item.id] ?? buildPrealertDraft(item)), transportMode: e.target.value as "sea" | "land" } }))} style={prealertEditInputStyle}>
@@ -197,26 +197,26 @@ export default function StaffPrealertList(props: StaffPrealertListProps) {
                     value={props.prealertBatchDrafts[item.id] ?? ""}
                     onChange={(e) => props.setPrealertBatchDrafts((prev) => ({ ...prev, [item.id]: e.target.value }))}
                     placeholder="柜号（可选，装柜时填写）"
-                    style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "5px 8px", width: "100%", fontSize: 12, marginBottom: 4 }}
+                    style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "5px 8px", width: "100%", fontSize: 12, marginBottom: 4 }}
                   />
                   <div style={{ display: "flex", gap: 8 }}>
                     {isEditing ? (
                       <>
-                        <button type="button" disabled={props.loading} onClick={() => props.onConfirmPrealertEdit(item.id)} style={{ border: "none", borderRadius: 8, padding: "8px 14px", color: "#fff", background: "#000000", fontWeight: 600 }}>确认修改</button>
+                        <button type="button" disabled={props.loading} onClick={() => props.onConfirmPrealertEdit(item.id)} style={{ border: "none", borderRadius: 8, padding: "8px 14px", color: "var(--white)", background: "var(--t-strong)", fontWeight: 600 }}>确认修改</button>
                         <button type="button" disabled={props.loading} onClick={() => {
                           const sourceItem = props.prealerts.find((p) => p.id === item.id);
                           props.setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: props.prealertConfirmedDrafts[item.id] ?? (sourceItem ? buildPrealertDraft(sourceItem) : prev[item.id]) }));
                           props.setEditingPrealertId(null);
-                        }} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 14px", color: "#000000", background: "#fff", fontWeight: 600 }}>取消修改</button>
+                        }} style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 14px", color: "var(--t-strong)", background: "var(--white)", fontWeight: 600 }}>取消修改</button>
                       </>
                     ) : (
                       <button type="button" disabled={props.loading} onClick={() => {
                         const sourceItem = props.prealerts.find((p) => p.id === item.id);
                         props.setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: props.prealertConfirmedDrafts[item.id] ?? prev[item.id] ?? (sourceItem ? buildPrealertDraft(sourceItem) : buildPrealertDraft(item)) }));
                         props.setEditingPrealertId(item.id);
-                      }} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 14px", color: "#000000", background: "#fff", fontWeight: 600 }}>修改</button>
+                      }} style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 14px", color: "var(--t-strong)", background: "var(--white)", fontWeight: 600 }}>修改</button>
                     )}
-                    <button type="button" disabled={props.loading} onClick={() => props.onApprovePrealert(item)} style={{ border: "none", borderRadius: 8, padding: "8px 14px", color: "#fff", background: "#000000", fontWeight: 600 }}>确认收货</button>
+                    <button type="button" disabled={props.loading} onClick={() => props.onApprovePrealert(item)} style={{ border: "none", borderRadius: 8, padding: "8px 14px", color: "var(--white)", background: "var(--t-strong)", fontWeight: 600 }}>确认收货</button>
                   </div>
                 </div>
               );

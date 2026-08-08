@@ -105,8 +105,8 @@ export default function AiChatWidget() {
           borderRadius: 999,
           border: "none",
           padding: "12px 18px",
-          color: "#fff",
-          background: "#2563eb",
+          color: "var(--white)",
+          background: "var(--c-blue)",
           cursor: "pointer",
           boxShadow: "0 8px 24px rgba(37, 99, 235, 0.35)",
           zIndex: 50,
@@ -123,8 +123,8 @@ export default function AiChatWidget() {
             bottom: 80,
             width: 360,
             height: 520,
-            background: "#fff",
-            border: "1px solid #e5e7eb",
+            background: "var(--white)",
+            border: "1px solid var(--l-soft)",
             borderRadius: 14,
             display: "flex",
             flexDirection: "column",
@@ -132,12 +132,12 @@ export default function AiChatWidget() {
             boxShadow: "0 16px 40px rgba(15, 23, 42, 0.2)",
           }}
         >
-          <div style={{ padding: "12px 14px", borderBottom: "1px solid #e5e7eb" }}>
+          <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--l-soft)" }}>
             <strong>订单 AI 助手</strong>
-            <div style={{ fontSize: 12, color: "#000000", marginTop: 4 }}>
+            <div style={{ fontSize: 12, color: "var(--t-strong)", marginTop: 4 }}>
               数据范围：同公司账号数据
             </div>
-            <div style={{ fontSize: 12, color: "#000000", marginTop: 2 }}>
+            <div style={{ fontSize: 12, color: "var(--t-strong)", marginTop: 2 }}>
               当前身份：{session?.role} / {session?.userId} / {session?.companyId}
             </div>
           </div>
@@ -149,13 +149,13 @@ export default function AiChatWidget() {
                 type="button"
                 onClick={() => handleSend(item)}
                 style={{
-                  border: "1px solid #d1d5db",
+                  border: "1px solid var(--l-strong)",
                   borderRadius: 999,
                   padding: "6px 10px",
                   fontSize: 12,
                   cursor: "pointer",
-                  background: "#f8fafc",
-                  color: "#000000",
+                  background: "var(--s-cool)",
+                  color: "var(--t-strong)",
                 }}
               >
                 {item}
@@ -171,7 +171,7 @@ export default function AiChatWidget() {
               display: "flex",
               flexDirection: "column",
               gap: 8,
-              background: "#f8fafc",
+              background: "var(--s-cool)",
             }}
           >
             {loading ? (
@@ -183,11 +183,11 @@ export default function AiChatWidget() {
                   padding: "8px 10px",
                   fontSize: 13,
                   lineHeight: 1.5,
-                  background: "#fff",
-                  border: "1px solid #e5e7eb",
+                  background: "var(--white)",
+                  border: "1px solid var(--l-soft)",
                 }}
               >
-                <span style={{ color: "#000000", marginRight: 6 }}>AI 思考中</span>
+                <span style={{ color: "var(--t-strong)", marginRight: 6 }}>AI 思考中</span>
                 <span className="typing-dots" aria-hidden>
                   <span />
                   <span />
@@ -206,8 +206,8 @@ export default function AiChatWidget() {
                   fontSize: 13,
                   lineHeight: 1.5,
                   whiteSpace: "pre-wrap",
-                  background: msg.role === "user" ? "#dbeafe" : "#fff",
-                  border: "1px solid #e5e7eb",
+                  background: msg.role === "user" ? "var(--c-blue-bg-2)" : "var(--white)",
+                  border: "1px solid var(--l-soft)",
                 }}
               >
                 {msg.content}
@@ -215,7 +215,7 @@ export default function AiChatWidget() {
             ))}
           </div>
 
-          <div style={{ padding: 10, borderTop: "1px solid #e5e7eb", display: "flex", gap: 8 }}>
+          <div style={{ padding: 10, borderTop: "1px solid var(--l-soft)", display: "flex", gap: 8 }}>
             <div style={{ flex: 1 }}>
               <input
                 value={input}
@@ -223,7 +223,7 @@ export default function AiChatWidget() {
                 placeholder="例如：我的单号 THCN0001 到哪了？"
                 style={{
                   width: "100%",
-                  border: "1px solid #d1d5db",
+                  border: "1px solid var(--l-strong)",
                   borderRadius: 8,
                   padding: "8px 10px",
                   outline: "none",
@@ -235,7 +235,7 @@ export default function AiChatWidget() {
                 }}
               />
               {input.trim().length > 0 && !loading ? (
-                <div style={{ marginTop: 4, color: "#000000", fontSize: 12 }}>输入中...</div>
+                <div style={{ marginTop: 4, color: "var(--t-strong)", fontSize: 12 }}>输入中...</div>
               ) : null}
             </div>
             <button
@@ -246,8 +246,8 @@ export default function AiChatWidget() {
                 border: "none",
                 borderRadius: 8,
                 padding: "8px 14px",
-                color: "#fff",
-                background: canSend ? "#2563eb" : "#9ca3af",
+                color: "var(--white)",
+                background: canSend ? "var(--c-blue)" : "var(--t-faint)",
                 cursor: canSend ? "pointer" : "not-allowed",
               }}
             >

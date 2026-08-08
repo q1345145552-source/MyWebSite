@@ -15,13 +15,13 @@ export default function MockLoginPanel() {
       style={{
         marginTop: 18,
         maxWidth: 680,
-        border: "1px solid #e5e7eb",
+        border: "1px solid var(--l-soft)",
         borderRadius: 12,
         padding: 16,
       }}
     >
       <h2 style={{ margin: 0, fontSize: 18 }}>账号入口</h2>
-      <p style={{ marginTop: 8, color: "#000000" }}>
+      <p style={{ marginTop: 8, color: "var(--t-strong)" }}>
         系统已切换为真实登录模式。请先登录或注册后再进入工作台。
       </p>
 
@@ -29,10 +29,10 @@ export default function MockLoginPanel() {
         <a
           href="/login"
           style={{
-            border: "1px solid #2563eb",
+            border: "1px solid var(--c-blue)",
             borderRadius: 8,
             padding: "8px 14px",
-            color: "#2563eb",
+            color: "var(--c-blue)",
             textDecoration: "none",
             fontWeight: 600,
           }}
@@ -42,10 +42,10 @@ export default function MockLoginPanel() {
         <a
           href="/register"
           style={{
-            border: "1px solid #059669",
+            border: "1px solid var(--c-green)",
             borderRadius: 8,
             padding: "8px 14px",
-            color: "#059669",
+            color: "var(--c-green)",
             textDecoration: "none",
             fontWeight: 600,
           }}
@@ -60,11 +60,11 @@ export default function MockLoginPanel() {
               window.location.href = "/login";
             }}
             style={{
-              border: "1px solid #dc2626",
+              border: "1px solid var(--c-red-2)",
               borderRadius: 8,
               padding: "8px 14px",
-              background: "#fff",
-              color: "#dc2626",
+              background: "var(--white)",
+              color: "var(--c-red-2)",
               cursor: "pointer",
               fontWeight: 600,
             }}

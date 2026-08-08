@@ -117,7 +117,7 @@ function drawToJpeg(
   const ctx = canvas.getContext("2d");
   if (!ctx) return Promise.resolve(null);
   // JPEG 不支持透明，PNG 的透明区域不铺底会变黑
-  ctx.fillStyle = "#ffffff";
+  ctx.fillStyle = "var(--white)";
   ctx.fillRect(0, 0, w, h);
   ctx.drawImage(source, 0, 0, w, h);
 

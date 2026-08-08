@@ -53,18 +53,18 @@ export default function ShipmentSearch({
           {warehouseOptions.map((w) => (<option key={w.id} value={w.id}>{w.label}</option>))}
         </select>
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          <button type="button" onClick={onSearch} style={{ border: "none", borderRadius: 6, padding: "8px 16px", background: "#2563eb", color: "#fff", fontWeight: 500, fontSize: 13, cursor: "pointer" }}>搜索</button>
-          <button type="button" onClick={() => setCollapsed((v) => !v)} style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "6px 10px", fontSize: 12, background: "#fff", cursor: "pointer", color: "#000000" }}>{collapsed ? "展开更多条件" : "收起条件"}</button>
+          <button type="button" onClick={onSearch} style={{ border: "none", borderRadius: 6, padding: "8px 16px", background: "var(--c-blue)", color: "var(--white)", fontWeight: 500, fontSize: 13, cursor: "pointer" }}>搜索</button>
+          <button type="button" onClick={() => setCollapsed((v) => !v)} style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "6px 10px", fontSize: 12, background: "var(--white)", cursor: "pointer", color: "var(--t-strong)" }}>{collapsed ? "展开更多条件" : "收起条件"}</button>
         </div>
       </div>
       {!collapsed && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8, marginBottom: 10, padding: 10, border: "1px dashed #e5e7eb", borderRadius: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8, marginBottom: 10, padding: 10, border: "1px dashed var(--l-soft)", borderRadius: 8 }}>
           <input value={value.batchNo} onChange={(e) => onChange("batchNo", e.target.value)} placeholder="批次号" style={inputStyle} />
           <input value={value.itemName} onChange={(e) => onChange("itemName", e.target.value)} placeholder="品名" style={inputStyle} />
           <input value={value.packageCount} onChange={(e) => onChange("packageCount", e.target.value)} placeholder="包裹数量" style={inputStyle} />
           <input value={value.productQuantity} onChange={(e) => onChange("productQuantity", e.target.value)} placeholder="产品数量" style={inputStyle} />
           <div style={{ display: "flex", flexDirection: "column", gap: 2, gridColumn: "span 2" }}>
-            <span style={{ fontSize: 11, color: "#000000" }}>到仓日期</span>
+            <span style={{ fontSize: 11, color: "var(--t-strong)" }}>到仓日期</span>
             <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
               <input type="date" value={value.arrivedAtFrom} onChange={(e) => onChange("arrivedAtFrom", e.target.value)} style={{ ...inputStyle, flex: 1 }} />
               <span style={{ fontSize: 11 }}>~</span>
@@ -83,7 +83,7 @@ export default function ShipmentSearch({
           </select>
           <input value={value.receiverAddress} onChange={(e) => onChange("receiverAddress", e.target.value)} placeholder="收货地址" style={inputStyle} />
           <div style={{ display: "flex", flexDirection: "column", gap: 2, gridColumn: "span 2" }}>
-            <span style={{ fontSize: 11, color: "#000000" }}>发货日期</span>
+            <span style={{ fontSize: 11, color: "var(--t-strong)" }}>发货日期</span>
             <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
               <input type="date" value={value.shipDateFrom} onChange={(e) => onChange("shipDateFrom", e.target.value)} style={{ ...inputStyle, flex: 1 }} />
               <span style={{ fontSize: 11 }}>~</span>

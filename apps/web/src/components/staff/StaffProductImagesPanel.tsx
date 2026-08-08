@@ -13,12 +13,12 @@ export default function StaffProductImagesPanel(props: OrderProductImagesPanelPr
   const imgs = props.images ?? [];
   const canAdd = props.canManage && imgs.length < MAX_ORDER_PRODUCT_IMAGES;
   return (
-    <div style={{ marginTop: 8, marginBottom: 8, padding: 10, background: "#f8fafc", borderRadius: 8, border: "1px solid #e2e8f0" }}>
-      <div style={{ fontWeight: 600, marginBottom: 6, fontSize: 13, color: "#000000" }}>
+    <div style={{ marginTop: 8, marginBottom: 8, padding: 10, background: "var(--s-cool)", borderRadius: 8, border: "1px solid var(--l-cool)" }}>
+      <div style={{ fontWeight: 600, marginBottom: 6, fontSize: 13, color: "var(--t-strong)" }}>
         订单详情 · 产品图（最多 {MAX_ORDER_PRODUCT_IMAGES} 张）
       </div>
       {imgs.length === 0 && !canAdd ? (
-        <div style={{ fontSize: 12, color: "#000000" }}>暂无产品图</div>
+        <div style={{ fontSize: 12, color: "var(--t-strong)" }}>暂无产品图</div>
       ) : (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "flex-start" }}>
           {imgs.map((img) => (
@@ -26,7 +26,7 @@ export default function StaffProductImagesPanel(props: OrderProductImagesPanelPr
               <img
                 src={img.imageUrl ? `${apiBaseUrl()}${img.imageUrl}` : ""}
                 alt={img.fileName}
-                style={{ width: 88, height: 88, objectFit: "cover", borderRadius: 8, border: "1px solid #e5e7eb", display: "block" }}
+                style={{ width: 88, height: 88, objectFit: "cover", borderRadius: 8, border: "1px solid var(--l-soft)", display: "block" }}
               />
               {props.canManage ? (
                 <button
@@ -40,8 +40,8 @@ export default function StaffProductImagesPanel(props: OrderProductImagesPanelPr
                     borderRadius: 6,
                     padding: "2px 4px",
                     fontSize: 11,
-                    background: "#fff",
-                    color: "#b91c1c",
+                    background: "var(--white)",
+                    color: "var(--c-red-deep)",
                     cursor: props.busy ? "not-allowed" : "pointer",
                   }}
                 >
@@ -71,15 +71,15 @@ export default function StaffProductImagesPanel(props: OrderProductImagesPanelPr
                 style={{
                   width: 88,
                   height: 88,
-                  border: "1px dashed #000000",
+                  border: "1px dashed var(--t-strong)",
                   borderRadius: 8,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   fontSize: 12,
-                  color: "#000000",
+                  color: "var(--t-strong)",
                   cursor: props.busy ? "not-allowed" : "pointer",
-                  background: "#fff",
+                  background: "var(--white)",
                 }}
               >
                 {props.busy ? "…" : "+ 上传"}
@@ -88,7 +88,7 @@ export default function StaffProductImagesPanel(props: OrderProductImagesPanelPr
           ) : null}
         </div>
       )}
-      {!props.canManage ? <div style={{ fontSize: 12, color: "#000000", marginTop: 6 }}>仅展示；无本仓库操作权限时不可修改（与上传接口校验的订单仓库一致）。</div> : null}
+      {!props.canManage ? <div style={{ fontSize: 12, color: "var(--t-strong)", marginTop: 6 }}>仅展示；无本仓库操作权限时不可修改（与上传接口校验的订单仓库一致）。</div> : null}
     </div>
   );
 }

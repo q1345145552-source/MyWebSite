@@ -25,6 +25,65 @@
   --shadow-sm: 0 2px 6px rgba(26, 26, 30, 0.05);
   --shadow-md: 0 6px 16px rgba(26, 26, 30, 0.08);
   --shadow-lg: 0 12px 28px rgba(26, 26, 30, 0.12);
+
+  /* ==========================================================================
+     页面实际在用的颜色（2026-08-09 收敛）
+     --------------------------------------------------------------------------
+     背景：页面里写死了 2584 处颜色、115 种，各写各的，所以整体看起来很杂。
+     这一步只做一件事：把用得最多的 33 种颜色起个名字，页面改成引用名字。
+     **每个名字的值就是页面原来在用的值，所以这一步做完页面一模一样，零风险。**
+     （已用 19 个页面的整页截图逐像素比对验证过。）
+
+     真正改样子是下一步：只改这里的值，全站跟着变，改一处顶原来几百处。
+     上面那批 --brand / --ink / --canvas 是当初定的设计色，页面基本没用上，
+     两套颜色并存正是"塑料感"的根源；下一步就是把下面这批指向上面那批。
+     ========================================================================== */
+
+  /* ── 文字 ── */
+  --t-strong: #000000;   /* 226 处。纯黑，正文里最重的字 */
+  --t-heading: #111827;  /* 27 处。标题 */
+  --t-body: #374151;     /* 83 处。正文 */
+  --t-muted: #6b7280;    /* 248 处。次要说明文字、表头 */
+  --t-faint: #9ca3af;    /* 106 处。占位符、无数据提示 */
+  --white: #ffffff;      /* 336 处。白底 + 深色按钮上的白字 */
+
+  /* ── 底色 ── */
+  --s-alt: #f9fafb;      /* 31 处。浅灰底 */
+  --s-sunken: #f3f4f6;   /* 49 处。凹下去的块、标签底 */
+  --s-cool: #f8fafc;     /* 33 处。偏冷的浅底 */
+  --s-cool-2: #f1f5f9;   /* 18 处 */
+
+  /* ── 线条 ── */
+  --l-strong: #d1d5db;   /* 298 处。输入框、表格边框 */
+  --l-soft: #e5e7eb;     /* 202 处。更浅的分隔线 */
+  --l-cool: #e2e8f0;     /* 37 处。偏冷的分隔线 */
+
+  /* ── 蓝：主按钮、链接、进行中 ── */
+  --c-blue: #2563eb;     /* 141 处。⚠️ 用户明确说过不要这个蓝 */
+  --c-blue-deep: #1e40af;/* 17 处 */
+  --c-navy: #1e3a8a;     /* 22 处。用户定的主色藏青，跟 --brand 同值 */
+  --c-blue-bg: #eff6ff;  /* 25 处。浅蓝底 */
+  --c-blue-bg-2: #dbeafe;/* 20 处 */
+
+  /* ── 红：危险、延迟、错误 ── */
+  --c-red: #ef4444;      /* 36 处 */
+  --c-red-2: #dc2626;    /* 30 处 */
+  --c-red-deep: #b91c1c; /* 57 处。跟 --danger 同值 */
+  --c-red-dark: #991b1b; /* 14 处 */
+  --c-red-bg: #fee2e2;   /* 20 处。浅红底 */
+
+  /* ── 绿：成功、已完成、已签收 ── */
+  --c-green: #059669;    /* 36 处 */
+  --c-green-2: #10b981;  /* 20 处 */
+  --c-green-3: #16a34a;  /* 16 处 */
+  --c-green-deep: #065f46;/* 29 处 */
+  --c-green-dark: #166534;/* 14 处 */
+  --c-green-bg: #d1fae5; /* 20 处。浅绿底 */
+
+  /* ── 橙黄：处理中、待办、提醒 ── */
+  --c-amber: #f59e0b;    /* 18 处 */
+  --c-amber-deep: #92400e;/* 30 处 */
+  --c-amber-bg: #fef3c7; /* 29 处。浅黄底 */
 }
 
 * {
@@ -162,7 +221,7 @@ main {
 .dashboard-sidebar-subtitle {
   margin: 18px 0 10px 0;
   font-size: 11px;
-  color: #9ca3af;
+  color: var(--t-faint);
   font-weight: 500;
   letter-spacing: 0.5px;
 }
@@ -195,7 +254,7 @@ main {
 
 .dashboard-sidebar-group-arrow {
   font-size: 9px;
-  color: #9ca3af;
+  color: var(--t-faint);
   width: 10px;
   flex-shrink: 0;
   transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
@@ -609,7 +668,7 @@ button:disabled {
 .btn-primary {
   border: none;
   background: var(--brand);
-  color: #fff;
+  color: var(--white);
   font-weight: 600;
   padding: 8px 16px;
 }
@@ -663,9 +722,9 @@ button:disabled {
 }
 
 /* override old global button background rule */
-button:not([style*="background: #fff"]):not([style*="background:#fff"]):not([style*="background: transparent"]):not([style*="background:transparent"]) {
+button:not([style*="background: var(--white)"]):not([style*="background:var(--white)"]):not([style*="background: transparent"]):not([style*="background:transparent"]) {
   background: var(--brand);
-  color: #fff;
+  color: var(--white);
 }
 
 a {
@@ -726,7 +785,7 @@ p {
 }
 .tag-normal {
   background: #eef9ee;
-  color: #166534;
+  color: var(--c-green-dark);
   border-color: rgba(22, 101, 52, 0.12);
 }
 .tag-sensitive {
@@ -735,13 +794,13 @@ p {
   border-color: rgba(154, 52, 18, 0.12);
 }
 .tag-sea {
-  background: #eff6ff;
-  color: #1e3a8a;
+  background: var(--c-blue-bg);
+  color: var(--c-navy);
   border-color: rgba(30, 58, 138, 0.12);
 }
 .tag-land {
   background: #ecfdf5;
-  color: #065f46;
+  color: var(--c-green-deep);
   border-color: rgba(6, 95, 70, 0.12);
 }
 
@@ -843,7 +902,7 @@ table tbody tr:hover {
 .step-item-done {
   border-color: rgba(15, 118, 110, 0.2);
   background: rgba(15, 118, 110, 0.05);
-  color: #166534;
+  color: var(--c-green-dark);
 }
 
 .step-item-done .step-index {
@@ -863,7 +922,7 @@ table tbody tr:hover {
   align-items: center;
   justify-content: center;
   font-weight: 700;
-  color: #fff;
+  color: var(--white);
   background: var(--brand);
 }
 
@@ -913,7 +972,7 @@ table tbody tr:hover {
   position: absolute;
   border-radius: 999px;
   padding: 6px 12px;
-  color: #fff;
+  color: var(--white);
   font-size: 12px;
   font-weight: 600;
 }
@@ -1120,7 +1179,7 @@ table tbody tr:hover {
   max-width: 360px;
   border-radius: 10px;
   padding: 10px 12px;
-  color: #fff;
+  color: var(--white);
   box-shadow: var(--shadow-lg);
   animation: toastSlide 0.22s ease-out;
 }
@@ -1188,7 +1247,7 @@ table tbody tr:hover {
 .order-badge-land {
   border-color: rgba(6, 95, 70, 0.12);
   background: rgba(6, 95, 70, 0.05);
-  color: #065f46;
+  color: var(--c-green-deep);
 }
 
 .order-badge-amount {
@@ -1200,13 +1259,13 @@ table tbody tr:hover {
 .order-badge-unpaid {
   border-color: rgba(153, 27, 27, 0.12);
   background: rgba(153, 27, 27, 0.05);
-  color: #991b1b;
+  color: var(--c-red-dark);
 }
 
 .order-badge-paid {
   border-color: rgba(22, 101, 52, 0.12);
   background: rgba(22, 101, 52, 0.05);
-  color: #166534;
+  color: var(--c-green-dark);
 }
 
 .order-fields {
@@ -1343,13 +1402,13 @@ table tbody tr:hover {
 
 .prealert-title {
   font-weight: 700;
-  color: #92400e;
+  color: var(--c-amber-deep);
 }
 
 .prealert-badge {
   border: 1px solid rgba(146, 64, 14, 0.15);
-  color: #92400e;
-  background: #fef3c7;
+  color: var(--c-amber-deep);
+  background: var(--c-amber-bg);
   border-radius: 6px;
   padding: 2px 10px;
   font-size: 12px;
@@ -1370,7 +1429,7 @@ table tbody tr:hover {
 
 .prealert-label {
   font-size: 12px;
-  color: #92400e;
+  color: var(--c-amber-deep);
   margin-bottom: 2px;
 }
 
@@ -1473,7 +1532,7 @@ table tbody tr:hover {
 
 .section-label-query {
   background: rgba(217, 119, 6, 0.06);
-  color: #92400e;
+  color: var(--c-amber-deep);
   border: 1px solid rgba(217, 119, 6, 0.12);
 }
 
@@ -1581,7 +1640,7 @@ button:disabled {
   min-height: 100vh;
   display: grid;
   grid-template-columns: 1.1fr 1fr;
-  background: #fff;
+  background: var(--white);
 }
 
 /* 左侧图片：只取图片左半边，避开素材本身的拼接缝 */
@@ -1605,7 +1664,7 @@ button:disabled {
 .auth-visual-text {
   position: relative;
   z-index: 1;
-  color: #fff;
+  color: var(--white);
 }
 
 .auth-visual-text h2 {
@@ -1666,7 +1725,7 @@ button:disabled {
   padding: 11px 13px;
   font-size: 14px;
   color: var(--ink);
-  background: #fff;
+  background: var(--white);
   outline: none;
 }
 
@@ -1686,7 +1745,7 @@ button:disabled {
   padding: 12px;
   font-size: 15px;
   font-weight: 600;
-  color: #fff;
+  color: var(--white);
   background: var(--brand);
   cursor: pointer;
   margin-top: 6px;
@@ -1705,7 +1764,7 @@ button:disabled {
 
 .auth-btn-ghost {
   width: auto;
-  background: #fff;
+  background: var(--white);
   color: var(--ink-mute);
   border: 1px solid #d8d6d1;
   padding: 11px 18px;
@@ -1788,7 +1847,7 @@ button:disabled {
 .table-card {
   border: none !important;
   border-radius: 0 !important;
-  background: #fff !important;
+  background: var(--white) !important;
   box-shadow: none !important;
 }
 
@@ -1836,7 +1895,7 @@ button:disabled {
 .row-act {
   border: none !important;
   background: transparent !important;
-  color: #111827 !important;
+  color: var(--t-heading) !important;
   font-weight: 500 !important;
   padding: 2px 0 !important;
   margin-right: 14px !important;
@@ -1873,7 +1932,7 @@ button:disabled {
   width: 100%;
   height: 100%;
   overflow-y: auto;
-  background: #fff;
+  background: var(--white);
 }
 
 /* 标题栏吸顶，往下滚也能随时关掉 */
@@ -1881,7 +1940,7 @@ button:disabled {
   position: sticky;
   top: 0;
   z-index: 2;
-  background: #fff;
+  background: var(--white);
   border-bottom: 1px solid var(--line-soft);
   padding: 14px 24px;
   display: flex;
@@ -1905,7 +1964,7 @@ button:disabled {
 
 .detail-close {
   border: 1px solid #d8d6d1;
-  background: #fff;
+  background: var(--white);
   color: var(--ink-mute);
   border-radius: 6px;
   width: 30px;

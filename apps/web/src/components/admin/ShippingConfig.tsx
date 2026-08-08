@@ -51,24 +51,24 @@ export default function ShippingConfig(props: ShippingConfigProps) {
   const labelMap: Record<string, string> = { sea_normal: "海运·普货", sea_inspection: "海运·商检", sea_sensitive: "海运·敏感", land_normal: "陆运·普货", land_inspection: "陆运·商检", land_sensitive: "陆运·敏感" };
 
   return (
-    <section style={{ marginBottom: 24, border: "1px solid #e5e7eb", borderRadius: 12, padding: 20, background: "#fff" }}>
+    <section style={{ marginBottom: 24, border: "1px solid var(--l-soft)", borderRadius: 12, padding: 20, background: "var(--white)" }}>
       <h2 style={{ marginTop: 0, marginBottom: 12, fontSize: 18 }}>运费配置</h2>
-      <p style={{ color: "#000000", marginBottom: 12, fontSize: 14 }}>设置最低计费体积（低消）。当货物体积低于低消时，按低消计算运费。</p>
+      <p style={{ color: "var(--t-strong)", marginBottom: 12, fontSize: 14 }}>设置最低计费体积（低消）。当货物体积低于低消时，按低消计算运费。</p>
       <div style={{ display: "grid", gap: 10, maxWidth: 400 }}>
         <div>
-          <div style={{ fontSize: 13, color: "#000000", marginBottom: 4 }}>海运低消（立方米）</div>
-          <input value={props.shippingConfigSea} onChange={(e) => props.onSeaChange(e.target.value)} type="number" step="0.1" min="0" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", fontSize: 13, width: "100%" }} />
+          <div style={{ fontSize: 13, color: "var(--t-strong)", marginBottom: 4 }}>海运低消（立方米）</div>
+          <input value={props.shippingConfigSea} onChange={(e) => props.onSeaChange(e.target.value)} type="number" step="0.1" min="0" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", fontSize: 13, width: "100%" }} />
         </div>
         <div>
-          <div style={{ fontSize: 13, color: "#000000", marginBottom: 4 }}>陆运低消（立方米）</div>
-          <input value={props.shippingConfigLand} onChange={(e) => props.onLandChange(e.target.value)} type="number" step="0.1" min="0" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", fontSize: 13, width: "100%" }} />
+          <div style={{ fontSize: 13, color: "var(--t-strong)", marginBottom: 4 }}>陆运低消（立方米）</div>
+          <input value={props.shippingConfigLand} onChange={(e) => props.onLandChange(e.target.value)} type="number" step="0.1" min="0" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", fontSize: 13, width: "100%" }} />
         </div>
         <button type="button" disabled={props.configSaving} onClick={async () => {
           try {
             await updateShippingConfig({ sea_min_volume: props.shippingConfigSea, land_min_volume: props.shippingConfigLand });
             props.onToast("配置已保存");
           } catch { props.onToast("保存失败"); }
-        }} style={{ border: "none", borderRadius: 6, padding: "8px 16px", background: "#2563eb", color: "#fff", fontWeight: 500, fontSize: 13, cursor: "pointer", justifySelf: "start" }}>
+        }} style={{ border: "none", borderRadius: 6, padding: "8px 16px", background: "var(--c-blue)", color: "var(--white)", fontWeight: 500, fontSize: 13, cursor: "pointer", justifySelf: "start" }}>
           {props.configSaving ? "保存中…" : "保存配置"}
         </button>
       </div>
@@ -81,22 +81,22 @@ export default function ShippingConfig(props: ShippingConfigProps) {
           const isView = expandedClientId === c.id;
           const isEdit = expandedClientId === `edit-${c.id}`;
           return (
-            <div key={c.id} style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 10, background: hasCustom ? "#fefce8" : "#fff" }}>
+            <div key={c.id} style={{ border: "1px solid var(--l-soft)", borderRadius: 8, padding: 10, background: hasCustom ? "#fefce8" : "var(--white)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
                   <span style={{ fontWeight: 600, fontSize: 14 }}>{c.name}</span>
-                  <span style={{ marginLeft: 8, fontSize: 12, color: "#6b7280", fontFamily: "monospace" }}>{c.id}</span>
-                  {hasCustom ? <span style={{ marginLeft: 8, fontSize: 11, color: "#d97706" }}>已配置</span> : <span style={{ marginLeft: 8, fontSize: 11, color: "#9ca3af" }}>使用默认</span>}
+                  <span style={{ marginLeft: 8, fontSize: 12, color: "var(--t-muted)", fontFamily: "monospace" }}>{c.id}</span>
+                  {hasCustom ? <span style={{ marginLeft: 8, fontSize: 11, color: "#d97706" }}>已配置</span> : <span style={{ marginLeft: 8, fontSize: 11, color: "var(--t-faint)" }}>使用默认</span>}
                   {hasMinDisabled ? <span style={{ marginLeft: 8, fontSize: 11, color: "#8b5cf6" }}>低消已取消</span> : null}
                 </div>
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                  <button type="button" onClick={() => { if (isView) { setExpandedClientId(null); return; } setExpandedClientId(c.id); loadClientPrices(c.id); }} style={{ border: "1px solid #2563eb", borderRadius: 4, padding: "4px 10px", fontSize: 12, background: "#fff", color: "#2563eb", cursor: "pointer" }}>{isView ? "收起" : "查看价格"}</button>
-                  <button type="button" onClick={() => { if (isEdit) { setExpandedClientId(null); return; } setExpandedClientId(`edit-${c.id}`); loadClientPrices(c.id); }} style={{ border: "none", borderRadius: 4, padding: "4px 10px", fontSize: 12, background: "#2563eb", color: "#fff", cursor: "pointer" }}>{isEdit ? "收起" : "编辑价格"}</button>
+                  <button type="button" onClick={() => { if (isView) { setExpandedClientId(null); return; } setExpandedClientId(c.id); loadClientPrices(c.id); }} style={{ border: "1px solid var(--c-blue)", borderRadius: 4, padding: "4px 10px", fontSize: 12, background: "var(--white)", color: "var(--c-blue)", cursor: "pointer" }}>{isView ? "收起" : "查看价格"}</button>
+                  <button type="button" onClick={() => { if (isEdit) { setExpandedClientId(null); return; } setExpandedClientId(`edit-${c.id}`); loadClientPrices(c.id); }} style={{ border: "none", borderRadius: 4, padding: "4px 10px", fontSize: 12, background: "var(--c-blue)", color: "var(--white)", cursor: "pointer" }}>{isEdit ? "收起" : "编辑价格"}</button>
                 </div>
               </div>
               {isView ? (
-                <div style={{ marginTop: 10, borderTop: "1px solid #e5e7eb", paddingTop: 10 }}>
-                  <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6, color: "#000000" }}>当前价格</div>
+                <div style={{ marginTop: 10, borderTop: "1px solid var(--l-soft)", paddingTop: 10 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6, color: "var(--t-strong)" }}>当前价格</div>
                   {priceDefaults.map((d) => {
                     const key = `${d.transportMode}|${d.cargoType}`;
                     const val = clientPrices[key] ?? props.rateDefaults.find((rd) => rd.transportMode === d.transportMode && rd.cargoType === d.cargoType)?.unitPriceCny ?? d.unitPriceCny;
@@ -107,16 +107,16 @@ export default function ShippingConfig(props: ShippingConfigProps) {
                       </div>
                     );
                   })}
-                  <div style={{ marginTop: 6, fontSize: 12, color: clientMinVolumeDisabled ? "#8b5cf6" : "#6b7280" }}>
+                  <div style={{ marginTop: 6, fontSize: 12, color: clientMinVolumeDisabled ? "#8b5cf6" : "var(--t-muted)" }}>
                     低消：{clientMinVolumeDisabled ? "已取消" : `海运${props.shippingConfigSea}方 / 陆运${props.shippingConfigLand}方`}
                   </div>
                 </div>
               ) : null}
               {isEdit ? (
-                <div style={{ marginTop: 10, borderTop: "1px solid #e5e7eb", paddingTop: 10 }} data-client={c.id}>
+                <div style={{ marginTop: 10, borderTop: "1px solid var(--l-soft)", paddingTop: 10 }} data-client={c.id}>
                   <label style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, fontSize: 13, cursor: "pointer" }}>
                     <input type="checkbox" checked={clientMinVolumeDisabled} onChange={(e) => setClientMinVolumeDisabled(e.target.checked)} />
-                    <span style={{ color: "#000000" }}>取消低消</span>
+                    <span style={{ color: "var(--t-strong)" }}>取消低消</span>
                   </label>
                   {priceDefaults.map((d) => {
                     const key = `${d.transportMode}|${d.cargoType}`;
@@ -124,8 +124,8 @@ export default function ShippingConfig(props: ShippingConfigProps) {
                     return (
                       <div key={key} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
                         <span style={{ width: 100, fontSize: 13 }}>{labelMap[key] ?? key}</span>
-                        <input value={val} data-price-key={key} onChange={(e) => setClientPrices((p) => ({ ...p, [key]: Number(e.target.value) || 0 }))} type="number" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 8px", fontSize: 13, width: 90 }} />
-                        <span style={{ fontSize: 12, color: "#9ca3af" }}>¥/m³</span>
+                        <input value={val} data-price-key={key} onChange={(e) => setClientPrices((p) => ({ ...p, [key]: Number(e.target.value) || 0 }))} type="number" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "6px 8px", fontSize: 13, width: 90 }} />
+                        <span style={{ fontSize: 12, color: "var(--t-faint)" }}>¥/m³</span>
                       </div>
                     );
                   })}
@@ -145,7 +145,7 @@ export default function ShippingConfig(props: ShippingConfigProps) {
                       await loadClientPrices(c.id);
                       props.onToast("已保存");
                     } catch (err) { props.onToast(`保存失败：${err instanceof Error ? err.message : "网络错误"}`); }
-                  }} style={{ border: "none", borderRadius: 6, padding: "8px 16px", background: "#2563eb", color: "#fff", fontWeight: 500, fontSize: 13, cursor: "pointer", marginTop: 8 }}>保存客户价格</button>
+                  }} style={{ border: "none", borderRadius: 6, padding: "8px 16px", background: "var(--c-blue)", color: "var(--white)", fontWeight: 500, fontSize: 13, cursor: "pointer", marginTop: 8 }}>保存客户价格</button>
                 </div>
               ) : null}
             </div>

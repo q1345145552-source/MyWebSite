@@ -117,19 +117,19 @@ export default function StaffLastmile(props: StaffLastmileProps) {
   }
 
   return (
-    <section id="staff-lastmile" style={{ display: "block", border: "1px solid #e5e7eb", borderLeft: "4px solid #d1d5db", borderRadius: 12, padding: 16, marginBottom: 18, background: "#fcfcfd", boxShadow: "0 1px 3px rgba(15,23,42,0.06)" }}>
-      <h2 style={{ marginTop: 0, fontSize: 18, color: "#111827", marginBottom: 12 }}>尾端派送</h2>
+    <section id="staff-lastmile" style={{ display: "block", border: "1px solid var(--l-soft)", borderLeft: "4px solid var(--l-strong)", borderRadius: 12, padding: 16, marginBottom: 18, background: "#fcfcfd", boxShadow: "0 1px 3px rgba(15,23,42,0.06)" }}>
+      <h2 style={{ marginTop: 0, fontSize: 18, color: "var(--t-heading)", marginBottom: 12 }}>尾端派送</h2>
 
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 12, marginBottom: 16, background: "#f8fafc" }}>
+      <div style={{ border: "1px solid var(--l-soft)", borderRadius: 8, padding: 12, marginBottom: 16, background: "var(--s-cool)" }}>
         <h4 style={{ margin: "0 0 8px", fontSize: 14 }}>创建派送单（一车多单，逗号分隔）</h4>
         <div style={{ display: "grid", gap: 6 }}>
-          <div style={{ border: "1px solid #e5e7eb", borderRadius: 6, padding: 8, background: "#fff" }}>
+          <div style={{ border: "1px solid var(--l-soft)", borderRadius: 6, padding: 8, background: "var(--white)" }}>
             {/* 唛头快捷勾选。2026-08-06：原来写死 .slice(0, 10)，线上有 42 个唛头，
                 多出来的 32 个直接不显示、也没有任何提示（老板就是这么发现丢货的）。
                 现在全部显示，一行放不下就换行。 */}
             <div style={{ display: "flex", gap: 4, marginBottom: 4, flexWrap: "wrap" }}>
               {[...new Set(props.lmShipments.map(s => s.clientId).filter(Boolean))].map(m => (
-                <button key={m} onClick={() => { setLmShipSearch(m); const found = new Set<string>(); props.lmShipments.filter(s => s.clientId === m).forEach(s => found.add(s.id)); const n = new Set(lmSelected); found.forEach(id => n.add(id)); setLmSelected(n); }} style={{ border: "1px solid #6b21a8", borderRadius: 4, padding: "1px 6px", fontSize: 10, background: lmShipSearch === m ? "#6b21a8" : "#fff", color: lmShipSearch === m ? "#fff" : "#6b21a8", cursor: "pointer" }}>{m}</button>
+                <button key={m} onClick={() => { setLmShipSearch(m); const found = new Set<string>(); props.lmShipments.filter(s => s.clientId === m).forEach(s => found.add(s.id)); const n = new Set(lmSelected); found.forEach(id => n.add(id)); setLmSelected(n); }} style={{ border: "1px solid #6b21a8", borderRadius: 4, padding: "1px 6px", fontSize: 10, background: lmShipSearch === m ? "#6b21a8" : "var(--white)", color: lmShipSearch === m ? "var(--white)" : "#6b21a8", cursor: "pointer" }}>{m}</button>
               ))}
             </div>
             {/* 粘贴运单号批量勾选。2026-08-06：原来匹配不上的号码**静默丢弃** ——
@@ -150,48 +150,48 @@ export default function StaffLastmile(props: StaffLastmileProps) {
               } else {
                 setLmBatchMissing([]);
               }
-            }} placeholder="粘贴运单号批量勾选..." style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "4px 8px", fontSize: 11, width: "100%", marginBottom: 4, color: "#6b21a8" }} />
+            }} placeholder="粘贴运单号批量勾选..." style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 8px", fontSize: 11, width: "100%", marginBottom: 4, color: "#6b21a8" }} />
             {lmBatchMissing.length > 0 && (
-              <div style={{ fontSize: 11, color: "#b91c1c", marginBottom: 4, lineHeight: 1.5 }}>
+              <div style={{ fontSize: 11, color: "var(--c-red-deep)", marginBottom: 4, lineHeight: 1.5 }}>
                 有 {lmBatchMissing.length} 个运单号没找到，<b>没有</b>加进去：{lmBatchMissing.join("、")}
                 <br />
                 （可能是单号打错了，或者这批货还没到仓 / 已经在别的派送单里）
               </div>
             )}
-            <input value={lmShipSearch} onChange={e => setLmShipSearch(e.target.value)} onFocus={props.onLoadShipments} placeholder="搜索运单号/唛头/品名..." style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 8px", fontSize: 12, width: "100%", marginBottom: 4 }} />
+            <input value={lmShipSearch} onChange={e => setLmShipSearch(e.target.value)} onFocus={props.onLoadShipments} placeholder="搜索运单号/唛头/品名..." style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "6px 8px", fontSize: 12, width: "100%", marginBottom: 4 }} />
             {/* 2026-08-06：原来写死 .slice(0, 50)，超出的不显示也不提示。
                 现在全部渲染（框本身可滚动），并在下面写清楚一共多少条。 */}
             <div style={{ maxHeight: 180, overflow: "auto" }}>
               {filteredLmShipments.map(s => (
                 <label key={s.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "2px 0", fontSize: 12, cursor: "pointer" }}>
                   <input type="checkbox" checked={lmSelected.has(s.id)} onChange={() => { const n = new Set(lmSelected); n.has(s.id) ? n.delete(s.id) : n.add(s.id); setLmSelected(n); }} />
-                  <span style={{ fontFamily: "monospace", color: "#1e3a8a", minWidth: 150 }}>{s.trackingNo}</span>
+                  <span style={{ fontFamily: "monospace", color: "var(--c-navy)", minWidth: 150 }}>{s.trackingNo}</span>
                   <span style={{ color: "#6b21a8", minWidth: 100, fontWeight: 600 }}>{s.clientId}</span>
-                  <span style={{ color: "#374151", flex: 1 }}>{s.itemName}</span>
-                  <span style={{ color: "#6b7280", minWidth: 40, textAlign: "right" }}>{s.packageCount}件</span>
+                  <span style={{ color: "var(--t-body)", flex: 1 }}>{s.itemName}</span>
+                  <span style={{ color: "var(--t-muted)", minWidth: 40, textAlign: "right" }}>{s.packageCount}件</span>
                 </label>
               ))}
             </div>
-            <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>
+            <div style={{ fontSize: 11, color: "var(--t-muted)", marginTop: 4 }}>
               已选 {lmSelected.size} 个运单 · 当前列出 {filteredLmShipments.length} 条
               {lmShipSearch ? `（共 ${props.lmShipments.length} 条，已按「${lmShipSearch}」筛选）` : ""}
             </div>
           </div>
           <div style={{ display: "flex", gap: 6 }}>
-            <input value={lmDriverName} onChange={e => setLmDriverName(e.target.value)} placeholder="司机姓名" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 8px", fontSize: 12, flex: 1 }} />
-            <input value={lmLicensePlate} onChange={e => setLmLicensePlate(e.target.value)} placeholder="车牌号" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 8px", fontSize: 12, flex: 1 }} />
-            <input value={lmPhoneNumber} onChange={e => setLmPhoneNumber(e.target.value)} placeholder="电话" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 8px", fontSize: 12, flex: 1 }} />
-            <input type="date" value={lmDeliveryDate} onChange={e => setLmDeliveryDate(e.target.value)} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 8px", fontSize: 12 }} />
+            <input value={lmDriverName} onChange={e => setLmDriverName(e.target.value)} placeholder="司机姓名" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "6px 8px", fontSize: 12, flex: 1 }} />
+            <input value={lmLicensePlate} onChange={e => setLmLicensePlate(e.target.value)} placeholder="车牌号" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "6px 8px", fontSize: 12, flex: 1 }} />
+            <input value={lmPhoneNumber} onChange={e => setLmPhoneNumber(e.target.value)} placeholder="电话" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "6px 8px", fontSize: 12, flex: 1 }} />
+            <input type="date" value={lmDeliveryDate} onChange={e => setLmDeliveryDate(e.target.value)} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "6px 8px", fontSize: 12 }} />
           </div>
-          <button disabled={busy || lmSelected.size === 0} onClick={createLastmile} style={{ border: "none", borderRadius: 6, padding: "6px 14px", background: "#2563eb", color: "#fff", cursor: "pointer", fontSize: 12, justifySelf: "start" }}>创建派送单</button>
+          <button disabled={busy || lmSelected.size === 0} onClick={createLastmile} style={{ border: "none", borderRadius: 6, padding: "6px 14px", background: "var(--c-blue)", color: "var(--white)", cursor: "pointer", fontSize: 12, justifySelf: "start" }}>创建派送单</button>
         </div>
       </div>
 
       {props.lmOrderList.length === 0 ? (
-        <p style={{ color: "#9ca3af", fontSize: 13 }}>暂无派送单</p>
+        <p style={{ color: "var(--t-faint)", fontSize: 13 }}>暂无派送单</p>
       ) : (
         <div style={{ marginBottom: 12 }}>
-          <input value={lmOrderSearch} onChange={e => setLmOrderSearch(e.target.value)} placeholder="搜索派送单号/运单号/唛头..." style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 8px", fontSize: 12, width: "100%" }} />
+          <input value={lmOrderSearch} onChange={e => setLmOrderSearch(e.target.value)} placeholder="搜索派送单号/运单号/唛头..." style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "6px 8px", fontSize: 12, width: "100%" }} />
         </div>
       )}
       {Object.entries(groups).map(([dn, items]) => {
@@ -199,11 +199,11 @@ export default function StaffLastmile(props: StaffLastmileProps) {
         const total = items.length;
         const done = signed === total;
         return (
-          <div key={dn} style={{ marginBottom: 16, border: "1px solid #e5e7eb", borderRadius: 8, padding: 12, background: done ? "#f0fdf4" : "#fff" }}>
+          <div key={dn} style={{ marginBottom: 16, border: "1px solid var(--l-soft)", borderRadius: 8, padding: 12, background: done ? "#f0fdf4" : "var(--white)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
               <div style={{ fontSize: 13, fontWeight: 600 }}>
-                <span style={{ fontFamily: "monospace", color: "#1e3a8a" }}>{dn}</span>
-                <span style={{ color: done ? "#16a34a" : "#6b7280", marginLeft: 8 }}>{signed}/{total} 签收 {done ? "派送完成" : " 派送中"}</span>
+                <span style={{ fontFamily: "monospace", color: "var(--c-navy)" }}>{dn}</span>
+                <span style={{ color: done ? "var(--c-green-3)" : "var(--t-muted)", marginLeft: 8 }}>{signed}/{total} 签收 {done ? "派送完成" : " 派送中"}</span>
               </div>
               {!done && (
                 <button onClick={async () => {
@@ -221,12 +221,12 @@ export default function StaffLastmile(props: StaffLastmileProps) {
               )}
             </div>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-              <thead><tr style={{ borderBottom: "2px solid #e2e8f0", textAlign: "left" }}>
+              <thead><tr style={{ borderBottom: "2px solid var(--l-cool)", textAlign: "left" }}>
                 <th style={{ padding: "4px 6px" }}>唛头</th><th style={{ padding: "4px 6px" }}>运单号</th><th style={{ padding: "4px 6px" }}>司机</th><th style={{ padding: "4px 6px" }}>车牌</th><th style={{ padding: "4px 6px" }}>电话</th><th style={{ padding: "4px 6px" }}>日期</th><th style={{ padding: "4px 6px" }}>状态</th><th style={{ padding: "4px 6px" }}>操作</th>
               </tr></thead>
               <tbody>
                 {items.map(o => (
-                  <tr key={o.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
+                  <tr key={o.id} style={{ borderBottom: "1px solid var(--l-soft)" }}>
                     <td style={{ padding: "4px 6px", fontFamily: "monospace", whiteSpace: "nowrap" }}>{o.clientId || "-"}</td>
                     <td style={{ padding: "4px 6px", fontFamily: "monospace" }}>{o.trackingNo || o.shipmentId}</td>
                     <td style={{ padding: "4px 6px" }}>{o.driverName ?? "-"}</td>
@@ -234,21 +234,21 @@ export default function StaffLastmile(props: StaffLastmileProps) {
                     <td style={{ padding: "4px 6px" }}>{o.phoneNumber ?? "-"}</td>
                     <td style={{ padding: "4px 6px" }}>{o.deliveryDate || "-"}</td>
                     <td style={{ padding: "4px 6px" }}>
-                      {o.status === "SIGNED" ? <span>已签收{o.signImageBase64 ? <img src={"data:image/jpeg;base64,"+o.signImageBase64} alt="签收凭证" onClick={() => setPreviewImg("data:image/jpeg;base64,"+o.signImageBase64!)} style={{ maxWidth:40, maxHeight:40, borderRadius:4, marginLeft:4, cursor:"pointer", border:"1px solid #e5e7eb" }} /> : null}</span> : " 派送中"}
+                      {o.status === "SIGNED" ? <span>已签收{o.signImageBase64 ? <img src={"data:image/jpeg;base64,"+o.signImageBase64} alt="签收凭证" onClick={() => setPreviewImg("data:image/jpeg;base64,"+o.signImageBase64!)} style={{ maxWidth:40, maxHeight:40, borderRadius:4, marginLeft:4, cursor:"pointer", border:"1px solid var(--l-soft)" }} /> : null}</span> : " 派送中"}
                     </td>
                     <td style={{ padding: "4px 6px" }}>
                       {o.status !== "SIGNED" && (
-                        <button disabled={busy} onClick={() => { setLmSignData({ id: o.id, action: "sign" }); lmSignFileRef.current?.click(); }} style={{ border: "1px solid #16a34a", borderRadius: 4, padding: "2px 6px", fontSize: 11, background: "#fff", color: "#16a34a", cursor: "pointer" }}>签收</button>
+                        <button disabled={busy} onClick={() => { setLmSignData({ id: o.id, action: "sign" }); lmSignFileRef.current?.click(); }} style={{ border: "1px solid var(--c-green-3)", borderRadius: 4, padding: "2px 6px", fontSize: 11, background: "var(--white)", color: "var(--c-green-3)", cursor: "pointer" }}>签收</button>
                       )}
                       {/* 2026-08-06：这里原来只有状态文字，看不到轨迹，员工得跑回运单管理才能查 */}
                       <button
                         disabled={!o.trackingNo}
                         onClick={() => o.trackingNo && openShipmentTrack(o.trackingNo)}
-                        style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "2px 6px", fontSize: 11, background: "#fff", color: o.trackingNo ? "#1e3a8a" : "#9ca3af", cursor: o.trackingNo ? "pointer" : "not-allowed", marginLeft: 4, whiteSpace: "nowrap" }}
+                        style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "2px 6px", fontSize: 11, background: "var(--white)", color: o.trackingNo ? "var(--c-navy)" : "var(--t-faint)", cursor: o.trackingNo ? "pointer" : "not-allowed", marginLeft: 4, whiteSpace: "nowrap" }}
                       >
                         物流轨迹
                       </button>
-                      <button onClick={() => deleteOrder(o.id)} style={{ border: "1px solid #fca5a5", borderRadius: 4, padding: "2px 4px", fontSize: 11, background: "#fff", color: "#dc2626", cursor: "pointer", marginLeft: 4 }}>删除</button>
+                      <button onClick={() => deleteOrder(o.id)} style={{ border: "1px solid #fca5a5", borderRadius: 4, padding: "2px 4px", fontSize: 11, background: "var(--white)", color: "var(--c-red-2)", cursor: "pointer", marginLeft: 4 }}>删除</button>
                     </td>
                   </tr>
                 ))}

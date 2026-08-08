@@ -81,9 +81,9 @@ export default function ClientTrackPage() {
 
   return (
     <RoleShell allowedRole="client" title="物流追踪看板">
-      <section style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 16, background: "#fff" }}>
+      <section style={{ border: "1px solid var(--l-soft)", borderRadius: 12, padding: 16, background: "var(--white)" }}>
         <h2 style={{ marginTop: 0 }}>Track & Trace（免登录查询）</h2>
-        <p style={{ color: "#000000", marginTop: 0 }}>
+        <p style={{ color: "var(--t-strong)", marginTop: 0 }}>
           点击按钮将<strong>直接打开快递100</strong>（无需先填单号）；填写单号或公司编码后，跳转链接会尽量带上参数。
         </p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 8 }}>
@@ -91,18 +91,18 @@ export default function ClientTrackPage() {
             value={trackingNo}
             onChange={(e) => setTrackingNo(e.target.value)}
             placeholder="运单号 / 快递单号（可选）"
-            style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}
+            style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }}
           />
           <input
             value={companySearch}
             onChange={(e) => setCompanySearch(e.target.value)}
             placeholder="搜索快递公司（中文/拼音/首字母/编码）"
-            style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}
+            style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }}
           />
           <select
             value={companyCodePreset}
             onChange={(e) => setCompanyCodePreset(e.target.value)}
-            style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}
+            style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }}
           >
             <option value="">快递公司编码（请选择）</option>
             {filteredCompanyOptions.map((item) => (
@@ -115,7 +115,7 @@ export default function ClientTrackPage() {
             value={companyCode}
             onChange={(e) => setCompanyCode(e.target.value)}
             placeholder="或手动输入公司编码（例如 shunfeng）"
-            style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}
+            style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }}
           />
           <button
             type="button"
@@ -136,7 +136,7 @@ export default function ClientTrackPage() {
                 setLoading(false);
               }
             }}
-            style={{ border: "none", borderRadius: 8, padding: "8px 12px", background: "#2563eb", color: "#fff" }}
+            style={{ border: "none", borderRadius: 8, padding: "8px 12px", background: "var(--c-blue)", color: "var(--white)" }}
           >
             {loading ? "处理中..." : "跳转快递100查单"}
           </button>

@@ -31,9 +31,9 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
-  PENDING: { bg: "#fef3c7", text: "#92400e" },
-  APPROVED: { bg: "#d1fae5", text: "#065f46" },
-  REJECTED: { bg: "#fee2e2", text: "#991b1b" },
+  PENDING: { bg: "var(--c-amber-bg)", text: "var(--c-amber-deep)" },
+  APPROVED: { bg: "var(--c-green-bg)", text: "var(--c-green-deep)" },
+  REJECTED: { bg: "var(--c-red-bg)", text: "var(--c-red-dark)" },
 };
 
 /**
@@ -144,7 +144,7 @@ export default function ClientWalletPage() {
   return (
     <RoleShell allowedRole="client" title="集货余额">
       {/* 余额卡片 */}
-      <section style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 16, background: "#fff", marginBottom: 14 }}>
+      <section style={{ border: "1px solid var(--l-soft)", borderRadius: 12, padding: 16, background: "var(--white)", marginBottom: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
           <h2 style={{ margin: 0 }}>集货余额</h2>
           <button
@@ -153,8 +153,8 @@ export default function ClientWalletPage() {
               border: "none",
               borderRadius: 8,
               padding: "8px 20px",
-              background: "#1e3a8a",
-              color: "#fff",
+              background: "var(--c-navy)",
+              color: "var(--white)",
               fontWeight: 600,
               fontSize: 14,
               cursor: "pointer",
@@ -163,32 +163,32 @@ export default function ClientWalletPage() {
             充值
           </button>
         </div>
-        {loading ? <p style={{ color: "#000000" }}>加载中...</p> : null}
-        <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: "14px 16px", background: "#f8fafc", maxWidth: 320 }}>
-          <div style={{ color: "#000000", fontSize: 12 }}>可用余额（人民币）</div>
+        {loading ? <p style={{ color: "var(--t-strong)" }}>加载中...</p> : null}
+        <div style={{ border: "1px solid var(--l-cool)", borderRadius: 10, padding: "14px 16px", background: "var(--s-cool)", maxWidth: 320 }}>
+          <div style={{ color: "var(--t-strong)", fontSize: 12 }}>可用余额（人民币）</div>
           <div style={{ fontSize: 30, fontWeight: 700 }}>¥{balance.toFixed(2)}</div>
-          <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>只能用于集货拼柜付款</div>
+          <div style={{ fontSize: 12, color: "var(--t-muted)", marginTop: 4 }}>只能用于集货拼柜付款</div>
         </div>
       </section>
 
       {/* 余额流水（2026-08-07 新增）：每一笔进出都在这里，客户能自己对账 */}
-      <section style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 16, background: "#fff", marginBottom: 14 }}>
+      <section style={{ border: "1px solid var(--l-soft)", borderRadius: 12, padding: 16, background: "var(--white)", marginBottom: 14 }}>
         <h3 style={{ margin: "0 0 12px" }}>余额流水</h3>
         {ledger.length === 0 ? (
-          <p style={{ color: "#6b7280", fontSize: 13 }}>暂无流水</p>
+          <p style={{ color: "var(--t-muted)", fontSize: 13 }}>暂无流水</p>
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
-                <tr style={{ background: "#f1f5f9", borderBottom: "1px solid #e5e7eb" }}>
+                <tr style={{ background: "var(--s-cool-2)", borderBottom: "1px solid var(--l-soft)" }}>
                   {["时间", "类型", "来源", "单号", "金额", "余额", "备注"].map((h, i) => (
-                    <th key={h} style={{ padding: "8px 12px", textAlign: i === 4 || i === 5 ? "right" : "left", fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>{h}</th>
+                    <th key={h} style={{ padding: "8px 12px", textAlign: i === 4 || i === 5 ? "right" : "left", fontWeight: 600, color: "var(--t-body)", whiteSpace: "nowrap" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {ledger.map((r) => (
-                  <tr key={r.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                  <tr key={r.id} style={{ borderBottom: "1px solid var(--s-sunken)" }}>
                     <td style={{ padding: "8px 12px", whiteSpace: "nowrap" }}>
                       {new Date(r.createdAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
                     </td>
@@ -199,8 +199,8 @@ export default function ClientWalletPage() {
                     <td style={{ padding: "8px 12px", textAlign: "right", fontWeight: 600, whiteSpace: "nowrap" }}>
                       {r.amount >= 0 ? "+" : "−"}¥{Math.abs(r.amount).toFixed(2)}
                     </td>
-                    <td style={{ padding: "8px 12px", textAlign: "right", whiteSpace: "nowrap", color: "#6b7280" }}>¥{r.balanceAfter.toFixed(2)}</td>
-                    <td style={{ padding: "8px 12px", color: "#6b7280", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.remark}>{r.remark || "—"}</td>
+                    <td style={{ padding: "8px 12px", textAlign: "right", whiteSpace: "nowrap", color: "var(--t-muted)" }}>¥{r.balanceAfter.toFixed(2)}</td>
+                    <td style={{ padding: "8px 12px", color: "var(--t-muted)", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.remark}>{r.remark || "—"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -210,27 +210,27 @@ export default function ClientWalletPage() {
       </section>
 
       {/* 充值记录 */}
-      <section style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 16, background: "#fff", marginBottom: 14 }}>
+      <section style={{ border: "1px solid var(--l-soft)", borderRadius: 12, padding: 16, background: "var(--white)", marginBottom: 14 }}>
         <h3 style={{ margin: "0 0 12px" }}>充值记录</h3>
         {recharges.length === 0 ? (
-          <p style={{ color: "#6b7280", fontSize: 13 }}>暂无充值记录</p>
+          <p style={{ color: "var(--t-muted)", fontSize: 13 }}>暂无充值记录</p>
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
-                <tr style={{ background: "#f9fafb", borderBottom: "1px solid #e5e7eb" }}>
-                  <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#374151" }}>时间</th>
-                  <th style={{ padding: "8px 12px", textAlign: "right", fontWeight: 600, color: "#374151" }}>金额</th>
-                  <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#374151" }}>支付方式</th>
-                  <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#374151" }}>状态</th>
-                  <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#374151" }}>备注</th>
+                <tr style={{ background: "var(--s-alt)", borderBottom: "1px solid var(--l-soft)" }}>
+                  <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "var(--t-body)" }}>时间</th>
+                  <th style={{ padding: "8px 12px", textAlign: "right", fontWeight: 600, color: "var(--t-body)" }}>金额</th>
+                  <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "var(--t-body)" }}>支付方式</th>
+                  <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "var(--t-body)" }}>状态</th>
+                  <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "var(--t-body)" }}>备注</th>
                 </tr>
               </thead>
               <tbody>
                 {recharges.map((r) => {
-                  const sc = STATUS_COLORS[r.status] ?? { bg: "#f3f4f6", text: "#374151" };
+                  const sc = STATUS_COLORS[r.status] ?? { bg: "var(--s-sunken)", text: "var(--t-body)" };
                   return (
-                    <tr key={r.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                    <tr key={r.id} style={{ borderBottom: "1px solid var(--s-sunken)" }}>
                       <td style={{ padding: "8px 12px", whiteSpace: "nowrap" }}>
                         {new Date(r.createdAt).toLocaleString("zh-CN", {
                           month: "2-digit",
@@ -257,7 +257,7 @@ export default function ClientWalletPage() {
                           {STATUS_LABELS[r.status] ?? r.status}
                         </span>
                       </td>
-                      <td style={{ padding: "8px 12px", color: "#6b7280", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <td style={{ padding: "8px 12px", color: "var(--t-muted)", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {r.reviewRemark || r.remark || "—"}
                       </td>
                     </tr>
@@ -270,15 +270,15 @@ export default function ClientWalletPage() {
       </section>
 
       {/* 说明 */}
-      <section style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 16, background: "#fff" }}>
+      <section style={{ border: "1px solid var(--l-soft)", borderRadius: 12, padding: 16, background: "var(--white)" }}>
         <h3 style={{ marginTop: 0 }}>说明</h3>
-        <ul style={{ margin: 0, paddingLeft: 18, color: "#000000" }}>
+        <ul style={{ margin: 0, paddingLeft: 18, color: "var(--t-strong)" }}>
           <li>集货余额<strong>只能用于集货拼柜（普通版和仓库版）付款</strong>，不能用于普通运单。</li>
           <li>充值只收人民币。提交充值申请并上传水单后，由管理员审核，通过才会到账。</li>
           <li>在集货拼柜里付款时<strong>直接扣余额、当场完成</strong>，不用再传水单。付款不可自行撤销，点错了请联系客服。</li>
           <li>如有疑问请联系客服。</li>
         </ul>
-        {message ? <p style={{ marginTop: 10, color: "#b91c1c" }}>{message}</p> : null}
+        {message ? <p style={{ marginTop: 10, color: "var(--c-red-deep)" }}>{message}</p> : null}
       </section>
 
       {/* 充值弹窗 */}
@@ -305,7 +305,7 @@ export default function ClientWalletPage() {
             style={{
               width: "100%",
               maxWidth: 480,
-              background: "#fff",
+              background: "var(--white)",
               borderRadius: 12,
               padding: 24,
               boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
@@ -317,7 +317,7 @@ export default function ClientWalletPage() {
 
             {/* 金额 */}
             <div style={{ marginBottom: 16 }}>
-              <label style={{ display: "block", marginBottom: 6, fontWeight: 500, fontSize: 14, color: "#374151" }}>充值金额</label>
+              <label style={{ display: "block", marginBottom: 6, fontWeight: 500, fontSize: 14, color: "var(--t-body)" }}>充值金额</label>
               <input
                 type="number"
                 min="0.01"
@@ -328,7 +328,7 @@ export default function ClientWalletPage() {
                 style={{
                   width: "100%",
                   padding: "10px 14px",
-                  border: "1px solid #d1d5db",
+                  border: "1px solid var(--l-strong)",
                   borderRadius: 8,
                   fontSize: 16,
                   boxSizing: "border-box",
@@ -338,7 +338,7 @@ export default function ClientWalletPage() {
 
             {/* 支付方式 */}
             <div style={{ marginBottom: 16 }}>
-              <label style={{ display: "block", marginBottom: 6, fontWeight: 500, fontSize: 14, color: "#374151" }}>支付方式</label>
+              <label style={{ display: "block", marginBottom: 6, fontWeight: 500, fontSize: 14, color: "var(--t-body)" }}>支付方式</label>
               <div style={{ display: "flex", gap: 8 }}>
                 {PAYMENT_METHODS.map((m) => (
                   <button
@@ -349,9 +349,9 @@ export default function ClientWalletPage() {
                       flex: 1,
                       padding: "10px 12px",
                       borderRadius: 8,
-                      border: rechargeMethod === m.value ? "2px solid #2563eb" : "1px solid #d1d5db",
-                      background: rechargeMethod === m.value ? "#eff6ff" : "#fff",
-                      color: rechargeMethod === m.value ? "#2563eb" : "#374151",
+                      border: rechargeMethod === m.value ? "2px solid var(--c-blue)" : "1px solid var(--l-strong)",
+                      background: rechargeMethod === m.value ? "var(--c-blue-bg)" : "var(--white)",
+                      color: rechargeMethod === m.value ? "var(--c-blue)" : "var(--t-body)",
                       fontWeight: 600,
                       fontSize: 13,
                       cursor: "pointer",
@@ -365,8 +365,8 @@ export default function ClientWalletPage() {
 
             {/* 付款凭证 */}
             <div style={{ marginBottom: 16 }}>
-              <label style={{ display: "block", marginBottom: 6, fontWeight: 500, fontSize: 14, color: "#374151" }}>
-                付款凭证 <span style={{ color: "#ef4444" }}>*</span>
+              <label style={{ display: "block", marginBottom: 6, fontWeight: 500, fontSize: 14, color: "var(--t-body)" }}>
+                付款凭证 <span style={{ color: "var(--c-red)" }}>*</span>
               </label>
               <input
                 ref={fileInputRef}
@@ -380,7 +380,7 @@ export default function ClientWalletPage() {
                   <img
                     src={rechargeProof}
                     alt="付款凭证"
-                    style={{ width: "100%", maxHeight: 200, objectFit: "contain", borderRadius: 8, border: "1px solid #e5e7eb" }}
+                    style={{ width: "100%", maxHeight: 200, objectFit: "contain", borderRadius: 8, border: "1px solid var(--l-soft)" }}
                   />
                 </div>
               )}
@@ -388,7 +388,7 @@ export default function ClientWalletPage() {
 
             {/* 备注 */}
             <div style={{ marginBottom: 20 }}>
-              <label style={{ display: "block", marginBottom: 6, fontWeight: 500, fontSize: 14, color: "#374151" }}>备注（选填）</label>
+              <label style={{ display: "block", marginBottom: 6, fontWeight: 500, fontSize: 14, color: "var(--t-body)" }}>备注（选填）</label>
               <input
                 type="text"
                 placeholder="可填写备注信息"
@@ -397,7 +397,7 @@ export default function ClientWalletPage() {
                 style={{
                   width: "100%",
                   padding: "10px 14px",
-                  border: "1px solid #d1d5db",
+                  border: "1px solid var(--l-strong)",
                   borderRadius: 8,
                   fontSize: 14,
                   boxSizing: "border-box",
@@ -406,7 +406,7 @@ export default function ClientWalletPage() {
             </div>
 
             {rechargeError && (
-              <div style={{ marginBottom: 16, padding: "8px 12px", background: "#fef2f2", color: "#991b1b", borderRadius: 8, fontSize: 13 }}>
+              <div style={{ marginBottom: 16, padding: "8px 12px", background: "#fef2f2", color: "var(--c-red-dark)", borderRadius: 8, fontSize: 13 }}>
                 {rechargeError}
               </div>
             )}
@@ -421,10 +421,10 @@ export default function ClientWalletPage() {
                 }}
                 disabled={rechargeSubmitting}
                 style={{
-                  border: "1px solid #d1d5db",
+                  border: "1px solid var(--l-strong)",
                   borderRadius: 8,
                   padding: "10px 20px",
-                  background: "#fff",
+                  background: "var(--white)",
                   cursor: "pointer",
                   fontSize: 14,
                 }}
@@ -439,8 +439,8 @@ export default function ClientWalletPage() {
                   border: "none",
                   borderRadius: 8,
                   padding: "10px 24px",
-                  background: "#2563eb",
-                  color: "#fff",
+                  background: "var(--c-blue)",
+                  color: "var(--white)",
                   fontWeight: 600,
                   cursor: rechargeSubmitting ? "not-allowed" : "pointer",
                   opacity: rechargeSubmitting ? 0.7 : 1,

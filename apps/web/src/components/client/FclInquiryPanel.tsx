@@ -118,7 +118,7 @@ export default function FclInquiryPanel(props: ClientFclInquiryProps) {
   };
 
   return (
-    <section style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 20, background: "#fff", marginBottom: 18 }}>
+    <section style={{ border: "1px solid var(--l-soft)", borderRadius: 12, padding: 20, background: "var(--white)", marginBottom: 18 }}>
       <h2 style={{ margin: "0 0 16px", fontSize: 18 }}>整柜询价</h2>
 
       {/* 表单 */}
@@ -127,7 +127,7 @@ export default function FclInquiryPanel(props: ClientFclInquiryProps) {
           <div style={{ gridColumn: "1/-1" }}>
             <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>选择客户 *</label>
             <input value={selectedClientId} onChange={e => setSelectedClientId(e.target.value)} placeholder="输入客户ID" list="fcl-client-list"
-              style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13 }} />
+              style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13 }} />
             <datalist id="fcl-client-list">
               {(props.clients ?? []).map(c => (<option key={c.id} value={c.id}>{c.id} - {c.name}</option>))}
             </datalist>
@@ -136,27 +136,27 @@ export default function FclInquiryPanel(props: ClientFclInquiryProps) {
         <div>
           <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>品名 *</label>
           <input value={productName} onChange={e => setProductName(e.target.value)} placeholder="货物品名"
-            style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13 }} />
+            style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13 }} />
         </div>
         <div>
           <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>货值</label>
           <input value={cargoValue} onChange={e => setCargoValue(e.target.value)} placeholder="如 ¥50,000"
-            style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13 }} />
+            style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13 }} />
         </div>
         <div>
           <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>货重</label>
           <input value={cargoWeight} onChange={e => setCargoWeight(e.target.value)} placeholder="如 25吨"
-            style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13 }} />
+            style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13 }} />
         </div>
         <div>
           <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>地址 *</label>
           <input value={address} onChange={e => setAddress(e.target.value)} placeholder="收货/发货地址"
-            style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13 }} />
+            style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13 }} />
         </div>
         <div>
           <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>柜型</label>
           <select value={containerType} onChange={e => setContainerType(e.target.value)}
-            style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13 }}>
+            style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13 }}>
             <option value="1*40HQ">1*40HQ</option>
             <option value="1*20GP">1*20GP</option>
             <option value="2*40HQ">2*40HQ</option>
@@ -167,7 +167,7 @@ export default function FclInquiryPanel(props: ClientFclInquiryProps) {
         <div>
           <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>清提派/派送</label>
           <select value={serviceType} onChange={e => setServiceType(e.target.value)}
-            style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13 }}>
+            style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13 }}>
             <option value="清提派">清提派（清关+提货+派送）</option>
             <option value="派送">仅派送</option>
           </select>
@@ -175,43 +175,43 @@ export default function FclInquiryPanel(props: ClientFclInquiryProps) {
         <div>
           <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>装柜时间</label>
           <input type="date" value={loadingDate} onChange={e => setLoadingDate(e.target.value)}
-            style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13 }} />
+            style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13 }} />
         </div>
         <div>
           <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>认证文件</label>
           <input type="file" onChange={e => setCertFile(e.target.files?.[0] || null)}
-            style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13 }} />
+            style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13 }} />
         </div>
         <div style={{ gridColumn: "1/-1" }}>
           <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>产品图片</label>
           <input type="file" multiple accept="image/*" onChange={e => handleProductImages(e.target.files)}
-            style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13, marginBottom: 8 }} />
+            style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13, marginBottom: 8 }} />
           {productPreviews.length > 0 && (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {productPreviews.map((src, i) => (
-                <img key={i} src={src} alt={`preview-${i}`} style={{ width: 60, height: 60, objectFit: "cover", borderRadius: 6, border: "1px solid #e5e7eb" }} />
+                <img key={i} src={src} alt={`preview-${i}`} style={{ width: 60, height: 60, objectFit: "cover", borderRadius: 6, border: "1px solid var(--l-soft)" }} />
               ))}
             </div>
           )}
         </div>
       </div>
 
-      {message && <p style={{ color: message.includes("失败") ? "#b91c1c" : "#065f46", fontSize: 13, marginBottom: 12 }}>{message}</p>}
+      {message && <p style={{ color: message.includes("失败") ? "var(--c-red-deep)" : "var(--c-green-deep)", fontSize: 13, marginBottom: 12 }}>{message}</p>}
 
       <button disabled={loading} onClick={submit}
-        style={{ border: "none", borderRadius: 6, padding: "8px 20px", background: loading ? "#9ca3af" : "#2563eb", color: "#fff", fontSize: 14, cursor: "pointer", marginBottom: 24 }}>
+        style={{ border: "none", borderRadius: 6, padding: "8px 20px", background: loading ? "var(--t-faint)" : "var(--c-blue)", color: "var(--white)", fontSize: 14, cursor: "pointer", marginBottom: 24 }}>
         {loading ? "提交中…" : "提交询价"}
       </button>
 
       {/* 历史列表 */}
       <h3 style={{ fontSize: 15, marginBottom: 10 }}>询价记录</h3>
-      {!listLoaded && <button onClick={loadList} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 14px", background: "#fff", cursor: "pointer", fontSize: 13 }}>加载记录</button>}
-      {listLoaded && listError && <button onClick={() => { setListError(false); setListLoaded(false); }} style={{ border: "1px solid #fca5a5", borderRadius: 6, padding: "6px 14px", background: "#fff", color: "#dc2626", cursor: "pointer", fontSize: 13 }}>加载失败，点击重试</button>}
-      {listLoaded && !listError && list.length === 0 && <p style={{ color: "#9ca3af", fontSize: 13 }}>暂无询价记录</p>}
+      {!listLoaded && <button onClick={loadList} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "6px 14px", background: "var(--white)", cursor: "pointer", fontSize: 13 }}>加载记录</button>}
+      {listLoaded && listError && <button onClick={() => { setListError(false); setListLoaded(false); }} style={{ border: "1px solid #fca5a5", borderRadius: 6, padding: "6px 14px", background: "var(--white)", color: "var(--c-red-2)", cursor: "pointer", fontSize: 13 }}>加载失败，点击重试</button>}
+      {listLoaded && !listError && list.length === 0 && <p style={{ color: "var(--t-faint)", fontSize: 13 }}>暂无询价记录</p>}
       {list.length > 0 && (
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-            <thead><tr style={{ borderBottom: "2px solid #e5e7eb", textAlign: "left" }}>
+            <thead><tr style={{ borderBottom: "2px solid var(--l-soft)", textAlign: "left" }}>
               <th style={{ padding: "6px 8px" }}>品名</th>
               <th style={{ padding: "6px 8px" }}>柜型</th>
               <th style={{ padding: "6px 8px" }}>货重</th>
@@ -222,7 +222,7 @@ export default function FclInquiryPanel(props: ClientFclInquiryProps) {
             </tr></thead>
             <tbody>
               {list.map((item) => (
-                <tr key={item.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                <tr key={item.id} style={{ borderBottom: "1px solid var(--s-cool-2)" }}>
                   <td style={{ padding: "6px 8px" }}>{item.productName}</td>
                   <td style={{ padding: "6px 8px" }}>{item.containerType}</td>
                   <td style={{ padding: "6px 8px" }}>{item.cargoWeight || "—"}</td>

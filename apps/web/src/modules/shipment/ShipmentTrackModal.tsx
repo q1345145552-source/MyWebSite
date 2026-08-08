@@ -66,39 +66,39 @@ import { shipmentStatusZh } from "./shipment-status";
 // ── Status config ──
 
 const STATUS_CONFIG: Record<string, { zh: string; color: string; bg: string; icon: string }> = {
-  created:        { zh: "已创建",     color: "#6b7280", bg: "#f3f4f6", icon: "" },
+  created:        { zh: "已创建",     color: "var(--t-muted)", bg: "var(--s-sunken)", icon: "" },
   // 前半段（2026-08-06 起才写轨迹）：客户预报 → 国内仓收货
   inwarehousecn:  { zh: "国内仓已收货", color: "#0369a1", bg: "#e0f2fe", icon: "" },
   receivedcn:     { zh: "国内仓已收货", color: "#0369a1", bg: "#e0f2fe", icon: "" },
-  pickedup:       { zh: "已揽收",     color: "#6b7280", bg: "#f3f4f6", icon: "" },
+  pickedup:       { zh: "已揽收",     color: "var(--t-muted)", bg: "var(--s-sunken)", icon: "" },
   loaded:         { zh: "已装柜",     color: "#0369a1", bg: "#e0f2fe", icon: "" },
-  delaydeparted:  { zh: "延迟开船",   color: "#b45309", bg: "#fef3c7", icon: "" },
-  delay_departed: { zh: "延迟开船",   color: "#b45309", bg: "#fef3c7", icon: "" },
-  departed:       { zh: "已开船",     color: "#1e40af", bg: "#dbeafe", icon: "" },
-  delayintransit: { zh: "延迟运输",   color: "#b45309", bg: "#fef3c7", icon: "" },
-  delay_in_transit: { zh: "延迟运输", color: "#b45309", bg: "#fef3c7", icon: "" },
-  arrivedport:    { zh: "已到港",     color: "#065f46", bg: "#d1fae5", icon: "" },
+  delaydeparted:  { zh: "延迟开船",   color: "#b45309", bg: "var(--c-amber-bg)", icon: "" },
+  delay_departed: { zh: "延迟开船",   color: "#b45309", bg: "var(--c-amber-bg)", icon: "" },
+  departed:       { zh: "已开船",     color: "var(--c-blue-deep)", bg: "var(--c-blue-bg-2)", icon: "" },
+  delayintransit: { zh: "延迟运输",   color: "#b45309", bg: "var(--c-amber-bg)", icon: "" },
+  delay_in_transit: { zh: "延迟运输", color: "#b45309", bg: "var(--c-amber-bg)", icon: "" },
+  arrivedport:    { zh: "已到港",     color: "var(--c-green-deep)", bg: "var(--c-green-bg)", icon: "" },
   // 陆运专属环节（2026-08-06）。key 必须小写，statusCfg 是按 toLowerCase() 查的
-  atportcn:       { zh: "到达凭祥口岸", color: "#1e40af", bg: "#dbeafe", icon: "" },
-  exportcleared:  { zh: "出口已放行", color: "#166534", bg: "#dcfce7", icon: "" },
-  invietnam:      { zh: "过境越南",   color: "#1e40af", bg: "#dbeafe", icon: "" },
-  laoscleared:    { zh: "老挝边境已放行", color: "#166534", bg: "#dcfce7", icon: "" },
-  borderdelay:    { zh: "口岸滞留",   color: "#b45309", bg: "#fef3c7", icon: "" },
-  customsinspect: { zh: "海关查验",   color: "#b45309", bg: "#fef3c7", icon: "" },
-  customsth:      { zh: "清关中",     color: "#92400e", bg: "#fef3c7", icon: "" },
-  customscleared: { zh: "清关已放行", color: "#166534", bg: "#dcfce7", icon: "" },
+  atportcn:       { zh: "到达凭祥口岸", color: "var(--c-blue-deep)", bg: "var(--c-blue-bg-2)", icon: "" },
+  exportcleared:  { zh: "出口已放行", color: "var(--c-green-dark)", bg: "#dcfce7", icon: "" },
+  invietnam:      { zh: "过境越南",   color: "var(--c-blue-deep)", bg: "var(--c-blue-bg-2)", icon: "" },
+  laoscleared:    { zh: "老挝边境已放行", color: "var(--c-green-dark)", bg: "#dcfce7", icon: "" },
+  borderdelay:    { zh: "口岸滞留",   color: "#b45309", bg: "var(--c-amber-bg)", icon: "" },
+  customsinspect: { zh: "海关查验",   color: "#b45309", bg: "var(--c-amber-bg)", icon: "" },
+  customsth:      { zh: "清关中",     color: "var(--c-amber-deep)", bg: "var(--c-amber-bg)", icon: "" },
+  customscleared: { zh: "清关已放行", color: "var(--c-green-dark)", bg: "#dcfce7", icon: "" },
   inwarehouseth:  { zh: "已到仓",     color: "#7c3aed", bg: "#ede9fe", icon: "" },
   outfordelivery: { zh: "派送中",     color: "#db2777", bg: "#fce7f3", icon: "" },
-  delivered:      { zh: "派送完成",   color: "#16a34a", bg: "#f0fdf4", icon: "" },
-  exception:      { zh: "异常",       color: "#dc2626", bg: "#fef2f2", icon: "" },
-  returned:       { zh: "已退回",     color: "#991b1b", bg: "#fee2e2", icon: "" },
-  cancelled:      { zh: "已取消",     color: "#6b7280", bg: "#f3f4f6", icon: "" },
+  delivered:      { zh: "派送完成",   color: "var(--c-green-3)", bg: "#f0fdf4", icon: "" },
+  exception:      { zh: "异常",       color: "var(--c-red-2)", bg: "#fef2f2", icon: "" },
+  returned:       { zh: "已退回",     color: "var(--c-red-dark)", bg: "var(--c-red-bg)", icon: "" },
+  cancelled:      { zh: "已取消",     color: "var(--t-muted)", bg: "var(--s-sunken)", icon: "" },
   // 容器状态（旧日志兼容）
-  intransit:      { zh: "运输中",     color: "#1e40af", bg: "#dbeafe", icon: "" },
-  customs:        { zh: "清关中",     color: "#92400e", bg: "#fef3c7", icon: "" },
+  intransit:      { zh: "运输中",     color: "var(--c-blue-deep)", bg: "var(--c-blue-bg-2)", icon: "" },
+  customs:        { zh: "清关中",     color: "var(--c-amber-deep)", bg: "var(--c-amber-bg)", icon: "" },
   loading:        { zh: "装柜中",     color: "#0369a1", bg: "#e0f2fe", icon: "" },
   sealed:         { zh: "已封柜",     color: "#0369a1", bg: "#e0f2fe", icon: "" },
-  arrived:        { zh: "已到港",     color: "#065f46", bg: "#d1fae5", icon: "" },
+  arrived:        { zh: "已到港",     color: "var(--c-green-deep)", bg: "var(--c-green-bg)", icon: "" },
 };
 
 function statusCfg(s: string) {
@@ -107,8 +107,8 @@ function statusCfg(s: string) {
   const cfg = STATUS_CONFIG[s.toLowerCase()];
   return {
     zh: shipmentStatusZh(s),
-    color: cfg?.color ?? "#6b7280",
-    bg: cfg?.bg ?? "#f3f4f6",
+    color: cfg?.color ?? "var(--t-muted)",
+    bg: cfg?.bg ?? "var(--s-sunken)",
     icon: cfg?.icon ?? "",
   };
 }
@@ -136,12 +136,12 @@ function LoadingSkeleton() {
     <div style={{ padding: "32px 0" }}>
       {[1, 2, 3, 4].map((i) => (
         <div key={i} style={{ display: "flex", gap: 12, marginBottom: 20, paddingLeft: 28, position: "relative" }}>
-          <div style={{ position: "absolute", left: 2, top: 0, bottom: -20, width: 2, background: "#e5e7eb" }} />
-          <div style={{ position: "absolute", left: -3, top: 2, width: 12, height: 12, borderRadius: "50%", background: "#e5e7eb" }} />
+          <div style={{ position: "absolute", left: 2, top: 0, bottom: -20, width: 2, background: "var(--l-soft)" }} />
+          <div style={{ position: "absolute", left: -3, top: 2, width: 12, height: 12, borderRadius: "50%", background: "var(--l-soft)" }} />
           <div style={{ flex: 1 }}>
-            <div style={{ height: 12, width: 80, background: "#e5e7eb", borderRadius: 4, marginBottom: 6 }} />
-            <div style={{ height: 14, width: "70%", background: "#f3f4f6", borderRadius: 4, marginBottom: 4 }} />
-            <div style={{ height: 10, width: "40%", background: "#f9fafb", borderRadius: 4 }} />
+            <div style={{ height: 12, width: 80, background: "var(--l-soft)", borderRadius: 4, marginBottom: 6 }} />
+            <div style={{ height: 14, width: "70%", background: "var(--s-sunken)", borderRadius: 4, marginBottom: 4 }} />
+            <div style={{ height: 10, width: "40%", background: "var(--s-alt)", borderRadius: 4 }} />
           </div>
         </div>
       ))}
@@ -160,8 +160,8 @@ function TimelineNode({ item, isLast, isChild, index, tabTrackingNo, hideOperato
   // 父运单标签下混合展示了各子单的记录，标出这条属于哪个子单
   const sourceLabel = item.trackingNo && item.trackingNo !== tabTrackingNo ? item.trackingNo : null;
   // 墨黑配色：不用彩色，最新一条黑色实心，历史节点浅灰描边
-  const INK = "#111827";
-  const tickColor = isLatest ? "#fff" : "#9ca3af";
+  const INK = "var(--t-heading)";
+  const tickColor = isLatest ? "var(--white)" : "var(--t-faint)";
   const dot = isChild ? 20 : 22;
   // 备注跟状态说的是同一件事就不重复显示
   const showRemark = Boolean(item.remark && item.remark !== toCfg.zh);
@@ -178,7 +178,7 @@ function TimelineNode({ item, isLast, isChild, index, tabTrackingNo, hideOperato
           top: dot + 4,
           bottom: 0,
           width: 1,
-          background: "#e5e7eb",
+          background: "var(--l-soft)",
         }} />
       )}
 
@@ -190,8 +190,8 @@ function TimelineNode({ item, isLast, isChild, index, tabTrackingNo, hideOperato
         width: dot,
         height: dot,
         borderRadius: "50%",
-        border: `1.5px solid ${isLatest ? INK : "#d1d5db"}`,
-        background: isLatest ? INK : "#fff",
+        border: `1.5px solid ${isLatest ? INK : "var(--l-strong)"}`,
+        background: isLatest ? INK : "var(--white)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -213,13 +213,13 @@ function TimelineNode({ item, isLast, isChild, index, tabTrackingNo, hideOperato
         <span style={{
           fontSize: isChild ? 14 : 15,
           fontWeight: isLatest ? 700 : 500,
-          color: isLatest ? "#111827" : "#374151",
+          color: isLatest ? "var(--t-heading)" : "var(--t-body)",
         }}>{toCfg.zh}</span>
-        <span style={{ fontSize: isChild ? 12 : 13, color: "#9ca3af" }}>
+        <span style={{ fontSize: isChild ? 12 : 13, color: "var(--t-faint)" }}>
           {formatTime(item.changedAt)}
         </span>
         {sourceLabel && (
-          <span style={{ fontSize: 12, color: "#6b7280" }}>{sourceLabel}</span>
+          <span style={{ fontSize: 12, color: "var(--t-muted)" }}>{sourceLabel}</span>
         )}
         {/* 删掉写错的一条（员工/管理员）。客户端后端根本不下发 id，这里不会出现 */}
         {onDelete && item.id ? (
@@ -229,11 +229,11 @@ function TimelineNode({ item, isLast, isChild, index, tabTrackingNo, hideOperato
             onClick={() => onDelete(item)}
             style={{
               marginLeft: "auto",
-              border: "1px solid #e5e7eb",
+              border: "1px solid var(--l-soft)",
               borderRadius: 6,
               padding: "2px 8px",
-              background: "#fff",
-              color: deleting ? "#9ca3af" : "#b91c1c",
+              background: "var(--white)",
+              color: deleting ? "var(--t-faint)" : "var(--c-red-deep)",
               fontSize: 12,
               cursor: deleting ? "not-allowed" : "pointer",
             }}
@@ -246,7 +246,7 @@ function TimelineNode({ item, isLast, isChild, index, tabTrackingNo, hideOperato
       {/* 第二行：备注（跟状态重复就不显示）+ 操作人。
           操作人只在有名字时才显示 —— 客户端后端已经把它清空，这里不会再兜底成「员工/管理员」 */}
       {showRemark || showOperator ? (
-        <div style={{ marginTop: 4, fontSize: isChild ? 12 : 13, color: "#9ca3af", lineHeight: 1.6 }}>
+        <div style={{ marginTop: 4, fontSize: isChild ? 12 : 13, color: "var(--t-faint)", lineHeight: 1.6 }}>
           {showRemark ? item.remark : null}
           {showOperator ? (
             <span style={{ marginLeft: showRemark ? 8 : 0 }}>{item.operatorName}</span>
@@ -257,7 +257,7 @@ function TimelineNode({ item, isLast, isChild, index, tabTrackingNo, hideOperato
       {/* 下一站（2026-08-06）。客户看得到货接下来去哪，比如「下一站【泰国边境】」。
           老轨迹这个字段是空的，就不显示这一行。 */}
       {item.nextStop ? (
-        <div style={{ marginTop: 2, fontSize: isChild ? 12 : 13, color: "#6b7280", lineHeight: 1.6 }}>
+        <div style={{ marginTop: 2, fontSize: isChild ? 12 : 13, color: "var(--t-muted)", lineHeight: 1.6 }}>
           下一站【{item.nextStop}】
         </div>
       ) : null}
@@ -309,7 +309,7 @@ function TrackContent({ data, onReload }: { data: TrackData; onReload?: () => vo
     <div>
       {/* Tab bar */}
       {allTabs.length > 1 && (
-        <div style={{ display: "flex", gap: 0, marginBottom: 16, border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
+        <div style={{ display: "flex", gap: 0, marginBottom: 16, border: "1px solid var(--l-soft)", borderRadius: 10, overflow: "hidden" }}>
           {allTabs.map((t, i) => (
             <button
               key={i}
@@ -320,10 +320,10 @@ function TrackContent({ data, onReload }: { data: TrackData; onReload?: () => vo
                 padding: "8px 12px",
                 fontSize: 12,
                 fontWeight: activeTab === i ? 700 : 500,
-                background: activeTab === i ? "#2563eb" : "#fff",
-                color: activeTab === i ? "#fff" : "#374151",
+                background: activeTab === i ? "var(--c-blue)" : "var(--white)",
+                color: activeTab === i ? "var(--white)" : "var(--t-body)",
                 cursor: "pointer",
-                borderRight: i < allTabs.length - 1 ? "1px solid #e5e7eb" : "none",
+                borderRight: i < allTabs.length - 1 ? "1px solid var(--l-soft)" : "none",
               }}
             >
               {i === 0 ? `${t.trackingNo}` : `${t.trackingNo}`}
@@ -334,8 +334,8 @@ function TrackContent({ data, onReload }: { data: TrackData; onReload?: () => vo
 
       {/* 装柜时间线（客户端看到日期但不含柜号） */}
       {data.containers && data.containers.length > 0 && data.containers.some(c => c.loadingDate || c.departureDate) ? (
-        <div style={{ marginBottom: 14, fontSize: 13, color: "#6b7280" }}>
-          <div style={{ fontWeight: 600, color: "#374151", marginBottom: 4 }}>装柜时间</div>
+        <div style={{ marginBottom: 14, fontSize: 13, color: "var(--t-muted)" }}>
+          <div style={{ fontWeight: 600, color: "var(--t-body)", marginBottom: 4 }}>装柜时间</div>
           {data.containers.map((c, i) => (
             <div key={i} style={{ marginBottom: 4 }}>
               {c.loadingDate ? <div>装柜：{c.loadingDate.slice(0, 10)}</div> : null}
@@ -349,8 +349,8 @@ function TrackContent({ data, onReload }: { data: TrackData; onReload?: () => vo
 
       {/* 尾程派送 */}
       {data.lastmile ? (
-        <div style={{ marginBottom: 14, fontSize: 13, color: "#6b7280" }}>
-          <div style={{ fontWeight: 600, color: "#374151", marginBottom: 4 }}>派送信息</div>
+        <div style={{ marginBottom: 14, fontSize: 13, color: "var(--t-muted)" }}>
+          <div style={{ fontWeight: 600, color: "var(--t-body)", marginBottom: 4 }}>派送信息</div>
           {data.lastmile.driverName ? <div>司机：{data.lastmile.driverName}</div> : null}
           {data.lastmile.licensePlate ? <div>车牌：{data.lastmile.licensePlate}</div> : null}
           {data.lastmile.phoneNumber ? <div>电话：{data.lastmile.phoneNumber}</div> : null}
@@ -362,16 +362,16 @@ function TrackContent({ data, onReload }: { data: TrackData; onReload?: () => vo
                 alt="签收凭证"
                 onClick={() => setZoomImage(data.lastmile!.signImageBase64!)}
                 title="点击查看大图"
-                style={{ maxWidth: 200, maxHeight: 200, borderRadius: 6, border: "1px solid #e5e7eb", cursor: "zoom-in", display: "block" }}
+                style={{ maxWidth: 200, maxHeight: 200, borderRadius: 6, border: "1px solid var(--l-soft)", cursor: "zoom-in", display: "block" }}
               />
-              <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 3 }}>点击查看大图</div>
+              <div style={{ fontSize: 12, color: "var(--t-faint)", marginTop: 3 }}>点击查看大图</div>
             </div>
           ) : null}
         </div>
       ) : null}
 
       {/* 产品信息 */}
-      <div style={{ marginBottom: 14, fontSize: 13, color: "#6b7280" }}>
+      <div style={{ marginBottom: 14, fontSize: 13, color: "var(--t-muted)" }}>
         {activeTab === 0 ? (
           <>
             {data.products && data.products.length > 1 ? (
@@ -390,10 +390,10 @@ function TrackContent({ data, onReload }: { data: TrackData; onReload?: () => vo
 
       {/* 当前状态：只留文字，不用渐变底、色块和光晕 */}
       <div style={{ marginBottom: 18 }}>
-        <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 3 }}>当前状态</div>
-        <div style={{ fontSize: 18, fontWeight: 700, color: "#111827" }}>{currentCfg.zh}</div>
+        <div style={{ fontSize: 12, color: "var(--t-faint)", marginBottom: 3 }}>当前状态</div>
+        <div style={{ fontSize: 18, fontWeight: 700, color: "var(--t-heading)" }}>{currentCfg.zh}</div>
         {activeTab === 0 && data.containers?.length > 0 && (
-          <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 3 }}>
+          <div style={{ fontSize: 12, color: "var(--t-faint)", marginTop: 3 }}>
             {data.containers.map((c) => c.containerNo).filter(Boolean).join("  ｜  ") || null}
           </div>
         )}
@@ -408,10 +408,10 @@ function TrackContent({ data, onReload }: { data: TrackData; onReload?: () => vo
             gap: 8,
             marginBottom: 14,
             paddingBottom: 8,
-            borderBottom: "1px solid #f3f4f6",
+            borderBottom: "1px solid var(--s-sunken)",
           }}>
-            <span style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>状态变更记录</span>
-            <span style={{ fontSize: 12, color: "#9ca3af" }}>{tab.timeline.length} 条</span>
+            <span style={{ fontSize: 14, fontWeight: 600, color: "var(--t-heading)" }}>状态变更记录</span>
+            <span style={{ fontSize: 12, color: "var(--t-faint)" }}>{tab.timeline.length} 条</span>
           </div>
 
           {/* Timeline: 最新在上 */}
@@ -450,7 +450,7 @@ function TrackContent({ data, onReload }: { data: TrackData; onReload?: () => vo
           }}
         >
           <img src={zoomImage} alt="查看大图" style={{ maxWidth: "100%", maxHeight: "100%", borderRadius: 8 }} />
-          <div style={{ position: "absolute", top: 16, right: 20, color: "#fff", fontSize: 28, lineHeight: 1 }}>×</div>
+          <div style={{ position: "absolute", top: 16, right: 20, color: "var(--white)", fontSize: 28, lineHeight: 1 }}>×</div>
         </div>
       ) : null}
     </div>
@@ -514,7 +514,7 @@ function ShipmentTrackModal({ trackingOrId, onClose }: { trackingOrId: string; o
         maxWidth: 600,
         maxHeight: "88vh",
         overflow: "auto",
-        background: "#fff",
+        background: "var(--white)",
         borderRadius: 16,
         boxShadow: "0 24px 80px rgba(0,0,0,0.25)",
       }}>
@@ -527,13 +527,13 @@ function ShipmentTrackModal({ trackingOrId, onClose }: { trackingOrId: string; o
           justifyContent: "space-between",
           alignItems: "center",
           padding: "18px 22px",
-          background: "#fff",
-          borderBottom: "1px solid #e5e7eb",
+          background: "var(--white)",
+          borderBottom: "1px solid var(--l-soft)",
           borderRadius: "16px 16px 0 0",
         }}>
           <div>
-            <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#111827" }}>物流轨迹</h3>
-            <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2, fontFamily: "monospace" }}>
+            <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "var(--t-heading)" }}>物流轨迹</h3>
+            <div style={{ fontSize: 12, color: "var(--t-muted)", marginTop: 2, fontFamily: "monospace" }}>
               {data?.trackingNo || trackingOrId}
             </div>
           </div>
@@ -543,22 +543,22 @@ function ShipmentTrackModal({ trackingOrId, onClose }: { trackingOrId: string; o
               width: 32,
               height: 32,
               borderRadius: 8,
-              border: "1px solid #e5e7eb",
-              background: "#fff",
+              border: "1px solid var(--l-soft)",
+              background: "var(--white)",
               cursor: "pointer",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               fontSize: 16,
-              color: "#6b7280",
+              color: "var(--t-muted)",
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = "#f3f4f6";
-              e.currentTarget.style.color = "#111827";
+              e.currentTarget.style.background = "var(--s-sunken)";
+              e.currentTarget.style.color = "var(--t-heading)";
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background = "#fff";
-              e.currentTarget.style.color = "#6b7280";
+              e.currentTarget.style.background = "var(--white)";
+              e.currentTarget.style.color = "var(--t-muted)";
             }}
           >
             ×
@@ -572,17 +572,17 @@ function ShipmentTrackModal({ trackingOrId, onClose }: { trackingOrId: string; o
           ) : error ? (
             <div style={{ textAlign: "center", padding: "40px 0" }}>
               <div style={{ fontSize: 40, marginBottom: 12 }}></div>
-              <div style={{ fontSize: 14, color: "#b91c1c", marginBottom: 8 }}>{error}</div>
+              <div style={{ fontSize: 14, color: "var(--c-red-deep)", marginBottom: 8 }}>{error}</div>
               <button
                 onClick={() => load()}
                 style={{
-                  border: "1px solid #d1d5db",
+                  border: "1px solid var(--l-strong)",
                   borderRadius: 8,
                   padding: "6px 16px",
-                  background: "#fff",
+                  background: "var(--white)",
                   cursor: "pointer",
                   fontSize: 13,
-                  color: "#374151",
+                  color: "var(--t-body)",
                 }}
               >
                 重试
@@ -590,8 +590,8 @@ function ShipmentTrackModal({ trackingOrId, onClose }: { trackingOrId: string; o
             </div>
           ) : !data ? (
             <div style={{ textAlign: "center", padding: "40px 0" }}>
-              <div style={{ fontSize: 14, color: "#6b7280", marginBottom: 4 }}>暂无物流轨迹</div>
-              <div style={{ fontSize: 12, color: "#9ca3af" }}>货物状态更新后将显示在这里</div>
+              <div style={{ fontSize: 14, color: "var(--t-muted)", marginBottom: 4 }}>暂无物流轨迹</div>
+              <div style={{ fontSize: 12, color: "var(--t-faint)" }}>货物状态更新后将显示在这里</div>
             </div>
           ) : (
             <TrackContent data={data} onReload={load} />
@@ -634,9 +634,9 @@ export function openShipmentTrack(trackingOrId: string) {
         style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.4)", padding: 16 }}
         onClick={() => { errRoot.unmount(); overlay.remove(); }}
       >
-        <div style={{ width: "100%", maxWidth: 500, background: "#fff", borderRadius: 12, padding: 24, textAlign: "center" }}>
+        <div style={{ width: "100%", maxWidth: 500, background: "var(--white)", borderRadius: 12, padding: 24, textAlign: "center" }}>
           <div style={{ fontSize: 40, marginBottom: 12 }}></div>
-          <div style={{ fontSize: 14, color: "#b91c1c" }}>加载失败，请刷新页面后重试</div>
+          <div style={{ fontSize: 14, color: "var(--c-red-deep)" }}>加载失败，请刷新页面后重试</div>
         </div>
       </div>,
     );

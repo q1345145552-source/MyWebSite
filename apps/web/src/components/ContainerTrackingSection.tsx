@@ -50,28 +50,28 @@ interface Props {
 function statusColor(status: string): { bg: string; fg: string; border: string } {
   switch (status) {
     case "LOADING":
-      return { bg: "#fef3c7", fg: "#92400e", border: "#fde68a" };
+      return { bg: "var(--c-amber-bg)", fg: "var(--c-amber-deep)", border: "#fde68a" };
     case "SEALED":
       return { bg: "#e0f2fe", fg: "#0369a1", border: "#7dd3fc" };
     case "IN_TRANSIT":
-      return { bg: "#dbeafe", fg: "#1d4ed8", border: "#bfdbfe" };
+      return { bg: "var(--c-blue-bg-2)", fg: "#1d4ed8", border: "#bfdbfe" };
     case "DELAY_DEPARTED":
     case "DELAY_IN_TRANSIT":
-      return { bg: "#fef3c7", fg: "#b45309", border: "#fde68a" };
+      return { bg: "var(--c-amber-bg)", fg: "#b45309", border: "#fde68a" };
     case "ARRIVED":
       return { bg: "#cffafe", fg: "#0e7490", border: "#a5f3fc" };
     case "CUSTOMS":
       return { bg: "#fce7f3", fg: "#9d174d", border: "#fbcfe8" };
     case "CUSTOMS_CLEARED":
-      return { bg: "#dcfce7", fg: "#166534", border: "#bbf7d0" };
+      return { bg: "#dcfce7", fg: "var(--c-green-dark)", border: "#bbf7d0" };
     case "IN_WAREHOUSE_TH":
       return { bg: "#ede9fe", fg: "#7c3aed", border: "#c4b5fd" };
     case "DELIVERING":
       return { bg: "#fed7aa", fg: "#9a3412", border: "#fdba74" };
     case "SIGNED":
-      return { bg: "#dcfce7", fg: "#166534", border: "#bbf7d0" };
+      return { bg: "#dcfce7", fg: "var(--c-green-dark)", border: "#bbf7d0" };
     default:
-      return { bg: "#f1f5f9", fg: "#000000", border: "#e2e8f0" };
+      return { bg: "var(--s-cool-2)", fg: "var(--t-strong)", border: "var(--l-cool)" };
   }
 }
 
@@ -129,7 +129,7 @@ export function ContainerTrackingSection({ shipmentId, trackingNo, hideContainer
 
   if (error) {
     return (
-      <div style={{ padding: 10, color: "#dc2626", fontSize: 13 }}>
+      <div style={{ padding: 10, color: "var(--c-red-2)", fontSize: 13 }}>
         出柜信息加载失败：{error}
       </div>
     );
@@ -142,7 +142,7 @@ export function ContainerTrackingSection({ shipmentId, trackingNo, hideContainer
           padding: "10px 12px",
           color: "#64748b",
           fontSize: 13,
-          background: "#f8fafc",
+          background: "var(--s-cool)",
           border: "1px dashed #cbd5e1",
           borderRadius: 8,
         }}
@@ -155,7 +155,7 @@ export function ContainerTrackingSection({ shipmentId, trackingNo, hideContainer
   return (
     <div
       style={{
-        border: "1px solid #e2e8f0",
+        border: "1px solid var(--l-cool)",
         borderRadius: 10,
         background: "#fafbff",
         padding: 12,
@@ -177,8 +177,8 @@ export function ContainerTrackingSection({ shipmentId, trackingNo, hideContainer
               gap: 4,
               padding: "4px 10px",
               borderRadius: 999,
-              background: "linear-gradient(90deg, #fef3c7, #fde68a)",
-              color: "#92400e",
+              background: "linear-gradient(90deg, var(--c-amber-bg), #fde68a)",
+              color: "var(--c-amber-deep)",
               fontSize: 12,
               fontWeight: 700,
               border: "1px solid #fcd34d",
@@ -200,7 +200,7 @@ export function ContainerTrackingSection({ shipmentId, trackingNo, hideContainer
                 border: `1px solid ${color.border}`,
                 borderRadius: 8,
                 padding: "10px 12px",
-                background: "#fff",
+                background: "var(--white)",
                 display: "grid",
                 gridTemplateColumns: "1fr auto",
                 gap: 8,
@@ -217,8 +217,8 @@ export function ContainerTrackingSection({ shipmentId, trackingNo, hideContainer
                       fontSize: 11,
                       padding: "1px 7px",
                       borderRadius: 4,
-                      background: "#f1f5f9",
-                      color: "#000000",
+                      background: "var(--s-cool-2)",
+                      color: "var(--t-strong)",
                       fontWeight: 600,
                     }}
                   >

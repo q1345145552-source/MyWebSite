@@ -398,7 +398,7 @@ export default function StaffConsolidationPage() {
   return (
     <RoleShell allowedRole={["staff", "admin"]} title="集货拼柜管理">
       {toast && (
-        <div onClick={() => setToast("")} style={{ position: "fixed", top: 20, right: 20, zIndex: 9999, background: "#1f2937", color: "#fff", padding: "10px 20px", borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.3)", cursor: "pointer" }}>
+        <div onClick={() => setToast("")} style={{ position: "fixed", top: 20, right: 20, zIndex: 9999, background: "#1f2937", color: "var(--white)", padding: "10px 20px", borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.3)", cursor: "pointer" }}>
           {toast}
         </div>
       )}
@@ -414,18 +414,18 @@ export default function StaffConsolidationPage() {
           <h2 style={{ fontSize: 22, margin: "0 0 16px 0" }}>集货拼柜管理</h2>
 
           <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={{ padding: "6px 10px", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 13 }}>
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={{ padding: "6px 10px", border: "1px solid var(--l-strong)", borderRadius: 6, fontSize: 13 }}>
               <option value="">全部状态</option>
               {ALL_STATUSES.map((s) => <option key={s} value={s}>{STATUS_ZH[s]}</option>)}
             </select>
-            <input placeholder="搜索任务编号 / 客户名" value={searchText} onChange={(e) => setSearchText(e.target.value)} style={{ padding: "6px 12px", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 13, width: 220 }} />
+            <input placeholder="搜索任务编号 / 客户名" value={searchText} onChange={(e) => setSearchText(e.target.value)} style={{ padding: "6px 12px", border: "1px solid var(--l-strong)", borderRadius: 6, fontSize: 13, width: 220 }} />
           </div>
 
-          {loading ? <p style={{ color: "#6b7280" }}>加载中...</p> : filteredTasks.length === 0 ? <p style={{ color: "#9ca3af", textAlign: "center", padding: 40 }}>暂无任务</p> : (
+          {loading ? <p style={{ color: "var(--t-muted)" }}>加载中...</p> : filteredTasks.length === 0 ? <p style={{ color: "var(--t-faint)", textAlign: "center", padding: 40 }}>暂无任务</p> : (
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
-                  <tr style={{ background: "#f3f4f6" }}>
+                  <tr style={{ background: "var(--s-sunken)" }}>
                     <th style={thS}>任务编号</th>
                     <th style={thS}>客户</th>
                     <th style={thS}>目的地</th>
@@ -436,21 +436,21 @@ export default function StaffConsolidationPage() {
                 </thead>
                 <tbody>
                   {filteredTasks.map((t) => (
-                    <tr key={t.id} onClick={() => setSelectedTaskId(t.id)} style={{ borderBottom: "1px solid #e5e7eb", cursor: "pointer", transition: "background 0.15s" }}
-                      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "#f9fafb"; }}
+                    <tr key={t.id} onClick={() => setSelectedTaskId(t.id)} style={{ borderBottom: "1px solid var(--l-soft)", cursor: "pointer", transition: "background 0.15s" }}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--s-alt)"; }}
                       onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = ""; }}>
                       <td style={{ ...tdS, fontWeight: 600, whiteSpace: "nowrap", minWidth: 140 }}>{t.taskNo}</td>
                       <td style={{ ...tdS, minWidth: 80 }}>{t.clientName || "-"}</td>
                       <td style={{ ...tdS, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.destinationTh}</td>
                       <td style={tdS}>
                         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <div style={{ flex: 1, height: 6, background: "#e5e7eb", borderRadius: 3, overflow: "hidden", maxWidth: 120 }}>
-                            <div style={{ height: "100%", width: `${Math.min(t.volumePercent, 100)}%`, background: t.volumePercent >= 85 ? (t.volumePercent >= 100 ? "#10b981" : "#f59e0b") : "#3b82f6", borderRadius: 3 }} />
+                          <div style={{ flex: 1, height: 6, background: "var(--l-soft)", borderRadius: 3, overflow: "hidden", maxWidth: 120 }}>
+                            <div style={{ height: "100%", width: `${Math.min(t.volumePercent, 100)}%`, background: t.volumePercent >= 85 ? (t.volumePercent >= 100 ? "var(--c-green-2)" : "var(--c-amber)") : "#3b82f6", borderRadius: 3 }} />
                           </div>
-                          <span style={{ fontSize: 11, color: "#6b7280", whiteSpace: "nowrap" }}>{t.totalVolumeM3}/{t.maxVolumeM3}</span>
+                          <span style={{ fontSize: 11, color: "var(--t-muted)", whiteSpace: "nowrap" }}>{t.totalVolumeM3}/{t.maxVolumeM3}</span>
                         </div>
                       </td>
-                      <td style={tdS}><span style={{ fontSize: 11, padding: "2px 6px", borderRadius: 4, background: t.status === "completed" ? "#d1fae5" : t.status === "cancelled" ? "#fee2e2" : "#dbeafe", color: t.status === "completed" ? "#065f46" : t.status === "cancelled" ? "#991b1b" : "#1e40af", whiteSpace: "nowrap" }}>{STATUS_ZH[t.status] || t.status}</span></td>
+                      <td style={tdS}><span style={{ fontSize: 11, padding: "2px 6px", borderRadius: 4, background: t.status === "completed" ? "var(--c-green-bg)" : t.status === "cancelled" ? "var(--c-red-bg)" : "var(--c-blue-bg-2)", color: t.status === "completed" ? "var(--c-green-deep)" : t.status === "cancelled" ? "var(--c-red-dark)" : "var(--c-blue-deep)", whiteSpace: "nowrap" }}>{STATUS_ZH[t.status] || t.status}</span></td>
                       <td style={{ ...tdS, whiteSpace: "nowrap", minWidth: 100 }}>{formatBeijingTime(t.createdAt)}</td>
                     </tr>
                   ))}
@@ -465,42 +465,42 @@ export default function StaffConsolidationPage() {
       {selectedTaskId && taskDetail && (
         <div style={{ padding: 24 }}>
           <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
-            <button onClick={() => { setSelectedTaskId(null); setPreviewImage(null); setShowReceive(null); setShowQuote(false); setShowLoadingForm(false); setCancelStep(0); setExpandedPrealerts(new Set()); setReviewSubmitting(false); setShowRejectDialog(false); setRejectReason(""); setToast(""); loadTasks(); }} style={{ padding: "6px 14px", border: "1px solid #d1d5db", background: "#fff", color: "#6b7280", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>← 返回</button>
+            <button onClick={() => { setSelectedTaskId(null); setPreviewImage(null); setShowReceive(null); setShowQuote(false); setShowLoadingForm(false); setCancelStep(0); setExpandedPrealerts(new Set()); setReviewSubmitting(false); setShowRejectDialog(false); setRejectReason(""); setToast(""); loadTasks(); }} style={{ padding: "6px 14px", border: "1px solid var(--l-strong)", background: "var(--white)", color: "var(--t-muted)", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>← 返回</button>
             <h2 style={{ fontSize: 20, margin: 0 }}>{taskDetail.taskNo}</h2>
-            <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>创建时间：{formatBeijingTime(taskDetail.createdAt)}</div>
-            <span style={{ color: "#6b7280", fontSize: 13 }}>{taskDetail.clientName}</span>
-            <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 4, background: "#dbeafe", color: "#1e40af" }}>{STATUS_ZH[taskDetail.status] || taskDetail.status}</span>
+            <div style={{ fontSize: 12, color: "var(--t-muted)", marginBottom: 8 }}>创建时间：{formatBeijingTime(taskDetail.createdAt)}</div>
+            <span style={{ color: "var(--t-muted)", fontSize: 13 }}>{taskDetail.clientName}</span>
+            <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 4, background: "var(--c-blue-bg-2)", color: "var(--c-blue-deep)" }}>{STATUS_ZH[taskDetail.status] || taskDetail.status}</span>
             <div style={{ flex: 1 }} />
-            <button onClick={handleExport} style={{ padding: "6px 14px", background: "#059669", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>导出 Excel</button>
+            <button onClick={handleExport} style={{ padding: "6px 14px", background: "var(--c-green)", color: "var(--white)", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>导出 Excel</button>
           </div>
 
           {/* 进度条 */}
           {showProgress && (
-            <div style={{ marginBottom: 20, padding: 16, background: "#f9fafb", borderRadius: 10, border: "1px solid #e5e7eb" }}>
-              <div style={{ height: 20, background: "#e5e7eb", borderRadius: 10, overflow: "hidden", position: "relative" }}>
-                <div style={{ height: "100%", width: `${Math.min(taskDetail.volumePercent, 100)}%`, background: taskDetail.volumePercent >= 85 ? (taskDetail.volumePercent >= 100 ? "#10b981" : "#f59e0b") : "#1d4ed8", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  {taskDetail.volumePercent > 15 && <span style={{ fontSize: 11, color: "#fff", fontWeight: 600 }}>{taskDetail.totalVolumeM3} m³ ({taskDetail.volumePercent}%)</span>}
+            <div style={{ marginBottom: 20, padding: 16, background: "var(--s-alt)", borderRadius: 10, border: "1px solid var(--l-soft)" }}>
+              <div style={{ height: 20, background: "var(--l-soft)", borderRadius: 10, overflow: "hidden", position: "relative" }}>
+                <div style={{ height: "100%", width: `${Math.min(taskDetail.volumePercent, 100)}%`, background: taskDetail.volumePercent >= 85 ? (taskDetail.volumePercent >= 100 ? "var(--c-green-2)" : "var(--c-amber)") : "#1d4ed8", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  {taskDetail.volumePercent > 15 && <span style={{ fontSize: 11, color: "var(--white)", fontWeight: 600 }}>{taskDetail.totalVolumeM3} m³ ({taskDetail.volumePercent}%)</span>}
                 </div>
               </div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#9ca3af", marginTop: 2 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--t-faint)", marginTop: 2 }}>
                 <span>0</span><span>{taskDetail.maxVolumeM3} m³</span>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, marginTop: 10, textAlign: "center" }}>
-                <div><div style={{ fontSize: 18, fontWeight: 700 }}>{taskDetail.totalPrealerts}</div><div style={{ fontSize: 11, color: "#6b7280" }}>预报单</div></div>
-                <div><div style={{ fontSize: 18, fontWeight: 700 }}>{taskDetail.totalPackages}</div><div style={{ fontSize: 11, color: "#6b7280" }}>总件数</div></div>
-                <div><div style={{ fontSize: 18, fontWeight: 700 }}>{taskDetail.totalVolumeM3}</div><div style={{ fontSize: 11, color: "#6b7280" }}>已收体积</div></div>
-                <div><div style={{ fontSize: 18, fontWeight: 700 }}>{Math.max(0, taskDetail.maxVolumeM3 - taskDetail.totalVolumeM3).toFixed(1)}</div><div style={{ fontSize: 11, color: "#6b7280" }}>剩余空间</div></div>
+                <div><div style={{ fontSize: 18, fontWeight: 700 }}>{taskDetail.totalPrealerts}</div><div style={{ fontSize: 11, color: "var(--t-muted)" }}>预报单</div></div>
+                <div><div style={{ fontSize: 18, fontWeight: 700 }}>{taskDetail.totalPackages}</div><div style={{ fontSize: 11, color: "var(--t-muted)" }}>总件数</div></div>
+                <div><div style={{ fontSize: 18, fontWeight: 700 }}>{taskDetail.totalVolumeM3}</div><div style={{ fontSize: 11, color: "var(--t-muted)" }}>已收体积</div></div>
+                <div><div style={{ fontSize: 18, fontWeight: 700 }}>{Math.max(0, taskDetail.maxVolumeM3 - taskDetail.totalVolumeM3).toFixed(1)}</div><div style={{ fontSize: 11, color: "var(--t-muted)" }}>剩余空间</div></div>
               </div>
             </div>
           )}
 
           {/* 装柜后信息 */}
           {!showProgress && (
-            <div style={{ marginBottom: 20, padding: 16, background: "#eff6ff", borderRadius: 10, border: "1px solid #bfdbfe" }}>
+            <div style={{ marginBottom: 20, padding: 16, background: "var(--c-blue-bg)", borderRadius: 10, border: "1px solid #bfdbfe" }}>
               <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
-                {taskDetail.containerNo && <div><span style={{ fontSize: 12, color: "#6b7280" }}>柜号</span><div style={{ fontWeight: 600 }}>{taskDetail.containerNo}</div></div>}
-                {taskDetail.loadingDate && <div><span style={{ fontSize: 12, color: "#6b7280" }}>装柜日期</span><div style={{ fontWeight: 600 }}>{taskDetail.loadingDate}</div></div>}
-                <div><span style={{ fontSize: 12, color: "#6b7280" }}>物流状态</span><div style={{ fontWeight: 600 }}>{STATUS_ZH[taskDetail.status]}</div></div>
+                {taskDetail.containerNo && <div><span style={{ fontSize: 12, color: "var(--t-muted)" }}>柜号</span><div style={{ fontWeight: 600 }}>{taskDetail.containerNo}</div></div>}
+                {taskDetail.loadingDate && <div><span style={{ fontSize: 12, color: "var(--t-muted)" }}>装柜日期</span><div style={{ fontWeight: 600 }}>{taskDetail.loadingDate}</div></div>}
+                <div><span style={{ fontSize: 12, color: "var(--t-muted)" }}>物流状态</span><div style={{ fontWeight: 600 }}>{STATUS_ZH[taskDetail.status]}</div></div>
               </div>
             </div>
           )}
@@ -508,8 +508,8 @@ export default function StaffConsolidationPage() {
           {/* 满柜确认 */}
           {isFull && taskDetail.status === "collecting" && (
             <div style={{ marginBottom: 16, padding: "12px 16px", background: "#fffbeb", borderRadius: 8, border: "1px solid #fde68a", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <span style={{ fontWeight: 600, color: "#92400e", fontSize: 14 }}>已到 {taskDetail.maxVolumeM3} 方，请确认满柜</span>
-              <button onClick={handleConfirmFull} style={{ padding: "6px 16px", background: "#2563eb", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontSize: 13 }}>确认满柜</button>
+              <span style={{ fontWeight: 600, color: "var(--c-amber-deep)", fontSize: 14 }}>已到 {taskDetail.maxVolumeM3} 方，请确认满柜</span>
+              <button onClick={handleConfirmFull} style={{ padding: "6px 16px", background: "var(--c-blue)", color: "var(--white)", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontSize: 13 }}>确认满柜</button>
             </div>
           )}
 
@@ -517,7 +517,7 @@ export default function StaffConsolidationPage() {
           <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
             {/* 报价 */}
             {(taskDetail.status === "full_confirmed" || taskDetail.status === "quoted") && (
-              <button onClick={() => setShowQuote(true)} style={actionBtn("#2563eb")}>
+              <button onClick={() => setShowQuote(true)} style={actionBtn("var(--c-blue)")}>
                 {taskDetail.status === "quoted" ? "修改报价" : "录入报价"}
               </button>
             )}
@@ -525,42 +525,42 @@ export default function StaffConsolidationPage() {
             {/* 状态推进按钮 */}
             {actionButtons?.map((b) => (
               b.toStatus === "loading" ? (
-                <button key={b.toStatus} onClick={() => setShowLoadingForm(true)} style={actionBtn("#2563eb")} disabled={advancing}>{b.label}</button>
+                <button key={b.toStatus} onClick={() => setShowLoadingForm(true)} style={actionBtn("var(--c-blue)")} disabled={advancing}>{b.label}</button>
               ) : (
-                <button key={b.toStatus} onClick={() => handleAdvance(b.toStatus)} style={actionBtn("#2563eb")} disabled={advancing}>{advancing ? "处理中..." : b.label}</button>
+                <button key={b.toStatus} onClick={() => handleAdvance(b.toStatus)} style={actionBtn("var(--c-blue)")} disabled={advancing}>{advancing ? "处理中..." : b.label}</button>
               )
             ))}
 
             {/* 取消 */}
             {["collecting", "full_confirmed", "quoted"].includes(taskDetail.status) && (
-              <button onClick={handleCancel} style={actionBtn("#ef4444")} disabled={cancelSubmitting}>
+              <button onClick={handleCancel} style={actionBtn("var(--c-red)")} disabled={cancelSubmitting}>
                 {cancelSubmitting ? "取消中..." : cancelStep === 1 ? "确认取消" : "取消任务"}
               </button>
             )}
             {cancelStep === 1 && (
-              <button onClick={() => setCancelStep(0)} style={{ ...actionBtnBase, border: "1px solid #d1d5db", color: "#6b7280", background: "#fff" }}>返回</button>
+              <button onClick={() => setCancelStep(0)} style={{ ...actionBtnBase, border: "1px solid var(--l-strong)", color: "var(--t-muted)", background: "var(--white)" }}>返回</button>
             )}
           </div>
 
           {/* 付款审核区域 */}
           {taskDetail.paymentStatus === "pending_review" && (
-            <div style={{ marginBottom: 16, padding: "16px", background: "#fef3c7", borderRadius: 8, border: "1px solid #f59e0b" }}>
-              <div style={{ fontWeight: 700, color: "#92400e", fontSize: 15, marginBottom: 8 }}>💳 待审核付款</div>
+            <div style={{ marginBottom: 16, padding: "16px", background: "var(--c-amber-bg)", borderRadius: 8, border: "1px solid var(--c-amber)" }}>
+              <div style={{ fontWeight: 700, color: "var(--c-amber-deep)", fontSize: 15, marginBottom: 8 }}>💳 待审核付款</div>
               {taskDetail.paymentProofBase64 && (
                 <div style={{ marginBottom: 10 }}>
-                  <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 4 }}>付款截图</div>
-                  <img src={taskDetail.paymentProofBase64} alt="付款凭证" style={{ maxWidth: "100%", maxHeight: 300, borderRadius: 6, cursor: "pointer", border: "1px solid #e5e7eb" }}
+                  <div style={{ fontSize: 12, color: "var(--t-muted)", marginBottom: 4 }}>付款截图</div>
+                  <img src={taskDetail.paymentProofBase64} alt="付款凭证" style={{ maxWidth: "100%", maxHeight: 300, borderRadius: 6, cursor: "pointer", border: "1px solid var(--l-soft)" }}
                     onClick={() => setPreviewImage(taskDetail.paymentProofBase64!)} />
                 </div>
               )}
-              <div style={{ fontSize: 13, color: "#92400e", marginBottom: 10 }}>
+              <div style={{ fontSize: 13, color: "var(--c-amber-deep)", marginBottom: 10 }}>
                 上传时间：{taskDetail.paymentProofUploadedAt ? formatBeijingTime(taskDetail.paymentProofUploadedAt) : "-"}
               </div>
               <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={handleApprovePayment} disabled={reviewSubmitting} style={{ padding: "8px 20px", background: "#2563eb", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
+                <button onClick={handleApprovePayment} disabled={reviewSubmitting} style={{ padding: "8px 20px", background: "var(--c-blue)", color: "var(--white)", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
                   {reviewSubmitting ? "处理中..." : "✓ 审核通过"}
                 </button>
-                <button onClick={() => setShowRejectDialog(true)} disabled={reviewSubmitting} style={{ padding: "8px 20px", border: "1px solid #d1d5db", color: "#6b7280", background: "#fff", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
+                <button onClick={() => setShowRejectDialog(true)} disabled={reviewSubmitting} style={{ padding: "8px 20px", border: "1px solid var(--l-strong)", color: "var(--t-muted)", background: "var(--white)", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
                   ✗ 审核不通过
                 </button>
               </div>
@@ -576,10 +576,10 @@ export default function StaffConsolidationPage() {
                 <textarea value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} placeholder="请填写拒绝原因，客户可见" style={{ ...fi, minHeight: 80 }} />
               </div>
               <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
-                <button onClick={handleRejectPayment} disabled={reviewSubmitting} style={{ padding: "8px 18px", background: "#2563eb", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
+                <button onClick={handleRejectPayment} disabled={reviewSubmitting} style={{ padding: "8px 18px", background: "var(--c-blue)", color: "var(--white)", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
                   {reviewSubmitting ? "提交中..." : "确认拒绝"}
                 </button>
-                <button onClick={() => { setShowRejectDialog(false); setRejectReason(""); }} style={{ padding: "8px 18px", border: "1px solid #d1d5db", background: "#fff", color: "#6b7280", borderRadius: 6, cursor: "pointer" }}>取消</button>
+                <button onClick={() => { setShowRejectDialog(false); setRejectReason(""); }} style={{ padding: "8px 18px", border: "1px solid var(--l-strong)", background: "var(--white)", color: "var(--t-muted)", borderRadius: 6, cursor: "pointer" }}>取消</button>
               </div>
             </Modal>
           )}
@@ -592,11 +592,11 @@ export default function StaffConsolidationPage() {
                 <div><label style={fl}>订舱费 (¥)</label><input type="number" value={quoteBooking} onChange={(e) => setQuoteBooking(e.target.value)} style={fi} /></div>
                 <div><label style={fl}>清关费 (¥)</label><input type="number" value={quoteCustoms} onChange={(e) => setQuoteCustoms(e.target.value)} style={fi} /></div>
                 <div><label style={fl}>装柜费 (¥)</label><input type="number" value={quoteLoading} onChange={(e) => setQuoteLoading(e.target.value)} style={fi} /></div>
-                <div style={{ borderTop: "2px solid #10b981", paddingTop: 8, fontSize: 20, fontWeight: 700, color: "#10b981" }}>总价：¥{totalFee.toLocaleString()}</div>
+                <div style={{ borderTop: "2px solid var(--c-green-2)", paddingTop: 8, fontSize: 20, fontWeight: 700, color: "var(--c-green-2)" }}>总价：¥{totalFee.toLocaleString()}</div>
               </div>
               <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
-                <button onClick={handleQuote} disabled={quoteSubmitting} style={{ padding: "8px 18px", background: "#2563eb", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>{quoteSubmitting ? "保存中..." : "保存报价"}</button>
-                <button onClick={() => setShowQuote(false)} style={{ padding: "8px 18px", border: "1px solid #d1d5db", background: "#fff", color: "#6b7280", borderRadius: 6, cursor: "pointer" }}>取消</button>
+                <button onClick={handleQuote} disabled={quoteSubmitting} style={{ padding: "8px 18px", background: "var(--c-blue)", color: "var(--white)", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>{quoteSubmitting ? "保存中..." : "保存报价"}</button>
+                <button onClick={() => setShowQuote(false)} style={{ padding: "8px 18px", border: "1px solid var(--l-strong)", background: "var(--white)", color: "var(--t-muted)", borderRadius: 6, cursor: "pointer" }}>取消</button>
               </div>
             </Modal>
           )}
@@ -610,8 +610,8 @@ export default function StaffConsolidationPage() {
                 <div><label style={fl}>装柜日期</label><input type="date" value={loadingDate} onChange={(e) => setLoadingDate(e.target.value)} style={fi} /></div>
               </div>
               <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
-                <button onClick={handleLoading} disabled={loadingSubmitting} style={{ padding: "8px 18px", background: "#2563eb", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>{loadingSubmitting ? "提交中..." : "确认装柜"}</button>
-                <button onClick={() => setShowLoadingForm(false)} style={{ padding: "8px 18px", border: "1px solid #d1d5db", background: "#fff", color: "#6b7280", borderRadius: 6, cursor: "pointer" }}>取消</button>
+                <button onClick={handleLoading} disabled={loadingSubmitting} style={{ padding: "8px 18px", background: "var(--c-blue)", color: "var(--white)", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>{loadingSubmitting ? "提交中..." : "确认装柜"}</button>
+                <button onClick={() => setShowLoadingForm(false)} style={{ padding: "8px 18px", border: "1px solid var(--l-strong)", background: "var(--white)", color: "var(--t-muted)", borderRadius: 6, cursor: "pointer" }}>取消</button>
               </div>
             </Modal>
           )}
@@ -621,33 +621,33 @@ export default function StaffConsolidationPage() {
 
           {pendingPrealerts.length > 0 && (
             <div style={{ marginBottom: 16 }}>
-              <h4 style={{ fontSize: 14, color: "#f59e0b", marginBottom: 8 }}>待签收 ({pendingPrealerts.length})</h4>
+              <h4 style={{ fontSize: 14, color: "var(--c-amber)", marginBottom: 8 }}>待签收 ({pendingPrealerts.length})</h4>
               {pendingPrealerts.map((pa) => <StaffPrealertRow key={pa.id} pa={pa} taskStatus={taskDetail.status} expanded={expandedPrealerts} setExpanded={setExpandedPrealerts} onReceive={() => setShowReceive(pa)} setPreviewImage={setPreviewImage} />)}
             </div>
           )}
 
           {receivedPrealerts.length > 0 && (
             <div>
-              <h4 style={{ fontSize: 14, color: "#10b981", marginBottom: 8 }}>已签收 ({receivedPrealerts.length})</h4>
+              <h4 style={{ fontSize: 14, color: "var(--c-green-2)", marginBottom: 8 }}>已签收 ({receivedPrealerts.length})</h4>
               {receivedPrealerts.map((pa) => <StaffPrealertRow key={pa.id} pa={pa} taskStatus={taskDetail.status} expanded={expandedPrealerts} setExpanded={setExpandedPrealerts} setPreviewImage={setPreviewImage} />)}
             </div>
           )}
 
           {pendingPrealerts.length === 0 && receivedPrealerts.length === 0 && (
-            <p style={{ color: "#9ca3af", textAlign: "center", padding: 20 }}>暂无预报单</p>
+            <p style={{ color: "var(--t-faint)", textAlign: "center", padding: 20 }}>暂无预报单</p>
           )}
 
           {/* 状态时间线 */}
           {taskDetail.statusLogs && taskDetail.statusLogs.length > 0 && (
             <div style={{ marginTop: 28 }}>
               <h3 style={{ fontSize: 16, marginBottom: 12 }}>状态记录</h3>
-              <div style={{ position: "relative", paddingLeft: 24, borderLeft: "2px solid #e5e7eb", marginLeft: 8 }}>
+              <div style={{ position: "relative", paddingLeft: 24, borderLeft: "2px solid var(--l-soft)", marginLeft: 8 }}>
                 {taskDetail.statusLogs.map((log: any, i: number) => (
                   <div key={log.id || i} style={{ marginBottom: 14, position: "relative" }}>
-                    <div style={{ position: "absolute", left: -30, top: 4, width: 12, height: 12, borderRadius: "50%", background: "#3b82f6", border: "2px solid #fff" }} />
+                    <div style={{ position: "absolute", left: -30, top: 4, width: 12, height: 12, borderRadius: "50%", background: "#3b82f6", border: "2px solid var(--white)" }} />
                     <div style={{ fontSize: 13, fontWeight: 600 }}>{STATUS_ZH[log.fromStatus] || log.fromStatus} → {STATUS_ZH[log.toStatus] || log.toStatus}</div>
-                    <div style={{ fontSize: 12, color: "#6b7280" }}>{log.operatorName} · {formatBeijingTime(log.createdAt)}</div>
-                    {log.remark && <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>{log.remark}</div>}
+                    <div style={{ fontSize: 12, color: "var(--t-muted)" }}>{log.operatorName} · {formatBeijingTime(log.createdAt)}</div>
+                    {log.remark && <div style={{ fontSize: 12, color: "var(--t-faint)", marginTop: 2 }}>{log.remark}</div>}
                   </div>
                 ))}
               </div>
@@ -661,13 +661,13 @@ export default function StaffConsolidationPage() {
         <Modal onClose={() => { setShowReceive(null); setReceiveProofBase64(""); }} wide>
           <h3 style={{ marginTop: 0 }}>签收预报单 {showReceive.trackingNo}</h3>
           <div style={{ marginBottom: 12, fontSize: 13 }}>
-            <span style={{ color: "#6b7280" }}>唛头：</span>{showReceive.mark}
-            {showReceive.expressNo && <><span style={{ color: "#6b7280", marginLeft: 16 }}>快递单号：</span>{showReceive.expressNo}</>}
+            <span style={{ color: "var(--t-muted)" }}>唛头：</span>{showReceive.mark}
+            {showReceive.expressNo && <><span style={{ color: "var(--t-muted)", marginLeft: 16 }}>快递单号：</span>{showReceive.expressNo}</>}
           </div>
           <div style={{ overflowX: "auto", marginBottom: 16 }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
-                <tr style={{ background: "#f9fafb" }}>
+                <tr style={{ background: "var(--s-alt)" }}>
                   <th style={{ ...thS, minWidth: 100, whiteSpace: "nowrap" }}>唛头</th>
                   <th style={{ ...thS, minWidth: 160, whiteSpace: "nowrap" }}>运单号</th>
                   <th style={{ ...thS, minWidth: 80, whiteSpace: "nowrap" }}>产品名称</th>
@@ -684,7 +684,7 @@ export default function StaffConsolidationPage() {
               </thead>
               <tbody>
                 {showReceive.products.map((p, i) => (
-                  <tr key={p.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
+                  <tr key={p.id} style={{ borderBottom: "1px solid var(--l-soft)" }}>
                     {i === 0 && <td rowSpan={showReceive.products.length} style={{ ...tdS, minWidth: 100, whiteSpace: "nowrap", verticalAlign: "middle" , textAlign: "center" }}>{showReceive.mark}</td>}
                     {i === 0 && <td rowSpan={showReceive.products.length} style={{ ...tdS, minWidth: 160, whiteSpace: "nowrap", verticalAlign: "middle" , textAlign: "center" }}>{showReceive.trackingNo}</td>}
                     <td style={{ ...tdS, minWidth: 80, whiteSpace: "nowrap" }}>{p.productName}</td>
@@ -702,7 +702,7 @@ export default function StaffConsolidationPage() {
               </tbody>
             </table>
           </div>
-          <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 12 }}>
+          <div style={{ borderTop: "1px solid var(--l-soft)", paddingTop: 12 }}>
             <label style={fl}>签收照片 *（必填）</label>
             <input ref={fileInputRef} type="file" accept="image/*" onChange={async (e) => {
               const file = e.target.files?.[0];
@@ -714,13 +714,13 @@ export default function StaffConsolidationPage() {
             }} style={{ marginTop: 4 }} />
             {receiveProofBase64 && (
               <div style={{ marginTop: 8 }}>
-                <img src={`data:${receiveProofMime || "image/png"};base64,${receiveProofBase64}`} alt="签收照片预览" style={{ maxWidth: 200, maxHeight: 150, borderRadius: 6, border: "1px solid #e5e7eb" }} />
+                <img src={`data:${receiveProofMime || "image/png"};base64,${receiveProofBase64}`} alt="签收照片预览" style={{ maxWidth: 200, maxHeight: 150, borderRadius: 6, border: "1px solid var(--l-soft)" }} />
               </div>
             )}
           </div>
           <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
-            <button onClick={handleReceive} disabled={receiveSubmitting || !receiveProofBase64} style={{ padding: "8px 20px", background: !receiveProofBase64 ? "#9ca3af" : "#2563eb", color: "#fff", border: "none", borderRadius: 6, cursor: receiveProofBase64 ? "pointer" : "not-allowed", fontWeight: 600 }}>{receiveSubmitting ? "签收中..." : !receiveProofBase64 ? "请上传签收照片" : "确认签收"}</button>
-            <button onClick={() => { setShowReceive(null); setReceiveProofBase64(""); setReceiveProofFileName(""); setReceiveProofMime(""); }} style={{ padding: "8px 20px", border: "1px solid #d1d5db", background: "#fff", borderRadius: 6, cursor: "pointer", color: "#6b7280" }}>取消</button>
+            <button onClick={handleReceive} disabled={receiveSubmitting || !receiveProofBase64} style={{ padding: "8px 20px", background: !receiveProofBase64 ? "var(--t-faint)" : "var(--c-blue)", color: "var(--white)", border: "none", borderRadius: 6, cursor: receiveProofBase64 ? "pointer" : "not-allowed", fontWeight: 600 }}>{receiveSubmitting ? "签收中..." : !receiveProofBase64 ? "请上传签收照片" : "确认签收"}</button>
+            <button onClick={() => { setShowReceive(null); setReceiveProofBase64(""); setReceiveProofFileName(""); setReceiveProofMime(""); }} style={{ padding: "8px 20px", border: "1px solid var(--l-strong)", background: "var(--white)", borderRadius: 6, cursor: "pointer", color: "var(--t-muted)" }}>取消</button>
           </div>
         </Modal>
       )}
@@ -747,19 +747,19 @@ function StaffPrealertRow({
   const totalVol = pa.products.reduce((s, p) => s + (p.volume ?? 0), 0);
 
   return (
-    <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 12, marginBottom: 8, background: "#fff", cursor: "pointer" }} onClick={toggle}>
+    <div style={{ border: "1px solid var(--l-soft)", borderRadius: 8, padding: 12, marginBottom: 8, background: "var(--white)", cursor: "pointer" }} onClick={toggle}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ display: "flex", gap: 12, alignItems: "center", flex: 1 }}>
           <span style={{ fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", minWidth: 160 }}>{pa.trackingNo}</span>
           <span style={{ fontSize: 13, whiteSpace: "nowrap", minWidth: 100 }}>{pa.mark}</span>
-          {pa.expressNo && <span style={{ fontSize: 11, color: "#9ca3af" }}>快递: {pa.expressNo}</span>}
-          <span style={{ fontSize: 11, color: "#9ca3af" }}>{formatBeijingTime(pa.createdAt)}</span>
+          {pa.expressNo && <span style={{ fontSize: 11, color: "var(--t-faint)" }}>快递: {pa.expressNo}</span>}
+          <span style={{ fontSize: 11, color: "var(--t-faint)" }}>{formatBeijingTime(pa.createdAt)}</span>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <span style={{ fontSize: 12, color: "#6b7280", whiteSpace: "nowrap" }}>{totalPkg}件 / {totalVol.toFixed(3)}m³</span>
-          <span style={{ fontSize: 11, padding: "2px 6px", borderRadius: 4, background: pa.status === "received" ? "#d1fae5" : "#fef3c7", color: pa.status === "received" ? "#065f46" : "#92400e", whiteSpace: "nowrap" }}>{STATUS_ZH[pa.status]}</span>
+          <span style={{ fontSize: 12, color: "var(--t-muted)", whiteSpace: "nowrap" }}>{totalPkg}件 / {totalVol.toFixed(3)}m³</span>
+          <span style={{ fontSize: 11, padding: "2px 6px", borderRadius: 4, background: pa.status === "received" ? "var(--c-green-bg)" : "var(--c-amber-bg)", color: pa.status === "received" ? "var(--c-green-deep)" : "var(--c-amber-deep)", whiteSpace: "nowrap" }}>{STATUS_ZH[pa.status]}</span>
           {pa.status === "pending" && onReceive && (
-            <button onClick={(e) => { e.stopPropagation(); onReceive(); }} style={{ padding: "3px 10px", background: "#2563eb", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>签收</button>
+            <button onClick={(e) => { e.stopPropagation(); onReceive(); }} style={{ padding: "3px 10px", background: "var(--c-blue)", color: "var(--white)", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>签收</button>
           )}
         </div>
       </div>
@@ -767,11 +767,11 @@ function StaffPrealertRow({
       {open && (
         <div style={{ marginTop: 10 }} onClick={(e) => e.stopPropagation()}>
           {pa.status === "received" && pa.signedAt && (
-            <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
+            <div style={{ fontSize: 12, color: "var(--t-muted)", marginBottom: 8 }}>
               签收时间：{formatBeijingTime(pa.signedAt)}
               {pa.receivedProofBase64 && (
                 <div style={{ marginTop: 6 }}>
-                  <img src={pa.receivedProofBase64} alt="签收照片" style={{ maxWidth: 160, maxHeight: 120, borderRadius: 6, border: "1px solid #e5e7eb", cursor: "pointer", verticalAlign: "middle" }}
+                  <img src={pa.receivedProofBase64} alt="签收照片" style={{ maxWidth: 160, maxHeight: 120, borderRadius: 6, border: "1px solid var(--l-soft)", cursor: "pointer", verticalAlign: "middle" }}
                     onClick={(e) => { e.stopPropagation(); setPreviewImage(pa.receivedProofBase64!); }} />
                 </div>
               )}
@@ -780,7 +780,7 @@ function StaffPrealertRow({
           <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
-              <tr style={{ background: "#f9fafb" }}>
+              <tr style={{ background: "var(--s-alt)" }}>
                 <th style={{ ...thS, minWidth: 100, whiteSpace: "nowrap" }}>唛头</th>
                 <th style={{ ...thS, minWidth: 160, whiteSpace: "nowrap" }}>运单号</th>
                 <th style={{ ...thS, minWidth: 80, whiteSpace: "nowrap" }}>产品名称</th>
@@ -800,7 +800,7 @@ function StaffPrealertRow({
             </thead>
             <tbody>
               {pa.products.map((p, i) => (
-                <tr key={p.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
+                <tr key={p.id} style={{ borderBottom: "1px solid var(--l-soft)" }}>
                   {i === 0 && <td rowSpan={pa.products.length} style={{ ...tdS, minWidth: 100, whiteSpace: "nowrap", verticalAlign: "middle" , textAlign: "center" }}>{pa.mark}</td>}
                   {i === 0 && <td rowSpan={pa.products.length} style={{ ...tdS, minWidth: 160, whiteSpace: "nowrap", verticalAlign: "middle" , textAlign: "center" }}>{pa.trackingNo}</td>}
                   <td style={{ ...tdS, minWidth: 80, whiteSpace: "nowrap" }}>{p.productName}</td>
@@ -819,10 +819,10 @@ function StaffPrealertRow({
                     {p.productImageBase64 ? (
                       <button
                         onClick={(e) => { e.stopPropagation(); setPreviewImage(p.productImageBase64); }}
-                        style={{ padding: "3px 10px", border: "1px solid #2563eb", color: "#2563eb", background: "#fff", borderRadius: 4, cursor: "pointer", fontSize: 12 }}
+                        style={{ padding: "3px 10px", border: "1px solid var(--c-blue)", color: "var(--c-blue)", background: "var(--white)", borderRadius: 4, cursor: "pointer", fontSize: 12 }}
                       >查看图片</button>
                     ) : (
-                      <span style={{ color: "#9ca3af", fontSize: 12 }}>暂无图片</span>
+                      <span style={{ color: "var(--t-faint)", fontSize: 12 }}>暂无图片</span>
                     )}
                   </td>
                 </tr>
@@ -842,7 +842,7 @@ function StaffPrealertRow({
 function Modal({ children, onClose, wide }: { children: React.ReactNode; onClose: () => void; wide?: boolean }) {
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 9000, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 24, maxWidth: wide ? 1100 : 460, width: "90%", maxHeight: "85vh", overflowY: "auto", boxShadow: "0 8px 32px rgba(0,0,0,0.2)" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--white)", borderRadius: 12, padding: 24, maxWidth: wide ? 1100 : 460, width: "90%", maxHeight: "85vh", overflowY: "auto", boxShadow: "0 8px 32px rgba(0,0,0,0.2)" }}>
         {children}
       </div>
     </div>
@@ -852,9 +852,9 @@ function Modal({ children, onClose, wide }: { children: React.ReactNode; onClose
 // ============================================================================
 // 样式
 // ============================================================================
-const thS: React.CSSProperties = { textAlign: "left", padding: "6px 10px", fontSize: 12, color: "#6b7280", fontWeight: 600, borderBottom: "2px solid #e5e7eb" };
+const thS: React.CSSProperties = { textAlign: "left", padding: "6px 10px", fontSize: 12, color: "var(--t-muted)", fontWeight: 600, borderBottom: "2px solid var(--l-soft)" };
 const tdS: React.CSSProperties = { padding: "7px 10px", fontSize: 12 };
-const fl: React.CSSProperties = { display: "block", fontSize: 13, color: "#374151", fontWeight: 500, marginBottom: 3 };
-const fi: React.CSSProperties = { width: "100%", padding: "7px 10px", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 13, boxSizing: "border-box" };
-const actionBtn = (bg: string): React.CSSProperties => ({ padding: "6px 16px", background: bg, color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 600 });
+const fl: React.CSSProperties = { display: "block", fontSize: 13, color: "var(--t-body)", fontWeight: 500, marginBottom: 3 };
+const fi: React.CSSProperties = { width: "100%", padding: "7px 10px", border: "1px solid var(--l-strong)", borderRadius: 6, fontSize: 13, boxSizing: "border-box" };
+const actionBtn = (bg: string): React.CSSProperties => ({ padding: "6px 16px", background: bg, color: "var(--white)", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 600 });
 const actionBtnBase: React.CSSProperties = { padding: "6px 16px", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 600 };

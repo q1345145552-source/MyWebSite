@@ -15,7 +15,7 @@ interface PrealertSearchProps {
 }
 
 const compactStyle: Record<string, string | number> = {
-  border: "1px solid #d1d5db",
+  border: "1px solid var(--l-strong)",
   borderRadius: 6,
   padding: "5px 8px",
   fontSize: 12,
@@ -69,8 +69,8 @@ export default function PrealertSearch({
               border: "none",
               borderRadius: 6,
               padding: "6px 12px",
-              background: "#2563eb",
-              color: "#fff",
+              background: "var(--c-blue)",
+              color: "var(--white)",
               fontWeight: 500,
               fontSize: 12,
               cursor: "pointer",

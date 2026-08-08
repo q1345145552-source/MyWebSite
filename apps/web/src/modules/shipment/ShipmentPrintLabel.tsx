@@ -57,7 +57,7 @@ export function openPrintLabel(props: ShipmentPrintLabelProps) {
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: "Helvetica Neue", Arial, sans-serif; padding: 4px; }
-  .label { width: 280px; margin: 6px auto; border: 1.5px solid #000; padding: 8px 10px; page-break-after: always; }
+  .label { width: 280px; margin: 6px auto; border: 1.5px solid var(--t-strong); padding: 8px 10px; page-break-after: always; }
   .label:last-child { page-break-after: auto; }
   .row { display: flex; font-size: 14px; font-weight: bold; margin: 3px 0; }
   .row span { flex: 1; text-align: center; word-break: break-all; }
@@ -129,7 +129,7 @@ export function openPrintPrealert(props: PrealertPrintProps) {
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: "Helvetica Neue", Arial, sans-serif; padding: 4px; }
-  .label { width: 280px; margin: 6px auto; border: 1.5px solid #000; padding: 8px 10px; page-break-after: always; }
+  .label { width: 280px; margin: 6px auto; border: 1.5px solid var(--t-strong); padding: 8px 10px; page-break-after: always; }
   .label:last-child { page-break-after: auto; }
   .row { display: flex; font-size: 14px; font-weight: bold; margin: 3px 0; }
   .row span { flex: 1; text-align: center; word-break: break-all; }

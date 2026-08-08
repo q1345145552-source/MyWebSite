@@ -98,7 +98,7 @@ function PrealertPrintButton({ item }: { item: OrderItem }) {
         productQuantity: item.productQuantity,
         products: item.products?.map(p => ({ itemName: p.itemName, packageCount: p.packageCount })),
       });
-    }} style={{ border: "1px solid #8b5cf6", borderRadius: 4, padding: "4px 10px", fontSize: 12, background: "#fff", color: "#8b5cf6", cursor: "pointer", marginLeft: 6 }}>打印预报单</button>
+    }} style={{ border: "1px solid #8b5cf6", borderRadius: 4, padding: "4px 10px", fontSize: 12, background: "var(--white)", color: "#8b5cf6", cursor: "pointer", marginLeft: 6 }}>打印预报单</button>
   );
 }
 
@@ -690,29 +690,29 @@ export default function ClientHomePage() {
         </div>
 
         {/* 预报单管理 */}
-        <div style={{ marginBottom: 14, border: "1px solid #e5e7eb", borderRadius: 10, padding: 12, background: "#fff" }}>
+        <div style={{ marginBottom: 14, border: "1px solid var(--l-soft)", borderRadius: 10, padding: 12, background: "var(--white)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
             <div style={{ fontWeight: 700, color: "var(--ink)", fontSize: 16 }}>预报单</div>
             <button type="button" onClick={() => setShowCreateModal(true)}
-              style={{ border: "none", borderRadius: 6, padding: "8px 16px", background: "#2563eb", color: "#fff", fontWeight: 500, fontSize: 13, cursor: "pointer" }}>创建预报单</button>
+              style={{ border: "none", borderRadius: 6, padding: "8px 16px", background: "var(--c-blue)", color: "var(--white)", fontWeight: 500, fontSize: 13, cursor: "pointer" }}>创建预报单</button>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-            <div style={{ fontSize: 12, color: "#000000" }}>共 {prealerts.length} 条</div>
-            <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "4px 8px", fontSize: 12 }}>
+            <div style={{ fontSize: 12, color: "var(--t-strong)" }}>共 {prealerts.length} 条</div>
+            <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 8px", fontSize: 12 }}>
               {[20, 50, 100, 200, 500, 1000].map((n) => <option key={n} value={n}>{n}条/页</option>)}
             </select>
           </div>
           <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
             <input value={prealertSearch} onChange={(e) => setPrealertSearch(e.target.value)}
               placeholder="搜索单号、品名…"
-              style={{ flex: 1, border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 12px", fontSize: 13 }} />
+              style={{ flex: 1, border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 12px", fontSize: 13 }} />
           </div>
           {prealerts.length === 0 ? (
-            <div style={{ color: "#000000", fontSize: 13, padding: "20px 0", textAlign: "center" }}>暂无预报单</div>
+            <div style={{ color: "var(--t-strong)", fontSize: 13, padding: "20px 0", textAlign: "center" }}>暂无预报单</div>
           ) : (
                         <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                <thead><tr style={{ borderBottom: "2px solid #e5e7eb", textAlign: "left", background: "#f8fafc" }}>
+                <thead><tr style={{ borderBottom: "2px solid var(--l-soft)", textAlign: "left", background: "var(--s-cool)" }}>
                   <th style={{ padding: "6px 8px", fontWeight: 600 }}>唛头</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>预报单号</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>品名</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>尺寸(cm)</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>体积(m³)</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>重量(kg)</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>件</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>运输</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>状态</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>备注</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>操作</th>
                 </tr></thead>
                 <tbody>
@@ -724,12 +724,12 @@ export default function ClientHomePage() {
                     const isShipped = item.approvalStatus === "shipped";
                     const isReceived = item.approvalStatus === "received";
                     const sLabel = isReceived ? "已收货" : "已发货";
-                    const sColor = isReceived ? "#16a34a" : "#0369a1";
+                    const sColor = isReceived ? "var(--c-green-3)" : "#0369a1";
                     const sBg = isReceived ? "#dcfce7" : "#e0f2fe";
                     return (
-                      <tr key={item.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
+                      <tr key={item.id} style={{ borderBottom: "1px solid var(--l-soft)" }}>
                         <td style={{ padding: "6px 8px", fontFamily: "monospace", color: "#6b21a8", fontSize: 12 }}>{item.clientId || "—"}</td>
-                        <td style={{ padding: "6px 8px", fontFamily: "monospace", fontSize: 11 }}>{item.orderNo || "—"}<br /><span style={{ fontSize: 10, color: "#6b7280" }}>{item.trackingNo || ""}</span></td>
+                        <td style={{ padding: "6px 8px", fontFamily: "monospace", fontSize: 11 }}>{item.orderNo || "—"}<br /><span style={{ fontSize: 10, color: "var(--t-muted)" }}>{item.trackingNo || ""}</span></td>
                         <td style={{ padding: "6px 8px" }}>{item.itemName}</td>
                         <td style={{ padding: "6px 8px", fontSize: 11, whiteSpace: "nowrap" }}>{(() => { const dims = (item.products ?? []).map((p: any) => (p.lengthCm && p.widthCm && p.heightCm ? p.lengthCm + "×" + p.widthCm + "×" + p.heightCm : null)).filter(Boolean).join(", "); return dims || "—"; })()}</td>
                         <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }} className="col-num">{item.volumeM3 != null ? Number(item.volumeM3).toFixed(3) : "—"}</td>
@@ -739,7 +739,7 @@ export default function ClientHomePage() {
                         <td style={{ padding: "6px 8px" }}><span style={{ fontSize: 11, fontWeight: 500, color: sColor, background: sBg, padding: "2px 6px", borderRadius: 4 }}>{sLabel}</span></td>
                         <td style={{ padding: "6px 8px", fontSize: 12, maxWidth: 80, overflow: "hidden", textOverflow: "ellipsis" }} title={item.remark || ""}>{item.remark || ""}</td>
                         <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>
-                          {item.trackingNo ? <button type="button" onClick={() => openShipmentTrack(item.trackingNo!)} style={{ border: "1px solid #2563eb", borderRadius: 4, padding: "2px 8px", fontSize: 11, background: "#eff6ff", color: "#2563eb", cursor: "pointer" }}>物流轨迹</button> : <span style={{ fontSize: 11, color: "#9ca3af" }}>暂无物流轨迹</span>}
+                          {item.trackingNo ? <button type="button" onClick={() => openShipmentTrack(item.trackingNo!)} style={{ border: "1px solid var(--c-blue)", borderRadius: 4, padding: "2px 8px", fontSize: 11, background: "var(--c-blue-bg)", color: "var(--c-blue)", cursor: "pointer" }}>物流轨迹</button> : <span style={{ fontSize: 11, color: "var(--t-faint)" }}>暂无物流轨迹</span>}
                         </td>
                       </tr>
                     );
@@ -752,14 +752,14 @@ export default function ClientHomePage() {
 
         </div>
 
-        <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 10, marginBottom: 12, background: "#f8fafc" }}>
+        <div style={{ border: "1px solid var(--l-soft)", borderRadius: 8, padding: 10, marginBottom: 12, background: "var(--s-cool)" }}>
           <div style={{ fontWeight: 600, marginBottom: 8 }}>AI问答</div>
           <div style={{ display: "flex", gap: 8 }}>
             <input
               value={aiQuestion}
               onChange={(e) => setAiQuestion(e.target.value)}
               placeholder="例如：我的运单现在到哪了？"
-              style={{ flex: 1, border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}
+              style={{ flex: 1, border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   void runAiSearch();
@@ -770,13 +770,13 @@ export default function ClientHomePage() {
               type="button"
               onClick={() => void runAiSearch()}
               disabled={aiLoading}
-              style={{ border: "none", borderRadius: 8, padding: "8px 14px", color: "#fff", background: "#1d4ed8" }}
+              style={{ border: "none", borderRadius: 8, padding: "8px 14px", color: "var(--white)", background: "#1d4ed8" }}
             >
               {aiLoading ? "查询中..." : "AI 搜索"}
             </button>
           </div>
           {aiAnswer ? (
-            <div style={{ marginTop: 8, whiteSpace: "pre-wrap", color: "#000000", fontSize: 13 }}>{aiAnswer}</div>
+            <div style={{ marginTop: 8, whiteSpace: "pre-wrap", color: "var(--t-strong)", fontSize: 13 }}>{aiAnswer}</div>
           ) : null}
         </div>
       </section>
@@ -798,11 +798,11 @@ export default function ClientHomePage() {
               type="button"
               onClick={() => setQueryPanelCollapsed((v) => !v)}
               style={{
-                border: "1px solid #d1d5db",
+                border: "1px solid var(--l-strong)",
                 borderRadius: 8,
                 padding: "6px 10px",
-                color: "#000000",
-                background: "#fff",
+                color: "var(--t-strong)",
+                background: "var(--white)",
                 fontWeight: 600,
               }}
             >
@@ -821,8 +821,8 @@ export default function ClientHomePage() {
                   border: "none",
                   borderRadius: 999,
                   padding: "6px 14px",
-                  color: "#fff",
-                  background: queryMode === "unfinished" ? "#2563eb" : "#000000",
+                  color: "var(--white)",
+                  background: queryMode === "unfinished" ? "var(--c-blue)" : "var(--t-strong)",
                 }}
               >
                 订单在途
@@ -834,8 +834,8 @@ export default function ClientHomePage() {
                   border: "none",
                   borderRadius: 999,
                   padding: "6px 14px",
-                  color: "#fff",
-                  background: queryMode === "completed" ? "#2563eb" : "#000000",
+                  color: "var(--white)",
+                  background: queryMode === "completed" ? "var(--c-blue)" : "var(--t-strong)",
                 }}
               >
                 订单已完成
@@ -847,8 +847,8 @@ export default function ClientHomePage() {
                   border: "none",
                   borderRadius: 999,
                   padding: "6px 14px",
-                  color: "#fff",
-                  background: queryMode === "all" ? "#2563eb" : "#000000",
+                  color: "var(--white)",
+                  background: queryMode === "all" ? "var(--c-blue)" : "var(--t-strong)",
                 }}
               >
                 全部订单
@@ -864,28 +864,28 @@ export default function ClientHomePage() {
                 value={search.batchNo}
                 onChange={(e) => setSearch((v) => ({ ...v, batchNo: e.target.value }))}
                 placeholder="运单号"
-                style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}
+                style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }}
               />
               <input
                 value={search.orderId}
                 onChange={(e) => setSearch((v) => ({ ...v, orderId: e.target.value }))}
                 placeholder="运单号"
-                style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}
+                style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }}
               />
               <div style={{ display: "flex", gap: 4, alignItems: "center", gridColumn: "span 2" }}>
                 <input
                   type="date"
                   value={search.arrivedDateFrom}
                   onChange={(e) => setSearch((v) => ({ ...v, arrivedDateFrom: e.target.value }))}
-                  style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", flex: 1 }}
+                  style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px", flex: 1 }}
                   placeholder="到仓起始"
                 />
-                <span style={{ fontSize: 12, color: "#6b7280" }}>~</span>
+                <span style={{ fontSize: 12, color: "var(--t-muted)" }}>~</span>
                 <input
                   type="date"
                   value={search.arrivedDateTo}
                   onChange={(e) => setSearch((v) => ({ ...v, arrivedDateTo: e.target.value }))}
-                  style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", flex: 1 }}
+                  style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px", flex: 1 }}
                   placeholder="到仓截止"
                 />
               </div>
@@ -899,7 +899,7 @@ export default function ClientHomePage() {
                       top: "50%",
                       transform: "translateY(-50%)",
                       fontSize: 12,
-                      color: "#000000",
+                      color: "var(--t-strong)",
                       pointerEvents: "none",
                     }}
                   >
@@ -911,18 +911,18 @@ export default function ClientHomePage() {
                 value={search.domesticTrackingNo}
                 onChange={(e) => setSearch((v) => ({ ...v, domesticTrackingNo: e.target.value }))}
                 placeholder="国内快递单号"
-                style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}
+                style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }}
               />
               <input
                 value={search.status}
                 onChange={(e) => setSearch((v) => ({ ...v, status: e.target.value }))}
                 placeholder="状态（如 运输中）"
-                style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}
+                style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }}
               />
               <select
                 value={search.transportMode}
                 onChange={(e) => setSearch((v) => ({ ...v, transportMode: e.target.value }))}
-                style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}
+                style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }}
               >
                 <option value="">运输方式（全部）</option>
                 <option value="sea">海运</option>
@@ -931,7 +931,7 @@ export default function ClientHomePage() {
               <select
                 value={search.warehouseId}
                 onChange={(e) => setSearch((v) => ({ ...v, warehouseId: e.target.value }))}
-                style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}
+                style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }}
               >
                 <option value="">仓库（全部）</option>
                 {warehouseOptions.map((item) => (
@@ -947,7 +947,7 @@ export default function ClientHomePage() {
                 type="button"
                 onClick={() => void runOrderQuery()}
                 disabled={loading}
-                style={{ border: "none", borderRadius: 8, padding: "8px 14px", color: "#fff", background: "#2563eb" }}
+                style={{ border: "none", borderRadius: 8, padding: "8px 14px", color: "var(--white)", background: "var(--c-blue)" }}
               >
                 执行查询
               </button>
@@ -958,7 +958,7 @@ export default function ClientHomePage() {
                   setHasQueried(false);
                   setQueriedOrders([]);
                 }}
-                style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 14px", background: "#fff", color: "#000000" }}
+                style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 14px", background: "var(--white)", color: "var(--t-strong)" }}
               >
                 清空条件
               </button>
@@ -981,10 +981,10 @@ export default function ClientHomePage() {
               const totalPages = Math.max(1, Math.ceil(queriedOrders.length / pageSize));
               return (
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                  <span style={{ fontSize: 13, color: "#111827", fontWeight: 500 }}>共 {queriedOrders.length} 条 · 第 {currentPage}/{totalPages} 页</span>
+                  <span style={{ fontSize: 13, color: "var(--t-heading)", fontWeight: 500 }}>共 {queriedOrders.length} 条 · 第 {currentPage}/{totalPages} 页</span>
                   <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                    <button onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} disabled={currentPage <= 1} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "4px 12px", background: currentPage <= 1 ? "#f3f4f6" : "#fff", color: currentPage <= 1 ? "#9ca3af" : "#111827", cursor: currentPage <= 1 ? "default" : "pointer", fontSize: 13, fontWeight: 500 }}>上一页</button>
-                    <button onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "4px 12px", background: currentPage >= totalPages ? "#f3f4f6" : "#fff", color: currentPage >= totalPages ? "#9ca3af" : "#111827", cursor: currentPage >= totalPages ? "default" : "pointer", fontSize: 13, fontWeight: 500 }}>下一页</button>
+                    <button onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} disabled={currentPage <= 1} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 12px", background: currentPage <= 1 ? "var(--s-sunken)" : "var(--white)", color: currentPage <= 1 ? "var(--t-faint)" : "var(--t-heading)", cursor: currentPage <= 1 ? "default" : "pointer", fontSize: 13, fontWeight: 500 }}>上一页</button>
+                    <button onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 12px", background: currentPage >= totalPages ? "var(--s-sunken)" : "var(--white)", color: currentPage >= totalPages ? "var(--t-faint)" : "var(--t-heading)", cursor: currentPage >= totalPages ? "default" : "pointer", fontSize: 13, fontWeight: 500 }}>下一页</button>
                   </div>
                 </div>
               );
@@ -992,7 +992,7 @@ export default function ClientHomePage() {
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed", minWidth: CLIENT_TABLE_MIN_WIDTH }}>
                 <GridColgroup widths={CLIENT_COL_WIDTHS} flexIndex={CLIENT_FLEX_COL_INDEX} />
-                <thead><tr style={{ borderBottom: "2px solid #e5e7eb", textAlign: "left", background: "#f1f5f9" }}>
+                <thead><tr style={{ borderBottom: "2px solid var(--l-soft)", textAlign: "left", background: "var(--s-cool-2)" }}>
                   <th style={gridThStyle}>唛头</th><th style={gridThStyle}>运单号</th><th style={gridThStyle}>品名</th><th style={gridThStyle}>尺寸(cm)</th><th style={gridThStyle}>体积(m³)</th><th style={gridThStyle}>重量(kg)</th><th style={gridThStyle}>件</th><th style={gridThStyle}>运输</th><th style={gridThStyle}>物流状态</th><th style={gridThStyle}>备注</th><th style={gridThStyle}>操作</th>
                 </tr></thead>
                 <tbody>
@@ -1012,13 +1012,13 @@ export default function ClientHomePage() {
                     const images = detailImagesCache[item.id] ?? [];
                     return (
                       <Fragment key={item.id}>
-                        <tr style={{ borderBottom: isExpanded ? "none" : "1px solid #e5e7eb", background: isExpanded ? "#f8fafc" : "#fff" }}>
+                        <tr style={{ borderBottom: isExpanded ? "none" : "1px solid var(--l-soft)", background: isExpanded ? "var(--s-cool)" : "var(--white)" }}>
                           <td style={{ ...gridTdStyle, fontFamily: "monospace", color: "#6b21a8", fontSize: 12 }}>{item.clientId || "—"}</td>
                           <td style={{ ...gridTdStyle, fontFamily: "monospace", fontSize: 11 }}>
                             <div>{item.trackingNo || "—"}</div>
-                            <div style={{ fontSize: 10, color: "#6b7280" }}>{item.orderNo || ""}</div>
+                            <div style={{ fontSize: 10, color: "var(--t-muted)" }}>{item.orderNo || ""}</div>
                             {/* 明细块只露 3 行，这里写清楚一共几项 */}
-                            <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2 }}>共 {detailRows.length} 项</div>
+                            <div style={{ fontSize: 10, color: "var(--t-muted)", marginTop: 2 }}>共 {detailRows.length} 项</div>
                           </td>
                           {/* 品名 / 尺寸：合并成一块，固定高度一起滚 */}
                           <ProductDetailCell widths={CLIENT_DETAIL_COL_WIDTHS} rows={detailRows} />
@@ -1043,7 +1043,7 @@ export default function ClientHomePage() {
                             }} className="row-act">
                               详情
                             </button>
-                            {item.trackingNo ? <button onClick={() => openShipmentTrack(item.trackingNo!)} className="row-act">物流轨迹</button> : <span style={{ fontSize: 11, color: "#9ca3af" }}>暂无轨迹</span>}
+                            {item.trackingNo ? <button onClick={() => openShipmentTrack(item.trackingNo!)} className="row-act">物流轨迹</button> : <span style={{ fontSize: 11, color: "var(--t-faint)" }}>暂无轨迹</span>}
                           </td>
                         </tr>
                         {isExpanded && (
@@ -1058,26 +1058,26 @@ export default function ClientHomePage() {
                               >
                                   <div>
                               {/* 基本信息 */}
-                              <h4 style={{ margin: "0 0 8px", fontSize: 14, color: "#374151" }}>基本信息</h4>
+                              <h4 style={{ margin: "0 0 8px", fontSize: 14, color: "var(--t-body)" }}>基本信息</h4>
                               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "6px 16px", marginBottom: 12 }}>
-                                <div><span style={{ color: "#6b7280", fontSize: 12 }}>仓库：</span>{warehouseLabel(item.warehouseId)}</div>
+                                <div><span style={{ color: "var(--t-muted)", fontSize: 12 }}>仓库：</span>{warehouseLabel(item.warehouseId)}</div>
                                 {/* 2026-08-07 删除「批次号」：它存的就是柜号，用户要求客户不能看到柜号。
                                     后端 /client/orders 已同时不再下发 batchNo，两边一起改，不留半截。 */}
-                                <div><span style={{ color: "#6b7280", fontSize: 12 }}>运单号：</span>{item.trackingNo || "—"}</div>
-                                <div><span style={{ color: "#6b7280", fontSize: 12 }}>预报单号：</span>{item.orderNo || "—"}</div>
-                                <div><span style={{ color: "#6b7280", fontSize: 12 }}>审批状态：</span>{item.approvalStatus === "shipped" ? "已发货" : item.approvalStatus === "approved" ? "已审核" : item.approvalStatus || "—"}</div>
-                                <div><span style={{ color: "#6b7280", fontSize: 12 }}>运输方式：</span>{item.transportMode === "sea" ? "海运" : item.transportMode === "land" ? "陆运" : item.transportMode || "—"}</div>
-                                <div><span style={{ color: "#6b7280", fontSize: 12 }}>国内单号：</span>{(item.products?.length ?? 0) > 0 ? (item.products ?? []).map((p: any) => p.domesticTrackingNo || "—").filter(Boolean).join("、") || "—" : (item.domesticTrackingNo || "—")}</div>
-                                <div><span style={{ color: "#6b7280", fontSize: 12 }}>发货日期：</span>{item.shipDate || "—"}</div>
-                                <div><span style={{ color: "#6b7280", fontSize: 12 }}>货型：</span>{cargoTypeLabel}</div>
-                                <div><span style={{ color: "#6b7280", fontSize: 12 }}>收货地址：</span>{item.receiverAddressTh || "—"}</div>
+                                <div><span style={{ color: "var(--t-muted)", fontSize: 12 }}>运单号：</span>{item.trackingNo || "—"}</div>
+                                <div><span style={{ color: "var(--t-muted)", fontSize: 12 }}>预报单号：</span>{item.orderNo || "—"}</div>
+                                <div><span style={{ color: "var(--t-muted)", fontSize: 12 }}>审批状态：</span>{item.approvalStatus === "shipped" ? "已发货" : item.approvalStatus === "approved" ? "已审核" : item.approvalStatus || "—"}</div>
+                                <div><span style={{ color: "var(--t-muted)", fontSize: 12 }}>运输方式：</span>{item.transportMode === "sea" ? "海运" : item.transportMode === "land" ? "陆运" : item.transportMode || "—"}</div>
+                                <div><span style={{ color: "var(--t-muted)", fontSize: 12 }}>国内单号：</span>{(item.products?.length ?? 0) > 0 ? (item.products ?? []).map((p: any) => p.domesticTrackingNo || "—").filter(Boolean).join("、") || "—" : (item.domesticTrackingNo || "—")}</div>
+                                <div><span style={{ color: "var(--t-muted)", fontSize: 12 }}>发货日期：</span>{item.shipDate || "—"}</div>
+                                <div><span style={{ color: "var(--t-muted)", fontSize: 12 }}>货型：</span>{cargoTypeLabel}</div>
+                                <div><span style={{ color: "var(--t-muted)", fontSize: 12 }}>收货地址：</span>{item.receiverAddressTh || "—"}</div>
                               </div>
                               {/* 产品明细 */}
                               {(item.products?.length ?? 0) > 0 ? (
                                 <div style={{ marginBottom: 12 }}>
-                                  <h4 style={{ margin: "0 0 8px", fontSize: 14, color: "#374151" }}>产品明细</h4>
+                                  <h4 style={{ margin: "0 0 8px", fontSize: 14, color: "var(--t-body)" }}>产品明细</h4>
                                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                                    <thead><tr style={{ background: "#f1f5f9" }}>
+                                    <thead><tr style={{ background: "var(--s-cool-2)" }}>
                                       <th style={{ padding: "4px 6px", textAlign: "left" }}>品名</th>
                                       <th style={{ padding: "4px 6px", textAlign: "center" }}>件数</th>
                                       <th style={{ padding: "4px 6px", textAlign: "center" }}>单箱数量</th>
@@ -1088,7 +1088,7 @@ export default function ClientHomePage() {
                                     </tr></thead>
                                     <tbody>
                                       {(item.products ?? []).map((p: any, i: number) => (
-                                        <tr key={p.id || i} style={{ borderBottom: "1px solid #e5e7eb" }}>
+                                        <tr key={p.id || i} style={{ borderBottom: "1px solid var(--l-soft)" }}>
                                           <td style={{ padding: "4px 6px" }}>{p.itemName}</td>
                                           <td style={{ padding: "4px 6px", textAlign: "center" }}>{p.packageCount}</td>
                                           <td style={{ padding: "4px 6px", textAlign: "center" }}>{p.productQuantity ?? "—"}</td>
@@ -1104,11 +1104,11 @@ export default function ClientHomePage() {
                               ) : null}
                               {/* 产品图片 */}
                               <div>
-                                <h4 style={{ margin: "0 0 8px", fontSize: 14, color: "#374151" }}>产品图片</h4>
-                                {images.length === 0 ? <span style={{ fontSize: 12, color: "#9ca3af" }}>暂无</span> : (
+                                <h4 style={{ margin: "0 0 8px", fontSize: 14, color: "var(--t-body)" }}>产品图片</h4>
+                                {images.length === 0 ? <span style={{ fontSize: 12, color: "var(--t-faint)" }}>暂无</span> : (
                                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                                     {images.map((img) => (
-                                      <img key={img.id} src={imgSrc(img)} alt={img.fileName} onClick={() => setPreviewImage({ src: imgSrc(img), alt: img.fileName })} style={{ width: 80, height: 80, objectFit: "cover", borderRadius: 6, border: "1px solid #e5e7eb", cursor: "pointer" }} />
+                                      <img key={img.id} src={imgSrc(img)} alt={img.fileName} onClick={() => setPreviewImage({ src: imgSrc(img), alt: img.fileName })} style={{ width: 80, height: 80, objectFit: "cover", borderRadius: 6, border: "1px solid var(--l-soft)", cursor: "pointer" }} />
                                     ))}
                                   </div>
                                 )}
@@ -1140,23 +1140,23 @@ export default function ClientHomePage() {
         style={{ display: activeSection === "client-prealert" ? "block" : "none" }}
       >
         {/* 预报单管理 */}
-        <div style={{ marginBottom: 14, border: "1px solid #e5e7eb", borderRadius: 10, padding: 12, background: "#fff" }}>
+        <div style={{ marginBottom: 14, border: "1px solid var(--l-soft)", borderRadius: 10, padding: 12, background: "var(--white)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
             <div style={{ fontWeight: 700, color: "var(--ink)", fontSize: 16 }}>预报单</div>
             <button type="button" onClick={() => setShowCreateModal(true)}
-              style={{ border: "none", borderRadius: 6, padding: "8px 16px", background: "#2563eb", color: "#fff", fontWeight: 500, fontSize: 13, cursor: "pointer" }}>创建预报单</button>
+              style={{ border: "none", borderRadius: 6, padding: "8px 16px", background: "var(--c-blue)", color: "var(--white)", fontWeight: 500, fontSize: 13, cursor: "pointer" }}>创建预报单</button>
           </div>
           <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
             <input value={prealertSearch} onChange={(e) => setPrealertSearch(e.target.value)}
               placeholder="搜索单号、品名…"
-              style={{ flex: 1, border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 12px", fontSize: 13 }} />
+              style={{ flex: 1, border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 12px", fontSize: 13 }} />
           </div>
           {prealerts.length === 0 ? (
-            <div style={{ color: "#000000", fontSize: 13, padding: "20px 0", textAlign: "center" }}>暂无预报单</div>
+            <div style={{ color: "var(--t-strong)", fontSize: 13, padding: "20px 0", textAlign: "center" }}>暂无预报单</div>
           ) : (
                         <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                <thead><tr style={{ borderBottom: "2px solid #e5e7eb", textAlign: "left", background: "#f8fafc" }}>
+                <thead><tr style={{ borderBottom: "2px solid var(--l-soft)", textAlign: "left", background: "var(--s-cool)" }}>
                   <th style={{ padding: "6px 8px", fontWeight: 600 }}>唛头</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>预报单号</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>品名</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>尺寸(cm)</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>体积(m³)</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>重量(kg)</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>件</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>运输</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>状态</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>备注</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>操作</th>
                 </tr></thead>
                 <tbody>
@@ -1168,12 +1168,12 @@ export default function ClientHomePage() {
                     const isShipped = item.approvalStatus === "shipped";
                     const isReceived = item.approvalStatus === "received";
                     const sLabel = isReceived ? "已收货" : "已发货";
-                    const sColor = isReceived ? "#16a34a" : "#0369a1";
+                    const sColor = isReceived ? "var(--c-green-3)" : "#0369a1";
                     const sBg = isReceived ? "#dcfce7" : "#e0f2fe";
                     return (
-                      <tr key={item.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
+                      <tr key={item.id} style={{ borderBottom: "1px solid var(--l-soft)" }}>
                         <td style={{ padding: "6px 8px", fontFamily: "monospace", color: "#6b21a8", fontSize: 12 }}>{item.clientId || "—"}</td>
-                        <td style={{ padding: "6px 8px", fontFamily: "monospace", fontSize: 11 }}>{item.orderNo || "—"}<br /><span style={{ fontSize: 10, color: "#6b7280" }}>{item.trackingNo || ""}</span></td>
+                        <td style={{ padding: "6px 8px", fontFamily: "monospace", fontSize: 11 }}>{item.orderNo || "—"}<br /><span style={{ fontSize: 10, color: "var(--t-muted)" }}>{item.trackingNo || ""}</span></td>
                         <td style={{ padding: "6px 8px" }}>{item.itemName}</td>
                         <td style={{ padding: "6px 8px", fontSize: 11, whiteSpace: "nowrap" }}>{(() => { const dims = (item.products ?? []).map((p: any) => (p.lengthCm && p.widthCm && p.heightCm ? p.lengthCm + "×" + p.widthCm + "×" + p.heightCm : null)).filter(Boolean).join(", "); return dims || "—"; })()}</td>
                         <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }} className="col-num">{item.volumeM3 != null ? Number(item.volumeM3).toFixed(3) : "—"}</td>
@@ -1183,7 +1183,7 @@ export default function ClientHomePage() {
                         <td style={{ padding: "6px 8px" }}><span style={{ fontSize: 11, fontWeight: 500, color: sColor, background: sBg, padding: "2px 6px", borderRadius: 4 }}>{sLabel}</span></td>
                         <td style={{ padding: "6px 8px", fontSize: 12, maxWidth: 80, overflow: "hidden", textOverflow: "ellipsis" }} title={item.remark || ""}>{item.remark || ""}</td>
                         <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>
-                          {item.trackingNo ? <button type="button" onClick={() => openShipmentTrack(item.trackingNo!)} style={{ border: "1px solid #2563eb", borderRadius: 4, padding: "2px 8px", fontSize: 11, background: "#eff6ff", color: "#2563eb", cursor: "pointer" }}>物流轨迹</button> : <span style={{ fontSize: 11, color: "#9ca3af" }}>暂无物流轨迹</span>}
+                          {item.trackingNo ? <button type="button" onClick={() => openShipmentTrack(item.trackingNo!)} style={{ border: "1px solid var(--c-blue)", borderRadius: 4, padding: "2px 8px", fontSize: 11, background: "var(--c-blue-bg)", color: "var(--c-blue)", cursor: "pointer" }}>物流轨迹</button> : <span style={{ fontSize: 11, color: "var(--t-faint)" }}>暂无物流轨迹</span>}
                         </td>
                       </tr>
                     );
@@ -1198,23 +1198,23 @@ export default function ClientHomePage() {
 
       </section>
 
-      {message ? <p style={{ marginTop: 12, color: message.includes("失败") ? "#b91c1c" : "#065f46" }}>{message}</p> : null}
+      {message ? <p style={{ marginTop: 12, color: message.includes("失败") ? "var(--c-red-deep)" : "var(--c-green-deep)" }}>{message}</p> : null}
 
       {/* 创建预报单弹窗 */}
       {showCreateModal && (
         <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.4)", padding: 16 }}>
-          <div style={{ width: "100%", maxWidth: 1200, maxHeight: "90vh", overflow: "auto", background: "#fff", borderRadius: 12, padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+          <div style={{ width: "100%", maxWidth: 1200, maxHeight: "90vh", overflow: "auto", background: "var(--white)", borderRadius: 12, padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
             <h3 style={{ margin: "0 0 16px", fontSize: 18, fontWeight: 600 }}>创建预报单</h3>
             <div style={{ display: "grid", gap: 10 }}>
-              <select value={form.warehouseId} onChange={(e) => setForm((v) => ({ ...v, warehouseId: e.target.value }))} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", fontSize: 13 }}>
+              <select value={form.warehouseId} onChange={(e) => setForm((v) => ({ ...v, warehouseId: e.target.value }))} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", fontSize: 13 }}>
                 <option value="">选择仓库</option>
                 {warehouseOptions.map((w) => (<option key={w.id} value={w.id}>{w.label}</option>))}
               </select>
               {/* Multi-product section */}
-              <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 10, background: "#f9fafb" }}>
-                <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: "#000000" }}>产品列表</div>
+              <div style={{ border: "1px solid var(--l-soft)", borderRadius: 8, padding: 10, background: "var(--s-alt)" }}>
+                <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: "var(--t-strong)" }}>产品列表</div>
                 {formProducts.length === 0 ? (
-                  <input value={form.itemName} onChange={(e) => setForm((v) => ({ ...v, itemName: e.target.value }))} placeholder="品名 *" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", fontSize: 13, width: "100%" }} />
+                  <input value={form.itemName} onChange={(e) => setForm((v) => ({ ...v, itemName: e.target.value }))} placeholder="品名 *" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", fontSize: 13, width: "100%" }} />
                 ) : null}
                 {formProducts.map((p, i) => {
                   const pPkg = Number(p.packageCount) || 0;
@@ -1226,17 +1226,17 @@ export default function ClientHomePage() {
                   const prodWt = pWt * pPkg;
                   return (
                   <div key={i} style={{ display: "grid", gridTemplateColumns: "3fr 0.5fr 0.4fr 0.4fr 0.4fr 0.5fr 0.5fr 1fr 1fr 1fr auto", gap: 3, marginBottom: 4, alignItems: "center" }}>
-                    <input value={p.itemName} onChange={(e) => setFormProducts((v) => { const n = [...v]; n[i] = { ...n[i], itemName: e.target.value }; return n; })} placeholder="品名" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "4px 6px", fontSize: 12 }} />
-                    <input type="number" value={p.packageCount} onChange={(e) => setFormProducts((v) => { const n = [...v]; n[i] = { ...n[i], packageCount: e.target.value }; return n; })} placeholder="箱数" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "4px 6px", fontSize: 12 }} />
-                    <input type="number" step="0.01" value={p.lengthCm} onChange={(e) => setFormProducts((v) => { const n = [...v]; n[i] = { ...n[i], lengthCm: e.target.value }; return n; })} placeholder="长cm" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "4px 6px", fontSize: 12 }} />
-                    <input type="number" step="0.01" value={p.widthCm} onChange={(e) => setFormProducts((v) => { const n = [...v]; n[i] = { ...n[i], widthCm: e.target.value }; return n; })} placeholder="宽cm" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "4px 6px", fontSize: 12 }} />
-                    <input type="number" step="0.01" value={p.heightCm} onChange={(e) => setFormProducts((v) => { const n = [...v]; n[i] = { ...n[i], heightCm: e.target.value }; return n; })} placeholder="高cm" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "4px 6px", fontSize: 12 }} />
-                    <input type="number" value={p.productQuantity} onChange={(e) => setFormProducts((v) => { const n = [...v]; n[i] = { ...n[i], productQuantity: e.target.value }; return n; })} placeholder="单箱数量" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "4px 6px", fontSize: 12 }} />
-                    <input type="number" step="0.01" value={p.weightKg} onChange={(e) => setFormProducts((v) => { const n = [...v]; n[i] = { ...n[i], weightKg: e.target.value }; return n; })} placeholder="单箱重量kg" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "4px 6px", fontSize: 12 }} />
-                    <input value={p.domesticTrackingNo || ""} onChange={(e) => setFormProducts((v) => { const n = [...v]; n[i] = { ...n[i], domesticTrackingNo: e.target.value }; return n; })} placeholder="货拉拉" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "4px 6px", fontSize: 12 }} />
-                    <span style={{ fontSize: 11, color: prodVol > 0 ? "#2563eb" : "#9ca3af", textAlign: "right", padding: "0 4px" }}>{prodVol > 0 ? prodVol.toFixed(4) + "m³" : "---"}</span>
-                    <span style={{ fontSize: 11, color: prodWt > 0 ? "#2563eb" : "#9ca3af", textAlign: "right", padding: "0 4px" }}>{prodWt > 0 ? prodWt.toFixed(2) + "kg" : "---"}</span>
-                    <button type="button" onClick={() => setFormProducts((v) => v.filter((_, j) => j !== i))} style={{ border: "1px solid #fca5a5", borderRadius: 4, padding: "4px 6px", fontSize: 11, background: "#fff", color: "#dc2626", cursor: "pointer" }}>×</button>
+                    <input value={p.itemName} onChange={(e) => setFormProducts((v) => { const n = [...v]; n[i] = { ...n[i], itemName: e.target.value }; return n; })} placeholder="品名" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "4px 6px", fontSize: 12 }} />
+                    <input type="number" value={p.packageCount} onChange={(e) => setFormProducts((v) => { const n = [...v]; n[i] = { ...n[i], packageCount: e.target.value }; return n; })} placeholder="箱数" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "4px 6px", fontSize: 12 }} />
+                    <input type="number" step="0.01" value={p.lengthCm} onChange={(e) => setFormProducts((v) => { const n = [...v]; n[i] = { ...n[i], lengthCm: e.target.value }; return n; })} placeholder="长cm" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "4px 6px", fontSize: 12 }} />
+                    <input type="number" step="0.01" value={p.widthCm} onChange={(e) => setFormProducts((v) => { const n = [...v]; n[i] = { ...n[i], widthCm: e.target.value }; return n; })} placeholder="宽cm" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "4px 6px", fontSize: 12 }} />
+                    <input type="number" step="0.01" value={p.heightCm} onChange={(e) => setFormProducts((v) => { const n = [...v]; n[i] = { ...n[i], heightCm: e.target.value }; return n; })} placeholder="高cm" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "4px 6px", fontSize: 12 }} />
+                    <input type="number" value={p.productQuantity} onChange={(e) => setFormProducts((v) => { const n = [...v]; n[i] = { ...n[i], productQuantity: e.target.value }; return n; })} placeholder="单箱数量" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "4px 6px", fontSize: 12 }} />
+                    <input type="number" step="0.01" value={p.weightKg} onChange={(e) => setFormProducts((v) => { const n = [...v]; n[i] = { ...n[i], weightKg: e.target.value }; return n; })} placeholder="单箱重量kg" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "4px 6px", fontSize: 12 }} />
+                    <input value={p.domesticTrackingNo || ""} onChange={(e) => setFormProducts((v) => { const n = [...v]; n[i] = { ...n[i], domesticTrackingNo: e.target.value }; return n; })} placeholder="货拉拉" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "4px 6px", fontSize: 12 }} />
+                    <span style={{ fontSize: 11, color: prodVol > 0 ? "var(--c-blue)" : "var(--t-faint)", textAlign: "right", padding: "0 4px" }}>{prodVol > 0 ? prodVol.toFixed(4) + "m³" : "---"}</span>
+                    <span style={{ fontSize: 11, color: prodWt > 0 ? "var(--c-blue)" : "var(--t-faint)", textAlign: "right", padding: "0 4px" }}>{prodWt > 0 ? prodWt.toFixed(2) + "kg" : "---"}</span>
+                    <button type="button" onClick={() => setFormProducts((v) => v.filter((_, j) => j !== i))} style={{ border: "1px solid #fca5a5", borderRadius: 4, padding: "4px 6px", fontSize: 11, background: "var(--white)", color: "var(--c-red-2)", cursor: "pointer" }}>×</button>
                   </div>
                 );})}
                 {(() => {
@@ -1253,33 +1253,33 @@ export default function ClientHomePage() {
                     return s + wt * pkg;
                   }, 0);
                   return (
-                    <div style={{ fontSize: 12, fontWeight: 600, padding: "4px 0", color: "#2563eb", textAlign: "right" }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, padding: "4px 0", color: "var(--c-blue)", textAlign: "right" }}>
                       合计：总体积 {totalVol.toFixed(4)}m³  |  总重量 {totalWt.toFixed(2)}kg
                     </div>
                   );
                 })()}
-                <button type="button" onClick={() => setFormProducts((v) => [...v, { itemName: "", packageCount: "", lengthCm: "", widthCm: "", heightCm: "", productQuantity: "", weightKg: "", domesticTrackingNo: "" }])} style={{ border: "1px dashed #2563eb", borderRadius: 4, padding: "4px 10px", fontSize: 12, background: "#fff", color: "#2563eb", cursor: "pointer", marginTop: 4 }}>+ 添加产品</button>
+                <button type="button" onClick={() => setFormProducts((v) => [...v, { itemName: "", packageCount: "", lengthCm: "", widthCm: "", heightCm: "", productQuantity: "", weightKg: "", domesticTrackingNo: "" }])} style={{ border: "1px dashed var(--c-blue)", borderRadius: 4, padding: "4px 10px", fontSize: 12, background: "var(--white)", color: "var(--c-blue)", cursor: "pointer", marginTop: 4 }}>+ 添加产品</button>
               </div>
-              <div style={{ fontSize: 12, color: "#000000", marginTop: 4 }}>
+              <div style={{ fontSize: 12, color: "var(--t-strong)", marginTop: 4 }}>
                 输入长宽高和箱/袋数后，体积自动计算（长×宽×高÷1,000,000×箱数）
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
-                <input type="number" min={0} step="0.01" value={form.lengthCm} onChange={(e) => updateOrderDimensions({ lengthCm: e.target.value })} placeholder="长（cm）" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", fontSize: 13 }} />
-                <input type="number" min={0} step="0.01" value={form.widthCm} onChange={(e) => updateOrderDimensions({ widthCm: e.target.value })} placeholder="宽（cm）" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", fontSize: 13 }} />
-                <input type="number" min={0} step="0.01" value={form.heightCm} onChange={(e) => updateOrderDimensions({ heightCm: e.target.value })} placeholder="高（cm）" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", fontSize: 13 }} />
+                <input type="number" min={0} step="0.01" value={form.lengthCm} onChange={(e) => updateOrderDimensions({ lengthCm: e.target.value })} placeholder="长（cm）" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", fontSize: 13 }} />
+                <input type="number" min={0} step="0.01" value={form.widthCm} onChange={(e) => updateOrderDimensions({ widthCm: e.target.value })} placeholder="宽（cm）" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", fontSize: 13 }} />
+                <input type="number" min={0} step="0.01" value={form.heightCm} onChange={(e) => updateOrderDimensions({ heightCm: e.target.value })} placeholder="高（cm）" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", fontSize: 13 }} />
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8 }}>
-                <select value={form.packageUnit} onChange={(e) => setForm((v) => ({ ...v, packageUnit: e.target.value as "bag"  |  "box" }))} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", fontSize: 13 }}>
+                <select value={form.packageUnit} onChange={(e) => setForm((v) => ({ ...v, packageUnit: e.target.value as "bag"  |  "box" }))} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", fontSize: 13 }}>
                   <option value="box">箱</option>
                   <option value="bag">袋</option>
                 </select>
-                <input type="number" value={form.packageCount} onChange={(e) => updateOrderDimensions({ packageCount: e.target.value })} placeholder="箱/袋数" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", fontSize: 13 }} />
-                <input type="number" step="0.001" value={form.volumeM3} readOnly={formProducts.length > 0} onChange={(e) => setForm((v) => ({ ...v, volumeM3: e.target.value }))} placeholder="总体积（m³）" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", fontSize: 13 }} />
-                <input type="number" step="0.01" value={form.weightKg ?? ""} onChange={(e) => setForm((v) => ({ ...v, weightKg: e.target.value }))} placeholder="总重量(kg)" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", fontSize: 13 }} />
+                <input type="number" value={form.packageCount} onChange={(e) => updateOrderDimensions({ packageCount: e.target.value })} placeholder="箱/袋数" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", fontSize: 13 }} />
+                <input type="number" step="0.001" value={form.volumeM3} readOnly={formProducts.length > 0} onChange={(e) => setForm((v) => ({ ...v, volumeM3: e.target.value }))} placeholder="总体积（m³）" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", fontSize: 13 }} />
+                <input type="number" step="0.01" value={form.weightKg ?? ""} onChange={(e) => setForm((v) => ({ ...v, weightKg: e.target.value }))} placeholder="总重量(kg)" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", fontSize: 13 }} />
               </div>
-              <input value={form.trackingNo ?? ""} onChange={(e) => setForm((v) => ({ ...v, trackingNo: e.target.value }))} placeholder="预报单号（留空自动生成）" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", fontSize: 13 }} />
-              <input value={form.domesticTrackingNo} onChange={(e) => setForm((v) => ({ ...v, domesticTrackingNo: e.target.value }))} placeholder="国内快递单号" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", fontSize: 13 }} />
-              <select value={form.transportMode} onChange={(e) => setForm((v) => ({ ...v, transportMode: e.target.value as "sea"  |  "land" }))} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", fontSize: 13 }}>
+              <input value={form.trackingNo ?? ""} onChange={(e) => setForm((v) => ({ ...v, trackingNo: e.target.value }))} placeholder="预报单号（留空自动生成）" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", fontSize: 13 }} />
+              <input value={form.domesticTrackingNo} onChange={(e) => setForm((v) => ({ ...v, domesticTrackingNo: e.target.value }))} placeholder="国内快递单号" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", fontSize: 13 }} />
+              <select value={form.transportMode} onChange={(e) => setForm((v) => ({ ...v, transportMode: e.target.value as "sea"  |  "land" }))} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", fontSize: 13 }}>
                 <option value="">运输方式 *</option>
                 <option value="sea">海运</option>
                 <option value="land">陆运</option>
@@ -1289,8 +1289,8 @@ export default function ClientHomePage() {
 
             </div>
             {/* 产品图片上传 */}
-            <div style={{ marginTop: 10, border: "1px dashed #d1d5db", borderRadius: 8, padding: 10 }}>
-              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6, color: "#000000" }}>产品图片（可选，可多选）</div>
+            <div style={{ marginTop: 10, border: "1px dashed var(--l-strong)", borderRadius: 8, padding: 10 }}>
+              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6, color: "var(--t-strong)" }}>产品图片（可选，可多选）</div>
               <input type="file" multiple accept="image/*" onChange={(e) => {
                 const files = Array.from(e.target.files || []);
                 setPrealertImageFiles(files);
@@ -1300,18 +1300,18 @@ export default function ClientHomePage() {
                 <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
                   {prealertImagePreviews.map((url, i) => (
                     <div key={i} style={{ position: "relative" }}>
-                      <img src={url} style={{ width: 60, height: 60, objectFit: "cover", borderRadius: 4, border: "1px solid #e5e7eb" }} />
+                      <img src={url} style={{ width: 60, height: 60, objectFit: "cover", borderRadius: 4, border: "1px solid var(--l-soft)" }} />
                       <button type="button" onClick={() => {
                         setPrealertImageFiles(f => f.filter((_, j) => j !== i));
                         setPrealertImagePreviews(p => p.filter((_, j) => j !== i));
-                      }} style={{ position: "absolute", top: -6, right: -6, border: "1px solid #fca5a5", borderRadius: 10, width: 18, height: 18, fontSize: 10, background: "#fff", color: "#dc2626", cursor: "pointer", padding: 0, lineHeight: 1 }}>×</button>
+                      }} style={{ position: "absolute", top: -6, right: -6, border: "1px solid #fca5a5", borderRadius: 10, width: 18, height: 18, fontSize: 10, background: "var(--white)", color: "var(--c-red-2)", cursor: "pointer", padding: 0, lineHeight: 1 }}>×</button>
                     </div>
                   ))}
                 </div>
               )}
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-              <button type="button" onClick={() => { setShowCreateModal(false); setPrealertImageFiles([]); setPrealertImagePreviews([]); }} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: "#fff", cursor: "pointer", color: "#000000" }}>取消</button>
+              <button type="button" onClick={() => { setShowCreateModal(false); setPrealertImageFiles([]); setPrealertImagePreviews([]); }} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: "var(--white)", cursor: "pointer", color: "var(--t-strong)" }}>取消</button>
               <button type="button" onClick={async () => {
                 const hasProducts = formProducts.length > 0 && formProducts.some((p) => p.itemName.trim());
                 if (!hasProducts && !form.itemName) { setToast("请填写品名"); return; }
@@ -1344,7 +1344,7 @@ export default function ClientHomePage() {
                   setPrealertImagePreviews([]);
                   await refreshMainData();
                 } catch { setToast("创建失败"); }
-              }} style={{ border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: "#2563eb", color: "#fff", fontWeight: 500, cursor: "pointer" }}>
+              }} style={{ border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: "var(--c-blue)", color: "var(--white)", fontWeight: 500, cursor: "pointer" }}>
                 提交
               </button>
             </div>
@@ -1355,37 +1355,37 @@ export default function ClientHomePage() {
       {/* 编辑预报单弹窗 */}
       {editingPrealert && (
         <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.4)", padding: 16 }}>
-          <div style={{ width: "100%", maxWidth: 520, maxHeight: "90vh", overflow: "auto", background: "#fff", borderRadius: 12, padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+          <div style={{ width: "100%", maxWidth: 520, maxHeight: "90vh", overflow: "auto", background: "var(--white)", borderRadius: 12, padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
             <h3 style={{ margin: "0 0 16px", fontSize: 18, fontWeight: 600 }}>编辑预报单</h3>
             {(editingPrealert.products?.length ?? 0) > 1 && (
-              <div style={{ marginBottom: 10, background: "#f8fafc", borderRadius: 6, padding: "8px 10px", fontSize: 12 }}>
-                <div style={{ fontWeight: 600, marginBottom: 4, color: "#000000" }}>产品列表</div>
+              <div style={{ marginBottom: 10, background: "var(--s-cool)", borderRadius: 6, padding: "8px 10px", fontSize: 12 }}>
+                <div style={{ fontWeight: 600, marginBottom: 4, color: "var(--t-strong)" }}>产品列表</div>
                 {(editingPrealert.products ?? []).map((p) => (
-                  <div key={p.id} style={{ color: "#000000" }}>{p.itemName} ×{p.packageCount}箱</div>
+                  <div key={p.id} style={{ color: "var(--t-strong)" }}>{p.itemName} ×{p.packageCount}箱</div>
                 ))}
               </div>
             )}
             <div style={{ display: "grid", gap: 10 }}>
-              <input value={editingPrealert.itemName} onChange={(e) => setEditingPrealert((v) => v ? { ...v, itemName: e.target.value } : v)} placeholder="品名" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", fontSize: 13 }} />
+              <input value={editingPrealert.itemName} onChange={(e) => setEditingPrealert((v) => v ? { ...v, itemName: e.target.value } : v)} placeholder="品名" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", fontSize: 13 }} />
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                <input type="number" value={editingPrealert.packageCount} onChange={(e) => setEditingPrealert((v) => v ? { ...v, packageCount: +e.target.value } : v)} placeholder="箱数" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", fontSize: 13 }} />
-                <select value={editingPrealert.packageUnit} onChange={(e) => setEditingPrealert((v) => v ? { ...v, packageUnit: e.target.value as "bag"  |  "box" } : v)} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", fontSize: 13 }}>
+                <input type="number" value={editingPrealert.packageCount} onChange={(e) => setEditingPrealert((v) => v ? { ...v, packageCount: +e.target.value } : v)} placeholder="箱数" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", fontSize: 13 }} />
+                <select value={editingPrealert.packageUnit} onChange={(e) => setEditingPrealert((v) => v ? { ...v, packageUnit: e.target.value as "bag"  |  "box" } : v)} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", fontSize: 13 }}>
                   <option value="box">箱</option>
                   <option value="bag">袋</option>
                 </select>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                <input type="number" step="0.01" value={editingPrealert.weightKg ?? ""} onChange={(e) => setEditingPrealert((v) => v ? { ...v, weightKg: e.target.value ? +e.target.value : undefined } : v)} placeholder="重量(kg)" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", fontSize: 13 }} />
-                <input type="number" step="0.001" value={editingPrealert.volumeM3 ?? ""} onChange={(e) => setEditingPrealert((v) => v ? { ...v, volumeM3: e.target.value ? +e.target.value : undefined } : v)} placeholder="体积(m³)" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", fontSize: 13 }} />
+                <input type="number" step="0.01" value={editingPrealert.weightKg ?? ""} onChange={(e) => setEditingPrealert((v) => v ? { ...v, weightKg: e.target.value ? +e.target.value : undefined } : v)} placeholder="重量(kg)" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", fontSize: 13 }} />
+                <input type="number" step="0.001" value={editingPrealert.volumeM3 ?? ""} onChange={(e) => setEditingPrealert((v) => v ? { ...v, volumeM3: e.target.value ? +e.target.value : undefined } : v)} placeholder="体积(m³)" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", fontSize: 13 }} />
               </div>
-              <input value={editingPrealert.domesticTrackingNo ?? ""} onChange={(e) => setEditingPrealert((v) => v ? { ...v, domesticTrackingNo: e.target.value } : v)} placeholder="国内快递单号" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", fontSize: 13 }} />
-              <select value={editingPrealert.transportMode} onChange={(e) => setEditingPrealert((v) => v ? { ...v, transportMode: e.target.value } : v)} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", fontSize: 13 }}>
+              <input value={editingPrealert.domesticTrackingNo ?? ""} onChange={(e) => setEditingPrealert((v) => v ? { ...v, domesticTrackingNo: e.target.value } : v)} placeholder="国内快递单号" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", fontSize: 13 }} />
+              <select value={editingPrealert.transportMode} onChange={(e) => setEditingPrealert((v) => v ? { ...v, transportMode: e.target.value } : v)} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", fontSize: 13 }}>
                 <option value="sea">海运</option>
                 <option value="land">陆运</option>
               </select>
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-              <button type="button" onClick={() => setEditingPrealert(null)} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: "#fff", cursor: "pointer", color: "#000000" }}>取消</button>
+              <button type="button" onClick={() => setEditingPrealert(null)} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: "var(--white)", cursor: "pointer", color: "var(--t-strong)" }}>取消</button>
               <button type="button" onClick={async () => {
                 try {
                   await updateClientPrealert(editingPrealert.id, {
@@ -1401,7 +1401,7 @@ export default function ClientHomePage() {
                   setEditingPrealert(null);
                   await refreshMainData();
                 } catch { setToast("更新失败"); }
-              }} style={{ border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: "#2563eb", color: "#fff", fontWeight: 500, cursor: "pointer" }}>保存</button>
+              }} style={{ border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: "var(--c-blue)", color: "var(--white)", fontWeight: 500, cursor: "pointer" }}>保存</button>
             </div>
           </div>
         </div>

@@ -26,17 +26,17 @@ function FeeBreakdownPanel({ bd, title = "费用明细", compact }: { bd?: FeeBr
   if (!bd || !bd.rows || bd.rows.length === 0) return null;
   const fs = compact ? 11 : 12;
   return (
-    <div style={{ background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 6, padding: compact ? "6px 8px" : "8px 10px", fontSize: fs }}>
-      <div style={{ fontWeight: 600, color: "#374151", marginBottom: 4 }}>{title}</div>
+    <div style={{ background: "var(--s-alt)", border: "1px solid var(--l-soft)", borderRadius: 6, padding: compact ? "6px 8px" : "8px 10px", fontSize: fs }}>
+      <div style={{ fontWeight: 600, color: "var(--t-body)", marginBottom: 4 }}>{title}</div>
       {bd.rows.map(r => (
         <div key={r.cargoType} style={{ display: "flex", justifyContent: "space-between", gap: 8, color: "#4b5563", padding: "1px 0" }}>
           <span>{r.label}：{r.volumeM3.toFixed(3)} 方 × {r.unitPrice} 元/方</span>
           <span style={{ whiteSpace: "nowrap" }}>= {money(r.amount)}</span>
         </div>
       ))}
-      <div style={{ borderTop: "1px solid #e5e7eb", marginTop: 4, paddingTop: 4, display: "flex", justifyContent: "space-between", gap: 8 }}>
-        <span style={{ color: "#6b7280" }}>合计 {bd.totalVolumeM3.toFixed(3)} 方</span>
-        <span style={{ fontWeight: 700, fontSize: fs + 2, color: "#059669", whiteSpace: "nowrap" }}>
+      <div style={{ borderTop: "1px solid var(--l-soft)", marginTop: 4, paddingTop: 4, display: "flex", justifyContent: "space-between", gap: 8 }}>
+        <span style={{ color: "var(--t-muted)" }}>合计 {bd.totalVolumeM3.toFixed(3)} 方</span>
+        <span style={{ fontWeight: 700, fontSize: fs + 2, color: "var(--c-green)", whiteSpace: "nowrap" }}>
           {money(bd.storedFee ?? bd.computedFee)}
         </span>
       </div>
@@ -97,16 +97,16 @@ const PREALERT_STATUS_ZH: Record<string, string> = {
 };
 const TAG: Record<string, { bg: string; color: string }> = {
   planning: { bg: "#e0e7ff", color: "#3730a3" },
-  collecting: { bg: "#dbeafe", color: "#1e40af" },
+  collecting: { bg: "var(--c-blue-bg-2)", color: "var(--c-blue-deep)" },
   loading: { bg: "#ede9fe", color: "#5b21b6" },
   shipped: { bg: "#e0e7ff", color: "#3730a3" },
-  completed: { bg: "#d1fae5", color: "#065f46" },
-  cancelled: { bg: "#fee2e2", color: "#991b1b" },
-  pending: { bg: "#fef3c7", color: "#92400e" },
-  received_pending_payment: { bg: "#fef3c7", color: "#92400e" },
-  payment_submitted: { bg: "#dbeafe", color: "#1e40af" },
-  paid: { bg: "#d1fae5", color: "#065f46" },
-  thailand_received: { bg: "#d1fae5", color: "#065f46" },
+  completed: { bg: "var(--c-green-bg)", color: "var(--c-green-deep)" },
+  cancelled: { bg: "var(--c-red-bg)", color: "var(--c-red-dark)" },
+  pending: { bg: "var(--c-amber-bg)", color: "var(--c-amber-deep)" },
+  received_pending_payment: { bg: "var(--c-amber-bg)", color: "var(--c-amber-deep)" },
+  payment_submitted: { bg: "var(--c-blue-bg-2)", color: "var(--c-blue-deep)" },
+  paid: { bg: "var(--c-green-bg)", color: "var(--c-green-deep)" },
+  thailand_received: { bg: "var(--c-green-bg)", color: "var(--c-green-deep)" },
 };
 
 // ============================================================================
@@ -225,13 +225,13 @@ interface CreateCustomerForm {
 // ============================================================================
 // 共用样式
 // ============================================================================
-const thS: React.CSSProperties = { padding: "6px 10px", textAlign: "left", fontSize: 12, fontWeight: 600, color: "#374151", borderBottom: "2px solid #e5e7eb", whiteSpace: "nowrap" };
-const tdS: React.CSSProperties = { padding: "7px 10px", fontSize: 13, borderBottom: "1px solid #f3f4f6", verticalAlign: "middle" };
-const btnConfirm: React.CSSProperties = { padding: "8px 18px", background: "#2563eb", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontSize: 13 };
-const btnCancel: React.CSSProperties = { padding: "8px 18px", border: "1px solid #d1d5db", color: "#6b7280", background: "#fff", borderRadius: 6, cursor: "pointer", fontSize: 13 };
-const btnDanger: React.CSSProperties = { padding: "8px 18px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontSize: 13 };
-const fl: React.CSSProperties = { display: "block", fontSize: 13, color: "#374151", fontWeight: 500, marginBottom: 3 };
-const fi: React.CSSProperties = { width: "100%", padding: "7px 10px", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 13, boxSizing: "border-box" };
+const thS: React.CSSProperties = { padding: "6px 10px", textAlign: "left", fontSize: 12, fontWeight: 600, color: "var(--t-body)", borderBottom: "2px solid var(--l-soft)", whiteSpace: "nowrap" };
+const tdS: React.CSSProperties = { padding: "7px 10px", fontSize: 13, borderBottom: "1px solid var(--s-sunken)", verticalAlign: "middle" };
+const btnConfirm: React.CSSProperties = { padding: "8px 18px", background: "var(--c-blue)", color: "var(--white)", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontSize: 13 };
+const btnCancel: React.CSSProperties = { padding: "8px 18px", border: "1px solid var(--l-strong)", color: "var(--t-muted)", background: "var(--white)", borderRadius: 6, cursor: "pointer", fontSize: 13 };
+const btnDanger: React.CSSProperties = { padding: "8px 18px", background: "var(--c-red)", color: "var(--white)", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontSize: 13 };
+const fl: React.CSSProperties = { display: "block", fontSize: 13, color: "var(--t-body)", fontWeight: 500, marginBottom: 3 };
+const fi: React.CSSProperties = { width: "100%", padding: "7px 10px", border: "1px solid var(--l-strong)", borderRadius: 6, fontSize: 13, boxSizing: "border-box" };
 
 // ============================================================================
 // 主页面
@@ -629,7 +629,7 @@ export default function AdminWhrConsolidationPage() {
       <div style={{ maxWidth: "100%", padding: "20px 24px" }}>
         {/* Toast */}
         {toast && (
-          <div onClick={() => setToast("")} style={{ cursor: "pointer", marginBottom: 16, padding: "10px 16px", background: "#fef3c7", color: "#92400e", borderRadius: 8, fontSize: 14 }}>
+          <div onClick={() => setToast("")} style={{ cursor: "pointer", marginBottom: 16, padding: "10px 16px", background: "var(--c-amber-bg)", color: "var(--c-amber-deep)", borderRadius: 8, fontSize: 14 }}>
             {toast}
           </div>
         )}
@@ -645,13 +645,13 @@ export default function AdminWhrConsolidationPage() {
             </div>
 
             {loading ? (
-              <p style={{ color: "#9ca3af", fontSize: 14 }}>加载中...</p>
+              <p style={{ color: "var(--t-faint)", fontSize: 14 }}>加载中...</p>
             ) : plans.length === 0 ? (
-              <p style={{ color: "#9ca3af", fontSize: 14 }}>暂无计划</p>
+              <p style={{ color: "var(--t-faint)", fontSize: 14 }}>暂无计划</p>
             ) : (
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
-                  <tr style={{ background: "#f9fafb" }}>
+                  <tr style={{ background: "var(--s-alt)" }}>
                     <th style={thS}>计划编号</th>
                     <th style={thS}>仓库</th>
                     <th style={thS}>柜型</th>
@@ -667,7 +667,7 @@ export default function AdminWhrConsolidationPage() {
                 <tbody>
                   {plans.map(p => (
                     <tr key={p.id} onClick={() => { setSelectedPlanId(p.id); loadDetail(p.id); }} style={{ cursor: "pointer", background: "white" }}
-                      onMouseEnter={e => { e.currentTarget.style.background = "#f9fafb" }}
+                      onMouseEnter={e => { e.currentTarget.style.background = "var(--s-alt)" }}
                       onMouseLeave={e => { e.currentTarget.style.background = "white" }}>
                       <td style={{ ...tdS, fontWeight: 600, minWidth: 120, whiteSpace: "nowrap" }}>{p.planNo}</td>
                       <td style={tdS}>{p.warehouse}</td>
@@ -676,7 +676,7 @@ export default function AdminWhrConsolidationPage() {
                       <td style={tdS}>{p.totalVolumeM3} 方</td>
                       <td style={tdS}>{p.customerCount}</td>
                       <td style={tdS}>
-                        <span style={{ fontSize: 12, padding: "2px 8px", borderRadius: 4, background: TAG[p.status]?.bg ?? "#e5e7eb", color: TAG[p.status]?.color ?? "#374151" }}>
+                        <span style={{ fontSize: 12, padding: "2px 8px", borderRadius: 4, background: TAG[p.status]?.bg ?? "var(--l-soft)", color: TAG[p.status]?.color ?? "var(--t-body)" }}>
                           {PLAN_STATUS_ZH[p.status] ?? p.status}
                         </span>
                       </td>
@@ -685,7 +685,7 @@ export default function AdminWhrConsolidationPage() {
                       <td style={tdS}>
                         <button
                           onClick={(e) => { e.stopPropagation(); void openDeletePlan(p.id); }}
-                          style={{ padding: "3px 10px", border: "1px solid #ef4444", color: "#ef4444", background: "#fff", borderRadius: 4, cursor: "pointer", fontSize: 11 }}
+                          style={{ padding: "3px 10px", border: "1px solid var(--c-red)", color: "var(--c-red)", background: "var(--white)", borderRadius: 4, cursor: "pointer", fontSize: 11 }}
                         >删除</button>
                       </td>
                     </tr>
@@ -704,32 +704,32 @@ export default function AdminWhrConsolidationPage() {
             <button onClick={() => { setSelectedPlanId(null); setPlanDetail(null); setExpandedCustomer(null); }} style={{ ...btnCancel, marginBottom: 16 }}>← 返回列表</button>
 
             {detailLoading ? (
-              <p style={{ color: "#9ca3af", fontSize: 14 }}>加载中...</p>
+              <p style={{ color: "var(--t-faint)", fontSize: 14 }}>加载中...</p>
             ) : !planDetail ? (
-              <p style={{ color: "#ef4444", fontSize: 14 }}>加载计划详情失败</p>
+              <p style={{ color: "var(--c-red)", fontSize: 14 }}>加载计划详情失败</p>
             ) : (
               <>
                 {/* 计划基本信息 */}
-                <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: "16px 20px", marginBottom: 16, background: "#fafafa" }}>
+                <div style={{ border: "1px solid var(--l-soft)", borderRadius: 10, padding: "16px 20px", marginBottom: 16, background: "#fafafa" }}>
                   <h3 style={{ margin: "0 0 10px", fontSize: 17 }}>{planDetail.planNo}</h3>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "12px 24px", fontSize: 13, color: "#374151" }}>
-                    <div><span style={{ color: "#6b7280" }}>仓库：</span>{planDetail.warehouse}</div>
-                    <div><span style={{ color: "#6b7280" }}>柜型：</span>{planDetail.containerType}</div>
-                    <div><span style={{ color: "#6b7280" }}>目的地：</span>{planDetail.destinationTh}</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "12px 24px", fontSize: 13, color: "var(--t-body)" }}>
+                    <div><span style={{ color: "var(--t-muted)" }}>仓库：</span>{planDetail.warehouse}</div>
+                    <div><span style={{ color: "var(--t-muted)" }}>柜型：</span>{planDetail.containerType}</div>
+                    <div><span style={{ color: "var(--t-muted)" }}>目的地：</span>{planDetail.destinationTh}</div>
                     <div>
-                      <span style={{ color: "#6b7280" }}>方数：</span>
+                      <span style={{ color: "var(--t-muted)" }}>方数：</span>
                       {planDetail.usedVolumeM3 != null
                         ? `已用 ${planDetail.usedVolumeM3} / ${planDetail.totalVolumeM3} 方`
                         : `${planDetail.totalVolumeM3} 方`}
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <span style={{ color: "#6b7280" }}>状态：</span>
-                      <span style={{ fontSize: 12, padding: "2px 8px", borderRadius: 4, background: TAG[planDetail.status]?.bg ?? "#e5e7eb", color: TAG[planDetail.status]?.color ?? "#374151" }}>
+                      <span style={{ color: "var(--t-muted)" }}>状态：</span>
+                      <span style={{ fontSize: 12, padding: "2px 8px", borderRadius: 4, background: TAG[planDetail.status]?.bg ?? "var(--l-soft)", color: TAG[planDetail.status]?.color ?? "var(--t-body)" }}>
                         {PLAN_STATUS_ZH[planDetail.status] ?? planDetail.status}
                       </span>
                     </div>
-                    <div><span style={{ color: "#6b7280" }}>创建人：</span>{planDetail.creatorName}</div>
-                    <div><span style={{ color: "#6b7280" }}>创建时间：</span>{formatBeijingTime(planDetail.createdAt)}</div>
+                    <div><span style={{ color: "var(--t-muted)" }}>创建人：</span>{planDetail.creatorName}</div>
+                    <div><span style={{ color: "var(--t-muted)" }}>创建时间：</span>{formatBeijingTime(planDetail.createdAt)}</div>
                   </div>
                 </div>
 
@@ -744,35 +744,35 @@ export default function AdminWhrConsolidationPage() {
                 {planDetail.customers.map(c => {
                   const isExpanded = expandedCustomer === c.id;
                   return (
-                    <div key={c.id} style={{ border: "1px solid #e5e7eb", borderRadius: 10, marginBottom: 12, overflow: "hidden" }}>
+                    <div key={c.id} style={{ border: "1px solid var(--l-soft)", borderRadius: 10, marginBottom: 12, overflow: "hidden" }}>
                       {/* 客户卡片头 */}
-                      <div onClick={() => setExpandedCustomer(isExpanded ? null : c.id)} style={{ cursor: "pointer", padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", background: isExpanded ? "#f9fafb" : "white" }}>
+                      <div onClick={() => setExpandedCustomer(isExpanded ? null : c.id)} style={{ cursor: "pointer", padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", background: isExpanded ? "var(--s-alt)" : "white" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                           <span style={{ fontWeight: 600, fontSize: 15 }}>{c.clientName}</span>
-                          <span style={{ fontSize: 12, color: "#6b7280" }}>{c.clientPhone} · {c.clientCompany}</span>
-                          <span style={{ fontSize: 12, padding: "2px 8px", borderRadius: 4, background: "#f3f4f6", color: "#6b7280" }}>参与客户</span>
+                          <span style={{ fontSize: 12, color: "var(--t-muted)" }}>{c.clientPhone} · {c.clientCompany}</span>
+                          <span style={{ fontSize: 12, padding: "2px 8px", borderRadius: 4, background: "var(--s-sunken)", color: "var(--t-muted)" }}>参与客户</span>
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-                          <span style={{ fontSize: 13, color: "#6b7280" }}>
+                          <span style={{ fontSize: 13, color: "var(--t-muted)" }}>
                             {c.totalVolumeM3} 方 · {c.totalPrealerts} 个预报单
                             {c.totalFee != null ? ` · ${money(c.totalFee)}` : ""}
                           </span>
-                          <span style={{ fontSize: 12, color: "#9ca3af" }}>{isExpanded ? "▲" : "▼"}</span>
+                          <span style={{ fontSize: 12, color: "var(--t-faint)" }}>{isExpanded ? "▲" : "▼"}</span>
                         </div>
                       </div>
 
                       {/* 客户卡片展开体 */}
                       {isExpanded && (
-                        <div style={{ padding: "12px 16px", borderTop: "1px solid #e5e7eb", background: "#fafafa" }}>
+                        <div style={{ padding: "12px 16px", borderTop: "1px solid var(--l-soft)", background: "#fafafa" }}>
                           {/* 价格信息 */}
-                          <div style={{ display: "flex", gap: 20, alignItems: "center", fontSize: 13, marginBottom: 10, color: "#374151" }}>
+                          <div style={{ display: "flex", gap: 20, alignItems: "center", fontSize: 13, marginBottom: 10, color: "var(--t-body)" }}>
                             <span>普货：{c.unitPriceNormal} 元/方</span>
                             <span>商检：{c.unitPriceInspection} 元/方</span>
                             <span>敏感：{c.unitPriceSensitive} 元/方</span>
                             <button onClick={(e) => { e.stopPropagation(); setPriceTarget(c); setEditPriceNormal(String(c.unitPriceNormal)); setEditPriceInspection(String(c.unitPriceInspection)); setEditPriceSensitive(String(c.unitPriceSensitive)); }} style={{ ...btnCancel, padding: "4px 12px", fontSize: 12 }}>改单价</button>
                             {/* 已装柜/已发运的计划不给动参与名单，和「新增客户」同一条口径 */}
                             {["planning", "collecting"].includes(planDetail.status) && (
-                              <button onClick={(e) => { e.stopPropagation(); handleRemoveCustomer(c); }} disabled={removingCustomerId === c.id} style={{ ...btnCancel, padding: "4px 12px", fontSize: 12, color: "#b91c1c", borderColor: "#fecaca" }}>{removingCustomerId === c.id ? "移除中..." : "移除客户"}</button>
+                              <button onClick={(e) => { e.stopPropagation(); handleRemoveCustomer(c); }} disabled={removingCustomerId === c.id} style={{ ...btnCancel, padding: "4px 12px", fontSize: 12, color: "var(--c-red-deep)", borderColor: "#fecaca" }}>{removingCustomerId === c.id ? "移除中..." : "移除客户"}</button>
                             )}
                           </div>
 
@@ -786,9 +786,9 @@ export default function AdminWhrConsolidationPage() {
                           {/* 收货地址（客户端必填） */}
                           <div style={{ fontSize: 13, marginBottom: 10 }}>
                             {c.deliveryAddress?.trim() ? (
-                              <span style={{ color: "#6b7280" }}>收货地址：{c.deliveryAddress}</span>
+                              <span style={{ color: "var(--t-muted)" }}>收货地址：{c.deliveryAddress}</span>
                             ) : (
-                              <span style={{ color: "#b91c1c", background: "#fee2e2", padding: "3px 8px", borderRadius: 4 }}>
+                              <span style={{ color: "var(--c-red-deep)", background: "var(--c-red-bg)", padding: "3px 8px", borderRadius: 4 }}>
                                 收货地址未填写 —— 客户端已强制必填，该客户为历史数据，请联系其补填
                               </span>
                             )}
@@ -797,7 +797,7 @@ export default function AdminWhrConsolidationPage() {
                           {/* 预报单列表 */}
                           {c.prealerts.length > 0 && (
                             <div style={{ marginBottom: 10 }}>
-                              <div style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 }}>预报单（{c.prealerts.length}）</div>
+                              <div style={{ fontSize: 13, fontWeight: 600, color: "var(--t-body)", marginBottom: 6 }}>预报单（{c.prealerts.length}）</div>
                               {c.prealerts.map(pa => {
                                 const paPkg = pa.items.reduce((s: number, it: any) => s + it.packageCount, 0);
                                 const paVol = pa.items.reduce((s: number, it: any) => s + (it.volumeM3 ?? 0), 0);
@@ -811,27 +811,27 @@ export default function AdminWhrConsolidationPage() {
                                 const canCancel = !["loading", "shipped", "thailand_received", "cancelled"].includes(paStatus);
 
                                 return (
-                                  <div key={pa.id} style={{ marginBottom: 8, border: "1px solid #e5e7eb", borderRadius: 6, overflow: "hidden" }}>
+                                  <div key={pa.id} style={{ marginBottom: 8, border: "1px solid var(--l-soft)", borderRadius: 6, overflow: "hidden" }}>
                                     {/* 预报单卡片头 */}
-                                    <div onClick={() => setExpandedPrealert(paIsExpanded ? null : pa.id)} style={{ padding: "8px 12px", background: paIsExpanded ? "#eff6ff" : "#f9fafb", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, cursor: "pointer" }}>
+                                    <div onClick={() => setExpandedPrealert(paIsExpanded ? null : pa.id)} style={{ padding: "8px 12px", background: paIsExpanded ? "var(--c-blue-bg)" : "var(--s-alt)", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, cursor: "pointer" }}>
                                       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                                         <strong>{pa.trackingNo}</strong>
-                                        <span style={{ color: "#6b7280" }}>唛头：{pa.mark || "-"}</span>
-                                        {pa.expressNo && <span style={{ color: "#6b7280" }}>快递：{pa.expressNo}</span>}
-                                        <span style={{ fontSize: 11, padding: "2px 6px", borderRadius: 3, background: TAG[paStatus]?.bg ?? "#e5e7eb", color: TAG[paStatus]?.color ?? "#374151" }}>
+                                        <span style={{ color: "var(--t-muted)" }}>唛头：{pa.mark || "-"}</span>
+                                        {pa.expressNo && <span style={{ color: "var(--t-muted)" }}>快递：{pa.expressNo}</span>}
+                                        <span style={{ fontSize: 11, padding: "2px 6px", borderRadius: 3, background: TAG[paStatus]?.bg ?? "var(--l-soft)", color: TAG[paStatus]?.color ?? "var(--t-body)" }}>
                                           {PREALERT_STATUS_ZH[paStatus] ?? paStatus}
                                         </span>
                                       </div>
                                       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                                        {pa.totalFee != null && <span style={{ fontWeight: 600, color: "#059669" }}>{money(pa.totalFee)}</span>}
-                                        <span style={{ color: "#6b7280" }}>{paPkg}件 · {paVol.toFixed(3)}方</span>
-                                        <span style={{ fontSize: 12, color: "#9ca3af" }}>{paIsExpanded ? "▲" : "▼"}</span>
+                                        {pa.totalFee != null && <span style={{ fontWeight: 600, color: "var(--c-green)" }}>{money(pa.totalFee)}</span>}
+                                        <span style={{ color: "var(--t-muted)" }}>{paPkg}件 · {paVol.toFixed(3)}方</span>
+                                        <span style={{ fontSize: 12, color: "var(--t-faint)" }}>{paIsExpanded ? "▲" : "▼"}</span>
                                       </div>
                                     </div>
 
                                     {/* 预报单卡片展开体 */}
                                     {paIsExpanded && (
-                                      <div style={{ padding: "8px 12px", borderTop: "1px solid #e5e7eb", background: "#fff", fontSize: 12 }}>
+                                      <div style={{ padding: "8px 12px", borderTop: "1px solid var(--l-soft)", background: "var(--white)", fontSize: 12 }}>
                                         {/* 本单费用明细 */}
                                         {pa.feeBreakdown && pa.feeBreakdown.rows.length > 0 && (
                                           <div style={{ marginBottom: 8, maxWidth: 420 }}>
@@ -842,19 +842,19 @@ export default function AdminWhrConsolidationPage() {
                                         {/* 收货凭证 */}
                                         {pa.warehouseReceiptBase64 && (
                                           <div style={{ marginBottom: 8 }}>
-                                            <div style={{ color: "#6b7280", marginBottom: 4 }}>收货凭证</div>
-                                            <img src={pa.warehouseReceiptBase64} alt="收货凭证" onClick={() => setPreviewImage(pa.warehouseReceiptBase64!)} style={{ maxWidth: "100%", maxHeight: 180, borderRadius: 6, border: "1px solid #e5e7eb", cursor: "pointer" }} />
+                                            <div style={{ color: "var(--t-muted)", marginBottom: 4 }}>收货凭证</div>
+                                            <img src={pa.warehouseReceiptBase64} alt="收货凭证" onClick={() => setPreviewImage(pa.warehouseReceiptBase64!)} style={{ maxWidth: "100%", maxHeight: 180, borderRadius: 6, border: "1px solid var(--l-soft)", cursor: "pointer" }} />
                                           </div>
                                         )}
 
                                         {/* 付款截图 */}
                                         {pa.paymentProofs && pa.paymentProofs.length > 0 && (
                                           <div style={{ marginBottom: 8 }}>
-                                            <div style={{ color: "#6b7280", marginBottom: 4 }}>付款凭证（{pa.paymentProofs.length}张）</div>
+                                            <div style={{ color: "var(--t-muted)", marginBottom: 4 }}>付款凭证（{pa.paymentProofs.length}张）</div>
                                             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                                               {pa.paymentProofs.map((p: any, i: number) => {
                                                 const imgSrc = toImageSrc(p.base64Path || p.base64, p.mime);
-                                                return imgSrc ? <img key={i} src={imgSrc} alt={`付款凭证 ${i + 1}`} onClick={() => setPreviewImage(imgSrc)} style={{ width: 80, height: 80, objectFit: "cover", borderRadius: 4, border: "1px solid #e5e7eb", cursor: "pointer" }} /> : null;
+                                                return imgSrc ? <img key={i} src={imgSrc} alt={`付款凭证 ${i + 1}`} onClick={() => setPreviewImage(imgSrc)} style={{ width: 80, height: 80, objectFit: "cover", borderRadius: 4, border: "1px solid var(--l-soft)", cursor: "pointer" }} /> : null;
                                               })}
                                             </div>
                                           </div>
@@ -862,7 +862,7 @@ export default function AdminWhrConsolidationPage() {
 
                                         {/* 拒绝原因 */}
                                         {pa.paymentRejectReason && (
-                                          <div style={{ marginBottom: 8, padding: "6px 10px", background: "#fef2f2", borderRadius: 4, color: "#ef4444" }}>
+                                          <div style={{ marginBottom: 8, padding: "6px 10px", background: "#fef2f2", borderRadius: 4, color: "var(--c-red)" }}>
                                             拒绝原因：{pa.paymentRejectReason}
                                           </div>
                                         )}
@@ -870,9 +870,9 @@ export default function AdminWhrConsolidationPage() {
                                         {/* 泰国签收单 */}
                                         {pa.thailandReceiptBase64 && (
                                           <div style={{ marginBottom: 8 }}>
-                                            <div style={{ color: "#6b7280", marginBottom: 4 }}>泰国签收单</div>
-                                            <img src={pa.thailandReceiptBase64} alt="泰国签收单" onClick={() => setPreviewImage(pa.thailandReceiptBase64!)} style={{ maxWidth: "100%", maxHeight: 180, borderRadius: 6, border: "1px solid #e5e7eb", cursor: "pointer" }} />
-                                            {pa.thailandReceivedAt && <div style={{ color: "#6b7280", marginTop: 4 }}>签收时间：{formatBeijingTime(pa.thailandReceivedAt)}</div>}
+                                            <div style={{ color: "var(--t-muted)", marginBottom: 4 }}>泰国签收单</div>
+                                            <img src={pa.thailandReceiptBase64} alt="泰国签收单" onClick={() => setPreviewImage(pa.thailandReceiptBase64!)} style={{ maxWidth: "100%", maxHeight: 180, borderRadius: 6, border: "1px solid var(--l-soft)", cursor: "pointer" }} />
+                                            {pa.thailandReceivedAt && <div style={{ color: "var(--t-muted)", marginTop: 4 }}>签收时间：{formatBeijingTime(pa.thailandReceivedAt)}</div>}
                                           </div>
                                         )}
 
@@ -882,7 +882,7 @@ export default function AdminWhrConsolidationPage() {
                                             <button onClick={(e) => { e.stopPropagation(); setReviewTarget({ planId: selectedPlanId!, prealert: pa }); }} style={btnConfirm}>审核付款</button>
                                           )}
                                           {canRevoke && (
-                                            <button onClick={(e) => { e.stopPropagation(); handleRevokePayment(pa); }} disabled={revokingId === pa.id} style={{ ...btnCancel, color: "#b91c1c", borderColor: "#fecaca" }}>
+                                            <button onClick={(e) => { e.stopPropagation(); handleRevokePayment(pa); }} disabled={revokingId === pa.id} style={{ ...btnCancel, color: "var(--c-red-deep)", borderColor: "#fecaca" }}>
                                               {revokingId === pa.id ? "退款中..." : "撤销付款并退款"}
                                             </button>
                                           )}
@@ -894,12 +894,12 @@ export default function AdminWhrConsolidationPage() {
                                         {/* 预报单状态日志 */}
                                         {pa.statusLogs && pa.statusLogs.length > 0 && (
                                           <div style={{ marginBottom: 8 }}>
-                                            <div style={{ fontWeight: 600, color: "#374151", marginBottom: 4 }}>状态日志</div>
+                                            <div style={{ fontWeight: 600, color: "var(--t-body)", marginBottom: 4 }}>状态日志</div>
                                             {pa.statusLogs.map((sl: any) => (
-                                              <div key={sl.id} style={{ padding: "2px 0", color: "#6b7280", fontSize: 11 }}>
-                                                <span style={{ color: "#374151" }}>{PREALERT_STATUS_ZH[sl.fromStatus] ?? sl.fromStatus}</span> → <span style={{ color: "#374151" }}>{PREALERT_STATUS_ZH[sl.toStatus] ?? sl.toStatus}</span>
+                                              <div key={sl.id} style={{ padding: "2px 0", color: "var(--t-muted)", fontSize: 11 }}>
+                                                <span style={{ color: "var(--t-body)" }}>{PREALERT_STATUS_ZH[sl.fromStatus] ?? sl.fromStatus}</span> → <span style={{ color: "var(--t-body)" }}>{PREALERT_STATUS_ZH[sl.toStatus] ?? sl.toStatus}</span>
                                                 &nbsp;· {sl.operatorName} · {formatBeijingTime(sl.createdAt)}
-                                                {sl.remark && <span style={{ color: "#9ca3af", marginLeft: 8 }}>{sl.remark}</span>}
+                                                {sl.remark && <span style={{ color: "var(--t-faint)", marginLeft: 8 }}>{sl.remark}</span>}
                                               </div>
                                             ))}
                                           </div>
@@ -909,7 +909,7 @@ export default function AdminWhrConsolidationPage() {
                                         {pa.items.length > 0 && (
                                           <div style={{ overflowX: "auto" }}>
                                             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
-                                              <thead><tr style={{ background: "#f3f4f6" }}>
+                                              <thead><tr style={{ background: "var(--s-sunken)" }}>
                                                 <th style={{ ...thS, padding: "3px 5px", fontSize: 11 }}>品名</th>
                                                 <th style={{ ...thS, padding: "3px 5px", fontSize: 11 }}>件数</th>
                                                 <th style={{ ...thS, padding: "3px 5px", fontSize: 11 }}>方数</th>
@@ -930,10 +930,10 @@ export default function AdminWhrConsolidationPage() {
                                                     <td style={{ ...tdS, padding: "3px 5px", fontSize: 11 }}>
                                                       {it.productImageBase64 ? (
                                                         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                                          <img src={it.productImageBase64} alt="产品图片" style={{ width: 36, height: 36, objectFit: "cover", borderRadius: 4, border: "1px solid #e5e7eb", cursor: "pointer" }} onClick={(e) => { e.stopPropagation(); setPreviewImage(it.productImageBase64); }} />
+                                                          <img src={it.productImageBase64} alt="产品图片" style={{ width: 36, height: 36, objectFit: "cover", borderRadius: 4, border: "1px solid var(--l-soft)", cursor: "pointer" }} onClick={(e) => { e.stopPropagation(); setPreviewImage(it.productImageBase64); }} />
                                                           <button onClick={(e) => { e.stopPropagation(); setPreviewImage(it.productImageBase64); }} style={{ ...btnCancel, padding: "2px 6px", fontSize: 10 }}>查看</button>
                                                         </div>
-                                                      ) : <span style={{ color: "#d1d5db" }}>暂无图片</span>}
+                                                      ) : <span style={{ color: "var(--l-strong)" }}>暂无图片</span>}
                                                     </td>
                                                   </tr>
                                                 ))}
@@ -941,7 +941,7 @@ export default function AdminWhrConsolidationPage() {
                                             </table>
                                           </div>
                                         )}
-                                        {pa.items.length === 0 && <div style={{ color: "#9ca3af", padding: "4px 0" }}>暂无货品</div>}
+                                        {pa.items.length === 0 && <div style={{ color: "var(--t-faint)", padding: "4px 0" }}>暂无货品</div>}
                                       </div>
                                     )}
                                   </div>
@@ -956,13 +956,13 @@ export default function AdminWhrConsolidationPage() {
                             if (logs.length === 0) return null;
                             return (
                               <div>
-                                <div style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 }}>状态时间线</div>
+                                <div style={{ fontSize: 13, fontWeight: 600, color: "var(--t-body)", marginBottom: 6 }}>状态时间线</div>
                                 {logs.map((sl) => (
-                                  <div key={sl.id} style={{ fontSize: 12, color: "#6b7280", marginBottom: 6, paddingLeft: 10, borderLeft: "2px solid #e5e7eb" }}>
-                                    <strong style={{ color: "#2563eb", marginRight: 6 }}>{sl.trackingNo}</strong>
-                                    <strong style={{ color: "#374151" }}>{PREALERT_STATUS_ZH[sl.fromStatus] ?? sl.fromStatus}</strong> → <strong style={{ color: "#374151" }}>{PREALERT_STATUS_ZH[sl.toStatus] ?? sl.toStatus}</strong>
+                                  <div key={sl.id} style={{ fontSize: 12, color: "var(--t-muted)", marginBottom: 6, paddingLeft: 10, borderLeft: "2px solid var(--l-soft)" }}>
+                                    <strong style={{ color: "var(--c-blue)", marginRight: 6 }}>{sl.trackingNo}</strong>
+                                    <strong style={{ color: "var(--t-body)" }}>{PREALERT_STATUS_ZH[sl.fromStatus] ?? sl.fromStatus}</strong> → <strong style={{ color: "var(--t-body)" }}>{PREALERT_STATUS_ZH[sl.toStatus] ?? sl.toStatus}</strong>
                                     &nbsp;· {sl.operatorName} · {formatBeijingTime(sl.createdAt)}
-                                    {sl.remark && <div style={{ color: "#9ca3af", marginTop: 2 }}>{sl.remark}</div>}
+                                    {sl.remark && <div style={{ color: "var(--t-faint)", marginTop: 2 }}>{sl.remark}</div>}
                                   </div>
                                 ))}
                               </div>
@@ -986,7 +986,7 @@ export default function AdminWhrConsolidationPage() {
             {showReject ? (
               <>
                 <h3 style={{ marginTop: 0 }}>审核不通过</h3>
-                <p style={{ fontSize: 13, color: "#6b7280" }}>预报单：{reviewTarget.prealert.trackingNo} · {reviewTarget.prealert.mark}</p>
+                <p style={{ fontSize: 13, color: "var(--t-muted)" }}>预报单：{reviewTarget.prealert.trackingNo} · {reviewTarget.prealert.mark}</p>
                 <div style={{ marginTop: 10 }}>
                   <label style={fl}>拒绝原因 *</label>
                   <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)} placeholder="请填写拒绝原因" style={{ ...fi, minHeight: 80 }} />
@@ -995,15 +995,15 @@ export default function AdminWhrConsolidationPage() {
                   <label style={fl}>修改单价（可选，留空不修改）</label>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
                     <div>
-                      <label style={{ fontSize: 11, color: "#6b7280" }}>普货单价</label>
+                      <label style={{ fontSize: 11, color: "var(--t-muted)" }}>普货单价</label>
                       <input type="number" value={rejectPriceNormal} onChange={e => setRejectPriceNormal(e.target.value)} placeholder="留空不修改" style={fi} />
                     </div>
                     <div>
-                      <label style={{ fontSize: 11, color: "#6b7280" }}>商检单价</label>
+                      <label style={{ fontSize: 11, color: "var(--t-muted)" }}>商检单价</label>
                       <input type="number" value={rejectPriceInspection} onChange={e => setRejectPriceInspection(e.target.value)} placeholder="留空不修改" style={fi} />
                     </div>
                     <div>
-                      <label style={{ fontSize: 11, color: "#6b7280" }}>敏感单价</label>
+                      <label style={{ fontSize: 11, color: "var(--t-muted)" }}>敏感单价</label>
                       <input type="number" value={rejectPriceSensitive} onChange={e => setRejectPriceSensitive(e.target.value)} placeholder="留空不修改" style={fi} />
                     </div>
                   </div>
@@ -1022,7 +1022,7 @@ export default function AdminWhrConsolidationPage() {
                   <div style={{ marginTop: 8 }}>
                     <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 12 }}>货品明细</div>
                     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
-                      <thead><tr style={{ background: "#f3f4f6" }}>
+                      <thead><tr style={{ background: "var(--s-sunken)" }}>
                         {["品名","件数","方数","重量(kg)","类型"].map(h => <th key={h} style={{ ...thS, padding: "3px 6px", fontSize: 10 }}>{h}</th>)}
                       </tr></thead>
                       <tbody>
@@ -1040,7 +1040,7 @@ export default function AdminWhrConsolidationPage() {
                   </div>
                   {/* 费用及其算式 */}
                   {reviewTarget.prealert.totalFee != null && (
-                    <p style={{ margin: "8px 0 6px", fontSize: 16, fontWeight: 700, color: "#059669" }}>应付金额：{money(reviewTarget.prealert.totalFee)}</p>
+                    <p style={{ margin: "8px 0 6px", fontSize: 16, fontWeight: 700, color: "var(--c-green)" }}>应付金额：{money(reviewTarget.prealert.totalFee)}</p>
                   )}
                   <FeeBreakdownPanel bd={reviewTarget.prealert.feeBreakdown} title="费用是这样算出来的" />
                   {/* 付款截图 */}
@@ -1053,7 +1053,7 @@ export default function AdminWhrConsolidationPage() {
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                           {proofs.map((p: any, i: number) => {
                             const imgSrc = toImageSrc(p.base64Path || p.base64, p.mime);
-                            return imgSrc ? <img key={i} src={imgSrc} alt={`付款截图 ${i + 1}`} onClick={() => setPreviewImage(imgSrc)} style={{ width: 100, height: 100, objectFit: "cover", borderRadius: 6, border: "1px solid #e5e7eb", cursor: "pointer" }} /> : null;
+                            return imgSrc ? <img key={i} src={imgSrc} alt={`付款截图 ${i + 1}`} onClick={() => setPreviewImage(imgSrc)} style={{ width: 100, height: 100, objectFit: "cover", borderRadius: 6, border: "1px solid var(--l-soft)", cursor: "pointer" }} /> : null;
                           })}
                         </div>
                       </div>
@@ -1075,8 +1075,8 @@ export default function AdminWhrConsolidationPage() {
         {cancelTarget && (
           <Modal onClose={() => { setCancelTarget(null); setCancelReason(""); }}>
             <h3 style={{ marginTop: 0 }}>取消预报单</h3>
-            <p style={{ fontSize: 13, color: "#6b7280", marginBottom: 6 }}>预报单：{cancelTarget.prealert.trackingNo} · {cancelTarget.prealert.mark}</p>
-            <p style={{ fontSize: 14, color: "#6b7280", marginBottom: 10 }}>此操作不可恢复，将取消该预报单并释放已占用方数。</p>
+            <p style={{ fontSize: 13, color: "var(--t-muted)", marginBottom: 6 }}>预报单：{cancelTarget.prealert.trackingNo} · {cancelTarget.prealert.mark}</p>
+            <p style={{ fontSize: 14, color: "var(--t-muted)", marginBottom: 10 }}>此操作不可恢复，将取消该预报单并释放已占用方数。</p>
             <div>
               <label style={fl}>取消原因 *</label>
               <textarea value={cancelReason} onChange={e => setCancelReason(e.target.value)} placeholder="请填写取消原因" style={{ ...fi, minHeight: 80 }} />
@@ -1132,22 +1132,22 @@ export default function AdminWhrConsolidationPage() {
               <div style={{ marginTop: 10 }}>
                 <label style={fl}>选择客户</label>
                 <input value={addSearch} onChange={e => setAddSearch(e.target.value)} placeholder="搜索客户名 / 电话 / 公司" style={fi} />
-                <div style={{ maxHeight: 220, overflowY: "auto", border: "1px solid #e5e7eb", borderRadius: 6, marginTop: 6 }}>
+                <div style={{ maxHeight: 220, overflowY: "auto", border: "1px solid var(--l-soft)", borderRadius: 6, marginTop: 6 }}>
                   {clientsLoading ? (
-                    <div style={{ padding: "10px 12px", fontSize: 13, color: "#9ca3af" }}>加载客户列表中…</div>
+                    <div style={{ padding: "10px 12px", fontSize: 13, color: "var(--t-faint)" }}>加载客户列表中…</div>
                   ) : options.length === 0 ? (
-                    <div style={{ padding: "10px 12px", fontSize: 13, color: "#9ca3af" }}>
+                    <div style={{ padding: "10px 12px", fontSize: 13, color: "var(--t-faint)" }}>
                       没有可选客户{joined.size > 0 ? "（已在本计划里的客户不会重复出现）" : ""}
                     </div>
                   ) : options.map(cl => (
-                    <label key={cl.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", cursor: "pointer", borderBottom: "1px solid #f3f4f6", fontSize: 13 }}>
+                    <label key={cl.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", cursor: "pointer", borderBottom: "1px solid var(--s-sunken)", fontSize: 13 }}>
                       <input type="radio" name="add-whr-client" checked={addClientId === cl.id} onChange={() => setAddClientId(cl.id)} />
                       <span style={{ fontWeight: 600 }}>{cl.name}</span>
-                      <span style={{ color: "#6b7280", fontSize: 12 }}>{cl.phone}{cl.companyName ? ` · ${cl.companyName}` : ""}</span>
+                      <span style={{ color: "var(--t-muted)", fontSize: 12 }}>{cl.phone}{cl.companyName ? ` · ${cl.companyName}` : ""}</span>
                     </label>
                   ))}
                 </div>
-                <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>共 {options.length} 位可选</div>
+                <div style={{ fontSize: 12, color: "var(--t-muted)", marginTop: 4 }}>共 {options.length} 位可选</div>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 12 }}>
                 <div>
@@ -1210,9 +1210,9 @@ export default function AdminWhrConsolidationPage() {
                 <input value={clientSearch} onChange={e => setClientSearch(e.target.value)} placeholder="按姓名 / 电话 / 公司搜索" style={{ ...fi, flex: 1 }} />
                 <button onClick={() => loadClients()} style={btnCancel} disabled={clientsLoading}>{clientsLoading ? "刷新中..." : "刷新列表"}</button>
               </div>
-              <div style={{ maxHeight: 200, overflowY: "auto", border: "1px solid #e5e7eb", borderRadius: 6 }}>
+              <div style={{ maxHeight: 200, overflowY: "auto", border: "1px solid var(--l-soft)", borderRadius: 6 }}>
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                  <thead><tr style={{ background: "#f3f4f6" }}>
+                  <thead><tr style={{ background: "var(--s-sunken)" }}>
                     <th style={{ ...thS, padding: "4px 8px", width: 40 }}></th>
                     <th style={{ ...thS, padding: "4px 8px" }}>客户名</th>
                     <th style={{ ...thS, padding: "4px 8px" }}>电话</th>
@@ -1220,12 +1220,12 @@ export default function AdminWhrConsolidationPage() {
                   </tr></thead>
                   <tbody>
                     {filteredClients.length === 0 && (
-                      <tr><td colSpan={4} style={{ ...tdS, padding: "10px 8px", color: "#9ca3af" }}>没有匹配的客户</td></tr>
+                      <tr><td colSpan={4} style={{ ...tdS, padding: "10px 8px", color: "var(--t-faint)" }}>没有匹配的客户</td></tr>
                     )}
                     {filteredClients.map(cl => {
                       const isChecked = selectedCustomers.some(sc => sc.clientId === cl.id);
                       return (
-                        <tr key={cl.id} style={{ cursor: "pointer", background: isChecked ? "#eff6ff" : "white" }}>
+                        <tr key={cl.id} style={{ cursor: "pointer", background: isChecked ? "var(--c-blue-bg)" : "white" }}>
                           <td style={{ ...tdS, padding: "4px 8px", textAlign: "center" }}>
                             <input type="checkbox" checked={isChecked} onChange={() => {
                               if (isChecked) setSelectedCustomers(selectedCustomers.filter(sc => sc.clientId !== cl.id));
@@ -1249,11 +1249,11 @@ export default function AdminWhrConsolidationPage() {
                 {selectedCustomers.map((sc, idx) => {
                   const client = clients.find(cl => cl.id === sc.clientId);
                   return (
-                    <div key={sc.clientId} style={{ border: "1px solid #e5e7eb", borderRadius: 6, padding: "8px 12px", marginBottom: 8 }}>
+                    <div key={sc.clientId} style={{ border: "1px solid var(--l-soft)", borderRadius: 6, padding: "8px 12px", marginBottom: 8 }}>
                       <div style={{ fontWeight: 600, marginBottom: 6, fontSize: 13 }}>{client?.name ?? sc.clientId}</div>
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
                         <div>
-                          <label style={{ fontSize: 11, color: "#6b7280" }}>普货 (元/方)</label>
+                          <label style={{ fontSize: 11, color: "var(--t-muted)" }}>普货 (元/方)</label>
                           <input type="number" value={sc.unitPriceNormal} onChange={e => {
                             const cp = [...selectedCustomers];
                             cp[idx] = { ...cp[idx], unitPriceNormal: e.target.value };
@@ -1261,7 +1261,7 @@ export default function AdminWhrConsolidationPage() {
                           }} style={{ ...fi, marginTop: 2 }} />
                         </div>
                         <div>
-                          <label style={{ fontSize: 11, color: "#6b7280" }}>商检 (元/方)</label>
+                          <label style={{ fontSize: 11, color: "var(--t-muted)" }}>商检 (元/方)</label>
                           <input type="number" value={sc.unitPriceInspection} onChange={e => {
                             const cp = [...selectedCustomers];
                             cp[idx] = { ...cp[idx], unitPriceInspection: e.target.value };
@@ -1269,7 +1269,7 @@ export default function AdminWhrConsolidationPage() {
                           }} style={{ ...fi, marginTop: 2 }} />
                         </div>
                         <div>
-                          <label style={{ fontSize: 11, color: "#6b7280" }}>敏感 (元/方)</label>
+                          <label style={{ fontSize: 11, color: "var(--t-muted)" }}>敏感 (元/方)</label>
                           <input type="number" value={sc.unitPriceSensitive} onChange={e => {
                             const cp = [...selectedCustomers];
                             cp[idx] = { ...cp[idx], unitPriceSensitive: e.target.value };
@@ -1305,22 +1305,22 @@ export default function AdminWhrConsolidationPage() {
             <p style={{ marginTop: 0, fontWeight: 600 }}>删除这个集货计划？</p>
             {deletePlanPreview ? (
               <>
-                <p style={{ margin: "0 0 8px", fontSize: 13, color: "#374151" }}>会连带删掉：</p>
-                <ul style={{ margin: "0 0 12px", paddingLeft: 20, fontSize: 13, color: "#374151" }}>
+                <p style={{ margin: "0 0 8px", fontSize: 13, color: "var(--t-body)" }}>会连带删掉：</p>
+                <ul style={{ margin: "0 0 12px", paddingLeft: 20, fontSize: 13, color: "var(--t-body)" }}>
                   {Object.entries(deletePlanPreview.willDelete).map(([k, v]) => (
                     <li key={k}>{k}：{v} 条</li>
                   ))}
                 </ul>
                 {(deletePlanPreview.refundTotal ?? 0) > 0 && (
-                  <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 6, padding: 10, marginBottom: 12, fontSize: 13, color: "#166534" }}>
+                  <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 6, padding: 10, marginBottom: 12, fontSize: 13, color: "var(--c-green-dark)" }}>
                     删除时会把已付的 <b>¥{(deletePlanPreview.refundTotal ?? 0).toFixed(2)}</b>
                     {" "}退回给 {deletePlanPreview.refundCount} 位客户的集货余额。
                   </div>
                 )}
                 {deletePlanPreview.blockers.length > 0 && (
                   <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 6, padding: 10, marginBottom: 12 }}>
-                    <div style={{ fontSize: 13, color: "#b91c1c", fontWeight: 600, marginBottom: 4 }}>这个计划已经开始走流程了：</div>
-                    <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: "#b91c1c" }}>
+                    <div style={{ fontSize: 13, color: "var(--c-red-deep)", fontWeight: 600, marginBottom: 4 }}>这个计划已经开始走流程了：</div>
+                    <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: "var(--c-red-deep)" }}>
                       {deletePlanPreview.blockers.map((b, i) => <li key={i}>{b}</li>)}
                     </ul>
                     <div style={{ fontSize: 12, color: "#7f1d1d", marginTop: 6 }}>确实要删，请输入你的管理员密码：</div>
@@ -1329,23 +1329,23 @@ export default function AdminWhrConsolidationPage() {
                       value={deletePlanPassword}
                       onChange={(e) => setDeletePlanPassword(e.target.value)}
                       placeholder="管理员密码"
-                      style={{ marginTop: 6, width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
+                      style={{ marginTop: 6, width: "100%", border: "1px solid var(--l-strong)", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
                     />
                   </div>
                 )}
-                <p style={{ margin: "0 0 12px", fontSize: 12, color: "#6b7280" }}>删了找不回来。</p>
+                <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--t-muted)" }}>删了找不回来。</p>
               </>
             ) : (
-              <p style={{ fontSize: 13, color: "#6b7280" }}>正在查这个计划下面有多少东西…</p>
+              <p style={{ fontSize: 13, color: "var(--t-muted)" }}>正在查这个计划下面有多少东西…</p>
             )}
-            {deletePlanError && <p style={{ color: "#b91c1c", fontSize: 13, margin: "0 0 10px" }}>{deletePlanError}</p>}
+            {deletePlanError && <p style={{ color: "var(--c-red-deep)", fontSize: 13, margin: "0 0 10px" }}>{deletePlanError}</p>}
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={handleDeletePlan} disabled={deletePlanSubmitting || !deletePlanPreview}
-                style={{ padding: "8px 16px", background: deletePlanPreview ? "#ef4444" : "#d1d5db", color: "#fff", border: "none", borderRadius: 6, cursor: deletePlanPreview ? "pointer" : "not-allowed" }}>
+                style={{ padding: "8px 16px", background: deletePlanPreview ? "var(--c-red)" : "var(--l-strong)", color: "var(--white)", border: "none", borderRadius: 6, cursor: deletePlanPreview ? "pointer" : "not-allowed" }}>
                 {deletePlanSubmitting ? "删除中..." : "确认删除"}
               </button>
               <button onClick={() => setDeletePlanId(null)}
-                style={{ padding: "8px 16px", border: "1px solid #d1d5db", background: "#fff", color: "#6b7280", borderRadius: 6, cursor: "pointer" }}>取消</button>
+                style={{ padding: "8px 16px", border: "1px solid var(--l-strong)", background: "var(--white)", color: "var(--t-muted)", borderRadius: 6, cursor: "pointer" }}>取消</button>
             </div>
           </Modal>
         )}
@@ -1360,7 +1360,7 @@ export default function AdminWhrConsolidationPage() {
 function Modal({ children, onClose, wide }: { children: React.ReactNode; onClose: () => void; wide?: boolean }) {
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 24, maxWidth: wide ? 700 : 520, width: "90vw", maxHeight: "85vh", overflowY: "auto", boxShadow: "0 8px 30px rgba(0,0,0,0.15)" }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "var(--white)", borderRadius: 12, padding: 24, maxWidth: wide ? 700 : 520, width: "90vw", maxHeight: "85vh", overflowY: "auto", boxShadow: "0 8px 30px rgba(0,0,0,0.15)" }}>
         {children}
       </div>
     </div>

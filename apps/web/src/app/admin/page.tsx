@@ -108,22 +108,22 @@ const SECTION_LABELS: Record<(typeof SECTION_IDS)[number], string> = {
 
 const sectionStyle = {
   marginBottom: 24,
-  border: "1px solid #e5e7eb",
+  border: "1px solid var(--l-soft)",
   borderRadius: 12,
   padding: 20,
-  background: "#fff",
+  background: "var(--white)",
 };
 
 const cardStyle = {
-  border: "1px solid #e5e7eb",
+  border: "1px solid var(--l-soft)",
   borderRadius: 8,
   padding: "10px 12px",
-  background: "#f8fafc",
+  background: "var(--s-cool)",
   fontSize: 14,
 };
 
 const prealertEditInputStyle: React.CSSProperties = {
-  border: "1px solid #d1d5db",
+  border: "1px solid var(--l-strong)",
   borderRadius: 6,
   padding: "6px 8px",
   fontSize: 12,
@@ -1076,38 +1076,38 @@ export default function AdminHomePage() {
             }}
           >
             <div className={overviewFlash ? "kpi-flash" : ""} style={cardStyle}>
-              <div style={{ color: "#000000", fontSize: 12 }}>员工账号总人数</div>
+              <div style={{ color: "var(--t-strong)", fontSize: 12 }}>员工账号总人数</div>
               <div style={{ fontSize: 22, fontWeight: 700 }}>
                 <CountUpNumber value={overview.staffAccountCount} />
               </div>
             </div>
             <div className={overviewFlash ? "kpi-flash" : ""} style={cardStyle}>
-              <div style={{ color: "#000000", fontSize: 12 }}>客户账号</div>
+              <div style={{ color: "var(--t-strong)", fontSize: 12 }}>客户账号</div>
               <div style={{ fontSize: 22, fontWeight: 700 }}>
                 <CountUpNumber value={overview.clientAccountCount} />
               </div>
             </div>
             <div className={overviewFlash ? "kpi-flash" : ""} style={cardStyle}>
-              <div style={{ color: "#000000", fontSize: 12 }}>今日新增订单</div>
+              <div style={{ color: "var(--t-strong)", fontSize: 12 }}>今日新增订单</div>
               <div style={{ fontSize: 22, fontWeight: 700 }}>
                 <CountUpNumber value={overview.newOrderCountToday} />
               </div>
             </div>
             <div className={overviewFlash ? "kpi-flash" : ""} style={cardStyle}>
-              <div style={{ color: "#000000", fontSize: 12 }}>在途订单</div>
+              <div style={{ color: "var(--t-strong)", fontSize: 12 }}>在途订单</div>
               <div style={{ fontSize: 22, fontWeight: 700 }}>
                 <CountUpNumber value={overview.inTransitOrderCount} />
               </div>
             </div>
             <div className={overviewFlash ? "kpi-flash" : ""} style={cardStyle}>
-              <div style={{ color: "#000000", fontSize: 12 }}>当日收货总方数</div>
+              <div style={{ color: "var(--t-strong)", fontSize: 12 }}>当日收货总方数</div>
               <div style={{ fontSize: 22, fontWeight: 700 }}>
                 <CountUpNumber value={overview.receivedVolumeM3Today} decimals={1} />
               </div>
             </div>
           </div>
         ) : (
-          <p style={{ color: "#000000" }}>看板数据加载中…</p>
+          <p style={{ color: "var(--t-strong)" }}>看板数据加载中…</p>
         )}
         <div style={{ marginTop: 14, display: "grid", gap: 12 }}>
           <div className="dashboard-grid-2">
@@ -1167,11 +1167,11 @@ export default function AdminHomePage() {
               </div>
             </div>
           </div>
-          <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10, background: "#f8fafc" }}>
+          <div style={{ border: "1px solid var(--l-cool)", borderRadius: 10, padding: 10, background: "var(--s-cool)" }}>
             <div style={{ fontWeight: 700, marginBottom: 6 }}>毛利率趋势（最近结算）</div>
             {opsOverview ? (
               <>
-                <div style={{ fontSize: 13, color: "#000000", marginBottom: 8 }}>
+                <div style={{ fontSize: 13, color: "var(--t-strong)", marginBottom: 8 }}>
                   总收入 {opsOverview.profitSummary.totalRevenue.toFixed(2)} / 总成本{" "}
                   {opsOverview.profitSummary.totalCost.toFixed(2)} / 总利润{" "}
                   {opsOverview.profitSummary.totalProfit.toFixed(2)} / 毛利率{" "}
@@ -1179,14 +1179,14 @@ export default function AdminHomePage() {
                 </div>
                 <div style={{ display: "grid", gap: 4 }}>
                   {opsOverview.profitTrend.map((item: any) => (
-                    <div key={`${item.orderId}-${item.updatedAt}`} style={{ fontSize: 12, color: "#000000" }}>
+                    <div key={`${item.orderId}-${item.updatedAt}`} style={{ fontSize: 12, color: "var(--t-strong)" }}>
                       运单 {item.trackingNo ?? item.orderId ?? "—"}：利润 {item.profit.toFixed(2)}（{item.updatedAt.slice(0, 16)}）
                     </div>
                   ))}
                 </div>
               </>
             ) : (
-              <div style={{ fontSize: 13, color: "#000000" }}>暂无利润趋势数据</div>
+              <div style={{ fontSize: 13, color: "var(--t-strong)" }}>暂无利润趋势数据</div>
             )}
           </div>
           <div style={{ border: "1px solid #fde68a", borderRadius: 10, padding: 10, background: "#fffbeb" }}>
@@ -1194,22 +1194,22 @@ export default function AdminHomePage() {
             {opsOverview && opsOverview.customsAlerts.length > 0 ? (
               <div style={{ display: "grid", gap: 4 }}>
                 {opsOverview.customsAlerts.slice(0, 6).map((item: any) => (
-                  <div key={item.id} style={{ fontSize: 12, color: "#92400e" }}>
+                  <div key={item.id} style={{ fontSize: 12, color: "var(--c-amber-deep)" }}>
                     [{item.status === "inspection" ? "查验" : item.status === "released" ? "放行" : item.status === "pending" ? "待处理" : item.status}] 运单 {item.shipmentTrackingNo ?? item.shipmentId ?? "-"} /{" "}
                     {item.remark ?? "无备注"}
                   </div>
                 ))}
               </div>
             ) : (
-              <div style={{ fontSize: 13, color: "#000000" }}>暂无查验/待处理告警</div>
+              <div style={{ fontSize: 13, color: "var(--t-strong)" }}>暂无查验/待处理告警</div>
             )}
           </div>
-          <div style={{ border: "1px solid #bfdbfe", borderRadius: 10, padding: 10, background: "#eff6ff" }}>
+          <div style={{ border: "1px solid #bfdbfe", borderRadius: 10, padding: 10, background: "var(--c-blue-bg)" }}>
             <div style={{ fontWeight: 700, marginBottom: 6 }}>供应商报价变化提醒</div>
             {opsOverview && opsOverview.supplierPriceAlerts.length > 0 ? (
               <div style={{ display: "grid", gap: 4 }}>
                 {opsOverview.supplierPriceAlerts.slice(0, 6).map((item) => (
-                  <div key={`${item.routeCode}-${item.supplierName}-${item.updatedAt}`} style={{ fontSize: 12, color: "#1e3a8a" }}>
+                  <div key={`${item.routeCode}-${item.supplierName}-${item.updatedAt}`} style={{ fontSize: 12, color: "var(--c-navy)" }}>
                     {item.routeCode} / {item.supplierName}：{item.previousQuotePrice.toFixed(2)} →{" "}
                     {item.latestQuotePrice.toFixed(2)}（变动 {item.delta > 0 ? "+" : ""}
                     {item.delta.toFixed(2)}）
@@ -1217,7 +1217,7 @@ export default function AdminHomePage() {
                 ))}
               </div>
             ) : (
-              <div style={{ fontSize: 13, color: "#000000" }}>暂无报价变动提醒</div>
+              <div style={{ fontSize: 13, color: "var(--t-strong)" }}>暂无报价变动提醒</div>
             )}
           </div>
         </div>
@@ -1231,7 +1231,7 @@ export default function AdminHomePage() {
             <button
               type="button"
               onClick={() => setStaffPanelCollapsed((v) => !v)}
-              style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 10px", background: "#fff", fontWeight: 600, cursor: "pointer", color: "#000000" }}
+              style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "6px 10px", background: "var(--white)", fontWeight: 600, cursor: "pointer", color: "var(--t-strong)" }}
             >
               {staffPanelCollapsed ? "展开" : "折叠"}
             </button>
@@ -1239,44 +1239,44 @@ export default function AdminHomePage() {
               type="button"
               onClick={() => void loadStaff()}
               disabled={loading}
-              style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 12px", background: "#fff", cursor: "pointer", color: "#000000" }}
+              style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "6px 12px", background: "var(--white)", cursor: "pointer", color: "var(--t-strong)" }}
             >
               刷新
             </button>
           </div>
         </div>
         {staffPanelCollapsed ? (
-          <p style={{ color: "#000000", fontSize: 13, margin: 0 }}>已折叠，可防止误删。点击「展开」后显示添加员工与员工列表（含设置密码、删除等操作）。</p>
+          <p style={{ color: "var(--t-strong)", fontSize: 13, margin: 0 }}>已折叠，可防止误删。点击「展开」后显示添加员工与员工列表（含设置密码、删除等操作）。</p>
         ) : (
           <>
         <div style={{ marginBottom: 12 }}>
           <button
             type="button"
             onClick={() => { setShowStaffModal(true); setStaffForm({ id: "", name: "", phone: "", password: "" }); }}
-            style={{ border: "none", borderRadius: 8, padding: "8px 14px", background: "#2563eb", color: "#fff", fontWeight: 600, cursor: "pointer" }}
+            style={{ border: "none", borderRadius: 8, padding: "8px 14px", background: "var(--c-blue)", color: "var(--white)", fontWeight: 600, cursor: "pointer" }}
           >
             创建账号
           </button>
-          <span style={{ marginLeft: 8, fontSize: 12, color: "#000000" }}>需使用管理员身份登录</span>
+          <span style={{ marginLeft: 8, fontSize: 12, color: "var(--t-strong)" }}>需使用管理员身份登录</span>
         </div>
         {staffList.length === 0 ? (
           <EmptyStateCard title="暂无员工" description="请在上方添加员工账号。" />
         ) : (
           <div style={{ display: "grid", gap: 8 }}>
             {staffList.map((u) => (
-              <div key={u.id} style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 12, background: "#fff" }}>
+              <div key={u.id} style={{ border: "1px solid var(--l-soft)", borderRadius: 8, padding: 12, background: "var(--white)" }}>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8, alignItems: "center" }}>
                   <span><strong>账号</strong> {u.id}</span>
                   <span><strong>姓名</strong> {u.name}</span>
                   <span><strong>手机</strong> {u.phone}</span>
                   <span><strong>状态</strong> {u.status === "inactive" ? "已封禁" : "正常"}</span>
-                  <span style={{ color: "#000000", fontSize: 12 }}>{u.createdAt.slice(0, 10)}</span>
+                  <span style={{ color: "var(--t-strong)", fontSize: 12 }}>{u.createdAt.slice(0, 10)}</span>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     <button
                       type="button"
                       onClick={() => { setShowSettingPassword(false); setSettingPasswordValue(""); setSettingPasswordFor(settingPasswordFor === u.id ? null : u.id); }}
                       disabled={loading}
-                      style={{ border: "1px solid #059669", color: "#059669", borderRadius: 8, padding: "6px 10px", background: "#f0fdf4", cursor: "pointer", fontSize: 13 }}
+                      style={{ border: "1px solid var(--c-green)", color: "var(--c-green)", borderRadius: 8, padding: "6px 10px", background: "#f0fdf4", cursor: "pointer", fontSize: 13 }}
                     >
                       {settingPasswordFor === u.id ? "取消" : "设置密码"}
                     </button>
@@ -1284,22 +1284,22 @@ export default function AdminHomePage() {
                       type="button"
                       onClick={() => void confirmToggleBan(u.id, u.name, u.status, loadStaff, "员工")}
                       disabled={loading}
-                      style={{ border: `1px solid ${u.status === "inactive" ? "#059669" : "#dc2626"}`, color: u.status === "inactive" ? "#059669" : "#dc2626", borderRadius: 8, padding: "6px 10px", background: u.status === "inactive" ? "#f0fdf4" : "#fef2f2", cursor: "pointer", fontSize: 13 }}
+                      style={{ border: `1px solid ${u.status === "inactive" ? "var(--c-green)" : "var(--c-red-2)"}`, color: u.status === "inactive" ? "var(--c-green)" : "var(--c-red-2)", borderRadius: 8, padding: "6px 10px", background: u.status === "inactive" ? "#f0fdf4" : "#fef2f2", cursor: "pointer", fontSize: 13 }}
                     >
                       {u.status === "inactive" ? "解除封禁" : "封禁"}
                     </button>
                   </div>
                 </div>
                 {settingPasswordFor === u.id ? (
-                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #e5e7eb", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--l-soft)", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                     <input
                       type={showSettingPassword ? "text" : "password"}
                       value={settingPasswordValue}
                       onChange={(e) => setSettingPasswordValue(e.target.value)}
                       placeholder="新密码：至少 8 位，不能全是数字"
-                      style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 10px", width: 240 }}
+                      style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "6px 10px", width: 240 }}
                     />
-                    <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13, color: "#000000", cursor: "pointer", whiteSpace: "nowrap" }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13, color: "var(--t-strong)", cursor: "pointer", whiteSpace: "nowrap" }}>
                       <input type="checkbox" checked={showSettingPassword} onChange={(e) => setShowSettingPassword(e.target.checked)} style={{ cursor: "pointer" }} />
                       显示密码
                     </label>
@@ -1307,14 +1307,14 @@ export default function AdminHomePage() {
                       type="button"
                       onClick={() => void submitSetPassword(u.id)}
                       disabled={loading || !settingPasswordValue.trim()}
-                      style={{ border: "none", borderRadius: 8, padding: "6px 12px", background: "#059669", color: "#fff", cursor: "pointer" }}
+                      style={{ border: "none", borderRadius: 8, padding: "6px 12px", background: "var(--c-green)", color: "var(--white)", cursor: "pointer" }}
                     >
                       确认
                     </button>
                     <button
                       type="button"
                       onClick={() => { setSettingPasswordFor(null); setSettingPasswordValue(""); setShowSettingPassword(false); }}
-                      style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 12px", background: "#fff", cursor: "pointer", color: "#000000" }}
+                      style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "6px 12px", background: "var(--white)", cursor: "pointer", color: "var(--t-strong)" }}
                     >
                       取消
                     </button>
@@ -1336,7 +1336,7 @@ export default function AdminHomePage() {
             type="button"
             onClick={() => void loadClients()}
             disabled={loading}
-            style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 12px", background: "#fff", cursor: "pointer", color: "#000000" }}
+            style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "6px 12px", background: "var(--white)", cursor: "pointer", color: "var(--t-strong)" }}
           >
             刷新
           </button>
@@ -1345,7 +1345,7 @@ export default function AdminHomePage() {
           <button
             type="button"
             onClick={() => { setShowClientModal(true); setEditingClientId(null); setClientForm({ id: "", name: "", companyName: "", phone: "", email: "", password: "" }); }}
-            style={{ border: "none", borderRadius: 8, padding: "8px 14px", background: "#2563eb", color: "#fff", fontWeight: 600, cursor: "pointer" }}
+            style={{ border: "none", borderRadius: 8, padding: "8px 14px", background: "var(--c-blue)", color: "var(--white)", fontWeight: 600, cursor: "pointer" }}
           >
             创建账号
           </button>
@@ -1363,12 +1363,12 @@ export default function AdminHomePage() {
                   <span><strong>电话</strong> {u.phone}</span>
                   <span><strong>邮箱</strong> {u.email ?? "-"}</span>
                   <span><strong>状态</strong> {u.status === "inactive" ? "已封禁" : "正常"}</span>
-                  <span style={{ color: "#000000", fontSize: 12 }}>{u.createdAt.slice(0, 10)}</span>
+                  <span style={{ color: "var(--t-strong)", fontSize: 12 }}>{u.createdAt.slice(0, 10)}</span>
                   <button
                     type="button"
                     onClick={() => { setShowSettingPassword(false); setSettingPasswordValue(""); setSettingPasswordFor(settingPasswordFor === u.id ? null : u.id); }}
                     disabled={loading}
-                    style={{ border: "1px solid #059669", color: "#059669", borderRadius: 8, padding: "6px 10px", background: "#f0fdf4", cursor: "pointer", fontSize: 13 }}
+                    style={{ border: "1px solid var(--c-green)", color: "var(--c-green)", borderRadius: 8, padding: "6px 10px", background: "#f0fdf4", cursor: "pointer", fontSize: 13 }}
                   >
                     {settingPasswordFor === u.id ? "取消" : "设置密码"}
                   </button>
@@ -1387,7 +1387,7 @@ export default function AdminHomePage() {
                       setShowClientModal(true);
                     }}
                     disabled={loading}
-                    style={{ border: "1px solid #f59e0b", color: "#d97706", borderRadius: 8, padding: "6px 10px", background: "#fffbeb", cursor: "pointer", fontSize: 13 }}
+                    style={{ border: "1px solid var(--c-amber)", color: "#d97706", borderRadius: 8, padding: "6px 10px", background: "#fffbeb", cursor: "pointer", fontSize: 13 }}
                   >
                     编辑
                   </button>
@@ -1395,21 +1395,21 @@ export default function AdminHomePage() {
                     type="button"
                     onClick={() => void confirmToggleBan(u.id, u.name, u.status, loadClients, "客户")}
                     disabled={loading}
-                    style={{ border: `1px solid ${u.status === "inactive" ? "#059669" : "#fca5a5"}`, color: u.status === "inactive" ? "#059669" : "#dc2626", borderRadius: 8, padding: "6px 10px", background: u.status === "inactive" ? "#f0fdf4" : "#fef2f2", cursor: "pointer", fontSize: 13 }}
+                    style={{ border: `1px solid ${u.status === "inactive" ? "var(--c-green)" : "#fca5a5"}`, color: u.status === "inactive" ? "var(--c-green)" : "var(--c-red-2)", borderRadius: 8, padding: "6px 10px", background: u.status === "inactive" ? "#f0fdf4" : "#fef2f2", cursor: "pointer", fontSize: 13 }}
                   >
                     {u.status === "inactive" ? "解除封禁" : "封禁"}
                   </button>
                 </div>
                 {settingPasswordFor === u.id ? (
-                  <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #e5e7eb", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--l-soft)", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                     <input
                       type={showSettingPassword ? "text" : "password"}
                       value={settingPasswordValue}
                       onChange={(e) => setSettingPasswordValue(e.target.value)}
                       placeholder="输入新密码"
-                      style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 10px", width: 180 }}
+                      style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "6px 10px", width: 180 }}
                     />
-                    <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13, color: "#000000", cursor: "pointer", whiteSpace: "nowrap" }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13, color: "var(--t-strong)", cursor: "pointer", whiteSpace: "nowrap" }}>
                       <input type="checkbox" checked={showSettingPassword} onChange={(e) => setShowSettingPassword(e.target.checked)} style={{ cursor: "pointer" }} />
                       显示密码
                     </label>
@@ -1417,14 +1417,14 @@ export default function AdminHomePage() {
                       type="button"
                       onClick={() => void submitSetPassword(u.id)}
                       disabled={loading || !settingPasswordValue.trim()}
-                      style={{ border: "none", borderRadius: 8, padding: "6px 12px", background: "#059669", color: "#fff", cursor: "pointer" }}
+                      style={{ border: "none", borderRadius: 8, padding: "6px 12px", background: "var(--c-green)", color: "var(--white)", cursor: "pointer" }}
                     >
                       确认
                     </button>
                     <button
                       type="button"
                       onClick={() => { setSettingPasswordFor(null); setSettingPasswordValue(""); setShowSettingPassword(false); }}
-                      style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 12px", background: "#fff", cursor: "pointer", color: "#000000" }}
+                      style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "6px 12px", background: "var(--white)", cursor: "pointer", color: "var(--t-strong)" }}
                     >
                       取消
                     </button>
@@ -1444,14 +1444,14 @@ export default function AdminHomePage() {
             <button
               type="button"
               onClick={() => setOrdersPanelCollapsed((v) => !v)}
-              style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 10px", background: "#fff", fontWeight: 600, cursor: "pointer", color: "#000000" }}
+              style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "6px 10px", background: "var(--white)", fontWeight: 600, cursor: "pointer", color: "var(--t-strong)" }}
             >
               {ordersPanelCollapsed ? "展开" : "折叠"}
             </button>
             <button
               type="button"
               onClick={async () => { const clients = await fetchStaffClients(); setStaffClients(clients); setShowCreateOrderModal(true); }}
-              style={{ border: "none", borderRadius: 8, padding: "6px 12px", color: "#fff", background: "#16a34a", cursor: "pointer", fontWeight: 600 }}
+              style={{ border: "none", borderRadius: 8, padding: "6px 12px", color: "var(--white)", background: "var(--c-green-3)", cursor: "pointer", fontWeight: 600 }}
             >
               创建订单
             </button>
@@ -1463,19 +1463,19 @@ export default function AdminHomePage() {
               📥 批量导入
             </button>
             <input type="date" value={exportDateFrom} onChange={e => setExportDateFrom(e.target.value)}
-              style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "5px 6px", fontSize: 11 }} title="导出日期从" />
-            <span style={{ fontSize: 11, color: "#9ca3af" }}>至</span>
+              style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "5px 6px", fontSize: 11 }} title="导出日期从" />
+            <span style={{ fontSize: 11, color: "var(--t-faint)" }}>至</span>
             <input type="date" value={exportDateTo} onChange={e => setExportDateTo(e.target.value)}
-              style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "5px 6px", fontSize: 11 }} title="导出日期到" />
+              style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "5px 6px", fontSize: 11 }} title="导出日期到" />
             <button type="button" onClick={exportOrdersToExcel}
-              style={{ border: "none", borderRadius: 8, padding: "6px 12px", color: "#fff", background: "#2563eb", cursor: "pointer", fontSize: 13 }}>
+              style={{ border: "none", borderRadius: 8, padding: "6px 12px", color: "var(--white)", background: "var(--c-blue)", cursor: "pointer", fontSize: 13 }}>
               导出Excel
             </button>
             <button
               type="button"
               onClick={() => void loadOrders()}
               disabled={loading}
-              style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 12px", background: "#fff", cursor: "pointer", color: "#000000" }}
+              style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "6px 12px", background: "var(--white)", cursor: "pointer", color: "var(--t-strong)" }}
             >
               刷新
             </button>
@@ -1488,21 +1488,21 @@ export default function AdminHomePage() {
             onSearch={() => {}}
             warehouseOptions={warehouseOptions}
             logisticsStatusOptions={logisticsStatusOptions as unknown as string[]}
-            inputStyle={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", fontSize: 13 }}
+            inputStyle={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px", fontSize: 13 }}
           />
         ) : null}
         {ordersPanelCollapsed ? (
-          <p style={{ color: "#000000", fontSize: 13, margin: 0 }}>已折叠。点击「展开」可查看订单列表并导出 Excel。</p>
+          <p style={{ color: "var(--t-strong)", fontSize: 13, margin: 0 }}>已折叠。点击「展开」可查看订单列表并导出 Excel。</p>
         ) : filteredOrderList.length === 0 ? (
           <EmptyStateCard title="暂无匹配订单" description="无匹配结果" />
         ) : (
           <>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, padding: "0 8px" }}>
-            <span style={{ fontSize: 13, color: "#111827", fontWeight: 500 }}>共 {filteredOrderList.length} 条 · 第 {currentPage}/{totalPages} 页</span>
+            <span style={{ fontSize: 13, color: "var(--t-heading)", fontWeight: 500 }}>共 {filteredOrderList.length} 条 · 第 {currentPage}/{totalPages} 页</span>
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <button onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} disabled={currentPage <= 1} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "4px 12px", background: currentPage <= 1 ? "#f3f4f6" : "#fff", color: currentPage <= 1 ? "#9ca3af" : "#111827", cursor: currentPage <= 1 ? "default" : "pointer", fontSize: 13, fontWeight: 500 }}>上一页</button>
-              <button onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "4px 12px", background: currentPage >= totalPages ? "#f3f4f6" : "#fff", color: currentPage >= totalPages ? "#9ca3af" : "#111827", cursor: currentPage >= totalPages ? "default" : "pointer", fontSize: 13, fontWeight: 500 }}>下一页</button>
-              <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "4px 8px", fontSize: 13, color: "#111827" }}>
+              <button onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} disabled={currentPage <= 1} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 12px", background: currentPage <= 1 ? "var(--s-sunken)" : "var(--white)", color: currentPage <= 1 ? "var(--t-faint)" : "var(--t-heading)", cursor: currentPage <= 1 ? "default" : "pointer", fontSize: 13, fontWeight: 500 }}>上一页</button>
+              <button onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 12px", background: currentPage >= totalPages ? "var(--s-sunken)" : "var(--white)", color: currentPage >= totalPages ? "var(--t-faint)" : "var(--t-heading)", cursor: currentPage >= totalPages ? "default" : "pointer", fontSize: 13, fontWeight: 500 }}>下一页</button>
+              <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 8px", fontSize: 13, color: "var(--t-heading)" }}>
                 {[20, 50, 100, 200].map((n) => <option key={n} value={n}>{n}条/页</option>)}
               </select>
             </div>
@@ -1511,7 +1511,7 @@ export default function AdminHomePage() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed", minWidth: ORDER_TABLE_MIN_WIDTH }}>
               <GridColgroup widths={ORDER_COL_WIDTHS} flexIndex={ORDER_FLEX_COL_INDEX} />
               <thead>
-                <tr style={{ borderBottom: "2px solid #e2e8f0", textAlign: "left", background: "#f1f5f9" }}>
+                <tr style={{ borderBottom: "2px solid var(--l-cool)", textAlign: "left", background: "var(--s-cool-2)" }}>
                   {/* 货型跟着产品走，必须紧挨着国内单号，才能和上面 5 列绑成同一块一起滚 */}
                   <th style={gridThStyle}>
                     <input type="checkbox" checked={selectedOrders.size === filteredOrderList.length && filteredOrderList.length > 0} onChange={toggleSelectAllOrders} style={{ cursor: "pointer" }} />
@@ -1537,17 +1537,17 @@ export default function AdminHomePage() {
                   const detailRows = buildProductDetailRows(o);
                   return (
                   <Fragment key={o.id}>
-                  <tr style={{ borderBottom: "1px solid #e2e8f0", background: expandedOrderId === o.id ? "#eff6ff" : "#fff" }}>
+                  <tr style={{ borderBottom: "1px solid var(--l-cool)", background: expandedOrderId === o.id ? "var(--c-blue-bg)" : "var(--white)" }}>
                     <td style={gridTdStyle}>
                       <input type="checkbox" checked={selectedOrders.has(o.id)} onChange={() => toggleSelectOrder(o.id)} style={{ cursor: "pointer" }} />
                     </td>
-                    <td style={{ ...gridTdStyle, color: "#000000", fontWeight: 600 }}>{o.clientId ?? "—"}</td>
+                    <td style={{ ...gridTdStyle, color: "var(--t-strong)", fontWeight: 600 }}>{o.clientId ?? "—"}</td>
                     <td style={gridTdStyle}>
-                      <div style={{ fontWeight: 600, color: "#1e3a8a" }}>{o.trackingNo ?? "—"}</div>
+                      <div style={{ fontWeight: 600, color: "var(--c-navy)" }}>{o.trackingNo ?? "—"}</div>
                       {/* 明细块只露 3 行，这里写清楚一共几项，免得漏看 */}
                       <div style={{ fontSize: 11, color: "#64748b", marginTop: 3 }}>共 {detailRows.length} 项</div>
                     </td>
-                    <td style={{ ...gridTdStyle, color: "#000000" }}>
+                    <td style={{ ...gridTdStyle, color: "var(--t-strong)" }}>
                       {o.shipDate ?? o.createdAt.slice(0, 10)}
                     </td>
                     {/* 品名 / 箱数 / 单箱数量 / 长宽高 / 国内单号 / 货型：合并成一块，固定高度一起滚 */}
@@ -1598,21 +1598,21 @@ export default function AdminHomePage() {
                             setMessage(`删除失败：${err instanceof Error ? err.message : "未知错误"}`);
                           }
                         }}
-                        style={{ border: "1px solid #fecaca", borderRadius: 8, padding: "4px 10px", background: "#fef2f2", color: "#dc2626", cursor: "pointer", fontWeight: 700 }}
+                        style={{ border: "1px solid #fecaca", borderRadius: 8, padding: "4px 10px", background: "#fef2f2", color: "var(--c-red-2)", cursor: "pointer", fontWeight: 700 }}
                       >
                         删除
                       </button>
                       <button
                         type="button"
                         onClick={() => openShipmentTrack(o.trackingNo ?? o.id)}
-                        style={{ border: "none", background: "transparent", color: "#2563eb", cursor: "pointer", fontWeight: 600, padding: 0, marginLeft: 8 }}
+                        style={{ border: "none", background: "transparent", color: "var(--c-blue)", cursor: "pointer", fontWeight: 600, padding: 0, marginLeft: 8 }}
                       >
                         物流轨迹
                       </button>
                       <button
                         type="button"
                         onClick={() => openPrintLabel({ marks: o.clientName ?? o.clientId ?? "—", packageCount: o.packageCount ?? "—", trackingNo: o.trackingNo ?? "", itemName: o.itemName, productQuantity: o.productQuantity, transportMode: o.transportMode, products: (o.products ?? []).map(p => ({ itemName: p.itemName, packageCount: p.packageCount })) })}
-                        style={{ border: "none", background: "transparent", color: "#16a34a", cursor: "pointer", fontWeight: 600, padding: 0, marginLeft: 8 }}
+                        style={{ border: "none", background: "transparent", color: "var(--c-green-3)", cursor: "pointer", fontWeight: 600, padding: 0, marginLeft: 8 }}
                       >
                         打印
                       </button>
@@ -1638,13 +1638,13 @@ export default function AdminHomePage() {
                             <span>收货地址：<strong>{o.receiverAddressTh ?? "—"}</strong></span>
                           </div>
                           {(o.productImages?.length ?? 0) > 0 || (orderImagesCache[o.orderId ?? o.id]?.length ?? 0) > 0 ? (
-                            <div style={{ marginBottom: 10, padding: 10, background: "#f8fafc", borderRadius: 8, border: "1px solid #e2e8f0" }}>
-                              <div style={{ fontWeight: 600, marginBottom: 6, fontSize: 13, color: "#000000" }}>产品图</div>
+                            <div style={{ marginBottom: 10, padding: 10, background: "var(--s-cool)", borderRadius: 8, border: "1px solid var(--l-cool)" }}>
+                              <div style={{ fontWeight: 600, marginBottom: 6, fontSize: 13, color: "var(--t-strong)" }}>产品图</div>
                               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                                 {(orderImagesCache[o.orderId ?? o.id] ?? o.productImages ?? []).map((img: any) => (
                                   <div key={img.id} style={{ position: "relative" }}>
-                                    <img src={img.imageUrl ? `${apiBaseUrl()}${img.imageUrl}` : ""} alt={img.fileName} style={{ width: 88, height: 88, objectFit: "cover", borderRadius: 8, border: "1px solid #e5e7eb" }} />
-                                    <button type="button" onClick={async () => { await deleteStaffOrderProductImage(img.id); const oid = o.orderId ?? o.id; const imgs = await fetchShipmentImages(oid); setOrderImagesCache((c) => ({ ...c, [oid]: imgs })); }} style={{ position: "absolute", top: -4, right: -4, width: 18, height: 18, borderRadius: "50%", background: "#dc2626", color: "#fff", border: "none", cursor: "pointer", fontSize: 11, lineHeight: 1 }}>×</button>
+                                    <img src={img.imageUrl ? `${apiBaseUrl()}${img.imageUrl}` : ""} alt={img.fileName} style={{ width: 88, height: 88, objectFit: "cover", borderRadius: 8, border: "1px solid var(--l-soft)" }} />
+                                    <button type="button" onClick={async () => { await deleteStaffOrderProductImage(img.id); const oid = o.orderId ?? o.id; const imgs = await fetchShipmentImages(oid); setOrderImagesCache((c) => ({ ...c, [oid]: imgs })); }} style={{ position: "absolute", top: -4, right: -4, width: 18, height: 18, borderRadius: "50%", background: "var(--c-red-2)", color: "var(--white)", border: "none", cursor: "pointer", fontSize: 11, lineHeight: 1 }}>×</button>
                                   </div>
                                 ))}
                               </div>
@@ -1654,7 +1654,7 @@ export default function AdminHomePage() {
                             </div>
                           ) : (
                             <div style={{ marginBottom: 10 }}>
-                              <input type="file" accept="image/*" onChange={async (e) => { const f = e.target.files?.[0]; if (!f) return; const oid = o.orderId ?? o.id; try { const toBase64 = (file: File) => new Promise<string>((resolve, reject) => { const r = new FileReader(); r.onloadend = () => resolve((r.result as string).split(",")[1]); r.onerror = () => reject(new Error("文件读取失败")); r.readAsDataURL(file); }); const base64 = await toBase64(f); await uploadStaffOrderProductImage({ orderId: oid, fileName: f.name, mime: f.type, contentBase64: base64 }); const imgs = await fetchShipmentImages(oid); setOrderImagesCache((c) => ({ ...c, [oid]: imgs })); setToast("产品图已上传"); } catch (err) { setMessage("上传失败：" + (err instanceof Error ? err.message : "未知错误")); } }} style={{ fontSize: 12, color: "#2563eb" }} />
+                              <input type="file" accept="image/*" onChange={async (e) => { const f = e.target.files?.[0]; if (!f) return; const oid = o.orderId ?? o.id; try { const toBase64 = (file: File) => new Promise<string>((resolve, reject) => { const r = new FileReader(); r.onloadend = () => resolve((r.result as string).split(",")[1]); r.onerror = () => reject(new Error("文件读取失败")); r.readAsDataURL(file); }); const base64 = await toBase64(f); await uploadStaffOrderProductImage({ orderId: oid, fileName: f.name, mime: f.type, contentBase64: base64 }); const imgs = await fetchShipmentImages(oid); setOrderImagesCache((c) => ({ ...c, [oid]: imgs })); setToast("产品图已上传"); } catch (err) { setMessage("上传失败：" + (err instanceof Error ? err.message : "未知错误")); } }} style={{ fontSize: 12, color: "var(--c-blue)" }} />
                             </div>
                           )}
                         </div>
@@ -1674,63 +1674,63 @@ export default function AdminHomePage() {
                         >
                         <div style={{ display: "grid", gap: 8 }}>
                           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
-                            <input value={orderEditForm.clientId} onChange={(e) => setOrderEditForm((v) => ({ ...v, clientId: e.target.value }))} placeholder="唛头" list="admin-client-options" autoComplete="off" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }} />
+                            <input value={orderEditForm.clientId} onChange={(e) => setOrderEditForm((v) => ({ ...v, clientId: e.target.value }))} placeholder="唛头" list="admin-client-options" autoComplete="off" style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }} />
                             <datalist id="admin-client-options">{clientList.map((c) => (<option key={c.id} value={c.id}>{c.id}</option>))}</datalist>
-                            <input value={orderEditForm.trackingNo} onChange={(e) => setOrderEditForm((v) => ({ ...v, trackingNo: e.target.value.toUpperCase() }))} placeholder="运单号" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }} />
-                            <input value={orderEditForm.batchNo} onChange={(e) => setOrderEditForm((v) => ({ ...v, batchNo: e.target.value }))} placeholder="柜号" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }} />
-                            <select value={orderEditForm.warehouseId} onChange={(e) => setOrderEditForm((v) => ({ ...v, warehouseId: e.target.value }))} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}><option value="wh_yiwu_01">义乌仓</option><option value="wh_guangzhou_01">广州仓</option><option value="wh_dongguan_01">东莞仓</option><option value="wh_shenzhen_01">深圳仓</option></select>
-                            <select value={orderEditForm.transportMode} onChange={(e) => setOrderEditForm((v) => ({ ...v, transportMode: e.target.value as "sea" | "land" }))} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}><option value="sea">海运</option><option value="land">陆运</option></select>
-                            <input value={orderEditForm.domesticTrackingNo} onChange={(e) => setOrderEditForm((v) => ({ ...v, domesticTrackingNo: e.target.value }))} placeholder="货拉拉" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }} />
-                            <input value={orderEditForm.receiverAddressTh} onChange={(e) => setOrderEditForm((v) => ({ ...v, receiverAddressTh: e.target.value }))} placeholder="收货地址" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }} />
-                            <input value={orderEditForm.containerNo} onChange={(e) => setOrderEditForm((v) => ({ ...v, containerNo: e.target.value }))} placeholder="装柜号" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }} />
-                            <select value={orderEditForm.packageUnit} onChange={(e) => setOrderEditForm((v) => ({ ...v, packageUnit: e.target.value as "bag" | "box" }))} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}><option value="box">箱</option><option value="bag">袋</option></select>
-                            <input value={orderEditForm.weightKg} onChange={(e) => setOrderEditForm((v) => ({ ...v, weightKg: e.target.value }))} placeholder="重量(kg)" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }} />
-                            <input value={orderEditForm.volumeM3} onChange={(e) => setOrderEditForm((v) => ({ ...v, volumeM3: e.target.value }))} placeholder="体积(m³)" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }} />
-                            <input type="date" value={orderEditForm.shipDate} onChange={(e) => setOrderEditForm((v) => ({ ...v, shipDate: e.target.value }))} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }} />
+                            <input value={orderEditForm.trackingNo} onChange={(e) => setOrderEditForm((v) => ({ ...v, trackingNo: e.target.value.toUpperCase() }))} placeholder="运单号" style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }} />
+                            <input value={orderEditForm.batchNo} onChange={(e) => setOrderEditForm((v) => ({ ...v, batchNo: e.target.value }))} placeholder="柜号" style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }} />
+                            <select value={orderEditForm.warehouseId} onChange={(e) => setOrderEditForm((v) => ({ ...v, warehouseId: e.target.value }))} style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }}><option value="wh_yiwu_01">义乌仓</option><option value="wh_guangzhou_01">广州仓</option><option value="wh_dongguan_01">东莞仓</option><option value="wh_shenzhen_01">深圳仓</option></select>
+                            <select value={orderEditForm.transportMode} onChange={(e) => setOrderEditForm((v) => ({ ...v, transportMode: e.target.value as "sea" | "land" }))} style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }}><option value="sea">海运</option><option value="land">陆运</option></select>
+                            <input value={orderEditForm.domesticTrackingNo} onChange={(e) => setOrderEditForm((v) => ({ ...v, domesticTrackingNo: e.target.value }))} placeholder="货拉拉" style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }} />
+                            <input value={orderEditForm.receiverAddressTh} onChange={(e) => setOrderEditForm((v) => ({ ...v, receiverAddressTh: e.target.value }))} placeholder="收货地址" style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }} />
+                            <input value={orderEditForm.containerNo} onChange={(e) => setOrderEditForm((v) => ({ ...v, containerNo: e.target.value }))} placeholder="装柜号" style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }} />
+                            <select value={orderEditForm.packageUnit} onChange={(e) => setOrderEditForm((v) => ({ ...v, packageUnit: e.target.value as "bag" | "box" }))} style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }}><option value="box">箱</option><option value="bag">袋</option></select>
+                            <input value={orderEditForm.weightKg} onChange={(e) => setOrderEditForm((v) => ({ ...v, weightKg: e.target.value }))} placeholder="重量(kg)" style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }} />
+                            <input value={orderEditForm.volumeM3} onChange={(e) => setOrderEditForm((v) => ({ ...v, volumeM3: e.target.value }))} placeholder="体积(m³)" style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }} />
+                            <input type="date" value={orderEditForm.shipDate} onChange={(e) => setOrderEditForm((v) => ({ ...v, shipDate: e.target.value }))} style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }} />
                           </div>
-                          <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 10, background: "#f9fafb", marginTop: 8 }}>
-                            <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: "#000000" }}>产品行编辑</div>
+                          <div style={{ border: "1px solid var(--l-soft)", borderRadius: 8, padding: 10, background: "var(--s-alt)", marginTop: 8 }}>
+                            <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: "var(--t-strong)" }}>产品行编辑</div>
                             {editProducts.length === 0 && (
-                              <div style={{ fontSize: 12, color: "#9ca3af", padding: "4px 0" }}>无产品行，点击下方按钮添加</div>
+                              <div style={{ fontSize: 12, color: "var(--t-faint)", padding: "4px 0" }}>无产品行，点击下方按钮添加</div>
                             )}
                             {editProducts.map((p, i) => (
                               <div key={i} style={{ display: "grid", gridTemplateColumns: "2fr 0.4fr 0.3fr 0.3fr 0.3fr 0.4fr 0.45fr 0.8fr 1fr auto", gap: 4, marginBottom: 4, alignItems: "center" }}>
-                                <input value={p.itemName} onChange={(e) => { const n = [...editProducts]; n[i] = { ...n[i], itemName: e.target.value }; setEditProducts(n); }} placeholder="品名" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "4px 6px", fontSize: 12 }} />
-                                <input type="number" value={p.packageCount} onChange={(e) => { const n = [...editProducts]; n[i] = { ...n[i], packageCount: e.target.value }; setEditProducts(n); }} placeholder="箱数" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "4px 6px", fontSize: 12 }} />
-                                <input type="number" step="0.01" value={p.lengthCm} onChange={(e) => { const n = [...editProducts]; n[i] = { ...n[i], lengthCm: e.target.value }; setEditProducts(n); }} placeholder="长cm" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "4px 6px", fontSize: 12 }} />
-                                <input type="number" step="0.01" value={p.widthCm} onChange={(e) => { const n = [...editProducts]; n[i] = { ...n[i], widthCm: e.target.value }; setEditProducts(n); }} placeholder="宽cm" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "4px 6px", fontSize: 12 }} />
-                                <input type="number" step="0.01" value={p.heightCm} onChange={(e) => { const n = [...editProducts]; n[i] = { ...n[i], heightCm: e.target.value }; setEditProducts(n); }} placeholder="高cm" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "4px 6px", fontSize: 12 }} />
-                                <input type="number" value={p.productQuantity} onChange={(e) => { const n = [...editProducts]; n[i] = { ...n[i], productQuantity: e.target.value }; setEditProducts(n); }} placeholder="单箱数量" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "4px 6px", fontSize: 12 }} />
-                                <input type="number" step="0.01" value={p.weightKg} onChange={(e) => { const n = [...editProducts]; n[i] = { ...n[i], weightKg: e.target.value }; setEditProducts(n); }} placeholder="单箱重kg" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "4px 6px", fontSize: 12 }} />
-                                <select value={(p.cargoType || "normal").toLowerCase()} onChange={(e) => { const n = [...editProducts]; n[i] = { ...n[i], cargoType: e.target.value }; setEditProducts(n); }} style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "4px 6px", fontSize: 12, background: "#fff" }}>
+                                <input value={p.itemName} onChange={(e) => { const n = [...editProducts]; n[i] = { ...n[i], itemName: e.target.value }; setEditProducts(n); }} placeholder="品名" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "4px 6px", fontSize: 12 }} />
+                                <input type="number" value={p.packageCount} onChange={(e) => { const n = [...editProducts]; n[i] = { ...n[i], packageCount: e.target.value }; setEditProducts(n); }} placeholder="箱数" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "4px 6px", fontSize: 12 }} />
+                                <input type="number" step="0.01" value={p.lengthCm} onChange={(e) => { const n = [...editProducts]; n[i] = { ...n[i], lengthCm: e.target.value }; setEditProducts(n); }} placeholder="长cm" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "4px 6px", fontSize: 12 }} />
+                                <input type="number" step="0.01" value={p.widthCm} onChange={(e) => { const n = [...editProducts]; n[i] = { ...n[i], widthCm: e.target.value }; setEditProducts(n); }} placeholder="宽cm" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "4px 6px", fontSize: 12 }} />
+                                <input type="number" step="0.01" value={p.heightCm} onChange={(e) => { const n = [...editProducts]; n[i] = { ...n[i], heightCm: e.target.value }; setEditProducts(n); }} placeholder="高cm" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "4px 6px", fontSize: 12 }} />
+                                <input type="number" value={p.productQuantity} onChange={(e) => { const n = [...editProducts]; n[i] = { ...n[i], productQuantity: e.target.value }; setEditProducts(n); }} placeholder="单箱数量" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "4px 6px", fontSize: 12 }} />
+                                <input type="number" step="0.01" value={p.weightKg} onChange={(e) => { const n = [...editProducts]; n[i] = { ...n[i], weightKg: e.target.value }; setEditProducts(n); }} placeholder="单箱重kg" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "4px 6px", fontSize: 12 }} />
+                                <select value={(p.cargoType || "normal").toLowerCase()} onChange={(e) => { const n = [...editProducts]; n[i] = { ...n[i], cargoType: e.target.value }; setEditProducts(n); }} style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "4px 6px", fontSize: 12, background: "var(--white)" }}>
                                   <option value="normal">普货</option>
                                   <option value="inspection">商检</option>
                                   <option value="sensitive">敏感</option>
                                 </select>
-                                <input value={p.domesticTrackingNo || ""} onChange={(e) => { const n = [...editProducts]; n[i] = { ...n[i], domesticTrackingNo: e.target.value }; setEditProducts(n); }} placeholder="货拉拉" style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "4px 6px", fontSize: 12 }} />
-                                <button type="button" onClick={() => setEditProducts((v) => v.filter((_, j) => j !== i))} style={{ border: "1px solid #fca5a5", borderRadius: 4, padding: "4px 6px", fontSize: 11, background: "#fff", color: "#dc2626", cursor: "pointer" }}>X</button>
+                                <input value={p.domesticTrackingNo || ""} onChange={(e) => { const n = [...editProducts]; n[i] = { ...n[i], domesticTrackingNo: e.target.value }; setEditProducts(n); }} placeholder="货拉拉" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "4px 6px", fontSize: 12 }} />
+                                <button type="button" onClick={() => setEditProducts((v) => v.filter((_, j) => j !== i))} style={{ border: "1px solid #fca5a5", borderRadius: 4, padding: "4px 6px", fontSize: 11, background: "var(--white)", color: "var(--c-red-2)", cursor: "pointer" }}>X</button>
                               </div>
                             ))}
-                            <button type="button" onClick={() => setEditProducts((v) => [...v, { itemName: "", packageCount: "", lengthCm: "", widthCm: "", heightCm: "", productQuantity: "", weightKg: "", cargoType: "normal", domesticTrackingNo: "" }])} style={{ border: "1px dashed #2563eb", borderRadius: 4, padding: "4px 10px", fontSize: 12, background: "#fff", color: "#2563eb", cursor: "pointer", marginTop: 4 }}>+ 添加产品</button>
+                            <button type="button" onClick={() => setEditProducts((v) => [...v, { itemName: "", packageCount: "", lengthCm: "", widthCm: "", heightCm: "", productQuantity: "", weightKg: "", cargoType: "normal", domesticTrackingNo: "" }])} style={{ border: "1px dashed var(--c-blue)", borderRadius: 4, padding: "4px 10px", fontSize: 12, background: "var(--white)", color: "var(--c-blue)", cursor: "pointer", marginTop: 4 }}>+ 添加产品</button>
                           </div>
                           {(o.productImages?.length ?? 0) > 0 && (
-                            <div style={{ marginTop: 8, padding: 10, background: "#f8fafc", borderRadius: 8, border: "1px solid #e2e8f0" }}>
-                              <div style={{ fontWeight: 600, marginBottom: 6, fontSize: 13, color: "#000000" }}>产品图</div>
+                            <div style={{ marginTop: 8, padding: 10, background: "var(--s-cool)", borderRadius: 8, border: "1px solid var(--l-cool)" }}>
+                              <div style={{ fontWeight: 600, marginBottom: 6, fontSize: 13, color: "var(--t-strong)" }}>产品图</div>
                               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                                 {o.productImages!.map((img) => (
-                                  <img key={img.id} src={img.imageUrl ? `${apiBaseUrl()}${img.imageUrl}` : ""} alt={img.fileName} style={{ width: 88, height: 88, objectFit: "cover", borderRadius: 8, border: "1px solid #e5e7eb" }} />
+                                  <img key={img.id} src={img.imageUrl ? `${apiBaseUrl()}${img.imageUrl}` : ""} alt={img.fileName} style={{ width: 88, height: 88, objectFit: "cover", borderRadius: 8, border: "1px solid var(--l-soft)" }} />
                                 ))}
                               </div>
                             </div>
                           )}
                           <div style={{ marginBottom: 12 }}>
-                            <div style={{ fontSize: 12, color: "#000000", marginBottom: 4 }}>备注</div>
-                            <input value={orderEditForm.remark} onChange={(e) => setOrderEditForm((v) => ({ ...v, remark: e.target.value }))} placeholder="备注（可选）" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", width: "100%", fontSize: 13 }} />
+                            <div style={{ fontSize: 12, color: "var(--t-strong)", marginBottom: 4 }}>备注</div>
+                            <input value={orderEditForm.remark} onChange={(e) => setOrderEditForm((v) => ({ ...v, remark: e.target.value }))} placeholder="备注（可选）" style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px", width: "100%", fontSize: 13 }} />
                           </div>
 
                           <div style={{ display: "flex", gap: 8 }}>
-                            <button type="button" onClick={() => void submitOrderEdit()} disabled={loading} style={{ border: "none", borderRadius: 6, padding: "9px 18px", color: "#fff", background: "#1e3a8a", cursor: "pointer", fontWeight: 600 }}>保存</button>
-                            <button type="button" onClick={() => setEditingOrderId("")} style={{ border: "1px solid #d8d6d1", borderRadius: 6, padding: "9px 18px", background: "#fff", cursor: "pointer", color: "#1a1a1e" }}>取消</button>
+                            <button type="button" onClick={() => void submitOrderEdit()} disabled={loading} style={{ border: "none", borderRadius: 6, padding: "9px 18px", color: "var(--white)", background: "var(--c-navy)", cursor: "pointer", fontWeight: 600 }}>保存</button>
+                            <button type="button" onClick={() => setEditingOrderId("")} style={{ border: "1px solid #d8d6d1", borderRadius: 6, padding: "9px 18px", background: "var(--white)", cursor: "pointer", color: "#1a1a1e" }}>取消</button>
                           </div>
                         </div>
                         </DetailModal>
@@ -1751,36 +1751,36 @@ export default function AdminHomePage() {
       <section id="ops-tools" style={{ ...sectionStyle, display: activeSection === "ops-tools" ? "block" : "none" }}>
         <h2 style={{ margin: "0 0 16px", fontSize: 18 }}>{SECTION_LABELS["ops-tools"]}</h2>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16 }}>
-          <div style={{ padding: 16, background: "#f8fafc", borderRadius: 8, border: "1px solid #e2e8f0" }}>
+          <div style={{ padding: 16, background: "var(--s-cool)", borderRadius: 8, border: "1px solid var(--l-cool)" }}>
             <h4 style={{ margin: "0 0 12px", fontSize: 14 }}>体积重量核算</h4>
             <div style={{ display: "grid", gap: 8 }}>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <input value={calcLength} onChange={(e) => setCalcLength(e.target.value)} placeholder="长(cm)" style={prealertEditInputStyle} />
-                <span style={{ color: "#000000" }}>×</span>
+                <span style={{ color: "var(--t-strong)" }}>×</span>
                 <input value={calcWidth} onChange={(e) => setCalcWidth(e.target.value)} placeholder="宽(cm)" style={prealertEditInputStyle} />
-                <span style={{ color: "#000000" }}>×</span>
+                <span style={{ color: "var(--t-strong)" }}>×</span>
                 <input value={calcHeight} onChange={(e) => setCalcHeight(e.target.value)} placeholder="高(cm)" style={prealertEditInputStyle} />
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <span style={{ fontSize: 12, minWidth: 60 }}>数量：</span>
                 <input type="number" value={calcQty} onChange={(e) => setCalcQty(e.target.value)} style={{ ...prealertEditInputStyle, width: 80 }} />
-                <span style={{ fontSize: 12, color: "#000000" }}>箱</span>
+                <span style={{ fontSize: 12, color: "var(--t-strong)" }}>箱</span>
                 <button onClick={() => {
                   const l = Number(calcLength); const w = Number(calcWidth); const h = Number(calcHeight); const q = Number(calcQty);
                   if (!l || !w || !h) { setCalcResult("请填写长宽高"); return; }
                   const volM3 = (l * w * h * q) / 1_000_000;
                   const weightEst = volM3 * 167;
                   setCalcResult(`${volM3.toFixed(3)} m³（≈ ${weightEst.toFixed(1)} kg）`);
-                }} style={{ border: "none", borderRadius: 6, padding: "6px 12px", background: "#2563eb", color: "#fff", cursor: "pointer", fontSize: 12 }}>计算</button>
+                }} style={{ border: "none", borderRadius: 6, padding: "6px 12px", background: "var(--c-blue)", color: "var(--white)", cursor: "pointer", fontSize: 12 }}>计算</button>
               </div>
-              {calcResult && <div style={{ fontSize: 14, fontWeight: 600, color: "#16a34a" }}>{calcResult}</div>}
+              {calcResult && <div style={{ fontSize: 14, fontWeight: 600, color: "var(--c-green-3)" }}>{calcResult}</div>}
             </div>
           </div>
-          <div style={{ padding: 16, background: "#f8fafc", borderRadius: 8, border: "1px solid #e2e8f0" }}>
+          <div style={{ padding: 16, background: "var(--s-cool)", borderRadius: 8, border: "1px solid var(--l-cool)" }}>
             <h4 style={{ margin: "0 0 12px", fontSize: 14 }}>标签打印</h4>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <p style={{ fontSize: 12, color: "#000000", margin: 0 }}>在运单管理列表中点击「打印」按钮即可打印 FBA 标签 / 面单 / 箱号条码。</p>
-              <p style={{ fontSize: 12, color: "#000000", margin: 0 }}>支持：唛头、运单号、品名、箱数、运输方式等信息一键打印。</p>
+              <p style={{ fontSize: 12, color: "var(--t-strong)", margin: 0 }}>在运单管理列表中点击「打印」按钮即可打印 FBA 标签 / 面单 / 箱号条码。</p>
+              <p style={{ fontSize: 12, color: "var(--t-strong)", margin: 0 }}>支持：唛头、运单号、品名、箱数、运输方式等信息一键打印。</p>
             </div>
           </div>
         </div>
@@ -1791,31 +1791,31 @@ export default function AdminHomePage() {
         <h2 style={{ margin: "0 0 16px", fontSize: 18 }}>{SECTION_LABELS["lastmile"]}</h2>
 
         {/* 创建派送单 */}
-        <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 16, marginBottom: 16, background: "#f8fafc" }}>
+        <div style={{ border: "1px solid var(--l-soft)", borderRadius: 8, padding: 16, marginBottom: 16, background: "var(--s-cool)" }}>
           <h4 style={{ margin: "0 0 12px", fontSize: 14 }}>创建派送单</h4>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, maxWidth: 600 }}>
-            <div style={{ border: "1px solid #e5e7eb", borderRadius: 6, padding: 8, background: "#fff", gridColumn: "1/-1" }}>
-              <input value={lmShipSearch} onChange={e=>setLmShipSearch(e.target.value)} onFocus={()=>loadLmShipments()} placeholder="搜索运单（已到泰国的）..." style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 8px", fontSize: 12, width: "100%", marginBottom: 4 }} />
+            <div style={{ border: "1px solid var(--l-soft)", borderRadius: 6, padding: 8, background: "var(--white)", gridColumn: "1/-1" }}>
+              <input value={lmShipSearch} onChange={e=>setLmShipSearch(e.target.value)} onFocus={()=>loadLmShipments()} placeholder="搜索运单（已到泰国的）..." style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "6px 8px", fontSize: 12, width: "100%", marginBottom: 4 }} />
               {/* 2026-08-06：原来写死 .slice(0, 20)，超出的不显示也不提示 */}
               <div style={{ maxHeight: 150, overflow: "auto" }}>
                 {lmShipments.filter(s=>!lmShipSearch||(s.trackingNo||"").includes(lmShipSearch)||(s.clientId||"").includes(lmShipSearch)).map(s=>(
                   <label key={s.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "2px 0", fontSize: 12, cursor: "pointer" }}>
                     <input type="checkbox" checked={lmSelected.has(s.id)} onChange={()=>{const n=new Set(lmSelected);n.has(s.id)?n.delete(s.id):n.add(s.id);setLmSelected(n)}} />
-                    <span style={{ fontFamily: "monospace", color: "#1e3a8a", minWidth: 150 }}>{s.trackingNo}</span>
+                    <span style={{ fontFamily: "monospace", color: "var(--c-navy)", minWidth: 150 }}>{s.trackingNo}</span>
                     <span style={{ color: "#6b21a8", minWidth: 60 }}>{s.clientId}</span>
-                    <span style={{ color: "#374151" }}>{s.itemName} · {s.packageCount}件</span>
+                    <span style={{ color: "var(--t-body)" }}>{s.itemName} · {s.packageCount}件</span>
                   </label>
                 ))}
               </div>
-              <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>
+              <div style={{ fontSize: 11, color: "var(--t-muted)", marginTop: 4 }}>
                 已选 {lmSelected.size} 个运单 · 当前列出 {lmShipments.filter(s=>!lmShipSearch||(s.trackingNo||"").includes(lmShipSearch)||(s.clientId||"").includes(lmShipSearch)).length} 条
                 {lmShipSearch ? `（共 ${lmShipments.length} 条，已按「${lmShipSearch}」筛选）` : ""}
               </div>
             </div>
-            <input value={lmForm.driverName} onChange={e => setLmForm(f => ({...f, driverName: e.target.value}))} placeholder="司机姓名" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 12px", fontSize: 13 }} />
-            <input value={lmForm.licensePlate} onChange={e => setLmForm(f => ({...f, licensePlate: e.target.value}))} placeholder="车牌号" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 12px", fontSize: 13 }} />
+            <input value={lmForm.driverName} onChange={e => setLmForm(f => ({...f, driverName: e.target.value}))} placeholder="司机姓名" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 12px", fontSize: 13 }} />
+            <input value={lmForm.licensePlate} onChange={e => setLmForm(f => ({...f, licensePlate: e.target.value}))} placeholder="车牌号" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 12px", fontSize: 13 }} />
             <input value={lmForm.phoneNumber} onChange={e => setLmForm(f => ({...f, phoneNumber: e.target.value}))} placeholder="电话" />
-            <input type="date" value={lmForm.deliveryDate} onChange={e => setLmForm(f => ({...f, deliveryDate: e.target.value}))} placeholder="派送日期" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 12px", fontSize: 13 }} />
+            <input type="date" value={lmForm.deliveryDate} onChange={e => setLmForm(f => ({...f, deliveryDate: e.target.value}))} placeholder="派送日期" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 12px", fontSize: 13 }} />
           </div>
           <button disabled={loading || lmSelected.size===0} onClick={async () => {
             setLoading(true);
@@ -1831,14 +1831,14 @@ export default function AdminHomePage() {
               loadLastmileOrders();
             } catch (e: any) { setToast(e.message ?? "创建失败"); }
             finally { setLoading(false); }
-          }} style={{ marginTop: 8, border: "none", borderRadius: 6, padding: "8px 16px", background: "#2563eb", color: "#fff", cursor: "pointer", fontSize: 13 }}>创建派送单</button>
+          }} style={{ marginTop: 8, border: "none", borderRadius: 6, padding: "8px 16px", background: "var(--c-blue)", color: "var(--white)", cursor: "pointer", fontSize: 13 }}>创建派送单</button>
         </div>
 
         {/* 派送列表 */}
-        {lmOrders.length === 0 ? <p style={{ color: "#6b7280", fontSize: 13 }}>暂无派送单</p> : (
+        {lmOrders.length === 0 ? <p style={{ color: "var(--t-muted)", fontSize: 13 }}>暂无派送单</p> : (
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-              <thead><tr style={{ borderBottom: "2px solid #e2e8f0", textAlign: "left" }}>
+              <thead><tr style={{ borderBottom: "2px solid var(--l-cool)", textAlign: "left" }}>
                 <th style={{ padding: "6px 8px" }}>派送单号</th>
                 <th style={{ padding: "6px 8px" }}>运单号</th>
                 <th style={{ padding: "6px 8px" }}>司机</th>
@@ -1850,30 +1850,30 @@ export default function AdminHomePage() {
               </tr></thead>
               <tbody>
                 {lmOrders.map(o => (
-                  <tr key={o.id} style={{ borderBottom: "1px solid #e2e8f0" }}>
+                  <tr key={o.id} style={{ borderBottom: "1px solid var(--l-cool)" }}>
                     <td style={{ padding: "6px 8px", fontFamily: "monospace", fontSize: 11 }}>{o.deliveryNo}</td>
                     <td style={{ padding: "6px 8px", fontFamily: "monospace" }}>{o.trackingNo || o.shipmentId}</td>
                     <td style={{ padding: "6px 8px" }}>{o.driverName ?? "-"}</td>
                     <td style={{ padding: "6px 8px" }}>{o.licensePlate ?? "-"}</td>
                     <td style={{ padding: "6px 8px" }}>{o.phoneNumber ?? "-"}</td>
                     <td style={{ padding: "6px 8px" }}>{o.deliveryDate || "-"}</td>
-                    <td style={{ padding: "6px 8px" }}>{o.status === "SIGNED" ? <span>已签收{o.signImageBase64 ? <img src={"data:image/jpeg;base64,"+o.signImageBase64} alt="签收凭证" onClick={() => setPreviewImg("data:image/jpeg;base64,"+o.signImageBase64!)} style={{ maxWidth:40, maxHeight:40, borderRadius:4, marginLeft:4, cursor:"pointer", border:"1px solid #e5e7eb" }} /> : null}</span> : o.status === "DELIVERING" ? " 派送中" : o.status}</td>
+                    <td style={{ padding: "6px 8px" }}>{o.status === "SIGNED" ? <span>已签收{o.signImageBase64 ? <img src={"data:image/jpeg;base64,"+o.signImageBase64} alt="签收凭证" onClick={() => setPreviewImg("data:image/jpeg;base64,"+o.signImageBase64!)} style={{ maxWidth:40, maxHeight:40, borderRadius:4, marginLeft:4, cursor:"pointer", border:"1px solid var(--l-soft)" }} /> : null}</span> : o.status === "DELIVERING" ? " 派送中" : o.status}</td>
                     <td style={{ padding: "6px 8px" }}>
                       {o.status !== "SIGNED" && (
                         <button onClick={async () => {
                           setLmSignData({id:o.id,base64:""}); lmSignFileRef.current?.click();
-                        }} style={{ border: "1px solid #16a34a", borderRadius: 4, padding: "2px 8px", fontSize: 11, background: "#fff", color: "#16a34a", cursor: "pointer" }}>签收</button>
+                        }} style={{ border: "1px solid var(--c-green-3)", borderRadius: 4, padding: "2px 8px", fontSize: 11, background: "var(--white)", color: "var(--c-green-3)", cursor: "pointer" }}>签收</button>
                       )}
                       {/* 2026-08-06：这张表原来只有状态，看不到轨迹（员工端同时也补了同一处） */}
                       <button
                         disabled={!o.trackingNo}
                         onClick={() => o.trackingNo && openShipmentTrack(o.trackingNo)}
-                        style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "2px 8px", fontSize: 11, background: "#fff", color: o.trackingNo ? "#1e3a8a" : "#9ca3af", cursor: o.trackingNo ? "pointer" : "not-allowed", marginLeft: 4, whiteSpace: "nowrap" }}
+                        style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "2px 8px", fontSize: 11, background: "var(--white)", color: o.trackingNo ? "var(--c-navy)" : "var(--t-faint)", cursor: o.trackingNo ? "pointer" : "not-allowed", marginLeft: 4, whiteSpace: "nowrap" }}
                       >
                         物流轨迹
                       </button>
                       {/* 【审查问题 2】原来删除不看返回就弹「已删除」，删失败刷新一下单子又回来了 */}
-                      <button onClick={async ()=>{if(!confirm("确定删除？"))return;try{const res=await fetch(apiBaseUrl()+"/admin/lastmile/orders?id="+o.id,{method:"DELETE",headers:authHeaders()});await parseApiResponse(res);setToast("已删除");loadLastmileOrders()}catch(e:any){setToast(e.message||"删除失败，请重试")}}} style={{ border: "1px solid #fca5a5", borderRadius: 4, padding: "2px 6px", fontSize: 11, background: "#fff", color: "#dc2626", cursor: "pointer", marginLeft: 4 }}>删除</button>
+                      <button onClick={async ()=>{if(!confirm("确定删除？"))return;try{const res=await fetch(apiBaseUrl()+"/admin/lastmile/orders?id="+o.id,{method:"DELETE",headers:authHeaders()});await parseApiResponse(res);setToast("已删除");loadLastmileOrders()}catch(e:any){setToast(e.message||"删除失败，请重试")}}} style={{ border: "1px solid #fca5a5", borderRadius: 4, padding: "2px 6px", fontSize: 11, background: "var(--white)", color: "var(--c-red-2)", cursor: "pointer", marginLeft: 4 }}>删除</button>
                     </td>
                   </tr>
                 ))}
@@ -1908,7 +1908,7 @@ export default function AdminHomePage() {
       {/* 尾端地址 */}
       <section id="lastmile-address" style={{ ...sectionStyle, display: activeSection === "lastmile-address" ? "block" : "none" }}>
         <h2 style={{ margin: "0 0 16px", fontSize: 18 }}>尾端地址</h2>
-        <p style={{ fontSize: 13, color: "#6b7280" }}>客户端注册后自动同步唛头与派送地址。</p>
+        <p style={{ fontSize: 13, color: "var(--t-muted)" }}>客户端注册后自动同步唛头与派送地址。</p>
       </section>
 
       {/* 充值审核 */}
@@ -1922,11 +1922,11 @@ export default function AdminHomePage() {
               type="button"
               onClick={() => setRechargeStatusFilter(s)}
               style={{
-                border: rechargeStatusFilter === s ? "2px solid #2563eb" : "1px solid #d1d5db",
+                border: rechargeStatusFilter === s ? "2px solid var(--c-blue)" : "1px solid var(--l-strong)",
                 borderRadius: 8,
                 padding: "6px 14px",
-                background: rechargeStatusFilter === s ? "#eff6ff" : "#fff",
-                color: rechargeStatusFilter === s ? "#2563eb" : "#374151",
+                background: rechargeStatusFilter === s ? "var(--c-blue-bg)" : "var(--white)",
+                color: rechargeStatusFilter === s ? "var(--c-blue)" : "var(--t-body)",
                 fontWeight: 600,
                 fontSize: 13,
                 cursor: "pointer",
@@ -1937,20 +1937,20 @@ export default function AdminHomePage() {
           ))}
         </div>
         {rechargeList.length === 0 ? (
-          <p style={{ color: "#6b7280", fontSize: 13 }}>暂无充值申请</p>
+          <p style={{ color: "var(--t-muted)", fontSize: 13 }}>暂无充值申请</p>
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
-                <tr style={{ background: "#f9fafb", borderBottom: "1px solid #e5e7eb" }}>
-                  <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>时间</th>
-                  <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>客户</th>
-                  <th style={{ padding: "8px 10px", textAlign: "right", fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>金额</th>
-                  <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>支付方式</th>
-                  <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>状态</th>
-                  <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>凭证</th>
-                  <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>备注</th>
-                  <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>操作</th>
+                <tr style={{ background: "var(--s-alt)", borderBottom: "1px solid var(--l-soft)" }}>
+                  <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, color: "var(--t-body)", whiteSpace: "nowrap" }}>时间</th>
+                  <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, color: "var(--t-body)", whiteSpace: "nowrap" }}>客户</th>
+                  <th style={{ padding: "8px 10px", textAlign: "right", fontWeight: 600, color: "var(--t-body)", whiteSpace: "nowrap" }}>金额</th>
+                  <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, color: "var(--t-body)", whiteSpace: "nowrap" }}>支付方式</th>
+                  <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, color: "var(--t-body)", whiteSpace: "nowrap" }}>状态</th>
+                  <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, color: "var(--t-body)", whiteSpace: "nowrap" }}>凭证</th>
+                  <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, color: "var(--t-body)", whiteSpace: "nowrap" }}>备注</th>
+                  <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, color: "var(--t-body)", whiteSpace: "nowrap" }}>操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -1958,11 +1958,11 @@ export default function AdminHomePage() {
                   const methodLabel = r.paymentMethod === "WECHAT" ? "微信" : r.paymentMethod === "ALIPAY" ? "支付宝" : "银行转账";
                   const statusLabel = r.status === "PENDING" ? "待审核" : r.status === "APPROVED" ? "已通过" : "已拒绝";
                   const statusColor =
-                    r.status === "PENDING" ? { bg: "#fef3c7", text: "#92400e" } :
-                    r.status === "APPROVED" ? { bg: "#d1fae5", text: "#065f46" } :
-                    { bg: "#fee2e2", text: "#991b1b" };
+                    r.status === "PENDING" ? { bg: "var(--c-amber-bg)", text: "var(--c-amber-deep)" } :
+                    r.status === "APPROVED" ? { bg: "var(--c-green-bg)", text: "var(--c-green-deep)" } :
+                    { bg: "var(--c-red-bg)", text: "var(--c-red-dark)" };
                   return (
-                    <tr key={r.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                    <tr key={r.id} style={{ borderBottom: "1px solid var(--s-sunken)" }}>
                       <td style={{ padding: "8px 10px", whiteSpace: "nowrap", fontSize: 12 }}>
                         {new Date(r.createdAt).toLocaleString("zh-CN", {
                           month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
@@ -1986,10 +1986,10 @@ export default function AdminHomePage() {
                             const w = window.open("", "_blank");
                             if (w) { w.document.write(`<img src="${r.proofImage}" style="max-width:100%" />`); }
                           }}
-                          style={{ width: 60, height: 60, objectFit: "cover", borderRadius: 6, border: "1px solid #e5e7eb", cursor: "pointer" }}
+                          style={{ width: 60, height: 60, objectFit: "cover", borderRadius: 6, border: "1px solid var(--l-soft)", cursor: "pointer" }}
                         />
                       </td>
-                      <td style={{ padding: "8px 10px", maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, color: "#6b7280" }}>
+                      <td style={{ padding: "8px 10px", maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, color: "var(--t-muted)" }}>
                         {r.reviewRemark || r.remark || "—"}
                       </td>
                       <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
@@ -2008,20 +2008,20 @@ export default function AdminHomePage() {
                                 } catch (e: any) { setToast(e.message ?? "操作失败"); }
                                 finally { setLoading(false); }
                               }}
-                              style={{ border: "none", borderRadius: 6, padding: "4px 10px", background: "#16a34a", color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 600 }}
+                              style={{ border: "none", borderRadius: 6, padding: "4px 10px", background: "var(--c-green-3)", color: "var(--white)", cursor: "pointer", fontSize: 12, fontWeight: 600 }}
                             >
                               通过
                             </button>
                             <button
                               type="button"
                               onClick={() => { setRejectModalId(r.id); setRejectRemark(""); }}
-                              style={{ border: "none", borderRadius: 6, padding: "4px 10px", background: "#dc2626", color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 600 }}
+                              style={{ border: "none", borderRadius: 6, padding: "4px 10px", background: "var(--c-red-2)", color: "var(--white)", cursor: "pointer", fontSize: 12, fontWeight: 600 }}
                             >
                               拒绝
                             </button>
                           </div>
                         ) : (
-                          <span style={{ fontSize: 12, color: "#6b7280" }}>
+                          <span style={{ fontSize: 12, color: "var(--t-muted)" }}>
                             {r.reviewerName ? `审核人：${r.reviewerName}` : "—"}
                           </span>
                         )}
@@ -2038,20 +2038,20 @@ export default function AdminHomePage() {
       {/* 拒绝原因弹窗 */}
       {rejectModalId && (
         <div style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.4)", padding: 16 }}>
-          <div style={{ width: "100%", maxWidth: 400, background: "#fff", borderRadius: 12, padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+          <div style={{ width: "100%", maxWidth: 400, background: "var(--white)", borderRadius: 12, padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
             <h3 style={{ margin: "0 0 16px", fontSize: 16 }}>拒绝原因</h3>
             <textarea
               placeholder="请填写拒绝原因"
               value={rejectRemark}
               onChange={(e) => setRejectRemark(e.target.value)}
               rows={3}
-              style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: 8, fontSize: 14, boxSizing: "border-box", resize: "vertical" }}
+              style={{ width: "100%", padding: "10px", border: "1px solid var(--l-strong)", borderRadius: 8, fontSize: 14, boxSizing: "border-box", resize: "vertical" }}
             />
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
               <button
                 type="button"
                 onClick={() => setRejectModalId(null)}
-                style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 16px", background: "#fff", cursor: "pointer", fontSize: 13 }}
+                style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 16px", background: "var(--white)", cursor: "pointer", fontSize: 13 }}
               >
                 取消
               </button>
@@ -2069,7 +2069,7 @@ export default function AdminHomePage() {
                   } catch (e: any) { setToast(e.message ?? "操作失败"); }
                   finally { setLoading(false); }
                 }}
-                style={{ border: "none", borderRadius: 8, padding: "8px 16px", background: "#dc2626", color: "#fff", fontWeight: 600, cursor: "pointer", fontSize: 13 }}
+                style={{ border: "none", borderRadius: 8, padding: "8px 16px", background: "var(--c-red-2)", color: "var(--white)", fontWeight: 600, cursor: "pointer", fontSize: 13 }}
               >
                 确认拒绝
               </button>
@@ -2083,8 +2083,8 @@ export default function AdminHomePage() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
           <h2 style={{ margin: 0, fontSize: 18 }}>{SECTION_LABELS["ai-memory"]}</h2>
                           <div style={{ marginBottom: 12 }}>
-                            <div style={{ fontSize: 12, color: "#000000", marginBottom: 4 }}>备注</div>
-                            <input value={orderEditForm.remark} onChange={(e) => setOrderEditForm((v) => ({ ...v, remark: e.target.value }))} placeholder="备注（可选）" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", width: "100%", fontSize: 13 }} />
+                            <div style={{ fontSize: 12, color: "var(--t-strong)", marginBottom: 4 }}>备注</div>
+                            <input value={orderEditForm.remark} onChange={(e) => setOrderEditForm((v) => ({ ...v, remark: e.target.value }))} placeholder="备注（可选）" style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px", width: "100%", fontSize: 13 }} />
                           </div>
 
           <div style={{ display: "flex", gap: 8 }}>
@@ -2092,7 +2092,7 @@ export default function AdminHomePage() {
               type="button"
               onClick={() => void loadSessionMemory()}
               disabled={loading}
-              style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 12px", background: "#fff", cursor: "pointer", color: "#000000" }}
+              style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "6px 12px", background: "var(--white)", cursor: "pointer", color: "var(--t-strong)" }}
             >
               刷新
             </button>
@@ -2100,7 +2100,7 @@ export default function AdminHomePage() {
               type="button"
               onClick={() => void clearSessionMemory()}
               disabled={loading}
-              style={{ border: "1px solid #dc2626", color: "#dc2626", borderRadius: 8, padding: "6px 12px", background: "#fef2f2", cursor: "pointer", fontWeight: 600 }}
+              style={{ border: "1px solid var(--c-red-2)", color: "var(--c-red-2)", borderRadius: 8, padding: "6px 12px", background: "#fef2f2", cursor: "pointer", fontWeight: 600 }}
             >
               一键清理
             </button>
@@ -2111,13 +2111,13 @@ export default function AdminHomePage() {
             value={memoryFilterSessionId}
             onChange={(e) => setMemoryFilterSessionId(e.target.value)}
             placeholder="按会话ID清理（选填）"
-            style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", width: "100%" }}
+            style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px", width: "100%" }}
           />
           <input
             value={memoryFilterUserId}
             onChange={(e) => setMemoryFilterUserId(e.target.value)}
             placeholder="按用户ID清理（选填）"
-            style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", width: "100%" }}
+            style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px", width: "100%" }}
           />
         </div>
         {sessionMemoryList.length === 0 ? (
@@ -2126,7 +2126,7 @@ export default function AdminHomePage() {
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
-                <tr style={{ borderBottom: "2px solid #e2e8f0", textAlign: "left" }}>
+                <tr style={{ borderBottom: "2px solid var(--l-cool)", textAlign: "left" }}>
                   <th style={{ padding: "8px 6px" }}>会话ID</th>
                   <th style={{ padding: "8px 6px" }}>用户ID</th>
                   <th style={{ padding: "8px 6px" }}>意图</th>
@@ -2139,7 +2139,7 @@ export default function AdminHomePage() {
               </thead>
               <tbody>
                 {sessionMemoryList.map((row) => (
-                  <tr key={row.key} style={{ borderBottom: "1px solid #e2e8f0" }}>
+                  <tr key={row.key} style={{ borderBottom: "1px solid var(--l-cool)" }}>
                     <td style={{ padding: "8px 6px" }}>{row.sessionId}</td>
                     <td style={{ padding: "8px 6px" }}>{row.userId}</td>
                     <td style={{ padding: "8px 6px" }}>{row.intent ?? "-"}</td>
@@ -2147,7 +2147,7 @@ export default function AdminHomePage() {
                     <td style={{ padding: "8px 6px" }}>{row.statusScope ?? "-"}</td>
                     <td style={{ padding: "8px 6px" }}>{row.timeHint ?? "-"}</td>
                     <td style={{ padding: "8px 6px" }}>{row.metric ?? "-"}</td>
-                    <td style={{ padding: "8px 6px", color: "#000000" }}>{row.updatedAt.slice(0, 16)}</td>
+                    <td style={{ padding: "8px 6px", color: "var(--t-strong)" }}>{row.updatedAt.slice(0, 16)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -2164,15 +2164,15 @@ export default function AdminHomePage() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
           <h2 style={{ margin: 0, fontSize: 18 }}>{SECTION_LABELS["ai-knowledge-gaps"]}</h2>
                           <div style={{ marginBottom: 12 }}>
-                            <div style={{ fontSize: 12, color: "#000000", marginBottom: 4 }}>备注</div>
-                            <input value={orderEditForm.remark} onChange={(e) => setOrderEditForm((v) => ({ ...v, remark: e.target.value }))} placeholder="备注（可选）" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", width: "100%", fontSize: 13 }} />
+                            <div style={{ fontSize: 12, color: "var(--t-strong)", marginBottom: 4 }}>备注</div>
+                            <input value={orderEditForm.remark} onChange={(e) => setOrderEditForm((v) => ({ ...v, remark: e.target.value }))} placeholder="备注（可选）" style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px", width: "100%", fontSize: 13 }} />
                           </div>
 
           <div style={{ display: "flex", gap: 8 }}>
             <select
               value={knowledgeGapStatus}
               onChange={(e) => setKnowledgeGapStatus(e.target.value as "open" | "resolved")}
-              style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 10px", background: "#fff" }}
+              style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "6px 10px", background: "var(--white)" }}
             >
               <option value="open">仅看待处理</option>
               <option value="resolved">仅看已处理</option>
@@ -2181,7 +2181,7 @@ export default function AdminHomePage() {
               type="button"
               onClick={() => void loadKnowledgeGaps()}
               disabled={loading}
-              style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 12px", background: "#fff", cursor: "pointer", color: "#000000" }}
+              style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "6px 12px", background: "var(--white)", cursor: "pointer", color: "var(--t-strong)" }}
             >
               刷新
             </button>
@@ -2193,7 +2193,7 @@ export default function AdminHomePage() {
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
-                <tr style={{ borderBottom: "2px solid #e2e8f0", textAlign: "left" }}>
+                <tr style={{ borderBottom: "2px solid var(--l-cool)", textAlign: "left" }}>
                   <th style={{ padding: "8px 6px" }}>提问时间</th>
                   <th style={{ padding: "8px 6px" }}>用户ID</th>
                   <th style={{ padding: "8px 6px" }}>问题</th>
@@ -2204,8 +2204,8 @@ export default function AdminHomePage() {
               </thead>
               <tbody>
                 {knowledgeGapList.map((item) => (
-                  <tr key={item.id} style={{ borderBottom: "1px solid #e2e8f0" }}>
-                    <td style={{ padding: "8px 6px", color: "#000000" }}>{item.createdAt.slice(0, 16)}</td>
+                  <tr key={item.id} style={{ borderBottom: "1px solid var(--l-cool)" }}>
+                    <td style={{ padding: "8px 6px", color: "var(--t-strong)" }}>{item.createdAt.slice(0, 16)}</td>
                     <td style={{ padding: "8px 6px" }}>{item.userId}</td>
                     <td style={{ padding: "8px 6px", whiteSpace: "pre-wrap" }}>{item.question}</td>
                     <td style={{ padding: "8px 6px" }}>{item.knowledgeCountAtAsk}</td>
@@ -2216,12 +2216,12 @@ export default function AdminHomePage() {
                           type="button"
                           onClick={() => void resolveKnowledgeGap(item.id)}
                           disabled={loading}
-                          style={{ border: "1px solid #059669", color: "#059669", borderRadius: 8, padding: "6px 10px", background: "#ecfdf5", cursor: "pointer" }}
+                          style={{ border: "1px solid var(--c-green)", color: "var(--c-green)", borderRadius: 8, padding: "6px 10px", background: "#ecfdf5", cursor: "pointer" }}
                         >
                           标记已处理
                         </button>
                       ) : (
-                        <span style={{ color: "#000000" }}>{item.resolvedBy ? `已由 ${item.resolvedBy} 处理` : "已处理"}</span>
+                        <span style={{ color: "var(--t-strong)" }}>{item.resolvedBy ? `已由 ${item.resolvedBy} 处理` : "已处理"}</span>
                       )}
                     </td>
                   </tr>
@@ -2235,7 +2235,7 @@ export default function AdminHomePage() {
       {/* 7. AI知识投喂 */}
       <section id="knowledge-feed" style={{ ...sectionStyle, display: activeSection === "knowledge-feed" ? "block" : "none" }}>
         <h2 style={{ marginTop: 0, marginBottom: 12, fontSize: 18 }}>{SECTION_LABELS["knowledge-feed"]}</h2>
-        <p style={{ color: "#000000", marginBottom: 12, fontSize: 14 }}>
+        <p style={{ color: "var(--t-strong)", marginBottom: 12, fontSize: 14 }}>
           填写业务规则、时效说明、清关说明等内容，AI 会作为上下文参考。
         </p>
         <div style={{ display: "grid", gap: 8, maxWidth: 720 }}>
@@ -2243,14 +2243,14 @@ export default function AdminHomePage() {
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="知识标题（例如：海运时效说明）"
-            style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px" }}
+            style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }}
           />
           <textarea
             value={content}
             onChange={(e) => setContent(e.target.value)}
             placeholder="知识内容（支持长文本）"
             rows={5}
-            style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", resize: "vertical" }}
+            style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px", resize: "vertical" }}
           />
         </div>
         <div style={{ marginTop: 12 }}>
@@ -2258,7 +2258,7 @@ export default function AdminHomePage() {
             type="button"
             onClick={() => void submitKnowledge()}
             disabled={loading}
-            style={{ border: "none", borderRadius: 8, padding: "8px 14px", color: "#fff", background: "#059669", cursor: "pointer" }}
+            style={{ border: "none", borderRadius: 8, padding: "8px 14px", color: "var(--white)", background: "var(--c-green)", cursor: "pointer" }}
           >
             提交知识
           </button>
@@ -2273,10 +2273,10 @@ export default function AdminHomePage() {
         ) : (
           <div style={{ display: "grid", gap: 10 }}>
             {knowledgeItems.map((item) => (
-              <div key={item.id} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 12 }}>
+              <div key={item.id} style={{ border: "1px solid var(--l-soft)", borderRadius: 10, padding: 12 }}>
                 <div style={{ fontWeight: 600 }}>{item.title}</div>
-                <div style={{ marginTop: 6, whiteSpace: "pre-wrap", color: "#000000", fontSize: 14 }}>{item.content}</div>
-                <div style={{ marginTop: 6, color: "#000000", fontSize: 12 }}>
+                <div style={{ marginTop: 6, whiteSpace: "pre-wrap", color: "var(--t-strong)", fontSize: 14 }}>{item.content}</div>
+                <div style={{ marginTop: 6, color: "var(--t-strong)", fontSize: 12 }}>
                   {item.createdAt} / by {item.createdBy}
                 </div>
                 <div style={{ marginTop: 8 }}>
@@ -2285,8 +2285,8 @@ export default function AdminHomePage() {
                     onClick={() => void removeKnowledge(item.id)}
                     disabled={loading}
                     style={{
-                      border: "1px solid #ef4444",
-                      color: "#b91c1c",
+                      border: "1px solid var(--c-red)",
+                      color: "var(--c-red-deep)",
                       borderRadius: 8,
                       padding: "6px 10px",
                       background: "#fef2f2",
@@ -2316,36 +2316,36 @@ export default function AdminHomePage() {
       />
 
       {message ? (
-        <p style={{ marginTop: 12, color: message.includes("失败") ? "#b91c1c" : "#065f46" }}>{message}</p>
+        <p style={{ marginTop: 12, color: message.includes("失败") ? "var(--c-red-deep)" : "var(--c-green-deep)" }}>{message}</p>
       ) : null}
       <Toast open={toast.length > 0} message={toast} />
 
       {/* 创建员工弹窗 */}
       {showStaffModal && (
         <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.4)", padding: 16 }}>
-          <div style={{ width: "100%", maxWidth: 440, background: "#fff", borderRadius: 12, padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+          <div style={{ width: "100%", maxWidth: 440, background: "var(--white)", borderRadius: 12, padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
             <h3 style={{ margin: "0 0 16px", fontSize: 18, fontWeight: 600 }}>创建员工账号</h3>
             <div style={{ display: "grid", gap: 10 }}>
               <div>
-                <label style={{ fontSize: 12, color: "#000000", display: "block", marginBottom: 4 }}>账号（选填）</label>
-                <input value={staffForm.id} onChange={(e) => setStaffForm((f) => ({ ...f, id: e.target.value }))} placeholder="留空自动生成" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", width: "100%", fontSize: 13 }} />
+                <label style={{ fontSize: 12, color: "var(--t-strong)", display: "block", marginBottom: 4 }}>账号（选填）</label>
+                <input value={staffForm.id} onChange={(e) => setStaffForm((f) => ({ ...f, id: e.target.value }))} placeholder="留空自动生成" style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px", width: "100%", fontSize: 13 }} />
               </div>
               <div>
-                <label style={{ fontSize: 12, color: "#000000", display: "block", marginBottom: 4 }}>姓名 *</label>
-                <input value={staffForm.name} onChange={(e) => setStaffForm((f) => ({ ...f, name: e.target.value }))} placeholder="员工姓名" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", width: "100%", fontSize: 13 }} />
+                <label style={{ fontSize: 12, color: "var(--t-strong)", display: "block", marginBottom: 4 }}>姓名 *</label>
+                <input value={staffForm.name} onChange={(e) => setStaffForm((f) => ({ ...f, name: e.target.value }))} placeholder="员工姓名" style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px", width: "100%", fontSize: 13 }} />
               </div>
               <div>
-                <label style={{ fontSize: 12, color: "#000000", display: "block", marginBottom: 4 }}>手机 *</label>
-                <input value={staffForm.phone} onChange={(e) => setStaffForm((f) => ({ ...f, phone: e.target.value }))} placeholder="手机号" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", width: "100%", fontSize: 13 }} />
+                <label style={{ fontSize: 12, color: "var(--t-strong)", display: "block", marginBottom: 4 }}>手机 *</label>
+                <input value={staffForm.phone} onChange={(e) => setStaffForm((f) => ({ ...f, phone: e.target.value }))} placeholder="手机号" style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px", width: "100%", fontSize: 13 }} />
               </div>
               <div>
-                <label style={{ fontSize: 12, color: "#000000", display: "block", marginBottom: 4 }}>登录密码</label>
-                <input type="password" value={staffForm.password} onChange={(e) => setStaffForm((f) => ({ ...f, password: e.target.value }))} placeholder="密码（可选，填就要至少 8 位、不能全是数字）" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", width: "100%", fontSize: 13 }} />
+                <label style={{ fontSize: 12, color: "var(--t-strong)", display: "block", marginBottom: 4 }}>登录密码</label>
+                <input type="password" value={staffForm.password} onChange={(e) => setStaffForm((f) => ({ ...f, password: e.target.value }))} placeholder="密码（可选，填就要至少 8 位、不能全是数字）" style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px", width: "100%", fontSize: 13 }} />
               </div>
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-              <button type="button" onClick={() => setShowStaffModal(false)} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 14px", background: "#fff", cursor: "pointer", color: "#000000", fontSize: 13 }}>取消</button>
-              <button type="button" disabled={loading} onClick={() => void submitAddStaff()} style={{ border: "none", borderRadius: 8, padding: "8px 14px", background: loading ? "#000000" : "#2563eb", color: "#fff", fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", fontSize: 13 }}>{loading ? "提交中…" : "创建"}</button>
+              <button type="button" onClick={() => setShowStaffModal(false)} style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 14px", background: "var(--white)", cursor: "pointer", color: "var(--t-strong)", fontSize: 13 }}>取消</button>
+              <button type="button" disabled={loading} onClick={() => void submitAddStaff()} style={{ border: "none", borderRadius: 8, padding: "8px 14px", background: loading ? "var(--t-strong)" : "var(--c-blue)", color: "var(--white)", fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", fontSize: 13 }}>{loading ? "提交中…" : "创建"}</button>
             </div>
           </div>
         </div>
@@ -2354,37 +2354,37 @@ export default function AdminHomePage() {
       {/* 创建/编辑客户弹窗 */}
       {showClientModal && (
         <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.4)", padding: 16 }}>
-          <div style={{ width: "100%", maxWidth: 440, background: "#fff", borderRadius: 12, padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+          <div style={{ width: "100%", maxWidth: 440, background: "var(--white)", borderRadius: 12, padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
             <h3 style={{ margin: "0 0 16px", fontSize: 18, fontWeight: 600 }}>{editingClientId ? "编辑客户账号" : "创建客户账号"}</h3>
             <div style={{ display: "grid", gap: 10 }}>
               <div>
-                <label style={{ fontSize: 12, color: "#000000", display: "block", marginBottom: 4 }}>账号{editingClientId ? "" : "（选填，不填则自动生成）"}</label>
-                <input value={clientForm.id} onChange={(e) => setClientForm((f) => ({ ...f, id: e.target.value }))} placeholder={editingClientId ? undefined : "留空自动生成"} disabled={!!editingClientId} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", width: "100%", fontSize: 13, background: editingClientId ? "#f3f4f6" : "#fff", color: editingClientId ? "#6b7280" : "#000000" }} />
+                <label style={{ fontSize: 12, color: "var(--t-strong)", display: "block", marginBottom: 4 }}>账号{editingClientId ? "" : "（选填，不填则自动生成）"}</label>
+                <input value={clientForm.id} onChange={(e) => setClientForm((f) => ({ ...f, id: e.target.value }))} placeholder={editingClientId ? undefined : "留空自动生成"} disabled={!!editingClientId} style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px", width: "100%", fontSize: 13, background: editingClientId ? "var(--s-sunken)" : "var(--white)", color: editingClientId ? "var(--t-muted)" : "var(--t-strong)" }} />
               </div>
               <div>
-                <label style={{ fontSize: 12, color: "#000000", display: "block", marginBottom: 4 }}>客户名字 *</label>
-                <input value={clientForm.name} onChange={(e) => setClientForm((f) => ({ ...f, name: e.target.value }))} placeholder="客户姓名" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", width: "100%", fontSize: 13 }} />
+                <label style={{ fontSize: 12, color: "var(--t-strong)", display: "block", marginBottom: 4 }}>客户名字 *</label>
+                <input value={clientForm.name} onChange={(e) => setClientForm((f) => ({ ...f, name: e.target.value }))} placeholder="客户姓名" style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px", width: "100%", fontSize: 13 }} />
               </div>
               <div>
-                <label style={{ fontSize: 12, color: "#000000", display: "block", marginBottom: 4 }}>公司名字</label>
-                <input value={clientForm.companyName} onChange={(e) => setClientForm((f) => ({ ...f, companyName: e.target.value }))} placeholder="公司名（可选）" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", width: "100%", fontSize: 13 }} />
+                <label style={{ fontSize: 12, color: "var(--t-strong)", display: "block", marginBottom: 4 }}>公司名字</label>
+                <input value={clientForm.companyName} onChange={(e) => setClientForm((f) => ({ ...f, companyName: e.target.value }))} placeholder="公司名（可选）" style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px", width: "100%", fontSize: 13 }} />
               </div>
               <div>
-                <label style={{ fontSize: 12, color: "#000000", display: "block", marginBottom: 4 }}>电话号码 *</label>
-                <input value={clientForm.phone} onChange={(e) => setClientForm((f) => ({ ...f, phone: e.target.value }))} placeholder="手机号" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", width: "100%", fontSize: 13 }} />
+                <label style={{ fontSize: 12, color: "var(--t-strong)", display: "block", marginBottom: 4 }}>电话号码 *</label>
+                <input value={clientForm.phone} onChange={(e) => setClientForm((f) => ({ ...f, phone: e.target.value }))} placeholder="手机号" style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px", width: "100%", fontSize: 13 }} />
               </div>
               <div>
-                <label style={{ fontSize: 12, color: "#000000", display: "block", marginBottom: 4 }}>邮箱</label>
-                <input value={clientForm.email} onChange={(e) => setClientForm((f) => ({ ...f, email: e.target.value }))} placeholder="email@example.com" style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", width: "100%", fontSize: 13 }} />
+                <label style={{ fontSize: 12, color: "var(--t-strong)", display: "block", marginBottom: 4 }}>邮箱</label>
+                <input value={clientForm.email} onChange={(e) => setClientForm((f) => ({ ...f, email: e.target.value }))} placeholder="email@example.com" style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px", width: "100%", fontSize: 13 }} />
               </div>
               <div>
-                <label style={{ fontSize: 12, color: "#000000", display: "block", marginBottom: 4 }}>{editingClientId ? "登录密码（留空不修改）" : "登录密码 *"}</label>
-                <input type="password" value={clientForm.password} onChange={(e) => setClientForm((f) => ({ ...f, password: e.target.value }))} placeholder={editingClientId ? "留空不修改密码" : "密码（必填）"} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", width: "100%", fontSize: 13 }} />
+                <label style={{ fontSize: 12, color: "var(--t-strong)", display: "block", marginBottom: 4 }}>{editingClientId ? "登录密码（留空不修改）" : "登录密码 *"}</label>
+                <input type="password" value={clientForm.password} onChange={(e) => setClientForm((f) => ({ ...f, password: e.target.value }))} placeholder={editingClientId ? "留空不修改密码" : "密码（必填）"} style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px", width: "100%", fontSize: 13 }} />
               </div>
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-              <button type="button" onClick={() => { setShowClientModal(false); setEditingClientId(null); setClientForm({ id: "", name: "", companyName: "", phone: "", email: "", password: "" }); }} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 14px", background: "#fff", cursor: "pointer", color: "#000000", fontSize: 13 }}>取消</button>
-              <button type="button" disabled={loading} onClick={() => void (editingClientId ? submitEditClient() : submitAddClient())} style={{ border: "none", borderRadius: 8, padding: "8px 14px", background: loading ? "#000000" : "#2563eb", color: "#fff", fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", fontSize: 13 }}>{loading ? "提交中…" : editingClientId ? "保存" : "创建"}</button>
+              <button type="button" onClick={() => { setShowClientModal(false); setEditingClientId(null); setClientForm({ id: "", name: "", companyName: "", phone: "", email: "", password: "" }); }} style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 14px", background: "var(--white)", cursor: "pointer", color: "var(--t-strong)", fontSize: 13 }}>取消</button>
+              <button type="button" disabled={loading} onClick={() => void (editingClientId ? submitEditClient() : submitAddClient())} style={{ border: "none", borderRadius: 8, padding: "8px 14px", background: loading ? "var(--t-strong)" : "var(--c-blue)", color: "var(--white)", fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", fontSize: 13 }}>{loading ? "提交中…" : editingClientId ? "保存" : "创建"}</button>
             </div>
           </div>
         </div>
@@ -2393,66 +2393,66 @@ export default function AdminHomePage() {
 创建订单弹窗 */}
       {showCreateOrderModal && (
         <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.4)", padding: 16 }}>
-          <div style={{ width: "100%", maxWidth: 640, background: "#fff", borderRadius: 12, padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.3)", maxHeight: "85vh", overflow: "auto" }}>
+          <div style={{ width: "100%", maxWidth: 640, background: "var(--white)", borderRadius: 12, padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.3)", maxHeight: "85vh", overflow: "auto" }}>
             <h3 style={{ margin: "0 0 16px", fontSize: 18, fontWeight: 600 }}>创建订单</h3>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8, marginBottom: 12 }}>
               <div>
                 <label style={{ fontSize: 11, display: "block", marginBottom: 2 }}>客户 *</label>
-                <input list="admin-create-client" value={createForm.clientId} onChange={(e) => setCreateForm(f => ({ ...f, clientId: e.target.value }))} placeholder="输入客户ID搜索" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 8px", width: "100%", fontSize: 12 }} />
+                <input list="admin-create-client" value={createForm.clientId} onChange={(e) => setCreateForm(f => ({ ...f, clientId: e.target.value }))} placeholder="输入客户ID搜索" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "6px 8px", width: "100%", fontSize: 12 }} />
                 <datalist id="admin-create-client">{staffClients.map(c => (<option key={c.id} value={c.id}>{c.id} - {c.name}</option>))}</datalist>
               </div>
               <div>
                 <label style={{ fontSize: 11, display: "block", marginBottom: 2 }}>仓库</label>
-                <select value={createForm.warehouseId} onChange={(e) => setCreateForm(f => ({ ...f, warehouseId: e.target.value }))} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 8px", width: "100%", fontSize: 12 }}>
+                <select value={createForm.warehouseId} onChange={(e) => setCreateForm(f => ({ ...f, warehouseId: e.target.value }))} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "6px 8px", width: "100%", fontSize: 12 }}>
                   {warehouseOptions.map(w => (<option key={w.id} value={w.id}>{w.label}</option>))}
                 </select>
               </div>
               <div>
                 <label style={{ fontSize: 11, display: "block", marginBottom: 2 }}>到仓日期</label>
-                <input type="date" value={createForm.arrivedAt} onChange={(e) => setCreateForm(f => ({ ...f, arrivedAt: e.target.value }))} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 8px", width: "100%", fontSize: 12 }} />
+                <input type="date" value={createForm.arrivedAt} onChange={(e) => setCreateForm(f => ({ ...f, arrivedAt: e.target.value }))} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "6px 8px", width: "100%", fontSize: 12 }} />
               </div>
               <div>
                 <label style={{ fontSize: 11, display: "block", marginBottom: 2 }}>运输方式</label>
-                <select value={createForm.transportMode} onChange={(e) => setCreateForm(f => ({ ...f, transportMode: e.target.value as "sea" | "land" }))} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 8px", width: "100%", fontSize: 12 }}>
+                <select value={createForm.transportMode} onChange={(e) => setCreateForm(f => ({ ...f, transportMode: e.target.value as "sea" | "land" }))} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "6px 8px", width: "100%", fontSize: 12 }}>
                   <option value="sea">海运</option><option value="land">陆运</option>
                 </select>
               </div>
               <div>
                 <label style={{ fontSize: 11, display: "block", marginBottom: 2 }}>国内单号</label>
-                <input value={createForm.domesticTrackingNo} onChange={(e) => setCreateForm(f => ({ ...f, domesticTrackingNo: e.target.value }))} placeholder="货拉拉" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 8px", width: "100%", fontSize: 12 }} />
+                <input value={createForm.domesticTrackingNo} onChange={(e) => setCreateForm(f => ({ ...f, domesticTrackingNo: e.target.value }))} placeholder="货拉拉" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "6px 8px", width: "100%", fontSize: 12 }} />
               </div>
               <div>
                 <label style={{ fontSize: 11, display: "block", marginBottom: 2 }}>泰国收货人</label>
-                <input value={createForm.receiverNameTh} onChange={(e) => setCreateForm(f => ({ ...f, receiverNameTh: e.target.value }))} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 8px", width: "100%", fontSize: 12 }} />
+                <input value={createForm.receiverNameTh} onChange={(e) => setCreateForm(f => ({ ...f, receiverNameTh: e.target.value }))} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "6px 8px", width: "100%", fontSize: 12 }} />
               </div>
               <div>
                 <label style={{ fontSize: 11, display: "block", marginBottom: 2 }}>泰国收货电话</label>
-                <input value={createForm.receiverPhoneTh} onChange={(e) => setCreateForm(f => ({ ...f, receiverPhoneTh: e.target.value }))} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 8px", width: "100%", fontSize: 12 }} />
+                <input value={createForm.receiverPhoneTh} onChange={(e) => setCreateForm(f => ({ ...f, receiverPhoneTh: e.target.value }))} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "6px 8px", width: "100%", fontSize: 12 }} />
               </div>
               <div>
                 <label style={{ fontSize: 11, display: "block", marginBottom: 2 }}>泰国收货地址</label>
-                <input value={createForm.receiverAddressTh} onChange={(e) => setCreateForm(f => ({ ...f, receiverAddressTh: e.target.value }))} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 8px", width: "100%", fontSize: 12 }} />
+                <input value={createForm.receiverAddressTh} onChange={(e) => setCreateForm(f => ({ ...f, receiverAddressTh: e.target.value }))} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "6px 8px", width: "100%", fontSize: 12 }} />
               </div>
             </div>
             <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>产品行</div>
             {createProducts.map((p, i) => (
               <div key={i} style={{ display: "grid", gridTemplateColumns: "2fr 0.6fr 0.8fr 0.8fr 0.8fr 1.2fr", gap: 4, marginBottom: 4 }}>
-                <input value={p.itemName} onChange={(e) => { const n = [...createProducts]; n[i].itemName = e.target.value; setCreateProducts(n); }} placeholder="品名" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "4px 6px", fontSize: 11 }} />
-                <input type="number" value={p.packageCount} onChange={(e) => { const n = [...createProducts]; n[i].packageCount = Math.max(1, Number(e.target.value)); setCreateProducts(n); }} placeholder="箱数" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "4px 6px", fontSize: 11 }} />
-                <input value={p.productQuantity} onChange={(e) => { const n = [...createProducts]; n[i].productQuantity = e.target.value; setCreateProducts(n); }} placeholder="数量/箱" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "4px 6px", fontSize: 11 }} />
-                <input value={`${p.lengthCm}×${p.widthCm}×${p.heightCm}`} onChange={(e) => { const parts = e.target.value.split("×"); const n = [...createProducts]; n[i].lengthCm = parts[0] || ""; n[i].widthCm = parts[1] || ""; n[i].heightCm = parts[2] || ""; setCreateProducts(n); }} placeholder="L×W×H cm" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "4px 6px", fontSize: 11 }} />
-                <select value={p.cargoType} onChange={(e) => { const n = [...createProducts]; n[i].cargoType = e.target.value; setCreateProducts(n); }} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "4px 6px", fontSize: 11 }}>
+                <input value={p.itemName} onChange={(e) => { const n = [...createProducts]; n[i].itemName = e.target.value; setCreateProducts(n); }} placeholder="品名" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 6px", fontSize: 11 }} />
+                <input type="number" value={p.packageCount} onChange={(e) => { const n = [...createProducts]; n[i].packageCount = Math.max(1, Number(e.target.value)); setCreateProducts(n); }} placeholder="箱数" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 6px", fontSize: 11 }} />
+                <input value={p.productQuantity} onChange={(e) => { const n = [...createProducts]; n[i].productQuantity = e.target.value; setCreateProducts(n); }} placeholder="数量/箱" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 6px", fontSize: 11 }} />
+                <input value={`${p.lengthCm}×${p.widthCm}×${p.heightCm}`} onChange={(e) => { const parts = e.target.value.split("×"); const n = [...createProducts]; n[i].lengthCm = parts[0] || ""; n[i].widthCm = parts[1] || ""; n[i].heightCm = parts[2] || ""; setCreateProducts(n); }} placeholder="L×W×H cm" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 6px", fontSize: 11 }} />
+                <select value={p.cargoType} onChange={(e) => { const n = [...createProducts]; n[i].cargoType = e.target.value; setCreateProducts(n); }} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 6px", fontSize: 11 }}>
                   <option value="normal">普货</option><option value="inspection">商检</option><option value="sensitive">敏感</option>
                 </select>
                 <div style={{ display: "flex", gap: 4 }}>
-                  <input value={p.domesticTrackingNo} onChange={(e) => { const n = [...createProducts]; n[i].domesticTrackingNo = e.target.value; setCreateProducts(n); }} placeholder="国内单号" style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "4px 6px", fontSize: 11, flex: 1 }} />
-                  {createProducts.length > 1 && <button onClick={() => { setCreateProducts(createProducts.filter((_, j) => j !== i)); }} style={{ border: "none", background: "#fecaca", color: "#dc2626", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>×</button>}
+                  <input value={p.domesticTrackingNo} onChange={(e) => { const n = [...createProducts]; n[i].domesticTrackingNo = e.target.value; setCreateProducts(n); }} placeholder="国内单号" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 6px", fontSize: 11, flex: 1 }} />
+                  {createProducts.length > 1 && <button onClick={() => { setCreateProducts(createProducts.filter((_, j) => j !== i)); }} style={{ border: "none", background: "#fecaca", color: "var(--c-red-2)", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>×</button>}
                 </div>
               </div>
             ))}
-            <button onClick={() => setCreateProducts([...createProducts, { itemName: "", packageCount: 1, lengthCm: "", widthCm: "", heightCm: "", productQuantity: "", cargoType: "normal", domesticTrackingNo: "" }])} style={{ border: "1px solid #2563eb", borderRadius: 6, padding: "4px 10px", background: "#eff6ff", color: "#2563eb", cursor: "pointer", fontSize: 12, marginBottom: 16 }}>添加产品行</button>
+            <button onClick={() => setCreateProducts([...createProducts, { itemName: "", packageCount: 1, lengthCm: "", widthCm: "", heightCm: "", productQuantity: "", cargoType: "normal", domesticTrackingNo: "" }])} style={{ border: "1px solid var(--c-blue)", borderRadius: 6, padding: "4px 10px", background: "var(--c-blue-bg)", color: "var(--c-blue)", cursor: "pointer", fontSize: 12, marginBottom: 16 }}>添加产品行</button>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-              <button onClick={() => setShowCreateOrderModal(false)} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 14px", background: "#fff", cursor: "pointer", color: "#000" }}>取消</button>
+              <button onClick={() => setShowCreateOrderModal(false)} style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 14px", background: "var(--white)", cursor: "pointer", color: "var(--t-strong)" }}>取消</button>
               <button disabled={loading} onClick={async () => {
                 if (!createForm.clientId.trim()) { setMessage("请选择客户"); return; }
                 const validProducts = createProducts.filter(p => p.itemName.trim() && p.packageCount > 0);
@@ -2489,7 +2489,7 @@ export default function AdminHomePage() {
                 } catch (err) {
                   setMessage(`创建失败：${err instanceof Error ? err.message : "未知错误"}`);
                 } finally { setLoading(false); }
-              }} style={{ border: "none", borderRadius: 8, padding: "8px 14px", background: "#2563eb", color: "#fff", fontWeight: 600, cursor: "pointer" }}>
+              }} style={{ border: "none", borderRadius: 8, padding: "8px 14px", background: "var(--c-blue)", color: "var(--white)", fontWeight: 600, cursor: "pointer" }}>
                 {loading ? "提交中…" : "创建"}
               </button>
             </div>
@@ -2500,9 +2500,9 @@ export default function AdminHomePage() {
       {/* 批量导入弹窗 */}
       {showBatchImport && (
         <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.4)", padding: 16 }}>
-          <div style={{ width: "100%", maxWidth: 700, background: "#fff", borderRadius: 12, padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.3)", maxHeight: "85vh", overflow: "auto" }}>
+          <div style={{ width: "100%", maxWidth: 700, background: "var(--white)", borderRadius: 12, padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.3)", maxHeight: "85vh", overflow: "auto" }}>
             <h3 style={{ margin: "0 0 16px", fontSize: 18, fontWeight: 600 }}>批量导入运单</h3>
-            <div style={{ marginBottom: 12, fontSize: 12, color: "#000" }}>
+            <div style={{ marginBottom: 12, fontSize: 12, color: "var(--t-strong)" }}>
               下载模板 → 填写数据 → 上传文件。表头：客户ID, 仓库ID, 品名, 箱数, 包装单位, 运输方式, 到仓日期, 国内单号, 泰国收货人, 泰国收货电话, 泰国收货地址
             </div>
             {!batchConfirmed ? (
@@ -2520,28 +2520,28 @@ export default function AdminHomePage() {
                 {batchRows.length > 0 && (
                   <div style={{ marginBottom: 12 }}>
                     <div style={{ fontSize: 12, marginBottom: 4 }}>预览（{batchRows.length} 条）：</div>
-                    <div style={{ maxHeight: 200, overflow: "auto", fontSize: 11, border: "1px solid #e5e7eb", borderRadius: 6 }}>
+                    <div style={{ maxHeight: 200, overflow: "auto", fontSize: 11, border: "1px solid var(--l-soft)", borderRadius: 6 }}>
                       <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                        <thead><tr style={{ background: "#f1f5f9" }}>{Object.keys(batchRows[0]).slice(0, 6).map(k => (<th key={k} style={{ padding: "4px 6px", textAlign: "left" }}>{k}</th>))}</tr></thead>
+                        <thead><tr style={{ background: "var(--s-cool-2)" }}>{Object.keys(batchRows[0]).slice(0, 6).map(k => (<th key={k} style={{ padding: "4px 6px", textAlign: "left" }}>{k}</th>))}</tr></thead>
                         <tbody>{batchRows.slice(0, 20).map((r: any, i: number) => (<tr key={i}>{Object.values(r).slice(0, 6).map((v: any, j: number) => (<td key={j} style={{ padding: "2px 6px" }}>{String(v ?? "")}</td>))}</tr>))}</tbody>
                       </table>
                     </div>
-                    <button onClick={() => setBatchConfirmed(true)} style={{ marginTop: 8, border: "none", borderRadius: 6, padding: "6px 12px", background: "#2563eb", color: "#fff", cursor: "pointer", fontSize: 12 }}>确认导入</button>
+                    <button onClick={() => setBatchConfirmed(true)} style={{ marginTop: 8, border: "none", borderRadius: 6, padding: "6px 12px", background: "var(--c-blue)", color: "var(--white)", cursor: "pointer", fontSize: 12 }}>确认导入</button>
                   </div>
                 )}
               </>
             ) : (
               <div>
                 {/* 进度：只用文字报数，不放进度条 */}
-                <div style={{ marginBottom: 8, fontSize: 12, color: "#000" }}>
+                <div style={{ marginBottom: 8, fontSize: 12, color: "var(--t-strong)" }}>
                   正在导入 {batchRows.length} 条…
                   {batchProgress.current > 0 ? `　已处理 ${batchProgress.current}/${batchRows.length}，成功 ${batchProgress.success} 条` : ""}
-                  {batchProgress.fail > 0 ? <span style={{ color: "#b91c1c" }}>，失败 {batchProgress.fail} 条</span> : null}
+                  {batchProgress.fail > 0 ? <span style={{ color: "var(--c-red-deep)" }}>，失败 {batchProgress.fail} 条</span> : null}
                 </div>
               </div>
             )}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-              <button onClick={() => { setShowBatchImport(false); setBatchRows([]); setBatchConfirmed(false); setBatchFileName(""); }} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 14px", background: "#fff", cursor: "pointer" }}>取消</button>
+              <button onClick={() => { setShowBatchImport(false); setBatchRows([]); setBatchConfirmed(false); setBatchFileName(""); }} style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 14px", background: "var(--white)", cursor: "pointer" }}>取消</button>
               {batchConfirmed && (
                 <button disabled={batchLoading} onClick={async () => {
                   setBatchLoading(true); let success = 0; let fail = 0;
@@ -2567,7 +2567,7 @@ export default function AdminHomePage() {
                   setToast(`导入完成：成功 ${success}，失败 ${fail}`);
                   setShowBatchImport(false); setBatchRows([]); setBatchConfirmed(false);
                   await loadOrders();
-                }} style={{ border: "none", borderRadius: 8, padding: "8px 14px", background: "#2563eb", color: "#fff", fontWeight: 600, cursor: "pointer" }}>
+                }} style={{ border: "none", borderRadius: 8, padding: "8px 14px", background: "var(--c-blue)", color: "var(--white)", fontWeight: 600, cursor: "pointer" }}>
                   {batchLoading ? `导入中 ${batchProgress.current}/${batchRows.length}` : "开始导入"}
                 </button>
               )}
