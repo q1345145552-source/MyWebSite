@@ -13,7 +13,7 @@ export default function ForbiddenPage() {
   return (
     <main style={{ padding: 24 }}>
       <h1 style={{ fontSize: 28, marginBottom: 10 }}>403 - 无权限访问</h1>
-      <p style={{ color: "#4b5563", marginBottom: 8 }}>
+      <p style={{ color: "#4B5462", marginBottom: 8 }}>
         当前登录角色无权访问该页面。
       </p>
       <p style={{ color: "var(--t-strong)", marginBottom: 16 }}>来源页面：{from}</p>

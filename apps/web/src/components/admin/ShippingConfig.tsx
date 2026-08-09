@@ -86,8 +86,8 @@ export default function ShippingConfig(props: ShippingConfigProps) {
                 <div>
                   <span style={{ fontWeight: 600, fontSize: 14 }}>{c.name}</span>
                   <span style={{ marginLeft: 8, fontSize: 12, color: "var(--t-muted)", fontFamily: "monospace" }}>{c.id}</span>
-                  {hasCustom ? <span style={{ marginLeft: 8, fontSize: 11, color: "#d97706" }}>已配置</span> : <span style={{ marginLeft: 8, fontSize: 11, color: "var(--t-faint)" }}>使用默认</span>}
-                  {hasMinDisabled ? <span style={{ marginLeft: 8, fontSize: 11, color: "#8b5cf6" }}>低消已取消</span> : null}
+                  {hasCustom ? <span style={{ marginLeft: 8, fontSize: 11, color: "#B45309" }}>已配置</span> : <span style={{ marginLeft: 8, fontSize: 11, color: "var(--t-faint)" }}>使用默认</span>}
+                  {hasMinDisabled ? <span style={{ marginLeft: 8, fontSize: 11, color: "#1e3a8a" }}>低消已取消</span> : null}
                 </div>
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                   <button type="button" onClick={() => { if (isView) { setExpandedClientId(null); return; } setExpandedClientId(c.id); loadClientPrices(c.id); }} style={{ border: "1px solid var(--c-blue)", borderRadius: 4, padding: "4px 10px", fontSize: 12, background: "var(--white)", color: "var(--c-blue)", cursor: "pointer" }}>{isView ? "收起" : "查看价格"}</button>
@@ -107,7 +107,7 @@ export default function ShippingConfig(props: ShippingConfigProps) {
                       </div>
                     );
                   })}
-                  <div style={{ marginTop: 6, fontSize: 12, color: clientMinVolumeDisabled ? "#8b5cf6" : "var(--t-muted)" }}>
+                  <div style={{ marginTop: 6, fontSize: 12, color: clientMinVolumeDisabled ? "#1e3a8a" : "var(--t-muted)" }}>
                     低消：{clientMinVolumeDisabled ? "已取消" : `海运${props.shippingConfigSea}方 / 陆运${props.shippingConfigLand}方`}
                   </div>
                 </div>

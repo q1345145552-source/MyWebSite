@@ -98,7 +98,7 @@ function PrealertPrintButton({ item }: { item: OrderItem }) {
         productQuantity: item.productQuantity,
         products: item.products?.map(p => ({ itemName: p.itemName, packageCount: p.packageCount })),
       });
-    }} style={{ border: "1px solid #8b5cf6", borderRadius: 4, padding: "4px 10px", fontSize: 12, background: "var(--white)", color: "#8b5cf6", cursor: "pointer", marginLeft: 6 }}>打印预报单</button>
+    }} style={{ border: "1px solid #1e3a8a", borderRadius: 4, padding: "4px 10px", fontSize: 12, background: "var(--white)", color: "#1e3a8a", cursor: "pointer", marginLeft: 6 }}>打印预报单</button>
   );
 }
 
@@ -591,9 +591,9 @@ export default function ClientHomePage() {
       }
     });
     return [
-      { name: "已完成", value: bucket.completed, color: "#10b981" },
-      { name: "在途", value: bucket.unfinished, color: "#f59e0b" },
-      { name: "处理中", value: bucket.processing, color: "#f59e0b" },
+      { name: "已完成", value: bucket.completed, color: "#15803D" },
+      { name: "在途", value: bucket.unfinished, color: "#B45309" },
+      { name: "处理中", value: bucket.processing, color: "#B45309" },
     ];
   }, [dashboardOrders]);
 
@@ -629,8 +629,8 @@ export default function ClientHomePage() {
   }, [dashboardOrders]);
 
   return (
-    <RoleShell allowedRole="client" title="客户端工作台">
-      <p style={{ color: "#4b5563", marginBottom: 20 }}>
+    <RoleShell allowedRole="client" title="客户端工作台" variant="a3">
+      <p style={{ color: "#4B5462", marginBottom: 20 }}>
         客户提交预报单后会先进入“预报中”，员工审核通过后会自动进入“我的订单”。
       </p>
 
@@ -647,9 +647,9 @@ export default function ClientHomePage() {
             <div style={{ width: "100%", height: 220 }}>
               <ResponsiveContainer>
                 <LineChart data={clientEtaTrend}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="label" stroke="#000000" />
-                  <YAxis stroke="#000000" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E4E6EC" />
+                  <XAxis dataKey="label" stroke="#8B94A3" />
+                  <YAxis stroke="#8B94A3" />
                   <Tooltip
                     formatter={(value) => [`${String(value ?? "-")} 天`, "时效"]}
                     labelFormatter={(label) => (label ? `订单号：${String(label)}` : "时效详情")}
@@ -664,9 +664,9 @@ export default function ClientHomePage() {
             <div style={{ width: "100%", height: 220 }}>
               <ResponsiveContainer>
                 <BarChart data={clientStatusData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="name" stroke="#000000" />
-                  <YAxis stroke="#000000" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E4E6EC" />
+                  <XAxis dataKey="name" stroke="#8B94A3" />
+                  <YAxis stroke="#8B94A3" />
                   <Tooltip />
                   <Bar dataKey="value" radius={[6, 6, 0, 0]}>
                     {clientStatusData.map((item) => (
@@ -711,7 +711,7 @@ export default function ClientHomePage() {
             <div style={{ color: "var(--t-strong)", fontSize: 13, padding: "20px 0", textAlign: "center" }}>暂无预报单</div>
           ) : (
                         <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead><tr style={{ borderBottom: "2px solid var(--l-soft)", textAlign: "left", background: "var(--s-cool)" }}>
                   <th style={{ padding: "6px 8px", fontWeight: 600 }}>唛头</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>预报单号</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>品名</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>尺寸(cm)</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>体积(m³)</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>重量(kg)</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>件</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>运输</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>状态</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>备注</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>操作</th>
                 </tr></thead>
@@ -724,11 +724,11 @@ export default function ClientHomePage() {
                     const isShipped = item.approvalStatus === "shipped";
                     const isReceived = item.approvalStatus === "received";
                     const sLabel = isReceived ? "已收货" : "已发货";
-                    const sColor = isReceived ? "var(--c-green-3)" : "#0369a1";
-                    const sBg = isReceived ? "#dcfce7" : "#e0f2fe";
+                    const sColor = isReceived ? "var(--c-green-3)" : "#1e3a8a";
+                    const sBg = isReceived ? "#dcfce7" : "#EEF2FB";
                     return (
                       <tr key={item.id} style={{ borderBottom: "1px solid var(--l-soft)" }}>
-                        <td style={{ padding: "6px 8px", fontFamily: "monospace", color: "#6b21a8", fontSize: 12 }}>{item.clientId || "—"}</td>
+                        <td style={{ padding: "6px 8px", fontFamily: "monospace", color: "#14171D", fontSize: 12 }}>{item.clientId || "—"}</td>
                         <td style={{ padding: "6px 8px", fontFamily: "monospace", fontSize: 11 }}>{item.orderNo || "—"}<br /><span style={{ fontSize: 10, color: "var(--t-muted)" }}>{item.trackingNo || ""}</span></td>
                         <td style={{ padding: "6px 8px" }}>{item.itemName}</td>
                         <td style={{ padding: "6px 8px", fontSize: 11, whiteSpace: "nowrap" }}>{(() => { const dims = (item.products ?? []).map((p: any) => (p.lengthCm && p.widthCm && p.heightCm ? p.lengthCm + "×" + p.widthCm + "×" + p.heightCm : null)).filter(Boolean).join(", "); return dims || "—"; })()}</td>
@@ -770,7 +770,7 @@ export default function ClientHomePage() {
               type="button"
               onClick={() => void runAiSearch()}
               disabled={aiLoading}
-              style={{ border: "none", borderRadius: 8, padding: "8px 14px", color: "var(--white)", background: "#1d4ed8" }}
+              style={{ border: "none", borderRadius: 8, padding: "8px 14px", color: "var(--white)", background: "#1e3a8a" }}
             >
               {aiLoading ? "查询中..." : "AI 搜索"}
             </button>
@@ -958,7 +958,7 @@ export default function ClientHomePage() {
                   setHasQueried(false);
                   setQueriedOrders([]);
                 }}
-                style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 14px", background: "var(--white)", color: "var(--t-strong)" }}
+                style={{ border: "1px solid #E4E6EC", borderRadius: 8, padding: "8px 14px", background: "var(--white)", color: "var(--t-strong)" }}
               >
                 清空条件
               </button>
@@ -990,7 +990,7 @@ export default function ClientHomePage() {
               );
             })()}
             <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed", minWidth: CLIENT_TABLE_MIN_WIDTH }}>
+              <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed", minWidth: CLIENT_TABLE_MIN_WIDTH }}>
                 <GridColgroup widths={CLIENT_COL_WIDTHS} flexIndex={CLIENT_FLEX_COL_INDEX} />
                 <thead><tr style={{ borderBottom: "2px solid var(--l-soft)", textAlign: "left", background: "var(--s-cool-2)" }}>
                   <th style={gridThStyle}>唛头</th><th style={gridThStyle}>运单号</th><th style={gridThStyle}>品名</th><th style={gridThStyle}>尺寸(cm)</th><th style={gridThStyle}>体积(m³)</th><th style={gridThStyle}>重量(kg)</th><th style={gridThStyle}>件</th><th style={gridThStyle}>运输</th><th style={gridThStyle}>物流状态</th><th style={gridThStyle}>备注</th><th style={gridThStyle}>操作</th>
@@ -1013,7 +1013,7 @@ export default function ClientHomePage() {
                     return (
                       <Fragment key={item.id}>
                         <tr style={{ borderBottom: isExpanded ? "none" : "1px solid var(--l-soft)", background: isExpanded ? "var(--s-cool)" : "var(--white)" }}>
-                          <td style={{ ...gridTdStyle, fontFamily: "monospace", color: "#6b21a8", fontSize: 12 }}>{item.clientId || "—"}</td>
+                          <td style={{ ...gridTdStyle, fontFamily: "monospace", color: "#14171D", fontSize: 12 }}>{item.clientId || "—"}</td>
                           <td style={{ ...gridTdStyle, fontFamily: "monospace", fontSize: 11 }}>
                             <div>{item.trackingNo || "—"}</div>
                             <div style={{ fontSize: 10, color: "var(--t-muted)" }}>{item.orderNo || ""}</div>
@@ -1076,7 +1076,7 @@ export default function ClientHomePage() {
                               {(item.products?.length ?? 0) > 0 ? (
                                 <div style={{ marginBottom: 12 }}>
                                   <h4 style={{ margin: "0 0 8px", fontSize: 14, color: "var(--t-body)" }}>产品明细</h4>
-                                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                                  <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                                     <thead><tr style={{ background: "var(--s-cool-2)" }}>
                                       <th style={{ padding: "4px 6px", textAlign: "left" }}>品名</th>
                                       <th style={{ padding: "4px 6px", textAlign: "center" }}>件数</th>
@@ -1155,7 +1155,7 @@ export default function ClientHomePage() {
             <div style={{ color: "var(--t-strong)", fontSize: 13, padding: "20px 0", textAlign: "center" }}>暂无预报单</div>
           ) : (
                         <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead><tr style={{ borderBottom: "2px solid var(--l-soft)", textAlign: "left", background: "var(--s-cool)" }}>
                   <th style={{ padding: "6px 8px", fontWeight: 600 }}>唛头</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>预报单号</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>品名</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>尺寸(cm)</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>体积(m³)</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>重量(kg)</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>件</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>运输</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>状态</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>备注</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>操作</th>
                 </tr></thead>
@@ -1168,11 +1168,11 @@ export default function ClientHomePage() {
                     const isShipped = item.approvalStatus === "shipped";
                     const isReceived = item.approvalStatus === "received";
                     const sLabel = isReceived ? "已收货" : "已发货";
-                    const sColor = isReceived ? "var(--c-green-3)" : "#0369a1";
-                    const sBg = isReceived ? "#dcfce7" : "#e0f2fe";
+                    const sColor = isReceived ? "var(--c-green-3)" : "#1e3a8a";
+                    const sBg = isReceived ? "#dcfce7" : "#EEF2FB";
                     return (
                       <tr key={item.id} style={{ borderBottom: "1px solid var(--l-soft)" }}>
-                        <td style={{ padding: "6px 8px", fontFamily: "monospace", color: "#6b21a8", fontSize: 12 }}>{item.clientId || "—"}</td>
+                        <td style={{ padding: "6px 8px", fontFamily: "monospace", color: "#14171D", fontSize: 12 }}>{item.clientId || "—"}</td>
                         <td style={{ padding: "6px 8px", fontFamily: "monospace", fontSize: 11 }}>{item.orderNo || "—"}<br /><span style={{ fontSize: 10, color: "var(--t-muted)" }}>{item.trackingNo || ""}</span></td>
                         <td style={{ padding: "6px 8px" }}>{item.itemName}</td>
                         <td style={{ padding: "6px 8px", fontSize: 11, whiteSpace: "nowrap" }}>{(() => { const dims = (item.products ?? []).map((p: any) => (p.lengthCm && p.widthCm && p.heightCm ? p.lengthCm + "×" + p.widthCm + "×" + p.heightCm : null)).filter(Boolean).join(", "); return dims || "—"; })()}</td>

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import RoleShell from "../../../modules/layout/RoleShell";
 import Toast from "../../../modules/layout/Toast";
 import { openShipmentTrack } from "../../../modules/shipment/ShipmentTrackModal";
+import { shipmentStatusZh } from "../../../modules/shipment/shipment-status";
 import {
   fetchLoadingManifests,
   createLoadingManifest,
@@ -87,25 +88,13 @@ const WAREHOUSE_ZH: Record<string, string> = {
   wh_shenzhen_01: "深圳仓",
 };
 
-const SHIPMENT_STATUS_ZH: Record<string, string> = {
-  created: "已创建", pickedup: "已揽收", inwarehousecn: "国内仓已收货", receivedcn: "国内仓已收货",
-  customspending: "报关中", loaded: "已装柜", delayDeparted: "延迟开船", delaydeparted: "延迟开船",
-  departed: "已开船", delayInTransit: "延迟运输", delayintransit: "延迟运输",
-  arrivedPort: "已到港", arrivedport: "已到港", intransit: "运输中",
-  customsTH: "清关中", customsth: "清关中", customsCleared: "清关已放行", customscleared: "清关已放行",
-  inWarehouseTH: "已到仓", inwarehouseth: "已到仓", outfordelivery: "派送中", delivered: "派送完成",
-  exception: "异常", returned: "已退回", cancelled: "已取消",
-  // 陆运专属环节（2026-08-06）。这个 map 大小写两种 key 都收，新加的照旧两种都写
-  atPortCn: "到达凭祥口岸", atportcn: "到达凭祥口岸",
-  exportCleared: "出口已放行", exportcleared: "出口已放行",
-  inVietnam: "过境越南", invietnam: "过境越南",
-  laosCleared: "老挝边境已放行", laoscleared: "老挝边境已放行",
-  borderDelay: "口岸滞留", borderdelay: "口岸滞留",
-  customsInspect: "海关查验", customsinspect: "海关查验",
-};
+/* 运单状态的中文对照原来这个文件自己抄了一份，直接按原样查表、不转小写，
+   后端发的是 outForDelivery（驼峰），表里只有 outfordelivery（全小写）→ 查不到，
+   页面上就漏出了英文。2026-08-10 改用三端唯一那份 shipmentStatusZh()：
+   它查表前统一转小写，查不到也返回「未知状态」并在控制台报一条，不会再漏英文。 */
 
 const STATUS_COLOR: Record<string, string> = {
-  LOADING: "#d97706",
+  LOADING: "#B45309",
   SEALED: "var(--c-green-3)",
   IN_TRANSIT: "var(--c-blue)",
   ARRIVED: "var(--t-strong)",
@@ -360,8 +349,8 @@ export default function StaffContainerLoadingPage() {
 
 
   return (
-    <RoleShell allowedRole={["staff", "admin"]} title="装柜管理">
-      <h1 style={{ fontSize: 22, fontWeight: 700, color: "#0f172a", margin: "0 0 16px" }}>装柜管理</h1>
+    <RoleShell allowedRole={["staff", "admin"]} title="装柜管理" variant="a3">
+      <h1 style={{ fontSize: 22, fontWeight: 700, color: "#14171D", margin: "0 0 16px" }}>装柜管理</h1>
 
       {/* 搜索 & 新建 */}
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
@@ -456,7 +445,7 @@ export default function StaffContainerLoadingPage() {
             list.map((item) => (
               <div key={item.id} onClick={() => setSelectedId(item.id)} style={{ padding: "12px 16px", cursor: "pointer", borderBottom: "1px solid var(--s-cool-2)", background: selectedId === item.id ? "var(--c-blue-bg)" : "transparent" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ fontWeight: 600, fontSize: 14, color: "#0f172a" }}>{item.manifestNo}</span>
+                  <span style={{ fontWeight: 600, fontSize: 14, color: "#14171D" }}>{item.manifestNo}</span>
                   <span style={{ fontSize: 11, fontWeight: 500, color: STATUS_COLOR[item.status] ?? "var(--t-strong)" }}>{STATUS_LABEL[item.status] ?? item.status}</span>
                 </div>
                 <div style={{ fontSize: 12, color: "var(--t-strong)", marginTop: 4 }}>
@@ -478,7 +467,7 @@ export default function StaffContainerLoadingPage() {
               <>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
                   <div>
-                    <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#0f172a" }}>{detail.manifestNo}</h2>
+                    <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#14171D" }}>{detail.manifestNo}</h2>
                     <div style={{ fontSize: 13, color: "var(--t-strong)", marginTop: 4, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                       <span>运输方式:</span>
                       {/* 未标注的老柜子在这里补；已经走到某一方专属环节时后端会拒绝，
@@ -555,7 +544,7 @@ export default function StaffContainerLoadingPage() {
                           <button
                             disabled={!targetStatus}
                             onClick={() => { if (targetStatus) handlePushStatus(targetStatus); setTargetStatus(""); }}
-                            style={{ border: "none", borderRadius: 6, padding: "8px 16px", background: targetStatus ? "var(--c-blue)" : "#94a3b8", color: "var(--white)", fontWeight: 500, fontSize: 13, cursor: targetStatus ? "pointer" : "not-allowed", whiteSpace: "nowrap" }}
+                            style={{ border: "none", borderRadius: 6, padding: "8px 16px", background: targetStatus ? "var(--c-blue)" : "#8B94A3", color: "var(--white)", fontWeight: 500, fontSize: 13, cursor: targetStatus ? "pointer" : "not-allowed", whiteSpace: "nowrap" }}
                           >
                             确认推进
                           </button>
@@ -597,13 +586,13 @@ export default function StaffContainerLoadingPage() {
                       <div key={b.id} style={{ display: "grid", gridTemplateColumns: "1fr 0.6fr 0.7fr 0.5fr 0.4fr auto", gap: 4, padding: "6px 10px", borderBottom: "1px solid var(--s-cool-2)", alignItems: "center", background: "var(--white)", fontSize: 12 }}>
                         <div>
                           <span style={{ fontWeight: 600, fontFamily: "monospace", color: "var(--c-navy)" }}>{b.trackingNo ?? "—"}</span>
-                          {b.parentTrackingNo ? <span style={{ display: "block", fontSize: 10, color: "#9333ea" }}>← {b.parentTrackingNo}</span> : null}
+                          {b.parentTrackingNo ? <span style={{ display: "block", fontSize: 10, color: "#1e3a8a" }}>← {b.parentTrackingNo}</span> : null}
                           {b.itemName ? <span style={{ display: "block", color: "var(--t-body)", marginTop: 1 }}>{b.itemName}</span> : null}
                         </div>
-                        <span style={{ color: "#6b21a8", fontWeight: 500 }}>{b.clientId ?? "—"}</span>
+                        <span style={{ color: "#14171D", fontWeight: 500 }}>{b.clientId ?? "—"}</span>
                         <span style={{ color: "var(--t-body)" }}>{b.loadedPieces}件{b.packageCount != null ? ` / 共${b.packageCount}件` : ""}</span>
                         <span style={{ color: "var(--t-body)" }}>{b.transportMode === "sea" ? "海运" : b.transportMode === "land" ? "陆运" : "—"}</span>
-                        <span style={{ color: STATUS_COLOR[b.currentStatus ?? ""] ?? "var(--t-strong)", fontWeight: 500 }}>{SHIPMENT_STATUS_ZH[b.currentStatus ?? ""] ?? b.currentStatus ?? "—"}</span>
+                        <span style={{ color: STATUS_COLOR[b.currentStatus ?? ""] ?? "var(--t-strong)", fontWeight: 500 }}>{b.currentStatus ? shipmentStatusZh(b.currentStatus) : "—"}</span>
                         <div style={{ display: "flex", gap: 4 }}>
                           {/* 2026-08-06：这里原来只有状态文字，看不到轨迹，员工得跑回运单管理才能查 */}
                           <button
@@ -626,7 +615,7 @@ export default function StaffContainerLoadingPage() {
           {/* 运单列表（可添加到装柜） */}
           {detail && (
             <div style={{ border: "1px solid var(--l-soft)", borderRadius: 10, padding: 16, background: "var(--white)" }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: "#0f172a", marginBottom: 8 }}>选择运单添加到本柜</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#14171D", marginBottom: 8 }}>选择运单添加到本柜</div>
               <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
                 <input value={shipSearch.trackingNo} onChange={(e) => setShipSearch((v) => ({ ...v, trackingNo: e.target.value }))} placeholder="运单号" style={{ ...inputStyle, flex: 1, minWidth: 120 }} />
                 <input value={shipSearch.clientId} onChange={(e) => setShipSearch((v) => ({ ...v, clientId: e.target.value }))} placeholder="唛头" style={{ ...inputStyle, flex: 1, minWidth: 120 }} />
@@ -682,14 +671,14 @@ export default function StaffContainerLoadingPage() {
                             else { setBulkPieceDialog(s.trackingNo); setBulkPieceCount(String(remaining)); }
                           }} />
                           <span style={{ fontSize: 12, fontWeight: 600, fontFamily: "monospace", color: "var(--c-navy)", minWidth: 150 }}>{s.trackingNo}</span>
-                          <span style={{ fontSize: 12, color: "#6b21a8", minWidth: 60 }}>{s.clientId ?? "—"}</span>
+                          <span style={{ fontSize: 12, color: "#14171D", minWidth: 60 }}>{s.clientId ?? "—"}</span>
                           <span style={{ fontSize: 12, color: "var(--t-strong)", minWidth: 140 }}>
                             {isParent ? `共${totalPkg}件` : `${totalPkg}件`}
                             {isParent && remaining < totalPkg ? <span style={{ color: "var(--c-green)", fontWeight: 600 }}>（剩{remaining}件）</span> : null}
                           </span>
                           {isSelected && <span style={{ fontSize: 11, color: "var(--c-blue)", fontWeight: 600 }}>装{selectedShipments[s.trackingNo]}件</span>}
                           <span style={{ fontSize: 12, color: "var(--t-strong)", minWidth: 50 }}>{s.transportMode === "sea" ? "海运" : s.transportMode === "land" ? "陆运" : "—"}</span>
-                          <span style={{ fontSize: 12, color: alreadyIn ? "var(--c-green-3)" : loadedContainer ? "#d97706" : "var(--t-strong)" }}>{alreadyIn ? "已在本柜" : loadedContainer ? `已装柜(${loadedContainer})` : SHIPMENT_STATUS_ZH[s.currentStatus ?? ""] ?? s.currentStatus ?? ""}</span>
+                          <span style={{ fontSize: 12, color: alreadyIn ? "var(--c-green-3)" : loadedContainer ? "#B45309" : "var(--t-strong)" }}>{alreadyIn ? "已在本柜" : loadedContainer ? `已装柜(${loadedContainer})` : s.currentStatus ? shipmentStatusZh(s.currentStatus) : ""}</span>
                         </div>
                         {loadedChildren.length > 0 && (
                           <div style={{ paddingLeft: 28, fontSize: 11, color: "var(--t-muted)", marginTop: 3 }}>

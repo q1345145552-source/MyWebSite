@@ -210,7 +210,7 @@ export default function FclInquiryPanel(props: ClientFclInquiryProps) {
       {listLoaded && !listError && list.length === 0 && <p style={{ color: "var(--t-faint)", fontSize: 13 }}>暂无询价记录</p>}
       {list.length > 0 && (
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead><tr style={{ borderBottom: "2px solid var(--l-soft)", textAlign: "left" }}>
               <th style={{ padding: "6px 8px" }}>品名</th>
               <th style={{ padding: "6px 8px" }}>柜型</th>

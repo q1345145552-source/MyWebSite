@@ -1245,7 +1245,7 @@ const loadLmShipments = async () => {
   // 外壳是三端共用的，所以做成开关：改好一个页面才给那个页面加上。
   return (
     <RoleShell allowedRole="staff" title="员工工作台" variant="a3">
-      <p style={{ color: "#4b5563", marginBottom: 16 }}>
+      <p style={{ color: "#4B5462", marginBottom: 16 }}>
         员工可创建订单、查看运单列表中的订单信息（只读），并按状态流转规则更新物流状态；订单金额、付款及产品图（已审核订单）请在管理端维护。
       </p>
 
@@ -1287,7 +1287,7 @@ const loadLmShipments = async () => {
           borderRadius: 12,
           padding: 16,
           marginBottom: 18,
-          background: "#fcfcfd",
+          background: "#F0F1F4",
           boxShadow: "0 1px 3px rgba(15,23,42,0.06)",
         }}
       >
@@ -1454,7 +1454,7 @@ const loadLmShipments = async () => {
         style={{
           display: activeSection === "staff-ops-tools" ? "block" : "none",
           border: "1px solid var(--l-soft)",
-          borderLeft: "4px solid #0f766e",
+          borderLeft: "4px solid #15803D",
           borderRadius: 12,
           padding: 16,
           marginBottom: 18,
@@ -1535,7 +1535,7 @@ const loadLmShipments = async () => {
                     setLoading(false);
                   }
                 }}
-                style={{ border: "none", borderRadius: 8, padding: "8px 14px", color: "var(--white)", background: "#a16207" }}
+                style={{ border: "none", borderRadius: 8, padding: "8px 14px", color: "var(--white)", background: "#B45309" }}
               >
                 保存装柜号
               </button>
@@ -1637,7 +1637,7 @@ const loadLmShipments = async () => {
           borderLeft: "4px solid var(--l-strong)",
           borderRadius: 12,
           padding: 16,
-          background: "#fcfcfd",
+          background: "#F0F1F4",
           boxShadow: "0 1px 3px rgba(15,23,42,0.06)",
         }}
       >
@@ -1768,11 +1768,11 @@ const loadLmShipments = async () => {
                           <td style={gridTdStyle}>
                             <input type="checkbox" checked={selectedForExport.has(item.trackingNo)} onChange={() => toggleSelectShipment(item.trackingNo)} style={{ cursor: "pointer" }} />
                           </td>
-                          <td style={{ ...gridTdStyle, fontWeight: 600, color: "#6b21a8", fontFamily: "monospace", fontSize: 12 }}>{item.clientId ?? "—"}</td>
+                          <td style={{ ...gridTdStyle, fontWeight: 600, color: "#14171D", fontFamily: "monospace", fontSize: 12 }}>{item.clientId ?? "—"}</td>
                           <td style={gridTdStyle}>
                             <div style={{ fontWeight: 600, color: "var(--c-navy)" }}>{item.orderNo || item.trackingNo}</div>
                             {/* 明细块只露 3 行，这里写清楚一共几项，免得员工不知道下面还有货 */}
-                            <div style={{ fontSize: 11, color: "#64748b", marginTop: 3 }}>共 {detailRows.length} 项</div>
+                            <div style={{ fontSize: 11, color: "#8B94A3", marginTop: 3 }}>共 {detailRows.length} 项</div>
                           </td>
                           {/* 品名 / 箱数 / 单箱数量 / 长宽高 / 国内单号 / 货型：合并成一块，固定高度一起滚 */}
                           <ProductDetailCell widths={PRODUCT_DETAIL_COL_WIDTHS} rows={detailRows} />
@@ -1835,7 +1835,7 @@ const loadLmShipments = async () => {
                               >
                               <div>
                                 {/* 隐藏信息栏：不用色块，靠一条细线跟下面分开 */}
-                                <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 24px", marginBottom: 14, paddingBottom: 12, borderBottom: "1px solid #eceae6", fontSize: 12, color: "#6b6b72" }}>
+                                <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 24px", marginBottom: 14, paddingBottom: 12, borderBottom: "1px solid #eceae6", fontSize: 12, color: "#8B94A3" }}>
                                   <span>仓库：<strong>{warehouseLabelFromId(item.warehouseId)}</strong></span>
                                   <span>柜号：<strong>{item.batchNo ?? "—"}</strong></span>
                                   <span>包装：<strong>{item.packageUnit === "bag" ? "袋" : "箱"}</strong></span>
@@ -1843,7 +1843,7 @@ const loadLmShipments = async () => {
                                   <span>加收金额：<strong>{item.receivableAmountCny != null ? `${item.receivableCurrency === "THB" ? "THB" : "CNY"} ${item.receivableAmountCny.toFixed(2)}` : "0"}</strong></span>
                                   <span>收货地址：<strong>{item.receiverAddressTh ?? "—"}</strong></span>
                                 </div>
-                                <div style={{ fontWeight: 700, marginBottom: 12, color: "#0f172a" }}>运单详情（只读）</div>
+                                <div style={{ fontWeight: 700, marginBottom: 12, color: "#14171D" }}>运单详情（只读）</div>
                                 {(() => {
                                   const draft = shipmentOrderEditDrafts[item.id] ?? buildShipmentOrderEditDraft(item);
                                   /** 员工端运单列表统一只读，禁止在此处修改任何字段。 */
@@ -1885,7 +1885,7 @@ const loadLmShipments = async () => {
                                             货物明细 共 {detailRows.length} 项
                                           </div>
                                           <div style={{ maxHeight: 320, overflowY: "auto", border: "1px solid var(--l-cool)" }}>
-                                            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                                            <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                                               <thead>
                                                 <tr style={{ background: "var(--s-cool-2)", textAlign: "left" }}>
                                                   {["#", ...PRODUCT_DETAIL_HEADS].map((h) => (
@@ -2253,7 +2253,7 @@ const loadLmShipments = async () => {
                                     type="button"
                                     disabled={loading}
                                     onClick={() => setShipmentTableExpandedId(null)}
-                                    style={{ border: "1px solid #d8d6d1", borderRadius: 6, padding: "8px 16px", background: "var(--white)", color: "#1a1a1e" }}
+                                    style={{ border: "1px solid #d8d6d1", borderRadius: 6, padding: "8px 16px", background: "var(--white)", color: "#14171D" }}
                                   >
                                     关闭
                                   </button>
@@ -2290,7 +2290,7 @@ const loadLmShipments = async () => {
           borderRadius: 12,
           padding: 16,
           marginBottom: 18,
-          background: "#fcfcfd",
+          background: "#F0F1F4",
           boxShadow: "0 1px 3px rgba(15,23,42,0.06)",
         }}
       >
@@ -2308,7 +2308,7 @@ const loadLmShipments = async () => {
             {addrItems.filter(c => !addrKeyword || c.id.toLowerCase().includes(addrKeyword.toLowerCase()) || c.name.toLowerCase().includes(addrKeyword.toLowerCase())).map(client => (
               <div key={client.id} style={{ border: "1px solid var(--l-cool)", borderRadius: 8, padding: 12, background: "var(--white)" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                  <div><span style={{ fontWeight: 700, fontSize: 15, color: "#6b21a8", fontFamily: "monospace" }}>{client.id}</span>
+                  <div><span style={{ fontWeight: 700, fontSize: 15, color: "#14171D", fontFamily: "monospace" }}>{client.id}</span>
                     <span style={{ marginLeft: 8, fontSize: 13, color: "var(--t-strong)" }}>{client.name}</span></div>
                   <span style={{ fontSize: 12, color: "var(--t-strong)" }}>{client.phone}</span>
                 </div>
@@ -2326,10 +2326,10 @@ const loadLmShipments = async () => {
                   <button type="button" onClick={() => { setShowAddAddress(client.id); setAddrForm({ contactName: "", contactPhone: "", addressDetail: "", label: "" }); }}
                     style={{ border: "1px solid var(--c-blue)", borderRadius: 4, padding: "4px 8px", fontSize: 11, background: "var(--c-blue-bg)", color: "var(--c-blue)", cursor: "pointer" }}>添加地址</button>
                   <button type="button" onClick={() => setEditingNote({ clientId: client.id, content: clientNotes[client.id]?.content ?? "" })}
-                    style={{ border: "1px solid #8b5cf6", borderRadius: 4, padding: "4px 8px", fontSize: 11, background: "#f5f3ff", color: "#8b5cf6", cursor: "pointer" }}>编辑备注</button>
+                    style={{ border: "1px solid #1e3a8a", borderRadius: 4, padding: "4px 8px", fontSize: 11, background: "#EEF2FB", color: "#1e3a8a", cursor: "pointer" }}>编辑备注</button>
                 </div>
                 {showAddAddress === client.id && (
-                  <div style={{ marginTop: 6, padding: 8, background: "#f0f9ff", borderRadius: 6, border: "1px solid #bae6fd" }}>
+                  <div style={{ marginTop: 6, padding: 8, background: "#EEF2FB", borderRadius: 6, border: "1px solid #E4E6EC" }}>
                     <div style={{ display: "grid", gap: 4 }}>
                       <input value={addrForm.contactName} onChange={e => setAddrForm(v => ({...v, contactName: e.target.value}))} placeholder="联系人姓名" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "4px 6px", fontSize: 11 }} />
                       <input value={addrForm.contactPhone} onChange={e => setAddrForm(v => ({...v, contactPhone: e.target.value}))} placeholder="联系电话" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "4px 6px", fontSize: 11 }} />
@@ -2342,11 +2342,11 @@ const loadLmShipments = async () => {
                   </div>
                 )}
                 {editingNote?.clientId === client.id && (
-                  <div style={{ marginTop: 6, padding: 8, background: "#faf5ff", borderRadius: 6, border: "1px solid #e9d5ff" }}>
+                  <div style={{ marginTop: 6, padding: 8, background: "#EEF2FB", borderRadius: 6, border: "1px solid #E4E6EC" }}>
                     <textarea value={editingNote.content} onChange={e => setEditingNote(v => v ? {...v, content: e.target.value} : null)} rows={3} placeholder="输入备注..." style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "4px 6px", fontSize: 11, width: "100%", resize: "vertical" }} />
                     <div style={{ display: "flex", gap: 4, justifyContent: "flex-end", marginTop: 4 }}>
                       <button type="button" onClick={() => setEditingNote(null)} style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "3px 8px", fontSize: 11, background: "var(--white)", cursor: "pointer" }}>取消</button>
-                      <button type="button" onClick={() => saveNote(client.id, editingNote.content)} style={{ border: "none", borderRadius: 4, padding: "3px 8px", fontSize: 11, background: "#8b5cf6", color: "var(--white)", cursor: "pointer" }}>保存</button>
+                      <button type="button" onClick={() => saveNote(client.id, editingNote.content)} style={{ border: "none", borderRadius: 4, padding: "3px 8px", fontSize: 11, background: "#1e3a8a", color: "var(--white)", cursor: "pointer" }}>保存</button>
                     </div>
                   </div>
                 )}
@@ -2581,7 +2581,7 @@ const loadLmShipments = async () => {
             )}
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12, alignItems: "center" }}>
               <button type="button" onClick={downloadStaffBatchTemplate} style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 12px", background: "var(--white)", color: "var(--t-strong)", cursor: "pointer" }}>下载模板</button>
-              <label style={{ border: "1px solid var(--c-blue)", borderRadius: 8, padding: "8px 12px", background: "var(--c-blue-bg)", color: "#1d4ed8", cursor: "pointer" }}>
+              <label style={{ border: "1px solid var(--c-blue)", borderRadius: 8, padding: "8px 12px", background: "var(--c-blue-bg)", color: "#1e3a8a", cursor: "pointer" }}>
                 上传 Excel
                 <input type="file" accept=".xlsx,.xls" style={{ display: "none" }} onChange={(e) => {
                   const file = e.target.files?.[0];
@@ -2632,7 +2632,7 @@ const loadLmShipments = async () => {
             {batchRows.length > 0 && (
               <div style={{ overflowX: "auto", marginBottom: 12 }}>
                 <div style={{ fontSize: 13, marginBottom: 4, color: "var(--t-strong)" }}>预览：有效行 {batchRows.length} 条</div>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                   <thead>
                     <tr style={{ borderBottom: "1px solid var(--l-cool)", background: "var(--s-cool)" }}>
                       <th style={{ textAlign: "left", padding: "6px 4px" }}>#</th>
@@ -2682,7 +2682,7 @@ const loadLmShipments = async () => {
             </div>
             <div style={{ display: "grid", gap: 12 }}>
               {splitRows.map((row, i) => (
-                <div key={i} style={{ padding: 12, border: "1px solid var(--l-soft)", borderRadius: 8, background: "#fafafa" }}>
+                <div key={i} style={{ padding: 12, border: "1px solid var(--l-soft)", borderRadius: 8, background: "#F0F1F4" }}>
                   <div style={{ fontSize: 12, fontWeight: 600, color: "var(--t-strong)", marginBottom: 6 }}>分柜 {i + 1}</div>
                   <div style={{ display: "grid", gap: 6 }}>
                     <input value={row.trackingNo} onChange={(e) => setSplitRows((prev) => prev.map((r, j) => j === i ? { ...r, trackingNo: e.target.value } : r))} placeholder="运单号 *" style={orderCreateInputStyle} />
@@ -2721,7 +2721,7 @@ const loadLmShipments = async () => {
                   const text = error instanceof Error ? error.message : "分柜失败";
                   setMessage(`分柜失败：${text}`);
                 } finally { setLoading(false); }
-              }} style={{ border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: loading ? "var(--t-strong)" : "#d97706", color: "var(--white)", fontWeight: 500, cursor: loading ? "not-allowed" : "pointer" }}>{loading ? "提交中…" : "确认分柜"}</button>
+              }} style={{ border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: loading ? "var(--t-strong)" : "#B45309", color: "var(--white)", fontWeight: 500, cursor: loading ? "not-allowed" : "pointer" }}>{loading ? "提交中…" : "确认分柜"}</button>
             </div>
           </div>
         </div>
@@ -2748,7 +2748,7 @@ const loadLmShipments = async () => {
             <p style={{ color: "var(--t-muted)", fontSize: 13 }}>暂无数据，点击刷新加载</p>
           ) : (
             <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                   <tr style={{ background: "var(--s-alt)", borderBottom: "1px solid var(--l-soft)" }}>
                     <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "var(--t-body)" }}>客户</th>

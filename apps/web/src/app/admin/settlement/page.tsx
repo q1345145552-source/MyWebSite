@@ -43,7 +43,7 @@ export default function AdminSettlementPage() {
   }, []);
 
   return (
-    <RoleShell allowedRole="admin" title="财务结算系统">
+    <RoleShell allowedRole="admin" title="财务结算系统" variant="a3">
       <section style={{ border: "1px solid var(--l-soft)", borderRadius: 12, padding: 16, background: "var(--white)", marginBottom: 12 }}>
         <h2 style={{ marginTop: 0 }}>结算录入（AR/AP/税费）</h2>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: 8 }}>

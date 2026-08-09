@@ -197,7 +197,7 @@ export default function ClientImportsPage() {
   };
 
   return (
-    <RoleShell allowedRole="client" title="客户端批量下单">
+    <RoleShell allowedRole="client" title="客户端批量下单" variant="a3">
       <section style={{ border: "1px solid var(--l-soft)", borderRadius: 12, padding: 16, background: "var(--white)" }}>
         <h2 style={{ marginTop: 0 }}>智能下单系统（批量导入）</h2>
         <p style={{ color: "var(--t-strong)", marginTop: 0 }}>
@@ -217,7 +217,7 @@ export default function ClientImportsPage() {
               borderRadius: 8,
               padding: "8px 12px",
               background: "var(--c-blue-bg)",
-              color: "#1d4ed8",
+              color: "#1e3a8a",
               cursor: "pointer",
             }}
           >

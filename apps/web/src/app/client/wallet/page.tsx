@@ -142,7 +142,7 @@ export default function ClientWalletPage() {
   }, [data]);
 
   return (
-    <RoleShell allowedRole="client" title="集货余额">
+    <RoleShell allowedRole="client" title="集货余额" variant="a3">
       {/* 余额卡片 */}
       <section style={{ border: "1px solid var(--l-soft)", borderRadius: 12, padding: 16, background: "var(--white)", marginBottom: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
@@ -178,7 +178,7 @@ export default function ClientWalletPage() {
           <p style={{ color: "var(--t-muted)", fontSize: 13 }}>暂无流水</p>
         ) : (
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ background: "var(--s-cool-2)", borderBottom: "1px solid var(--l-soft)" }}>
                   {["时间", "类型", "来源", "单号", "金额", "余额", "备注"].map((h, i) => (
@@ -216,7 +216,7 @@ export default function ClientWalletPage() {
           <p style={{ color: "var(--t-muted)", fontSize: 13 }}>暂无充值记录</p>
         ) : (
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ background: "var(--s-alt)", borderBottom: "1px solid var(--l-soft)" }}>
                   <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "var(--t-body)" }}>时间</th>

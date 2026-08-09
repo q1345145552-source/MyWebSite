@@ -396,9 +396,9 @@ export default function StaffConsolidationPage() {
 
   // ======== 渲染 ========
   return (
-    <RoleShell allowedRole={["staff", "admin"]} title="集货拼柜管理">
+    <RoleShell allowedRole={["staff", "admin"]} title="集货拼柜管理" variant="a3">
       {toast && (
-        <div onClick={() => setToast("")} style={{ position: "fixed", top: 20, right: 20, zIndex: 9999, background: "#1f2937", color: "var(--white)", padding: "10px 20px", borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.3)", cursor: "pointer" }}>
+        <div onClick={() => setToast("")} style={{ position: "fixed", top: 20, right: 20, zIndex: 9999, background: "#14171D", color: "var(--white)", padding: "10px 20px", borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.3)", cursor: "pointer" }}>
           {toast}
         </div>
       )}
@@ -423,7 +423,7 @@ export default function StaffConsolidationPage() {
 
           {loading ? <p style={{ color: "var(--t-muted)" }}>加载中...</p> : filteredTasks.length === 0 ? <p style={{ color: "var(--t-faint)", textAlign: "center", padding: 40 }}>暂无任务</p> : (
             <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                   <tr style={{ background: "var(--s-sunken)" }}>
                     <th style={thS}>任务编号</th>
@@ -445,7 +445,7 @@ export default function StaffConsolidationPage() {
                       <td style={tdS}>
                         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                           <div style={{ flex: 1, height: 6, background: "var(--l-soft)", borderRadius: 3, overflow: "hidden", maxWidth: 120 }}>
-                            <div style={{ height: "100%", width: `${Math.min(t.volumePercent, 100)}%`, background: t.volumePercent >= 85 ? (t.volumePercent >= 100 ? "var(--c-green-2)" : "var(--c-amber)") : "#3b82f6", borderRadius: 3 }} />
+                            <div style={{ height: "100%", width: `${Math.min(t.volumePercent, 100)}%`, background: t.volumePercent >= 85 ? (t.volumePercent >= 100 ? "var(--c-green-2)" : "var(--c-amber)") : "#1e3a8a", borderRadius: 3 }} />
                           </div>
                           <span style={{ fontSize: 11, color: "var(--t-muted)", whiteSpace: "nowrap" }}>{t.totalVolumeM3}/{t.maxVolumeM3}</span>
                         </div>
@@ -478,7 +478,7 @@ export default function StaffConsolidationPage() {
           {showProgress && (
             <div style={{ marginBottom: 20, padding: 16, background: "var(--s-alt)", borderRadius: 10, border: "1px solid var(--l-soft)" }}>
               <div style={{ height: 20, background: "var(--l-soft)", borderRadius: 10, overflow: "hidden", position: "relative" }}>
-                <div style={{ height: "100%", width: `${Math.min(taskDetail.volumePercent, 100)}%`, background: taskDetail.volumePercent >= 85 ? (taskDetail.volumePercent >= 100 ? "var(--c-green-2)" : "var(--c-amber)") : "#1d4ed8", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <div style={{ height: "100%", width: `${Math.min(taskDetail.volumePercent, 100)}%`, background: taskDetail.volumePercent >= 85 ? (taskDetail.volumePercent >= 100 ? "var(--c-green-2)" : "var(--c-amber)") : "#1e3a8a", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center" }}>
                   {taskDetail.volumePercent > 15 && <span style={{ fontSize: 11, color: "var(--white)", fontWeight: 600 }}>{taskDetail.totalVolumeM3} m³ ({taskDetail.volumePercent}%)</span>}
                 </div>
               </div>
@@ -496,7 +496,7 @@ export default function StaffConsolidationPage() {
 
           {/* 装柜后信息 */}
           {!showProgress && (
-            <div style={{ marginBottom: 20, padding: 16, background: "var(--c-blue-bg)", borderRadius: 10, border: "1px solid #bfdbfe" }}>
+            <div style={{ marginBottom: 20, padding: 16, background: "var(--c-blue-bg)", borderRadius: 10, border: "1px solid #E4E6EC" }}>
               <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
                 {taskDetail.containerNo && <div><span style={{ fontSize: 12, color: "var(--t-muted)" }}>柜号</span><div style={{ fontWeight: 600 }}>{taskDetail.containerNo}</div></div>}
                 {taskDetail.loadingDate && <div><span style={{ fontSize: 12, color: "var(--t-muted)" }}>装柜日期</span><div style={{ fontWeight: 600 }}>{taskDetail.loadingDate}</div></div>}
@@ -644,7 +644,7 @@ export default function StaffConsolidationPage() {
               <div style={{ position: "relative", paddingLeft: 24, borderLeft: "2px solid var(--l-soft)", marginLeft: 8 }}>
                 {taskDetail.statusLogs.map((log: any, i: number) => (
                   <div key={log.id || i} style={{ marginBottom: 14, position: "relative" }}>
-                    <div style={{ position: "absolute", left: -30, top: 4, width: 12, height: 12, borderRadius: "50%", background: "#3b82f6", border: "2px solid var(--white)" }} />
+                    <div style={{ position: "absolute", left: -30, top: 4, width: 12, height: 12, borderRadius: "50%", background: "#1e3a8a", border: "2px solid var(--white)" }} />
                     <div style={{ fontSize: 13, fontWeight: 600 }}>{STATUS_ZH[log.fromStatus] || log.fromStatus} → {STATUS_ZH[log.toStatus] || log.toStatus}</div>
                     <div style={{ fontSize: 12, color: "var(--t-muted)" }}>{log.operatorName} · {formatBeijingTime(log.createdAt)}</div>
                     {log.remark && <div style={{ fontSize: 12, color: "var(--t-faint)", marginTop: 2 }}>{log.remark}</div>}
@@ -665,7 +665,7 @@ export default function StaffConsolidationPage() {
             {showReceive.expressNo && <><span style={{ color: "var(--t-muted)", marginLeft: 16 }}>快递单号：</span>{showReceive.expressNo}</>}
           </div>
           <div style={{ overflowX: "auto", marginBottom: 16 }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
                 <tr style={{ background: "var(--s-alt)" }}>
                   <th style={{ ...thS, minWidth: 100, whiteSpace: "nowrap" }}>唛头</th>
@@ -778,7 +778,7 @@ function StaffPrealertRow({
             </div>
           )}
           <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr style={{ background: "var(--s-alt)" }}>
                 <th style={{ ...thS, minWidth: 100, whiteSpace: "nowrap" }}>唛头</th>

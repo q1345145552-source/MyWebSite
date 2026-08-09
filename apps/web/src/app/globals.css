@@ -42,51 +42,60 @@
      两套颜色并存正是"塑料感"的根源；下一步就是把下面这批指向上面那批。
      ========================================================================== */
 
+  /* ⭐ 2026-08-10 全站换新：把「现在的样子」这批名字，全部指向下面 A3 那批。
+     只改这里的值，2264 处引用一起变，**没有动任何一个页面的排版**。
+     原来的值写在每行注释里，要退回去把值改回来即可。 */
+
   /* ── 文字 ── */
-  --t-strong: #000000;   /* 226 处。纯黑，正文里最重的字 */
-  --t-heading: #111827;  /* 27 处。标题 */
-  --t-body: #374151;     /* 83 处。正文 */
-  --t-muted: #6b7280;    /* 248 处。次要说明文字、表头 */
-  --t-faint: #9ca3af;    /* 106 处。占位符、无数据提示 */
-  --white: #ffffff;      /* 336 处。白底 + 深色按钮上的白字 */
+  --t-strong: var(--ink);    /* 226 处。原 #000000 纯黑 → 近黑带一点蓝 */
+  --t-heading: var(--ink);   /* 27 处。原 #111827 */
+  --t-body: var(--ink-2);    /* 83 处。原 #374151 */
+  /* ⚠️ 这里必须是 --ink-2 不是 --ink-3。
+     先接到 --ink-3(#8B94A3) 时白底对比度只有 3.06，低于「正文至少 4.5」的门槛，
+     248 处次要文字（说明、备注、日期）全都变得发虚看不清。--ink-2 是 7.65，
+     原来的 #6b7280 是 4.83 —— 改完比原来还清楚。
+     真正该用 --ink-3 的是表头和单位，那两处由 .a3-table 和 --t-faint 单独管。 */
+  --t-muted: var(--ink-2);   /* 248 处。原 #6b7280 */
+  --t-faint: #9ca3af;        /* 106 处。占位符，比 --ink-3 更淡，保持原值 */
+  --white: var(--panel);     /* 336 处。原 #ffffff，值不变 */
 
   /* ── 底色 ── */
-  --s-alt: #f9fafb;      /* 31 处。浅灰底 */
-  --s-sunken: #f3f4f6;   /* 49 处。凹下去的块、标签底 */
-  --s-cool: #f8fafc;     /* 33 处。偏冷的浅底 */
-  --s-cool-2: #f1f5f9;   /* 18 处 */
+  --s-alt: var(--ground);    /* 31 处。原 #f9fafb */
+  --s-sunken: var(--line-2); /* 49 处。原 #f3f4f6 */
+  --s-cool: var(--ground);   /* 33 处。原 #f8fafc */
+  --s-cool-2: var(--line-2); /* 18 处。原 #f1f5f9 */
 
   /* ── 线条 ── */
-  --l-strong: #d1d5db;   /* 298 处。输入框、表格边框 */
-  --l-soft: #e5e7eb;     /* 202 处。更浅的分隔线 */
-  --l-cool: #e2e8f0;     /* 37 处。偏冷的分隔线 */
+  --l-strong: var(--line);   /* 298 处。原 #d1d5db */
+  --l-soft: var(--line);     /* 202 处。原 #e5e7eb */
+  --l-cool: var(--line);     /* 37 处。原 #e2e8f0 */
 
   /* ── 蓝：主按钮、链接、进行中 ── */
-  --c-blue: #2563eb;     /* 141 处。⚠️ 用户明确说过不要这个蓝 */
-  --c-blue-deep: #1e40af;/* 17 处 */
-  --c-navy: #1e3a8a;     /* 22 处。用户定的主色藏青，跟 --brand 同值 */
-  --c-blue-bg: #eff6ff;  /* 25 处。浅蓝底 */
-  --c-blue-bg-2: #dbeafe;/* 20 处 */
+  --c-blue: var(--brand);        /* 141 处。原 #2563eb，用户明确说过不要这个蓝 */
+  --c-blue-deep: var(--brand-hover); /* 17 处。原 #1e40af */
+  --c-navy: var(--brand);        /* 22 处。原 #1e3a8a，本来就是主色 */
+  --c-blue-bg: var(--brand-soft);/* 25 处。原 #eff6ff */
+  --c-blue-bg-2: var(--brand-soft); /* 20 处。原 #dbeafe */
 
   /* ── 红：危险、延迟、错误 ── */
-  --c-red: #ef4444;      /* 36 处 */
-  --c-red-2: #dc2626;    /* 30 处 */
-  --c-red-deep: #b91c1c; /* 57 处。跟 --danger 同值 */
-  --c-red-dark: #991b1b; /* 14 处 */
-  --c-red-bg: #fee2e2;   /* 20 处。浅红底 */
+  --c-red: var(--bad);       /* 36 处。原 #ef4444 */
+  --c-red-2: var(--bad);     /* 30 处。原 #dc2626 */
+  --c-red-deep: var(--bad);  /* 57 处。原 #b91c1c */
+  --c-red-dark: var(--bad);  /* 14 处。原 #991b1b */
+  --c-red-bg: #fee2e2;       /* 20 处。浅红底，保持原值（底色不刺眼，够用） */
 
   /* ── 绿：成功、已完成、已签收 ── */
-  --c-green: #059669;    /* 36 处 */
-  --c-green-2: #10b981;  /* 20 处 */
-  --c-green-3: #16a34a;  /* 16 处 */
-  --c-green-deep: #065f46;/* 29 处 */
-  --c-green-dark: #166534;/* 14 处 */
-  --c-green-bg: #d1fae5; /* 20 处。浅绿底 */
+  --c-green: var(--ok);      /* 36 处。原 #059669 */
+  --c-green-2: var(--ok);    /* 20 处。原 #10b981 */
+  --c-green-3: var(--ok);    /* 16 处。原 #16a34a */
+  --c-green-deep: var(--ok); /* 29 处。原 #065f46 */
+  --c-green-dark: var(--ok); /* 14 处。原 #166534 */
+  --c-green-bg: #d1fae5;     /* 20 处。浅绿底，保持原值 */
 
   /* ── 橙黄：处理中、待办、提醒 ── */
-  --c-amber: #f59e0b;    /* 18 处 */
-  --c-amber-deep: #92400e;/* 30 处 */
-  --c-amber-bg: #fef3c7; /* 29 处。浅黄底 */
+  --c-amber: var(--warn);      /* 18 处。原 #f59e0b */
+  --c-amber-deep: var(--warn); /* 30 处。原 #92400e */
+  --c-amber-bg: #fef3c7;       /* 29 处。浅黄底，保持原值 */
 
   /* ==========================================================================
      A3 设计令牌（2026-08-09）—— 值照抄 docs/ui/方案A3-设计规格.md 第 2 节
@@ -196,19 +205,54 @@
   border-left: 2px solid #5B8DEF !important;
 }
 
+/* ---- 功能分区的大板块（2026-08-10）----
+   原来板块标题是 10.5px 的小灰字，跟上面「功能分区」那行说明字一模一样，
+   底下的菜单项反而是 12.5px —— 能点开的那一行成了最不起眼的一行，
+   所以看不出哪个板块可以展开。改法：
+     · 板块标题比菜单项更大更亮（13px 白灰、600），说明字仍是 10.5px 小灰字，一眼分得开
+     · 箭头挪到最右边、放大，展开时转 90 度并变白
+     · 展开后板块标题变纯白，子项左边一条竖线串起来，一看就知道是它下面的
+   只动颜色字号线条，菜单项一个没加没减。 */
 .a3-shell .dashboard-sidebar-group-header {
-  color: var(--navdark-ink) !important;
+  color: #C7CFDD !important;
   border: none !important;
-  font-size: 10.5px;
-  letter-spacing: 0.14em;
-  padding: 6px 8px;
+  border-left: 2px solid transparent !important;
+  border-radius: 0 !important;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 7px 8px;
+  margin-top: 2px;
 }
 .a3-shell .dashboard-sidebar-group-header:hover {
   color: #fff !important;
   border: none !important;
+  border-left: 2px solid transparent !important;
+  background: rgba(255, 255, 255, 0.05) !important;
 }
+/* 箭头：推到最右边（DOM 里它排在文字前面，靠 order 换到后面） */
 .a3-shell .dashboard-sidebar-group-arrow {
   color: #6E7789;
+  font-size: 11px;
+  order: 2;
+  margin-left: auto;
+  width: auto;
+}
+/* 展开中的板块：标题纯白、箭头变白 —— 一眼看得出现在开着的是哪个 */
+.a3-shell .dashboard-sidebar-group-collapsible.is-expanded .dashboard-sidebar-group-header {
+  color: #fff !important;
+}
+.a3-shell .dashboard-sidebar-group-collapsible.is-expanded .dashboard-sidebar-group-arrow {
+  color: #fff;
+}
+/* 子项：缩进 + 左边一条暗竖线，看得出是挂在这个板块下面的 */
+.a3-shell .dashboard-sidebar-group-collapsible .dashboard-sidebar-group-body-inner {
+  margin-left: 9px;
+  padding-left: 6px;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+}
+.a3-shell .dashboard-sidebar-group-collapsible .dashboard-sidebar-link {
+  font-size: 12px;
 }
 
 /* 底部两个按钮：深底上用描边，不要实心块。
@@ -283,7 +327,12 @@
 .a3-table tbody tr {
   border-bottom: 1px solid var(--line-2) !important;
 }
-.a3-table tbody td {
+/* ⚠️ 只管「自己没指定颜色」的格子。
+   2026-08-10：这条原来是无条件 !important，铺到全站 39 张表之后，
+   把那些**故意写成淡灰**的格子（日期、单位、「暂无数据」）一并刷成了深色，
+   主次就没了。加两个 :not() 排除掉自带 color 的格子 —— 浏览器把行内样式
+   序列化成 "…; color: xxx"，所以按 "; color:" 和开头的 "color:" 两种情况排除。 */
+.a3-table tbody td:not([style*="; color:"]):not([style^="color:"]) {
   color: var(--ink) !important;
 }
 /* 整行底色变浅，文字颜色不变；不用斑马纹 */
@@ -1476,7 +1525,7 @@ table tbody tr:hover {
   width: 60px;
   height: 20px;
   border-radius: 6px;
-  background: #3b82f6;
+  background: #1e3a8a;
 }
 
 .empty-truck-wheel {
@@ -1485,7 +1534,7 @@ table tbody tr:hover {
   width: 10px;
   height: 10px;
   border-radius: 999px;
-  background: #1e293b;
+  background: #14171D;
 }
 
 .empty-truck-wheel-left {
@@ -1500,14 +1549,14 @@ table tbody tr:hover {
   width: 120px;
   height: 4px;
   border-radius: 999px;
-  background: #bfdbfe;
+  background: #E4E6EC;
   margin: 0 auto 8px auto;
 }
 
 .empty-line {
   height: 8px;
   border-radius: 999px;
-  background: #bfdbfe;
+  background: #E4E6EC;
   margin: 6px 0 0 0;
 }
 
@@ -1718,7 +1767,7 @@ table tbody tr:hover {
   height: 10px;
   border-radius: 999px;
   display: inline-block;
-  border: 2px solid #94a3b8;
+  border: 2px solid #8B94A3;
   background: transparent;
 }
 
@@ -1735,7 +1784,7 @@ table tbody tr:hover {
 }
 
 .order-step-pending {
-  border-color: #cbd5e1;
+  border-color: #E4E6EC;
   background: transparent;
 }
 

@@ -341,10 +341,10 @@ export default function AdminHomePage() {
       }
     });
     return [
-      { name: "已完成", value: bucket.delivered, color: "#10b981" },
-      { name: "在途", value: bucket.inTransit, color: "#f59e0b" },
-      { name: "处理中", value: bucket.processing, color: "#f59e0b" },
-      { name: "异常/其他", value: bucket.exception, color: "#000000" },
+      { name: "已完成", value: bucket.delivered, color: "#15803D" },
+      { name: "在途", value: bucket.inTransit, color: "#B45309" },
+      { name: "处理中", value: bucket.processing, color: "#B45309" },
+      { name: "异常/其他", value: bucket.exception, color: "#4B5462" },
     ];
   }, [orderList]);
 
@@ -1063,7 +1063,7 @@ export default function AdminHomePage() {
   if (!session) return null;
 
   return (
-    <RoleShell allowedRole="admin" title="管理员工作台">
+    <RoleShell allowedRole="admin" title="管理员工作台" variant="a3">
       {/* 1. 运营看板 */}
       <section id="overview" style={{ ...sectionStyle, display: activeSection === "overview" ? "block" : "none" }}>
         <h2 style={{ marginTop: 0, marginBottom: 16, fontSize: 18 }}>{SECTION_LABELS.overview}</h2>
@@ -1116,9 +1116,9 @@ export default function AdminHomePage() {
               <div style={{ width: "100%", height: 240 }}>
                 <ResponsiveContainer>
                   <LineChart data={etaTrendData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                    <XAxis dataKey="label" stroke="#000000" />
-                    <YAxis stroke="#000000" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E4E6EC" />
+                    <XAxis dataKey="label" stroke="#8B94A3" />
+                    <YAxis stroke="#8B94A3" />
                     <Tooltip
                       formatter={(value) => [`${String(value ?? "-")} 天`, "时效"]}
                       labelFormatter={(label) => (label ? `订单号：${String(label)}` : "时效详情")}
@@ -1133,9 +1133,9 @@ export default function AdminHomePage() {
               <div style={{ width: "100%", height: 240 }}>
                 <ResponsiveContainer>
                   <BarChart data={statusDistribution}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                    <XAxis dataKey="name" stroke="#000000" />
-                    <YAxis stroke="#000000" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E4E6EC" />
+                    <XAxis dataKey="name" stroke="#8B94A3" />
+                    <YAxis stroke="#8B94A3" />
                     <Tooltip />
                     <Bar dataKey="value" radius={[6, 6, 0, 0]}>
                       {statusDistribution.map((item) => (
@@ -1204,7 +1204,7 @@ export default function AdminHomePage() {
               <div style={{ fontSize: 13, color: "var(--t-strong)" }}>暂无查验/待处理告警</div>
             )}
           </div>
-          <div style={{ border: "1px solid #bfdbfe", borderRadius: 10, padding: 10, background: "var(--c-blue-bg)" }}>
+          <div style={{ border: "1px solid #E4E6EC", borderRadius: 10, padding: 10, background: "var(--c-blue-bg)" }}>
             <div style={{ fontWeight: 700, marginBottom: 6 }}>供应商报价变化提醒</div>
             {opsOverview && opsOverview.supplierPriceAlerts.length > 0 ? (
               <div style={{ display: "grid", gap: 4 }}>
@@ -1387,7 +1387,7 @@ export default function AdminHomePage() {
                       setShowClientModal(true);
                     }}
                     disabled={loading}
-                    style={{ border: "1px solid var(--c-amber)", color: "#d97706", borderRadius: 8, padding: "6px 10px", background: "#fffbeb", cursor: "pointer", fontSize: 13 }}
+                    style={{ border: "1px solid var(--c-amber)", color: "#B45309", borderRadius: 8, padding: "6px 10px", background: "#fffbeb", cursor: "pointer", fontSize: 13 }}
                   >
                     编辑
                   </button>
@@ -1458,7 +1458,7 @@ export default function AdminHomePage() {
             <button
               type="button"
               onClick={() => setShowBatchImport(true)}
-              style={{ border: "1px solid #d97706", borderRadius: 8, padding: "6px 12px", color: "#d97706", background: "#fffbeb", cursor: "pointer", fontWeight: 600 }}
+              style={{ border: "1px solid #B45309", borderRadius: 8, padding: "6px 12px", color: "#B45309", background: "#fffbeb", cursor: "pointer", fontWeight: 600 }}
             >
               📥 批量导入
             </button>
@@ -1508,7 +1508,7 @@ export default function AdminHomePage() {
             </div>
           </div>
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed", minWidth: ORDER_TABLE_MIN_WIDTH }}>
+            <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed", minWidth: ORDER_TABLE_MIN_WIDTH }}>
               <GridColgroup widths={ORDER_COL_WIDTHS} flexIndex={ORDER_FLEX_COL_INDEX} />
               <thead>
                 <tr style={{ borderBottom: "2px solid var(--l-cool)", textAlign: "left", background: "var(--s-cool-2)" }}>
@@ -1545,7 +1545,7 @@ export default function AdminHomePage() {
                     <td style={gridTdStyle}>
                       <div style={{ fontWeight: 600, color: "var(--c-navy)" }}>{o.trackingNo ?? "—"}</div>
                       {/* 明细块只露 3 行，这里写清楚一共几项，免得漏看 */}
-                      <div style={{ fontSize: 11, color: "#64748b", marginTop: 3 }}>共 {detailRows.length} 项</div>
+                      <div style={{ fontSize: 11, color: "#8B94A3", marginTop: 3 }}>共 {detailRows.length} 项</div>
                     </td>
                     <td style={{ ...gridTdStyle, color: "var(--t-strong)" }}>
                       {o.shipDate ?? o.createdAt.slice(0, 10)}
@@ -1630,7 +1630,7 @@ export default function AdminHomePage() {
                           onClose={() => setExpandedOrderId("")}
                         >
                         <div>
-                          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 24px", marginBottom: 14, paddingBottom: 12, borderBottom: "1px solid #eceae6", fontSize: 12, color: "#6b6b72" }}>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 24px", marginBottom: 14, paddingBottom: 12, borderBottom: "1px solid #eceae6", fontSize: 12, color: "#8B94A3" }}>
                             <span>仓库：<strong>{warehouseOptions.find(w => w.id === o.warehouseId)?.label ?? "—"}</strong></span>
                             <span>柜号：<strong>{o.batchNo ?? "—"}</strong></span>
                             <span>包装：<strong>{o.packageUnit === "bag" ? "袋" : "箱"}</strong></span>
@@ -1730,7 +1730,7 @@ export default function AdminHomePage() {
 
                           <div style={{ display: "flex", gap: 8 }}>
                             <button type="button" onClick={() => void submitOrderEdit()} disabled={loading} style={{ border: "none", borderRadius: 6, padding: "9px 18px", color: "var(--white)", background: "var(--c-navy)", cursor: "pointer", fontWeight: 600 }}>保存</button>
-                            <button type="button" onClick={() => setEditingOrderId("")} style={{ border: "1px solid #d8d6d1", borderRadius: 6, padding: "9px 18px", background: "var(--white)", cursor: "pointer", color: "#1a1a1e" }}>取消</button>
+                            <button type="button" onClick={() => setEditingOrderId("")} style={{ border: "1px solid #d8d6d1", borderRadius: 6, padding: "9px 18px", background: "var(--white)", cursor: "pointer", color: "#14171D" }}>取消</button>
                           </div>
                         </div>
                         </DetailModal>
@@ -1802,7 +1802,7 @@ export default function AdminHomePage() {
                   <label key={s.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "2px 0", fontSize: 12, cursor: "pointer" }}>
                     <input type="checkbox" checked={lmSelected.has(s.id)} onChange={()=>{const n=new Set(lmSelected);n.has(s.id)?n.delete(s.id):n.add(s.id);setLmSelected(n)}} />
                     <span style={{ fontFamily: "monospace", color: "var(--c-navy)", minWidth: 150 }}>{s.trackingNo}</span>
-                    <span style={{ color: "#6b21a8", minWidth: 60 }}>{s.clientId}</span>
+                    <span style={{ color: "#14171D", minWidth: 60 }}>{s.clientId}</span>
                     <span style={{ color: "var(--t-body)" }}>{s.itemName} · {s.packageCount}件</span>
                   </label>
                 ))}
@@ -1837,7 +1837,7 @@ export default function AdminHomePage() {
         {/* 派送列表 */}
         {lmOrders.length === 0 ? <p style={{ color: "var(--t-muted)", fontSize: 13 }}>暂无派送单</p> : (
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead><tr style={{ borderBottom: "2px solid var(--l-cool)", textAlign: "left" }}>
                 <th style={{ padding: "6px 8px" }}>派送单号</th>
                 <th style={{ padding: "6px 8px" }}>运单号</th>
@@ -1940,7 +1940,7 @@ export default function AdminHomePage() {
           <p style={{ color: "var(--t-muted)", fontSize: 13 }}>暂无充值申请</p>
         ) : (
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ background: "var(--s-alt)", borderBottom: "1px solid var(--l-soft)" }}>
                   <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, color: "var(--t-body)", whiteSpace: "nowrap" }}>时间</th>
@@ -2124,7 +2124,7 @@ export default function AdminHomePage() {
           <EmptyStateCard title="暂无会话记忆" description="当前没有可排查的 AI 会话记忆记录。" />
         ) : (
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ borderBottom: "2px solid var(--l-cool)", textAlign: "left" }}>
                   <th style={{ padding: "8px 6px" }}>会话ID</th>
@@ -2191,7 +2191,7 @@ export default function AdminHomePage() {
           <EmptyStateCard title="暂无待补问题" description="当 AI 遇到知识不足时，会自动汇总到这里供管理员补知识。" />
         ) : (
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ borderBottom: "2px solid var(--l-cool)", textAlign: "left" }}>
                   <th style={{ padding: "8px 6px" }}>提问时间</th>
@@ -2521,7 +2521,7 @@ export default function AdminHomePage() {
                   <div style={{ marginBottom: 12 }}>
                     <div style={{ fontSize: 12, marginBottom: 4 }}>预览（{batchRows.length} 条）：</div>
                     <div style={{ maxHeight: 200, overflow: "auto", fontSize: 11, border: "1px solid var(--l-soft)", borderRadius: 6 }}>
-                      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                      <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse" }}>
                         <thead><tr style={{ background: "var(--s-cool-2)" }}>{Object.keys(batchRows[0]).slice(0, 6).map(k => (<th key={k} style={{ padding: "4px 6px", textAlign: "left" }}>{k}</th>))}</tr></thead>
                         <tbody>{batchRows.slice(0, 20).map((r: any, i: number) => (<tr key={i}>{Object.values(r).slice(0, 6).map((v: any, j: number) => (<td key={j} style={{ padding: "2px 6px" }}>{String(v ?? "")}</td>))}</tr>))}</tbody>
                       </table>

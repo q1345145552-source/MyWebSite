@@ -52,22 +52,22 @@ function statusColor(status: string): { bg: string; fg: string; border: string }
     case "LOADING":
       return { bg: "var(--c-amber-bg)", fg: "var(--c-amber-deep)", border: "#fde68a" };
     case "SEALED":
-      return { bg: "#e0f2fe", fg: "#0369a1", border: "#7dd3fc" };
+      return { bg: "#EEF2FB", fg: "#1e3a8a", border: "#E4E6EC" };
     case "IN_TRANSIT":
-      return { bg: "var(--c-blue-bg-2)", fg: "#1d4ed8", border: "#bfdbfe" };
+      return { bg: "var(--c-blue-bg-2)", fg: "#1e3a8a", border: "#E4E6EC" };
     case "DELAY_DEPARTED":
     case "DELAY_IN_TRANSIT":
       return { bg: "var(--c-amber-bg)", fg: "#b45309", border: "#fde68a" };
     case "ARRIVED":
-      return { bg: "#cffafe", fg: "#0e7490", border: "#a5f3fc" };
+      return { bg: "#EEF2FB", fg: "#1e3a8a", border: "#E4E6EC" };
     case "CUSTOMS":
-      return { bg: "#fce7f3", fg: "#9d174d", border: "#fbcfe8" };
+      return { bg: "#EEF2FB", fg: "#1e3a8a", border: "#E4E6EC" };
     case "CUSTOMS_CLEARED":
       return { bg: "#dcfce7", fg: "var(--c-green-dark)", border: "#bbf7d0" };
     case "IN_WAREHOUSE_TH":
-      return { bg: "#ede9fe", fg: "#7c3aed", border: "#c4b5fd" };
+      return { bg: "#EEF2FB", fg: "#1e3a8a", border: "#E4E6EC" };
     case "DELIVERING":
-      return { bg: "#fed7aa", fg: "#9a3412", border: "#fdba74" };
+      return { bg: "#fed7aa", fg: "#B45309", border: "#fdba74" };
     case "SIGNED":
       return { bg: "#dcfce7", fg: "var(--c-green-dark)", border: "#bbf7d0" };
     default:
@@ -121,7 +121,7 @@ export function ContainerTrackingSection({ shipmentId, trackingNo, hideContainer
 
   if (loading) {
     return (
-      <div style={{ padding: 10, color: "#94a3b8", fontSize: 13 }}>
+      <div style={{ padding: 10, color: "#8B94A3", fontSize: 13 }}>
         正在查询出柜信息…
       </div>
     );
@@ -140,10 +140,10 @@ export function ContainerTrackingSection({ shipmentId, trackingNo, hideContainer
       <div
         style={{
           padding: "10px 12px",
-          color: "#64748b",
+          color: "#8B94A3",
           fontSize: 13,
           background: "var(--s-cool)",
-          border: "1px dashed #cbd5e1",
+          border: "1px dashed #E4E6EC",
           borderRadius: 8,
         }}
       >
@@ -157,15 +157,15 @@ export function ContainerTrackingSection({ shipmentId, trackingNo, hideContainer
       style={{
         border: "1px solid var(--l-cool)",
         borderRadius: 10,
-        background: "#fafbff",
+        background: "#EEF2FB",
         padding: 12,
       }}
     >
       {/* 标题 + 拆柜提示 */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-        <div style={{ fontWeight: 700, fontSize: 14, color: "#1e293b" }}>
+        <div style={{ fontWeight: 700, fontSize: 14, color: "#14171D" }}>
           出柜追踪
-          <span style={{ marginLeft: 8, color: "#64748b", fontWeight: 400, fontSize: 12 }}>
+          <span style={{ marginLeft: 8, color: "#8B94A3", fontWeight: 400, fontSize: 12 }}>
             总量 {data.totalVolumeM3.toFixed(2)} m³ · 已装 {data.totalLoadedM3.toFixed(2)} m³
           </span>
         </div>
@@ -209,7 +209,7 @@ export function ContainerTrackingSection({ shipmentId, trackingNo, hideContainer
             >
               <div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                  <span style={{ fontWeight: 700, color: "#0f172a", fontSize: 14 }}>
+                  <span style={{ fontWeight: 700, color: "#14171D", fontSize: 14 }}>
                     柜 {idx + 1}{hideContainerNo ? "" : `：${c.containerNo}`}
                   </span>
                   <span
@@ -225,7 +225,7 @@ export function ContainerTrackingSection({ shipmentId, trackingNo, hideContainer
                     {c.containerType}
                   </span>
                   {c.carrierName ? (
-                    <span style={{ fontSize: 12, color: "#475569", fontWeight: 500 }}>
+                    <span style={{ fontSize: 12, color: "#4B5462", fontWeight: 500 }}>
                       {c.carrierName}
                     </span>
                   ) : null}
@@ -243,7 +243,7 @@ export function ContainerTrackingSection({ shipmentId, trackingNo, hideContainer
                     {c.containerStatusLabel}
                   </span>
                 </div>
-                <div style={{ fontSize: 12, color: "#64748b", display: "flex", flexWrap: "wrap", gap: "4px 14px" }}>
+                <div style={{ fontSize: 12, color: "#8B94A3", display: "flex", flexWrap: "wrap", gap: "4px 14px" }}>
                   <span>本柜 {c.loadedVolumeM3.toFixed(2)} m³ · {c.loadedPieceCount} 件</span>
                   <span>装柜 {formatDate(c.loadingDate)}</span>
                   <span>开船 {formatDate(c.departureDate)}</span>

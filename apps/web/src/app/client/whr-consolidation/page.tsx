@@ -36,8 +36,8 @@ const ST_TAG: Record<string, { bg: string; color: string }> = {
   received_pending_payment: { bg: "var(--c-amber-bg)", color: "var(--c-amber-deep)" },
   payment_submitted: { bg: "var(--c-blue-bg-2)", color: "var(--c-blue-deep)" },
   paid: { bg: "var(--c-green-bg)", color: "var(--c-green-deep)" },
-  loading: { bg: "#ede9fe", color: "#5b21b6" },
-  shipped: { bg: "#e0e7ff", color: "#3730a3" },
+  loading: { bg: "#EEF2FB", color: "#1e3a8a" },
+  shipped: { bg: "#EEF2FB", color: "#1e3a8a" },
   thailand_received: { bg: "var(--c-green-bg)", color: "var(--c-green-deep)" },
   cancelled: { bg: "var(--c-red-bg)", color: "var(--c-red-dark)" },
 };
@@ -119,7 +119,7 @@ function FeeBreakdownPanel({ bd, title = "费用明细", compact }: { bd?: FeeBr
     <div style={{ background: "var(--s-alt)", border: "1px solid var(--l-soft)", borderRadius: 6, padding: compact ? "6px 8px" : "8px 10px", fontSize: fs }}>
       <div style={{ fontWeight: 600, color: "var(--t-body)", marginBottom: 4 }}>{title}</div>
       {bd.rows.map(r => (
-        <div key={r.cargoType} style={{ display: "flex", justifyContent: "space-between", gap: 8, color: "#4b5563", padding: "1px 0" }}>
+        <div key={r.cargoType} style={{ display: "flex", justifyContent: "space-between", gap: 8, color: "#4B5462", padding: "1px 0" }}>
           <span>{r.label}：{r.volumeM3.toFixed(3)} 方 × {r.unitPrice} 元/方</span>
           <span style={{ whiteSpace: "nowrap" }}>= {money(r.amount)}</span>
         </div>
@@ -433,7 +433,7 @@ export default function ClientWhrConsolidationPage() {
   // 渲染
   // ==========================================================================
   return (
-    <RoleShell allowedRole="client" title="集货拼柜（仓库版）">
+    <RoleShell allowedRole="client" title="集货拼柜（仓库版）" variant="a3">
       <div style={{ maxWidth: "100%", padding: "20px 24px" }}>
         {/* Toast */}
         {toast && (
@@ -446,7 +446,7 @@ export default function ClientWhrConsolidationPage() {
         <h3 style={{ fontSize: 17, marginBottom: 16 }}>我的拼柜计划</h3>
         {loading ? <p style={{ color: "var(--t-faint)", fontSize: 14 }}>加载中...</p> :
          plans.length === 0 ? <p style={{ color: "var(--t-faint)", fontSize: 14 }}>暂无参与的拼柜计划</p> :
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, marginBottom: 20 }}>
+          <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, marginBottom: 20 }}>
             <thead><tr style={{ background: "var(--s-alt)" }}>
               <th style={thS}>计划编号</th><th style={thS}>仓库</th><th style={thS}>柜型</th><th style={thS}>目的地</th>
               <th style={thS}>方数 (已用/总)</th><th style={thS}>预报单</th><th style={thS}>状态</th><th style={thS}>单价</th>
@@ -499,7 +499,7 @@ export default function ClientWhrConsolidationPage() {
         {selectedPlanId && detail && (() => {
           const addressMissing = !detail.deliveryAddress?.trim();
           return (
-          <div style={{ border: "1px solid var(--l-soft)", borderRadius: 10, padding: "16px 20px", background: "#fafafa" }}>
+          <div style={{ border: "1px solid var(--l-soft)", borderRadius: 10, padding: "16px 20px", background: "#F0F1F4" }}>
             {/* -------- 客户信息 -------- */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
               <div>
@@ -546,7 +546,7 @@ export default function ClientWhrConsolidationPage() {
                   <div style={{ fontSize: 13, fontWeight: 600, color: "var(--c-red-dark)", marginBottom: 4 }}>
                     请先填写泰国收货地址 <span style={{ color: "var(--c-red)" }}>*</span>
                   </div>
-                  <div style={{ fontSize: 12, color: "#7f1d1d", marginBottom: 8 }}>
+                  <div style={{ fontSize: 12, color: "#B02A25", marginBottom: 8 }}>
                     收货地址是必填项，尾端拆派要用。填写之前无法新建预报单，也无法上传付款凭证。
                   </div>
                   <button onClick={() => { setAddressVal(""); setEditAddress(true); }} style={btnBlue}>立即填写</button>
@@ -587,7 +587,7 @@ export default function ClientWhrConsolidationPage() {
                 return (
                   <div key={pa.id} style={{ border: "1px solid var(--l-soft)", borderRadius: 8, marginBottom: 12, background: "var(--white)", overflow: "hidden" }}>
                     {/* 预报单头部 */}
-                    <div onClick={() => setExpandedPrealert(isExpanded ? null : pa.id)} style={{ cursor: "pointer", padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", background: isExpanded ? "#f0f7ff" : "var(--white)" }}>
+                    <div onClick={() => setExpandedPrealert(isExpanded ? null : pa.id)} style={{ cursor: "pointer", padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", background: isExpanded ? "#EEF2FB" : "var(--white)" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                         <strong style={{ fontSize: 14 }}>{pa.trackingNo}</strong>
                         <span style={{ fontSize: 12, color: "var(--t-muted)" }}>唛头：{pa.mark || "-"}</span>
@@ -698,7 +698,7 @@ export default function ClientWhrConsolidationPage() {
                         {/* --- 货品表格 --- */}
                         {paItems.length > 0 ? (
                           <div style={{ overflowX: "auto" }}>
-                            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                            <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
                               <thead><tr style={{ background: "var(--s-sunken)" }}>
                                 <th style={{ ...thS, padding: "3px 6px", fontSize: 11 }}>品名</th>
                                 <th style={{ ...thS, padding: "3px 6px", fontSize: 11 }}>件数</th>
@@ -824,7 +824,7 @@ export default function ClientWhrConsolidationPage() {
               {itemForms.map((row, idx) => {
                 const { totalQty, totalWeight, vol } = calcItem(row);
                 return (
-                  <div key={idx} style={{ border: "1px solid var(--l-soft)", borderRadius: 6, padding: 10, marginBottom: 10, background: "#fafafa" }}>
+                  <div key={idx} style={{ border: "1px solid var(--l-soft)", borderRadius: 6, padding: 10, marginBottom: 10, background: "#F0F1F4" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                       <strong style={{ fontSize: 13 }}>
                         产品 {idx + 1}

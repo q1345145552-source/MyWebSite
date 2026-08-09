@@ -29,7 +29,7 @@ function FeeBreakdownPanel({ bd, title = "费用明细", compact }: { bd?: FeeBr
     <div style={{ background: "var(--s-alt)", border: "1px solid var(--l-soft)", borderRadius: 6, padding: compact ? "6px 8px" : "8px 10px", fontSize: fs }}>
       <div style={{ fontWeight: 600, color: "var(--t-body)", marginBottom: 4 }}>{title}</div>
       {bd.rows.map(r => (
-        <div key={r.cargoType} style={{ display: "flex", justifyContent: "space-between", gap: 8, color: "#4b5563", padding: "1px 0" }}>
+        <div key={r.cargoType} style={{ display: "flex", justifyContent: "space-between", gap: 8, color: "#4B5462", padding: "1px 0" }}>
           <span>{r.label}：{r.volumeM3.toFixed(3)} 方 × {r.unitPrice} 元/方</span>
           <span style={{ whiteSpace: "nowrap" }}>= {money(r.amount)}</span>
         </div>
@@ -96,10 +96,10 @@ const PREALERT_STATUS_ZH: Record<string, string> = {
   cancelled: "已取消",
 };
 const TAG: Record<string, { bg: string; color: string }> = {
-  planning: { bg: "#e0e7ff", color: "#3730a3" },
+  planning: { bg: "#EEF2FB", color: "#1e3a8a" },
   collecting: { bg: "var(--c-blue-bg-2)", color: "var(--c-blue-deep)" },
-  loading: { bg: "#ede9fe", color: "#5b21b6" },
-  shipped: { bg: "#e0e7ff", color: "#3730a3" },
+  loading: { bg: "#EEF2FB", color: "#1e3a8a" },
+  shipped: { bg: "#EEF2FB", color: "#1e3a8a" },
   completed: { bg: "var(--c-green-bg)", color: "var(--c-green-deep)" },
   cancelled: { bg: "var(--c-red-bg)", color: "var(--c-red-dark)" },
   pending: { bg: "var(--c-amber-bg)", color: "var(--c-amber-deep)" },
@@ -625,7 +625,7 @@ export default function AdminWhrConsolidationPage() {
   // 渲染
   // ==========================================================================
   return (
-    <RoleShell allowedRole="admin" title="集货拼柜（仓库版）">
+    <RoleShell allowedRole="admin" title="集货拼柜（仓库版）" variant="a3">
       <div style={{ maxWidth: "100%", padding: "20px 24px" }}>
         {/* Toast */}
         {toast && (
@@ -649,7 +649,7 @@ export default function AdminWhrConsolidationPage() {
             ) : plans.length === 0 ? (
               <p style={{ color: "var(--t-faint)", fontSize: 14 }}>暂无计划</p>
             ) : (
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                   <tr style={{ background: "var(--s-alt)" }}>
                     <th style={thS}>计划编号</th>
@@ -710,7 +710,7 @@ export default function AdminWhrConsolidationPage() {
             ) : (
               <>
                 {/* 计划基本信息 */}
-                <div style={{ border: "1px solid var(--l-soft)", borderRadius: 10, padding: "16px 20px", marginBottom: 16, background: "#fafafa" }}>
+                <div style={{ border: "1px solid var(--l-soft)", borderRadius: 10, padding: "16px 20px", marginBottom: 16, background: "#F0F1F4" }}>
                   <h3 style={{ margin: "0 0 10px", fontSize: 17 }}>{planDetail.planNo}</h3>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: "12px 24px", fontSize: 13, color: "var(--t-body)" }}>
                     <div><span style={{ color: "var(--t-muted)" }}>仓库：</span>{planDetail.warehouse}</div>
@@ -763,7 +763,7 @@ export default function AdminWhrConsolidationPage() {
 
                       {/* 客户卡片展开体 */}
                       {isExpanded && (
-                        <div style={{ padding: "12px 16px", borderTop: "1px solid var(--l-soft)", background: "#fafafa" }}>
+                        <div style={{ padding: "12px 16px", borderTop: "1px solid var(--l-soft)", background: "#F0F1F4" }}>
                           {/* 价格信息 */}
                           <div style={{ display: "flex", gap: 20, alignItems: "center", fontSize: 13, marginBottom: 10, color: "var(--t-body)" }}>
                             <span>普货：{c.unitPriceNormal} 元/方</span>
@@ -908,7 +908,7 @@ export default function AdminWhrConsolidationPage() {
                                         {/* 货品表格 */}
                                         {pa.items.length > 0 && (
                                           <div style={{ overflowX: "auto" }}>
-                                            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                                            <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
                                               <thead><tr style={{ background: "var(--s-sunken)" }}>
                                                 <th style={{ ...thS, padding: "3px 5px", fontSize: 11 }}>品名</th>
                                                 <th style={{ ...thS, padding: "3px 5px", fontSize: 11 }}>件数</th>
@@ -1021,7 +1021,7 @@ export default function AdminWhrConsolidationPage() {
                   {/* 货品明细 */}
                   <div style={{ marginTop: 8 }}>
                     <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 12 }}>货品明细</div>
-                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                    <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
                       <thead><tr style={{ background: "var(--s-sunken)" }}>
                         {["品名","件数","方数","重量(kg)","类型"].map(h => <th key={h} style={{ ...thS, padding: "3px 6px", fontSize: 10 }}>{h}</th>)}
                       </tr></thead>
@@ -1211,7 +1211,7 @@ export default function AdminWhrConsolidationPage() {
                 <button onClick={() => loadClients()} style={btnCancel} disabled={clientsLoading}>{clientsLoading ? "刷新中..." : "刷新列表"}</button>
               </div>
               <div style={{ maxHeight: 200, overflowY: "auto", border: "1px solid var(--l-soft)", borderRadius: 6 }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                   <thead><tr style={{ background: "var(--s-sunken)" }}>
                     <th style={{ ...thS, padding: "4px 8px", width: 40 }}></th>
                     <th style={{ ...thS, padding: "4px 8px" }}>客户名</th>
@@ -1323,7 +1323,7 @@ export default function AdminWhrConsolidationPage() {
                     <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: "var(--c-red-deep)" }}>
                       {deletePlanPreview.blockers.map((b, i) => <li key={i}>{b}</li>)}
                     </ul>
-                    <div style={{ fontSize: 12, color: "#7f1d1d", marginTop: 6 }}>确实要删，请输入你的管理员密码：</div>
+                    <div style={{ fontSize: 12, color: "#B02A25", marginTop: 6 }}>确实要删，请输入你的管理员密码：</div>
                     <input
                       type="password"
                       value={deletePlanPassword}

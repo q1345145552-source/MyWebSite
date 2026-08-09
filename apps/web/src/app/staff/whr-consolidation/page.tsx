@@ -75,7 +75,7 @@ function FeeBreakdownPanel({ bd, title = "费用明细", compact }: { bd?: FeeBr
     <div style={{ background: "var(--s-alt)", border: "1px solid var(--l-soft)", borderRadius: 6, padding: compact ? "6px 8px" : "8px 10px", fontSize: fs }}>
       <div style={{ fontWeight: 600, color: "var(--t-body)", marginBottom: 4 }}>{title}</div>
       {bd.rows.map(r => (
-        <div key={r.cargoType} style={{ display: "flex", justifyContent: "space-between", gap: 8, color: "#4b5563", padding: "1px 0" }}>
+        <div key={r.cargoType} style={{ display: "flex", justifyContent: "space-between", gap: 8, color: "#4B5462", padding: "1px 0" }}>
           <span>{r.label}：{r.volumeM3.toFixed(3)} 方 × {r.unitPrice} 元/方</span>
           <span style={{ whiteSpace: "nowrap" }}>= {money(r.amount)}</span>
         </div>
@@ -117,8 +117,8 @@ const TAG: Record<string, { bg: string; color: string }> = {
   received_pending_payment: { bg: "var(--c-amber-bg)", color: "var(--c-amber-deep)" },
   payment_submitted: { bg: "var(--c-blue-bg-2)", color: "var(--c-blue-deep)" },
   paid: { bg: "var(--c-green-bg)", color: "var(--c-green-deep)" },
-  loading: { bg: "#ede9fe", color: "#5b21b6" },
-  shipped: { bg: "#e0e7ff", color: "#3730a3" },
+  loading: { bg: "#EEF2FB", color: "#1e3a8a" },
+  shipped: { bg: "#EEF2FB", color: "#1e3a8a" },
   thailand_received: { bg: "var(--c-green-bg)", color: "var(--c-green-deep)" },
   cancelled: { bg: "var(--c-red-bg)", color: "var(--c-red-dark)" },
 };
@@ -727,7 +727,7 @@ export default function StaffWhrConsolidationPage() {
   });
 
   return (
-    <RoleShell allowedRole={["staff", "admin"]} title="集货拼柜（仓库版）">
+    <RoleShell allowedRole={["staff", "admin"]} title="集货拼柜（仓库版）" variant="a3">
       <div style={{ maxWidth: "100%", padding: "20px 24px" }}>
         {/* Toast */}
         {toast && (
@@ -770,7 +770,7 @@ export default function StaffWhrConsolidationPage() {
                       const flatItems = (c.prealerts ?? []).flatMap(pa => (pa.items ?? []).map(it => ({ ...it, prealertTrackingNo: pa.trackingNo, prealertMark: pa.mark })));
                       return (
                         <div key={c.id} style={{ borderTop: "1px solid var(--l-soft)" }}>
-                          <div onClick={() => setExpandedCustomer(cExpanded ? null : c.id)} style={{ cursor: "pointer", padding: "8px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", background: cExpanded ? "#fafafa" : "white" }}>
+                          <div onClick={() => setExpandedCustomer(cExpanded ? null : c.id)} style={{ cursor: "pointer", padding: "8px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", background: cExpanded ? "#F0F1F4" : "white" }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                               <strong style={{ fontSize: 14 }}>{c.clientName}</strong>
                               <span style={{ fontSize: 12, color: "var(--t-muted)" }}>{c.clientPhone} · {c.clientCompany}</span>
@@ -785,8 +785,8 @@ export default function StaffWhrConsolidationPage() {
                             </span>
                           </div>
                           {cExpanded && flatItems.length > 0 && (
-                            <div style={{ padding: "8px 16px", background: "#fafafa", overflowX: "auto" }}>
-                              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                            <div style={{ padding: "8px 16px", background: "#F0F1F4", overflowX: "auto" }}>
+                              <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                                 <thead><tr style={{ background: "var(--s-sunken)" }}>
                                   {["预报单号", "唛头", "品名", "件数", "方数(m³)", "重量(kg)", "类型"].map(h => <th key={h} style={{ ...thS, padding: "4px 8px", fontSize: 11 }}>{h}</th>)}
                                 </tr></thead>
@@ -831,7 +831,7 @@ export default function StaffWhrConsolidationPage() {
               opsPlans.length === 0 ? <p style={{ color: "var(--t-faint)", padding: "24px 0" }}>暂无活跃计划</p> :
               opsPlans.map(p => (
                 <div key={p.planId} style={{ marginBottom: 20, border: "1px solid var(--l-soft)", borderRadius: 10, overflow: "hidden" }}>
-                  <div style={{ padding: "10px 16px", background: "var(--s-alt)", borderBottom: "1px solid var(--l-soft)", display: "flex", gap: 12, alignItems: "center", fontSize: 14, fontWeight: 600, color: "#1f2937" }}>
+                  <div style={{ padding: "10px 16px", background: "var(--s-alt)", borderBottom: "1px solid var(--l-soft)", display: "flex", gap: 12, alignItems: "center", fontSize: 14, fontWeight: 600, color: "#14171D" }}>
                     <span>{p.planNo}</span>
                     <span style={{ fontWeight: 400, fontSize: 13, color: "var(--t-muted)" }}>
                       {p.warehouse} · {p.containerType} · {p.destinationTh} ·{" "}
@@ -1070,7 +1070,7 @@ export default function StaffWhrConsolidationPage() {
 
                                 {/* 货品表格 */}
                                 {(pa.items ?? []).length > 0 && (
-                                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, marginTop: 6 }}>
+                                  <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, marginTop: 6 }}>
                                     <thead><tr style={{ background: "var(--s-sunken)" }}>
                                       {["品名","件数","方数","类型"].map(h => <th key={h} style={{ ...thS, padding: "3px 6px", fontSize: 10 }}>{h}</th>)}
                                     </tr></thead>
@@ -1098,7 +1098,7 @@ export default function StaffWhrConsolidationPage() {
               ) : (
                 <>
                   {planList.length === 0 ? <p style={{ color: "var(--t-faint)", fontSize: 14, padding: "12px 0" }}>暂无计划</p> : (
-                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                    <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                       <thead>
                         <tr style={{ background: "var(--s-sunken)" }}>
                           {["计划编号", "仓库", "柜型", "目的地", "总方数", "已用/进度", "客户数", "状态", "创建人", "创建时间"].map(h => <th key={h} style={thS}>{h}</th>)}
@@ -1169,7 +1169,7 @@ export default function StaffWhrConsolidationPage() {
                 <div style={{ marginTop: 10 }}>
                   <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 12 }}>货品清单（{signTarget.items!.length}款）</div>
                   <div style={{ maxHeight: 300, overflowY: "auto" }}>
-                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                    <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
                       <thead><tr style={{ background: "var(--s-sunken)" }}>
                         {["品名","件数","方数","材质","类型"].map(h => <th key={h} style={{ ...thS, padding: "3px 6px", fontSize: 10 }}>{h}</th>)}
                       </tr></thead>
@@ -1275,7 +1275,7 @@ export default function StaffWhrConsolidationPage() {
                       {(reviewTarget.prealert.items ?? []).length > 0 && (
                         <div style={{ marginTop: 8 }}>
                           <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 12 }}>货品明细</div>
-                          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                          <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
                             <thead><tr style={{ background: "var(--s-sunken)" }}>
                               {["品名","件数","方数","重量(kg)","类型"].map(h => <th key={h} style={{ ...thS, padding: "3px 6px", fontSize: 10 }}>{h}</th>)}
                             </tr></thead>

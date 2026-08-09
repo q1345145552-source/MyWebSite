@@ -34,7 +34,7 @@ export default function AdminCustomsPage() {
   }, []);
 
   return (
-    <RoleShell allowedRole="admin" title="关务监控">
+    <RoleShell allowedRole="admin" title="关务监控" variant="a3">
       <section style={{ border: "1px solid var(--l-soft)", borderRadius: 12, padding: 16, background: "var(--white)", marginBottom: 12 }}>
         <h2 style={{ marginTop: 0 }}>报关状态录入</h2>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: 8 }}>

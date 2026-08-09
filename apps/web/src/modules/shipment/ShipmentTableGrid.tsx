@@ -86,7 +86,7 @@ export function ProductDetailCell({ widths, rows }: { widths: readonly number[];
   return (
     <td colSpan={widths.length} style={{ padding: 0, border: GRID_LINE, verticalAlign: "top" }}>
       <div style={{ height: DETAIL_ROW_HEIGHT * DETAIL_VISIBLE_ROWS, overflowY: "auto", overflowX: "hidden" }}>
-        <table style={{ width: totalWidth, borderCollapse: "collapse", tableLayout: "fixed", fontSize: 13 }}>
+        <table className="a3-table" style={{ width: totalWidth, borderCollapse: "collapse", tableLayout: "fixed", fontSize: 13 }}>
           <colgroup>
             {widths.map((w, i) => <col key={i} style={{ width: w }} />)}
           </colgroup>

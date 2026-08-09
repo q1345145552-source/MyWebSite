@@ -348,9 +348,9 @@ export default function ClientConsolidationPage() {
 
   // ---- 渲染 ----
   return (
-    <RoleShell allowedRole="client" title="集货拼柜">
+    <RoleShell allowedRole="client" title="集货拼柜" variant="a3">
       {toast && (
-        <div style={{ position: "fixed", top: 20, right: 20, zIndex: 9999, background: "#1f2937", color: "var(--white)", padding: "10px 20px", borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.3)", cursor: "pointer" }} onClick={() => setToast("")}>
+        <div style={{ position: "fixed", top: 20, right: 20, zIndex: 9999, background: "#14171D", color: "var(--white)", padding: "10px 20px", borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.3)", cursor: "pointer" }} onClick={() => setToast("")}>
           {toast}
         </div>
       )}
@@ -411,7 +411,7 @@ export default function ClientConsolidationPage() {
                     {/* 进度条 */}
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <div style={{ flex: 1, height: 8, background: "var(--l-soft)", borderRadius: 4, overflow: "hidden", maxWidth: 300 }}>
-                        <div style={{ height: "100%", width: `${Math.min(t.volumePercent, 100)}%`, background: t.volumePercent >= 85 ? (t.volumePercent >= 100 ? "var(--c-green-2)" : "var(--c-amber)") : "#3b82f6", borderRadius: 4, transition: "width 0.3s" }} />
+                        <div style={{ height: "100%", width: `${Math.min(t.volumePercent, 100)}%`, background: t.volumePercent >= 85 ? (t.volumePercent >= 100 ? "var(--c-green-2)" : "var(--c-amber)") : "#1e3a8a", borderRadius: 4, transition: "width 0.3s" }} />
                       </div>
                       <span style={{ fontSize: 12, color: "var(--t-muted)", whiteSpace: "nowrap" }}>{t.totalVolumeM3} / {t.maxVolumeM3} m³</span>
                     </div>
@@ -452,7 +452,7 @@ export default function ClientConsolidationPage() {
               {showProgress && (
                 <div style={{ marginBottom: 24, padding: 20, background: "var(--s-alt)", borderRadius: 12, border: "1px solid var(--l-soft)" }}>
                   <div style={{ height: 24, background: "var(--l-soft)", borderRadius: 12, overflow: "hidden", position: "relative", marginBottom: 8 }}>
-                    <div style={{ height: "100%", width: `${Math.min(taskDetail.volumePercent, 100)}%`, background: taskDetail.volumePercent >= 85 ? (taskDetail.volumePercent >= 100 ? "var(--c-green-2)" : "var(--c-amber)") : "#1d4ed8", borderRadius: 12, transition: "width 0.3s", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <div style={{ height: "100%", width: `${Math.min(taskDetail.volumePercent, 100)}%`, background: taskDetail.volumePercent >= 85 ? (taskDetail.volumePercent >= 100 ? "var(--c-green-2)" : "var(--c-amber)") : "#1e3a8a", borderRadius: 12, transition: "width 0.3s", display: "flex", alignItems: "center", justifyContent: "center" }}>
                       {taskDetail.volumePercent > 15 && (
                         <span style={{ fontSize: 12, color: "var(--white)", fontWeight: 600 }}>{taskDetail.totalVolumeM3} m³ ({taskDetail.volumePercent}%)</span>
                       )}
@@ -473,7 +473,7 @@ export default function ClientConsolidationPage() {
 
               {/* 装柜后信息 */}
               {!showProgress && (
-                <div style={{ marginBottom: 20, padding: 16, background: "var(--c-blue-bg)", borderRadius: 10, border: "1px solid #bfdbfe" }}>
+                <div style={{ marginBottom: 20, padding: 16, background: "var(--c-blue-bg)", borderRadius: 10, border: "1px solid #E4E6EC" }}>
                   <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
                     {taskDetail.containerNo && <div><span style={{ fontSize: 12, color: "var(--t-muted)" }}>柜号</span><div style={{ fontWeight: 600 }}>{taskDetail.containerNo}</div></div>}
                     {taskDetail.loadingDate && <div><span style={{ fontSize: 12, color: "var(--t-muted)" }}>装柜日期</span><div style={{ fontWeight: 600 }}>{taskDetail.loadingDate}</div></div>}
@@ -489,7 +489,7 @@ export default function ClientConsolidationPage() {
                 <div style={{ marginBottom: 24 }}>
                   <h3 style={{ fontSize: 16, marginBottom: 10 }}>品名汇总</h3>
                   <div style={{ overflowX: "auto" }}>
-                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                    <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                       <thead>
                         <tr style={{ background: "var(--s-sunken)" }}>
                           <th style={thStyle}>品名</th>
@@ -505,7 +505,7 @@ export default function ClientConsolidationPage() {
                             <td style={tdStyle}>{s.count}</td>
                             <td style={tdStyle}>{s.vol.toFixed(3)}</td>
                             <td style={tdStyle}>
-                              <div style={{ height: 6, borderRadius: 3, background: s.percent > 66 ? "#1d4ed8" : s.percent > 33 ? "#93c5fd" : "var(--l-soft)", width: `${s.percent}%`, minWidth: s.percent > 0 ? 4 : 0 }} />
+                              <div style={{ height: 6, borderRadius: 3, background: s.percent > 66 ? "#1e3a8a" : s.percent > 33 ? "#EEF2FB" : "var(--l-soft)", width: `${s.percent}%`, minWidth: s.percent > 0 ? 4 : 0 }} />
                             </td>
                           </tr>
                         ))}
@@ -590,7 +590,7 @@ export default function ClientConsolidationPage() {
                   {taskDetail.paymentStatus === "unpaid" && taskDetail.paymentRejectReason && (
                     <div style={{ marginTop: 8, padding: "12px 16px", background: "var(--c-red-bg)", borderRadius: 8, border: "1px solid var(--c-red)" }}>
                       <div style={{ color: "var(--c-red-dark)", fontWeight: 600, marginBottom: 4 }}>付款审核不通过</div>
-                      <div style={{ color: "#7f1d1d", fontSize: 13, marginBottom: 8 }}>{taskDetail.paymentRejectReason}</div>
+                      <div style={{ color: "#B02A25", fontSize: 13, marginBottom: 8 }}>{taskDetail.paymentRejectReason}</div>
                       <button onClick={() => setShowPay(true)} style={{ padding: "6px 16px", background: "var(--c-blue)", color: "var(--white)", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>去付款</button>
                     </div>
                   )}
@@ -604,7 +604,7 @@ export default function ClientConsolidationPage() {
                   <div style={{ position: "relative", paddingLeft: 24, borderLeft: "2px solid var(--l-soft)", marginLeft: 8 }}>
                     {taskDetail.statusLogs.map((log: any, i: number) => (
                       <div key={log.id || i} style={{ marginBottom: 16, position: "relative" }}>
-                        <div style={{ position: "absolute", left: -30, top: 4, width: 12, height: 12, borderRadius: "50%", background: "#3b82f6", border: "2px solid var(--white)" }} />
+                        <div style={{ position: "absolute", left: -30, top: 4, width: 12, height: 12, borderRadius: "50%", background: "#1e3a8a", border: "2px solid var(--white)" }} />
                         <div style={{ fontSize: 13, fontWeight: 600 }}>{STATUS_ZH[log.fromStatus] || log.fromStatus} → {STATUS_ZH[log.toStatus] || log.toStatus}</div>
                         <div style={{ fontSize: 12, color: "var(--t-muted)" }}>{log.operatorName} · {formatBeijingTime(log.createdAt)}</div>
                         {log.remark && <div style={{ fontSize: 12, color: "var(--t-faint)", marginTop: 2 }}>{log.remark}</div>}
@@ -647,7 +647,7 @@ export default function ClientConsolidationPage() {
 
           <h4 style={{ fontSize: 14, marginBottom: 8 }}>产品明细</h4>
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
                 <tr style={{ background: "var(--s-sunken)" }}>
                   <th style={thStyle}>产品名称</th>
@@ -827,7 +827,7 @@ function PrealertCard({
             </div>
           )}
           <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr style={{ background: "var(--s-alt)" }}>
                 <th style={{ ...thStyle, minWidth: 100, whiteSpace: "nowrap" }}>唛头</th>

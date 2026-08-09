@@ -117,7 +117,7 @@ export default function StaffLastmile(props: StaffLastmileProps) {
   }
 
   return (
-    <section id="staff-lastmile" style={{ display: "block", border: "1px solid var(--l-soft)", borderLeft: "4px solid var(--l-strong)", borderRadius: 12, padding: 16, marginBottom: 18, background: "#fcfcfd", boxShadow: "0 1px 3px rgba(15,23,42,0.06)" }}>
+    <section id="staff-lastmile" style={{ display: "block", border: "1px solid var(--l-soft)", borderLeft: "4px solid var(--l-strong)", borderRadius: 12, padding: 16, marginBottom: 18, background: "#F0F1F4", boxShadow: "0 1px 3px rgba(15,23,42,0.06)" }}>
       <h2 style={{ marginTop: 0, fontSize: 18, color: "var(--t-heading)", marginBottom: 12 }}>尾端派送</h2>
 
       <div style={{ border: "1px solid var(--l-soft)", borderRadius: 8, padding: 12, marginBottom: 16, background: "var(--s-cool)" }}>
@@ -129,7 +129,7 @@ export default function StaffLastmile(props: StaffLastmileProps) {
                 现在全部显示，一行放不下就换行。 */}
             <div style={{ display: "flex", gap: 4, marginBottom: 4, flexWrap: "wrap" }}>
               {[...new Set(props.lmShipments.map(s => s.clientId).filter(Boolean))].map(m => (
-                <button key={m} onClick={() => { setLmShipSearch(m); const found = new Set<string>(); props.lmShipments.filter(s => s.clientId === m).forEach(s => found.add(s.id)); const n = new Set(lmSelected); found.forEach(id => n.add(id)); setLmSelected(n); }} style={{ border: "1px solid #6b21a8", borderRadius: 4, padding: "1px 6px", fontSize: 10, background: lmShipSearch === m ? "#6b21a8" : "var(--white)", color: lmShipSearch === m ? "var(--white)" : "#6b21a8", cursor: "pointer" }}>{m}</button>
+                <button key={m} onClick={() => { setLmShipSearch(m); const found = new Set<string>(); props.lmShipments.filter(s => s.clientId === m).forEach(s => found.add(s.id)); const n = new Set(lmSelected); found.forEach(id => n.add(id)); setLmSelected(n); }} style={{ border: "1px solid #14171D", borderRadius: 4, padding: "1px 6px", fontSize: 10, background: lmShipSearch === m ? "#14171D" : "var(--white)", color: lmShipSearch === m ? "var(--white)" : "#14171D", cursor: "pointer" }}>{m}</button>
               ))}
             </div>
             {/* 粘贴运单号批量勾选。2026-08-06：原来匹配不上的号码**静默丢弃** ——
@@ -150,7 +150,7 @@ export default function StaffLastmile(props: StaffLastmileProps) {
               } else {
                 setLmBatchMissing([]);
               }
-            }} placeholder="粘贴运单号批量勾选..." style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 8px", fontSize: 11, width: "100%", marginBottom: 4, color: "#6b21a8" }} />
+            }} placeholder="粘贴运单号批量勾选..." style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 8px", fontSize: 11, width: "100%", marginBottom: 4, color: "#14171D" }} />
             {lmBatchMissing.length > 0 && (
               <div style={{ fontSize: 11, color: "var(--c-red-deep)", marginBottom: 4, lineHeight: 1.5 }}>
                 有 {lmBatchMissing.length} 个运单号没找到，<b>没有</b>加进去：{lmBatchMissing.join("、")}
@@ -166,7 +166,7 @@ export default function StaffLastmile(props: StaffLastmileProps) {
                 <label key={s.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "2px 0", fontSize: 12, cursor: "pointer" }}>
                   <input type="checkbox" checked={lmSelected.has(s.id)} onChange={() => { const n = new Set(lmSelected); n.has(s.id) ? n.delete(s.id) : n.add(s.id); setLmSelected(n); }} />
                   <span style={{ fontFamily: "monospace", color: "var(--c-navy)", minWidth: 150 }}>{s.trackingNo}</span>
-                  <span style={{ color: "#6b21a8", minWidth: 100, fontWeight: 600 }}>{s.clientId}</span>
+                  <span style={{ color: "#14171D", minWidth: 100, fontWeight: 600 }}>{s.clientId}</span>
                   <span style={{ color: "var(--t-body)", flex: 1 }}>{s.itemName}</span>
                   <span style={{ color: "var(--t-muted)", minWidth: 40, textAlign: "right" }}>{s.packageCount}件</span>
                 </label>
@@ -217,10 +217,10 @@ export default function StaffLastmile(props: StaffLastmileProps) {
                     setLmSelected(new Set());
                     props.onReloadOrders();
                   } catch (e: any) { props.onToast(e.message || "追加失败"); }
-                }} style={{ border: "1px solid #ca8a04", borderRadius: 4, padding: "2px 8px", fontSize: 11, background: "#fefce8", color: "#ca8a04", cursor: "pointer" }}>追加运单</button>
+                }} style={{ border: "1px solid #B45309", borderRadius: 4, padding: "2px 8px", fontSize: 11, background: "#fefce8", color: "#B45309", cursor: "pointer" }}>追加运单</button>
               )}
             </div>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead><tr style={{ borderBottom: "2px solid var(--l-cool)", textAlign: "left" }}>
                 <th style={{ padding: "4px 6px" }}>唛头</th><th style={{ padding: "4px 6px" }}>运单号</th><th style={{ padding: "4px 6px" }}>司机</th><th style={{ padding: "4px 6px" }}>车牌</th><th style={{ padding: "4px 6px" }}>电话</th><th style={{ padding: "4px 6px" }}>日期</th><th style={{ padding: "4px 6px" }}>状态</th><th style={{ padding: "4px 6px" }}>操作</th>
               </tr></thead>

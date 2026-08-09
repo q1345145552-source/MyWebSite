@@ -38,7 +38,7 @@ export default function AdminFinancePage() {
   const pageRows = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   return (
-    <RoleShell allowedRole="admin" title="财务报表">
+    <RoleShell allowedRole="admin" title="财务报表" variant="a3">
       <h1 style={{ fontSize: 22, fontWeight: 700, color: "var(--ink-legacy)", margin: "0 0 16px" }}>财务结算</h1>
 
       {data && (
@@ -73,7 +73,7 @@ export default function AdminFinancePage() {
       {!data && !error ? <p style={{ color: "var(--ink-mute)", fontSize: 13 }}>加载中…</p> : (
         <div style={{ border: "1px solid var(--hairline)", borderRadius: "var(--radius-lg)", overflow: "hidden", background: "var(--canvas)" }}>
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 900 }}>
+            <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 900 }}>
               <thead>
                 <tr style={{ background: "var(--canvas-soft)" }}>
                   <th style={{ padding: "10px 12px", textAlign: "left", fontWeight: 500, color: "var(--ink-mute)" }}>预报单号</th>

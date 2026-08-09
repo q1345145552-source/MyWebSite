@@ -80,7 +80,7 @@ export default function ClientTrackPage() {
   );
 
   return (
-    <RoleShell allowedRole="client" title="物流追踪看板">
+    <RoleShell allowedRole="client" title="物流追踪看板" variant="a3">
       <section style={{ border: "1px solid var(--l-soft)", borderRadius: 12, padding: 16, background: "var(--white)" }}>
         <h2 style={{ marginTop: 0 }}>Track & Trace（免登录查询）</h2>
         <p style={{ color: "var(--t-strong)", marginTop: 0 }}>
@@ -143,7 +143,7 @@ export default function ClientTrackPage() {
         </div>
 
         {infoMessage ? (
-          <p style={{ marginTop: 14, color: "#0f766e", fontSize: 13 }}>
+          <p style={{ marginTop: 14, color: "#15803D", fontSize: 13 }}>
             {infoMessage}
           </p>
         ) : null}

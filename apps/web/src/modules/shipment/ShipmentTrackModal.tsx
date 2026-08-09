@@ -68,10 +68,10 @@ import { shipmentStatusZh } from "./shipment-status";
 const STATUS_CONFIG: Record<string, { zh: string; color: string; bg: string; icon: string }> = {
   created:        { zh: "已创建",     color: "var(--t-muted)", bg: "var(--s-sunken)", icon: "" },
   // 前半段（2026-08-06 起才写轨迹）：客户预报 → 国内仓收货
-  inwarehousecn:  { zh: "国内仓已收货", color: "#0369a1", bg: "#e0f2fe", icon: "" },
-  receivedcn:     { zh: "国内仓已收货", color: "#0369a1", bg: "#e0f2fe", icon: "" },
+  inwarehousecn:  { zh: "国内仓已收货", color: "#1e3a8a", bg: "#EEF2FB", icon: "" },
+  receivedcn:     { zh: "国内仓已收货", color: "#1e3a8a", bg: "#EEF2FB", icon: "" },
   pickedup:       { zh: "已揽收",     color: "var(--t-muted)", bg: "var(--s-sunken)", icon: "" },
-  loaded:         { zh: "已装柜",     color: "#0369a1", bg: "#e0f2fe", icon: "" },
+  loaded:         { zh: "已装柜",     color: "#1e3a8a", bg: "#EEF2FB", icon: "" },
   delaydeparted:  { zh: "延迟开船",   color: "#b45309", bg: "var(--c-amber-bg)", icon: "" },
   delay_departed: { zh: "延迟开船",   color: "#b45309", bg: "var(--c-amber-bg)", icon: "" },
   departed:       { zh: "已开船",     color: "var(--c-blue-deep)", bg: "var(--c-blue-bg-2)", icon: "" },
@@ -87,8 +87,8 @@ const STATUS_CONFIG: Record<string, { zh: string; color: string; bg: string; ico
   customsinspect: { zh: "海关查验",   color: "#b45309", bg: "var(--c-amber-bg)", icon: "" },
   customsth:      { zh: "清关中",     color: "var(--c-amber-deep)", bg: "var(--c-amber-bg)", icon: "" },
   customscleared: { zh: "清关已放行", color: "var(--c-green-dark)", bg: "#dcfce7", icon: "" },
-  inwarehouseth:  { zh: "已到仓",     color: "#7c3aed", bg: "#ede9fe", icon: "" },
-  outfordelivery: { zh: "派送中",     color: "#db2777", bg: "#fce7f3", icon: "" },
+  inwarehouseth:  { zh: "已到仓",     color: "#1e3a8a", bg: "#EEF2FB", icon: "" },
+  outfordelivery: { zh: "派送中",     color: "#1e3a8a", bg: "#EEF2FB", icon: "" },
   delivered:      { zh: "派送完成",   color: "var(--c-green-3)", bg: "#f0fdf4", icon: "" },
   exception:      { zh: "异常",       color: "var(--c-red-2)", bg: "#fef2f2", icon: "" },
   returned:       { zh: "已退回",     color: "var(--c-red-dark)", bg: "var(--c-red-bg)", icon: "" },
@@ -96,8 +96,8 @@ const STATUS_CONFIG: Record<string, { zh: string; color: string; bg: string; ico
   // 容器状态（旧日志兼容）
   intransit:      { zh: "运输中",     color: "var(--c-blue-deep)", bg: "var(--c-blue-bg-2)", icon: "" },
   customs:        { zh: "清关中",     color: "var(--c-amber-deep)", bg: "var(--c-amber-bg)", icon: "" },
-  loading:        { zh: "装柜中",     color: "#0369a1", bg: "#e0f2fe", icon: "" },
-  sealed:         { zh: "已封柜",     color: "#0369a1", bg: "#e0f2fe", icon: "" },
+  loading:        { zh: "装柜中",     color: "#1e3a8a", bg: "#EEF2FB", icon: "" },
+  sealed:         { zh: "已封柜",     color: "#1e3a8a", bg: "#EEF2FB", icon: "" },
   arrived:        { zh: "已到港",     color: "var(--c-green-deep)", bg: "var(--c-green-bg)", icon: "" },
 };
 

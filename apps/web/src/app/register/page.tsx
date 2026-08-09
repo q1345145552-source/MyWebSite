@@ -43,7 +43,7 @@ export default function RegisterPage() {
 
           <div className="auth-field">
             <label>怎么开通</label>
-            <p style={{ margin: 0, fontSize: 13, lineHeight: 1.9, color: "#334155" }}>
+            <p style={{ margin: 0, fontSize: 13, lineHeight: 1.9, color: "#4B5462" }}>
               请通过下方方式联系我们，说明您的<strong>公司名称</strong>、<strong>联系人</strong>
               和<strong>手机号</strong>，我们会为您创建账号并发送登录信息。
             </p>
@@ -55,8 +55,8 @@ export default function RegisterPage() {
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {items.map((i) => (
                   <div key={i.label} style={{ display: "flex", gap: 12, fontSize: 13 }}>
-                    <span style={{ color: "#64748b", minWidth: 40 }}>{i.label}</span>
-                    <span style={{ color: "#0f172a", fontWeight: 500, whiteSpace: "nowrap" }}>{i.value}</span>
+                    <span style={{ color: "#8B94A3", minWidth: 40 }}>{i.label}</span>
+                    <span style={{ color: "#14171D", fontWeight: 500, whiteSpace: "nowrap" }}>{i.value}</span>
                   </div>
                 ))}
               </div>
@@ -64,7 +64,7 @@ export default function RegisterPage() {
           ) : (
             <div className="auth-field">
               <label>联系方式</label>
-              <p style={{ margin: 0, fontSize: 13, color: "#64748b" }}>
+              <p style={{ margin: 0, fontSize: 13, color: "#8B94A3" }}>
                 请联系您的业务对接人开通账号。
               </p>
             </div>
