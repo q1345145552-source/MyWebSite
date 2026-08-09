@@ -117,7 +117,11 @@ function drawToJpeg(
   const ctx = canvas.getContext("2d");
   if (!ctx) return Promise.resolve(null);
   // JPEG 不支持透明，PNG 的透明区域不铺底会变黑
-  ctx.fillStyle = "var(--white)";
+  // ⚠️ 这里**必须写死颜色，不能用 var(--white)**：
+  // fillStyle 是 canvas 的 JS 接口，不是 CSS，塞 var() 进去浏览器认不出、整句被忽略，
+  // 底色就退回默认的黑色 —— 带透明背景的 PNG 压完会变成黑底。
+  // （2026-08-09 批量换色时真的被换成 var(--white) 过，部署前查出来的。）
+  ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, w, h);
   ctx.drawImage(source, 0, 0, w, h);
 
