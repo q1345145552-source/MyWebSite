@@ -871,6 +871,31 @@ export async function fetchStaffShipments(): Promise<ShipmentItem[]> {
   return data.items;
 }
 
+/** 员工端运单列表顶部那排数字（A3 方案 §3.2） */
+export interface StaffShipmentOverview {
+  /** 在途：已经发出、还没到泰国仓 */
+  inTransitCount: number;
+  /** 延迟 · 查验：延迟开船 / 海上延误 / 口岸滞留 / 海关查验 / 异常 */
+  attentionCount: number;
+  /** 已到仓待派送 */
+  atWarehouseCount: number;
+  /** 本月已签收 */
+  signedThisMonthCount: number;
+  /** 下面几个是后端返回的对账字段，界面不显示 */
+  totalCount: number;
+  createdCount: number;
+  deliveringCount: number;
+  doneCount: number;
+}
+
+export async function fetchStaffShipmentOverview(): Promise<StaffShipmentOverview> {
+  const response = await fetch(`${apiBaseUrl()}/staff/shipments/overview`, {
+    method: "GET",
+    headers: { ...authHeaders() },
+  });
+  return parseApiResponse<StaffShipmentOverview>(response);
+}
+
 
 /** 尾端派送能挑的运单状态：已到仓 / 派送中 / 已签收 */
 const LASTMILE_STATUSES = "inWarehouseTH,outForDelivery,delivered";

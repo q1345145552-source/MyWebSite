@@ -53,7 +53,9 @@ export default function ShipmentSearch({
           {warehouseOptions.map((w) => (<option key={w.id} value={w.id}>{w.label}</option>))}
         </select>
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          <button type="button" onClick={onSearch} style={{ border: "none", borderRadius: 6, padding: "8px 16px", background: "var(--c-blue)", color: "var(--white)", fontWeight: 500, fontSize: 13, cursor: "pointer" }}>搜索</button>
+          {/* 只加了个 class，样式一个字没改 —— 这个组件管理员端也在用。
+              A3 页面靠 .a3-shell .ship-search-btn 单独换色，别的页面看不出变化。 */}
+          <button type="button" className="ship-search-btn" onClick={onSearch} style={{ border: "none", borderRadius: 6, padding: "8px 16px", background: "var(--c-blue)", color: "var(--white)", fontWeight: 500, fontSize: 13, cursor: "pointer" }}>搜索</button>
           <button type="button" onClick={() => setCollapsed((v) => !v)} style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "6px 10px", fontSize: 12, background: "var(--white)", cursor: "pointer", color: "var(--t-strong)" }}>{collapsed ? "展开更多条件" : "收起条件"}</button>
         </div>
       </div>

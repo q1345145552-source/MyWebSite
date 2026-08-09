@@ -7,7 +7,7 @@ import { checkRateLimit, getClientIp, rateLimitKey } from "../core/rate-limit";
 import { fail, ok, parseJsonArray, requireRole } from "../core/http-utils";
 import { logger } from "../core/logger";
 import { loadProductImagesForOrders } from "../orders/product-images";
-import { STATUS_FLOW, STATUS_FLOW_LAND, EXCEPTION_STATUSES, DELAY_STATUSES } from "./status-flow";
+import { STATUS_FLOW, STATUS_FLOW_LAND, EXCEPTION_STATUSES, DELAY_STATUSES, COMPLETED_STATUSES } from "./status-flow";
 
 interface Kuaidi100QueryPayload {
   com?: string;
@@ -829,6 +829,62 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
       trackingNo: log.shipment.trackingNo,
       currentStatus: result.newStatus,
       hasLogsLeft: result.hasLogsLeft,
+    });
+  });
+
+  /**
+   * 员工端运单列表顶部那排数字（2026-08-09，A3 方案 §3.2）。
+   *
+   * 用户选定要这四个：在途 / 延迟·查验 / 已到仓待派送 / 本月已签收。
+   * 为什么值得做：有 7 张预报单从 8-01 挂到现在没人收货、有个柜子被误推成
+   * 「延迟运输」也是事后才发现 —— 这排数字就是让这些一进来就看见。
+   *
+   * ⚠️ 「在途」用**减法**算，不要列举状态名。
+   * 2026-08-08 管理员端柜子统计踩过：第一版列举在途状态，测试库 16 个柜子只数到 13 个，
+   * 漏了两个老状态名，柜子凭空消失且没人发现。
+   * 这里同理：精确认领「已创建 / 已到仓 / 派送中 / 已完成」四类，剩下的一律算在途，
+   * 以后加了新状态也不会漏。返回里带上 total，四段相加应等于 total，一眼能看出有没有漏。
+   */
+  app.get("/staff/shipments/overview", async (req, res) => {
+    const auth = requireRole(req, res, ["staff", "admin"]);
+    if (!auth) return;
+
+    // 只数父运单，跟列表口径一致（子运单是分柜拆出来的，会重复计数）
+    const base = { companyId: auth.companyId, parentTrackingNo: null };
+
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+
+    /** 延迟 / 需要盯的：延迟开船、海上延误、口岸滞留、海关查验、异常 */
+    const ATTENTION = ["delayDeparted", "delayInTransit", "borderDelay", "customsInspect", "exception"];
+
+    const [total, created, atWarehouse, delivering, done, attention, signedThisMonth] =
+      await Promise.all([
+        prisma.shipment.count({ where: base }),
+        prisma.shipment.count({ where: { ...base, currentStatus: "created" } }),
+        prisma.shipment.count({ where: { ...base, currentStatus: "inWarehouseTH" } }),
+        prisma.shipment.count({ where: { ...base, currentStatus: "outForDelivery" } }),
+        prisma.shipment.count({ where: { ...base, currentStatus: { in: [...COMPLETED_STATUSES] } } }),
+        prisma.shipment.count({ where: { ...base, currentStatus: { in: ATTENTION } } }),
+        prisma.shipment.count({
+          where: { ...base, currentStatus: "delivered", updatedAt: { gte: startOfMonth } },
+        }),
+      ]);
+
+    // 剩下的全算「在途」——任何没被上面四类认领的状态都不会凭空消失
+    const inTransit = total - created - atWarehouse - delivering - done;
+
+    ok(res, {
+      inTransitCount: Math.max(0, inTransit),
+      attentionCount: attention,
+      atWarehouseCount: atWarehouse,
+      signedThisMonthCount: signedThisMonth,
+      // 下面这几个是给「四段相加等于总数」对账用的，界面上不显示
+      totalCount: total,
+      createdCount: created,
+      deliveringCount: delivering,
+      doneCount: done,
     });
   });
 }

@@ -35,8 +35,18 @@ export default function RoleShell(props: {
   allowedRole: AuthRole | AuthRole[];
   title: string;
   children: ReactNode;
+  /**
+   * 页面外观。默认沿用老样子；传 "a3" 才切成新版（深藏青导航 + 细顶栏）。
+   *
+   * ⚠️ 这个外壳是三端所有页面共用的，直接改样式就是全站一起变。
+   * 用户的要求是「一个页面一个页面来，认可了再铺开」，所以做成开关：
+   * 改造好一个页面就给那个页面加上 variant="a3"。
+   * 等页面全部改完，这个开关和下面的老样式一起删掉。
+   * 2026-08-09 只有员工端工作台（staff/page.tsx）打开了。
+   */
+  variant?: "default" | "a3";
 }) {
-  const { allowedRole, title, children } = props;
+  const { allowedRole, title, children, variant = "default" } = props;
   const allowedRoles = Array.isArray(allowedRole) ? allowedRole : [allowedRole];
   const [mounted, setMounted] = useState(false);
   const [session, setSession] = useState<AuthSession | null>(null);
@@ -256,7 +266,7 @@ export default function RoleShell(props: {
   const closeSidebar = () => setSidebarOpen(false);
 
   return (
-    <main className="dashboard-layout">
+    <main className={`dashboard-layout${variant === "a3" ? " a3-shell" : ""}`}>
       {/* 手机端遮罩 */}
       <div className={`sidebar-overlay ${sidebarOpen ? "open" : ""}`} onClick={closeSidebar} />
 
@@ -385,13 +395,13 @@ export default function RoleShell(props: {
               border: "1px solid var(--hairline)", borderRadius: 10, padding: 20,
             }}
           >
-            <h3 style={{ margin: "0 0 4px", fontSize: 16, fontWeight: 600, color: "var(--ink)" }}>修改密码</h3>
+            <h3 style={{ margin: "0 0 4px", fontSize: 16, fontWeight: 600, color: "var(--ink-legacy)" }}>修改密码</h3>
             <p style={{ margin: "0 0 14px", fontSize: 13, color: "var(--ink-mute)" }}>
               当前账号：{session.userId}
             </p>
 
             {pwdDone ? (
-              <p style={{ margin: 0, fontSize: 14, color: "var(--ink)" }}>
+              <p style={{ margin: 0, fontSize: 14, color: "var(--ink-legacy)" }}>
                 密码已修改。正在退出，请用新密码重新登录…
               </p>
             ) : (

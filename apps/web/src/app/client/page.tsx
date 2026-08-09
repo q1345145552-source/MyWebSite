@@ -692,7 +692,7 @@ export default function ClientHomePage() {
         {/* 预报单管理 */}
         <div style={{ marginBottom: 14, border: "1px solid var(--l-soft)", borderRadius: 10, padding: 12, background: "var(--white)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-            <div style={{ fontWeight: 700, color: "var(--ink)", fontSize: 16 }}>预报单</div>
+            <div style={{ fontWeight: 700, color: "var(--ink-legacy)", fontSize: 16 }}>预报单</div>
             <button type="button" onClick={() => setShowCreateModal(true)}
               style={{ border: "none", borderRadius: 6, padding: "8px 16px", background: "var(--c-blue)", color: "var(--white)", fontWeight: 500, fontSize: 13, cursor: "pointer" }}>创建预报单</button>
           </div>
@@ -1142,7 +1142,7 @@ export default function ClientHomePage() {
         {/* 预报单管理 */}
         <div style={{ marginBottom: 14, border: "1px solid var(--l-soft)", borderRadius: 10, padding: 12, background: "var(--white)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-            <div style={{ fontWeight: 700, color: "var(--ink)", fontSize: 16 }}>预报单</div>
+            <div style={{ fontWeight: 700, color: "var(--ink-legacy)", fontSize: 16 }}>预报单</div>
             <button type="button" onClick={() => setShowCreateModal(true)}
               style={{ border: "none", borderRadius: 6, padding: "8px 16px", background: "var(--c-blue)", color: "var(--white)", fontWeight: 500, fontSize: 13, cursor: "pointer" }}>创建预报单</button>
           </div>

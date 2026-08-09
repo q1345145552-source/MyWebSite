@@ -39,7 +39,7 @@ export default function AdminFinancePage() {
 
   return (
     <RoleShell allowedRole="admin" title="财务报表">
-      <h1 style={{ fontSize: 22, fontWeight: 700, color: "var(--ink)", margin: "0 0 16px" }}>财务结算</h1>
+      <h1 style={{ fontSize: 22, fontWeight: 700, color: "var(--ink-legacy)", margin: "0 0 16px" }}>财务结算</h1>
 
       {data && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, marginBottom: 20 }}>
@@ -51,7 +51,7 @@ export default function AdminFinancePage() {
           ].map((kpi) => (
             <div key={kpi.label} style={{ border: "1px solid var(--hairline)", borderRadius: "var(--radius-md)", padding: 16, background: "var(--canvas)" }}>
               <div style={{ fontSize: 12, color: "var(--ink-mute)", fontWeight: 500 }}>{kpi.label}</div>
-              <div style={{ fontSize: 22, fontWeight: 700, color: "var(--ink)", marginTop: 4 }}>{kpi.value}</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: "var(--ink-legacy)", marginTop: 4 }}>{kpi.value}</div>
             </div>
           ))}
         </div>

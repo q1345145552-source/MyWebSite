@@ -29,6 +29,8 @@ import {
   fetchStaffInboundPhotos,
   fetchStaffPrealerts,
   fetchStaffShipments,
+  fetchStaffShipmentOverview,
+  type StaffShipmentOverview,
   fetchShipmentImages,
   fetchClientNotes,
   patchStaffShipmentOrderBundle,
@@ -108,6 +110,12 @@ export default function StaffHomePage() {
   });
   const [prealertPanelCollapsed, setPrealertPanelCollapsed] = useState(false);
   const [shipmentListCollapsed, setShipmentListCollapsed] = useState(false);
+  /* 顶部那排数字。拉不到就整排不显示 —— 宁可不显示，
+     也不能显示一个假的 0 让人以为「今天没有延迟的」。 */
+  const [shipmentOverview, setShipmentOverview] = useState<StaffShipmentOverview | null>(null);
+  useEffect(() => {
+    fetchStaffShipmentOverview().then(setShipmentOverview).catch(() => setShipmentOverview(null));
+  }, []);
   const [shipmentTableExpandedId, setShipmentTableExpandedId] = useState<string | null>(null);
   const [shipmentImagesCache, setShipmentImagesCache] = useState<Record<string, OrderProductImageItem[]>>({});
   const [shipmentOrderEditDrafts, setShipmentOrderEditDrafts] = useState<Record<string, ShipmentOrderEditDraft>>({});
@@ -1233,8 +1241,10 @@ const loadLmShipments = async () => {
     setToast(`已导出 ${rows.length} 条`);
   };
 
+  // variant="a3" 只换外观（深藏青导航 + 细顶栏），不动任何排版。
+  // 外壳是三端共用的，所以做成开关：改好一个页面才给那个页面加上。
   return (
-    <RoleShell allowedRole="staff" title="员工工作台">
+    <RoleShell allowedRole="staff" title="员工工作台" variant="a3">
       <p style={{ color: "#4b5563", marginBottom: 16 }}>
         员工可创建订单、查看运单列表中的订单信息（只读），并按状态流转规则更新物流状态；订单金额、付款及产品图（已审核订单）请在管理端维护。
       </p>
@@ -1637,6 +1647,40 @@ const loadLmShipments = async () => {
             <p style={{ margin: "6px 0 8px", fontSize: 12, color: "var(--t-strong)" }}>
               表格展示运单号、用户、状态、加收金额、运输方式、发货时间、件重体、仓库与地址；点击「详情」打开运单详情与物流轨迹。
             </p>
+        {/* ==================================================================
+            顶部一排数字（A3 方案 §3.2，用户选定这四个）
+            只多一行数字，下面的表格排版一点不动。
+            为什么值得做：有 7 张预报单从 8-01 挂到现在没人收货、有个柜子被误推成
+            「延迟运输」也是事后才发现 —— 这排数字就是让这些一进来就看见。
+            ❌ 不做成彩色卡片，就是纯文字排一行。
+            ================================================================== */}
+        {shipmentOverview && (
+          <div style={{ display: "flex", gap: 40, flexWrap: "wrap", margin: "2px 0 14px" }}>
+            {[
+              { n: shipmentOverview.inTransitCount, label: "在途", warn: false },
+              { n: shipmentOverview.attentionCount, label: "延迟 / 查验", warn: true },
+              { n: shipmentOverview.atWarehouseCount, label: "已到仓待派送", warn: false },
+              { n: shipmentOverview.signedThisMonthCount, label: "本月已签收", warn: false },
+            ].map((k) => (
+              <div key={k.label}>
+                <div
+                  style={{
+                    fontFamily: "var(--a3-mono)",
+                    fontSize: 19,
+                    fontVariantNumeric: "tabular-nums",
+                    letterSpacing: "-0.02em",
+                    lineHeight: 1.25,
+                    /* 「延迟 / 查验」有数才变橙 —— 只有需要动手的那个跳出来 */
+                    color: k.warn && k.n > 0 ? "var(--warn)" : "var(--ink)",
+                  }}
+                >
+                  {k.n}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 2 }}>{k.label}</div>
+              </div>
+            ))}
+          </div>
+        )}
         <ShipmentSearch value={shipmentSearch} onChange={(key, val) => setShipmentSearch((prev) => ({ ...prev, [key]: val }))} onSearch={runShipmentListSearch} warehouseOptions={warehouseOptions} logisticsStatusOptions={logisticsStatusOptions} inputStyle={orderCreateInputStyle} />
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 2, flexWrap: "wrap" }}>
@@ -1646,20 +1690,20 @@ const loadLmShipments = async () => {
             <input type="date" value={exportDateTo} onChange={e => setExportDateTo(e.target.value)}
               style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "6px 8px", fontSize: 12 }} title="导出日期到" />
             <button type="button" onClick={exportShipmentsToExcel}
-              style={{ border: "1px solid var(--c-blue)", borderRadius: 8, padding: "8px 16px", color: "var(--c-blue)", background: "var(--white)", cursor: "pointer", fontWeight: 600, whiteSpace: "nowrap", fontSize: 14 }}>
+              style={{ border: "1px solid var(--line)", borderRadius: 8, padding: "8px 16px", color: "var(--ink-2)", background: "var(--panel)", cursor: "pointer", fontWeight: 500, whiteSpace: "nowrap", fontSize: 14 }}>
               导出Excel
             </button>
             <button
               type="button"
               onClick={() => setShowCreateModal(true)}
-              style={{ border: "none", borderRadius: 8, padding: "8px 16px", color: "var(--white)", background: "var(--c-blue)", cursor: "pointer", fontWeight: 600, whiteSpace: "nowrap", fontSize: 14 }}
+              style={{ border: "1px solid var(--brand)", borderRadius: 8, padding: "8px 16px", color: "var(--panel)", background: "var(--brand)", cursor: "pointer", fontWeight: 500, whiteSpace: "nowrap", fontSize: 14 }}
             >
               创建订单
             </button>
             <button
               type="button"
               onClick={() => setShowBatchImport(true)}
-              style={{ border: "1px solid var(--c-blue)", borderRadius: 8, padding: "8px 16px", color: "var(--c-blue)", background: "var(--white)", cursor: "pointer", fontWeight: 600, whiteSpace: "nowrap", fontSize: 14 }}
+              style={{ border: "1px solid var(--line)", borderRadius: 8, padding: "8px 16px", color: "var(--ink-2)", background: "var(--panel)", cursor: "pointer", fontWeight: 500, whiteSpace: "nowrap", fontSize: 14 }}
             >
               批量创建
             </button>
@@ -1685,9 +1729,13 @@ const loadLmShipments = async () => {
             ) : (
               <div
                 className="table-card"
-                style={{ overflowX: "auto", border: "1px solid var(--l-cool)", borderRadius: 10, background: "var(--white)" }}
+                style={{ overflowX: "auto", border: "1px solid var(--line)", borderRadius: "var(--a3-radius-lg)", background: "var(--panel)" }}
               >
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed", minWidth: SHIPMENT_TABLE_MIN_WIDTH }}>
+                {/* a3-table 只换外观（表头颜色、发丝分隔线、行 hover），**列和顺序一个不动**。
+                    ⚠️ 表头/单元格用的 gridThStyle / gridTdStyle 是三端共用的行内样式，
+                    不能直接改（改了管理员端和客户端一起变），所以在 globals.css 里
+                    用 .a3-table 覆盖，行内样式优先级高，那边必须写 !important。 */}
+                <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed", minWidth: SHIPMENT_TABLE_MIN_WIDTH }}>
                   <GridColgroup widths={SHIPMENT_COL_WIDTHS} flexIndex={SHIPMENT_FLEX_COL_INDEX} />
                   <thead>
                     <tr style={{ background: "var(--s-cool-2)", textAlign: "left", borderBottom: "2px solid var(--l-cool)" }}>

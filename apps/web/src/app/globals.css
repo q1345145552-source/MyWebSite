@@ -8,7 +8,10 @@
   --success: #0f766e;
   --processing: #d97706;
   --danger: #b91c1c;
-  --ink: #1a1a1e;
+  /* 原来的 --ink，2026-08-09 让位给 A3 规格里的 --ink（#14171D）。
+     老名字保留，值不变，所以引用它的 11 个地方看起来一模一样。
+     等页面一个个改完 A3，这个就可以删掉。 */
+  --ink-legacy: #1a1a1e;
   --ink-mute: #3d3d42;
   --hairline: rgba(0, 0, 0, 0.06);
   --hairline-cool: rgba(0, 0, 0, 0.05);
@@ -84,10 +87,366 @@
   --c-amber: #f59e0b;    /* 18 处 */
   --c-amber-deep: #92400e;/* 30 处 */
   --c-amber-bg: #fef3c7; /* 29 处。浅黄底 */
+
+  /* ==========================================================================
+     A3 设计令牌（2026-08-09）—— 值照抄 docs/ui/方案A3-设计规格.md 第 2 节
+     --------------------------------------------------------------------------
+     这批是「要做成的样子」，上面那两批是「现在的样子」。
+     加进来的时候还没有任何页面用它们，所以页面看起来一模一样。
+     页面按 A3 改造时，改一个页面就把那个页面切到这批变量上。
+     ========================================================================== */
+
+  --ground: #F6F6F4;      /* 页面底色，微暖灰，不是纯白 */
+  --panel: #FFFFFF;       /* 卡片 / 表格面 */
+  --ink: #14171D;         /* 正文，近黑带一点蓝 */
+  --ink-2: #4B5462;       /* 次要文字 */
+  --ink-3: #8B94A3;       /* 弱化文字、表头、单位 */
+  --line: #E4E6EC;        /* 分隔线 */
+  --line-2: #F0F1F4;      /* 更淡的行分隔 */
+  /* --brand 上面已有，值同为 #1e3a8a，不重复定义 */
+  --brand-soft: #EEF2FB;  /* 行 hover 底色 */
+  --navdark: #141C2E;     /* 左侧导航底色 */
+  --navdark-ink: #A6B0C4; /* 导航未选中文字 */
+  --ok: #15803D;          /* 已完成 */
+  --warn: #B45309;        /* 延迟 / 需要注意 */
+  --bad: #B02A25;         /* 异常 / 查验 */
+
+  /* 圆角统一 6px，卡片外框最大 10px（规格第 2 节，替代现在 3/4/6/8/10/12 混用） */
+  --a3-radius: 6px;
+  --a3-radius-lg: 10px;
+
+  /* 字体：中文系统字体栈，不引网络字体；数字用等宽让上下位数对齐 */
+  --a3-font: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --a3-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* A3 表格行 hover：整行底色变浅，**文字颜色不变**（规格 §3.3）。
+   不用斑马纹，行之间只有一条 1px 发丝线。
+   2026-08-09 只有员工端运单列表在用。 */
+/* ==========================================================================
+   A3 页面外壳（2026-08-09）
+   --------------------------------------------------------------------------
+   照 docs/ui/方案A-三个版本对比.html 的 A3 标签做。
+   ⚠️ 所有规则都写在 .a3-shell 里面 —— 这个外壳是三端所有页面共用的，
+   写到外面就是全站一起变。用户要求一个页面一个页面来。
+   给页面的 RoleShell 加 variant="a3" 才会套上。
+   ========================================================================== */
+
+.a3-shell {
+  gap: 0;
+  padding: 0;
+  background: var(--ground);
+}
+
+/* ---- 左侧导航：深藏青，172px ---- */
+.a3-shell .dashboard-sidebar {
+  width: 172px;
+  min-width: 172px;
+  background: var(--navdark);
+  border: none;
+  border-radius: 0;
+  height: 100vh;
+  top: 0;
+  padding: 16px 10px;
+}
+
+.a3-shell .dashboard-sidebar-title {
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-bottom: 18px;
+  padding-left: 8px;
+}
+
+/* 分组标题：10.5px、字距 .14em、灰色（规格 §3.1） */
+.a3-shell .dashboard-sidebar-subtitle {
+  color: #6E7789;
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  font-weight: 500;
+  margin: 16px 0 6px;
+  padding-left: 8px;
+}
+
+.a3-shell .dashboard-sidebar-link {
+  color: var(--navdark-ink) !important;
+  font-size: 12.5px;
+  padding: 6px 8px;
+  border-radius: 0 !important;
+  border-left: 2px solid transparent !important;
+}
+
+.a3-shell .dashboard-sidebar-link:hover {
+  color: #fff !important;
+  background: rgba(255, 255, 255, 0.04) !important;
+}
+
+/* 当前页：左边一条 2px 亮线 + 白字 + 极淡背景。
+   ❌ 不用蓝色圆角色块 —— 规格 §3.1 特意点名不要那个。 */
+.a3-shell .dashboard-sidebar-link-active {
+  color: #fff !important;
+  font-weight: 500;
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-left: 2px solid #5B8DEF !important;
+}
+
+.a3-shell .dashboard-sidebar-group-header {
+  color: var(--navdark-ink) !important;
+  border: none !important;
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  padding: 6px 8px;
+}
+.a3-shell .dashboard-sidebar-group-header:hover {
+  color: #fff !important;
+  border: none !important;
+}
+.a3-shell .dashboard-sidebar-group-arrow {
+  color: #6E7789;
+}
+
+/* 底部两个按钮：深底上用描边，不要实心块。
+   ⚠️ 必须写 !important：这个文件里有一条「所有 button 默认刷成藏青」的通用规则
+   （搜 "override old global button background rule"），它靠 4 个 :not() 把权重抬得很高，
+   普通的 .a3-shell .xxx 压不过它。带行内样式的按钮不受影响（行内样式优先级更高）。 */
+.a3-shell .dashboard-password-button,
+.a3-shell .dashboard-logout-button {
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  border-radius: var(--a3-radius) !important;
+  background: transparent !important;
+  color: var(--navdark-ink) !important;
+  font-size: 12px;
+  padding: 6px 10px;
+}
+.a3-shell .dashboard-password-button:hover,
+.a3-shell .dashboard-logout-button:hover {
+  color: #fff !important;
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 255, 255, 0.28) !important;
+}
+
+/* ---- 右侧内容 ---- */
+.a3-shell .dashboard-content {
+  height: 100vh;
+  padding: 0 20px 20px;
+  background: var(--ground);
+}
+
+/* 顶栏：细、贴顶、不要圆角卡片感 */
+.a3-shell .glass-topbar {
+  border: none;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--ground);
+  backdrop-filter: none;
+  padding: 12px 0;
+  margin-bottom: 14px;
+  box-shadow: none;
+}
+.a3-shell .glass-topbar-title {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+}
+.a3-shell .glass-topbar-meta {
+  color: var(--ink-3);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 内容区不要圆角卡片 + 阴影（用户说过不要圆角卡片、不要花里胡哨） */
+.a3-shell .table-card {
+  box-shadow: none;
+}
+
+/* ---- A3 表格外观（2026-08-09）----
+   ⚠️ 只换颜色、字号、线条，**不动任何列宽和排版** —— 用户明确说过
+   「运单的排版不要改，现在线上的排版就很好了，只要改 UI 设计」。
+   必须写 !important：表头/单元格是行内样式（三端共用的 gridThStyle / gridTdStyle），
+   行内样式优先级比 CSS 高。直接改那两个对象就是三端一起变，所以只能在这里盖。 */
+.a3-table thead tr {
+  background: var(--line-2) !important;
+  border-bottom: 1px solid var(--line) !important;
+}
+.a3-table thead th {
+  color: var(--ink-3) !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.06em;
+}
+.a3-table tbody tr {
+  border-bottom: 1px solid var(--line-2) !important;
+}
+.a3-table tbody td {
+  color: var(--ink) !important;
+}
+/* 整行底色变浅，文字颜色不变；不用斑马纹 */
+.a3-table tbody tr:hover td {
+  background: var(--brand-soft) !important;
+}
+
+/* 搜索按钮：只在 A3 页面里从亮蓝换成藏青。
+   组件本身（ShipmentSearch）管理员端也在用，那边保持原样。 */
+.a3-shell .ship-search-btn {
+  background: var(--brand) !important;
+  color: var(--panel) !important;
+}
+
+/* ==========================================================================
+   A3 交互反馈（2026-08-09）
+   --------------------------------------------------------------------------
+   用户要「互动感更强，但保留流畅度」。所以这里只做**你动它就有回应**的反馈，
+   不做花式动画：
+     · 全部 ≤ 160ms，鼠标抬起来动画就结束了，不会挡着你干活
+     · 只动 background / border / color / transform 这几样（不触发重排，不掉帧）
+     · 一个像素的位移都不产生布局变化，表格不会抖
+   ⚠️ 只写在 .a3-shell 里，且只挑具体元素 —— 批量导入那块用户说过不要动画，
+   这里的选择器碰不到它。
+   ⚠️ 系统开了「减弱动态效果」全部自动关掉，见文件末尾那个 media 块。
+   ========================================================================== */
+
+/* 表格行：鼠标划过整行变浅，淡入淡出而不是硬切 */
+.a3-table tbody tr td {
+  transition: background-color 130ms ease-out;
+}
+
+/* 行里的「详情 / 物流轨迹 / 打印」：下划线从中间展开，不是一下子冒出来 */
+.a3-shell .row-act {
+  position: relative;
+  transition: color 130ms ease-out;
+}
+.a3-shell .row-act::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: currentColor;
+  transform: scaleX(0);
+  transform-origin: center;
+  transition: transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.a3-shell .row-act:hover {
+  color: var(--brand) !important;
+  text-decoration: none !important;
+}
+.a3-shell .row-act:hover::after {
+  transform: scaleX(1);
+}
+.a3-shell .row-act:active {
+  transform: translateY(1px);
+}
+
+/* 工具栏按钮（导出 Excel / 批量创建 / 创建订单 / 搜索）：
+   悬停微微抬起，按下去沉一下 —— 手感来自这一下「沉」 */
+.a3-shell .table-card ~ * button,
+.a3-shell .ship-search-btn,
+.a3-shell section > div > div > button {
+  transition: background-color 140ms ease-out, border-color 140ms ease-out,
+    box-shadow 140ms ease-out, transform 90ms ease-out;
+}
+.a3-shell .ship-search-btn:hover,
+.a3-shell section > div > div > button:hover {
+  box-shadow: 0 1px 6px rgba(20, 28, 46, 0.14);
+}
+.a3-shell .ship-search-btn:active,
+.a3-shell section > div > div > button:active {
+  transform: translateY(1px);
+  box-shadow: none;
+}
+
+/* 左侧导航：那条亮线从上往下拉出来，不是硬闪 */
+.a3-shell .dashboard-sidebar-link {
+  transition: color 140ms ease-out, background-color 140ms ease-out;
+  position: relative;
+}
+.a3-shell .dashboard-sidebar-link::before {
+  content: "";
+  position: absolute;
+  left: -2px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #5b8def;
+  transform: scaleY(0);
+  transform-origin: top;
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.a3-shell .dashboard-sidebar-link-active::before {
+  transform: scaleY(1);
+}
+.a3-shell .dashboard-sidebar-link:hover::before {
+  transform: scaleY(1);
+  background: rgba(91, 141, 239, 0.45);
+}
+.a3-shell .dashboard-sidebar-link-active:hover::before {
+  background: #5b8def;
+}
+
+/* 输入框 / 下拉：点进去有一圈藏青的光，知道自己在哪一格 */
+.a3-shell input:not([type="checkbox"]):not([type="radio"]),
+.a3-shell select {
+  transition: border-color 140ms ease-out, box-shadow 140ms ease-out;
+}
+.a3-shell input:not([type="checkbox"]):not([type="radio"]):focus,
+.a3-shell select:focus {
+  outline: none;
+  border-color: var(--brand) !important;
+  box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.12);
+}
+
+/* 勾选框：点中时轻轻放大一下再回来 */
+.a3-shell input[type="checkbox"] {
+  transition: transform 110ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.a3-shell input[type="checkbox"]:active {
+  transform: scale(0.86);
+}
+.a3-shell input[type="checkbox"]:checked {
+  transform: scale(1.08);
+}
+
+
+@media (prefers-reduced-motion: reduce) {
+  .a3-table tbody tr td,
+  .a3-shell .row-act,
+  .a3-shell .row-act::after,
+  .a3-shell .dashboard-sidebar-link,
+  .a3-shell .dashboard-sidebar-link::before,
+  .a3-shell input,
+  .a3-shell select,
+  .a3-shell .ship-search-btn,
+  .a3-shell section > div > div > button {
+    transition: none !important;
+  }
+  .a3-shell .row-act:active,
+  .a3-shell .ship-search-btn:active,
+  .a3-shell section > div > div > button:active,
+  .a3-shell input[type="checkbox"]:active,
+  .a3-shell input[type="checkbox"]:checked {
+    transform: none !important;
+  }
+}
+
+.a3-row:hover {
+  background: var(--brand-soft) !important;
+}
+
+/* 「详情 物流轨迹 打印」三个按钮按 14px 间距会把「打印」挤出格子，这里收到 10px。
+   ⚠️ 必须写成 .a3-row 里面才生效 —— .row-act 本身是管理员端和客户端一起在用的，
+   直接改那个就是三端一起变，这一轮说好只改运单列表一个页面。 */
+.a3-row .row-act {
+  margin-right: 10px !important;
+}
+.a3-row .row-act:last-child {
+  margin-right: 0 !important;
 }
 
 html,
@@ -1698,7 +2057,7 @@ button:disabled {
   margin: 0 0 6px;
   font-size: 24px;
   font-weight: 700;
-  color: var(--ink);
+  color: var(--ink-legacy);
 }
 
 .auth-form .auth-sub {
@@ -1724,7 +2083,7 @@ button:disabled {
   border-radius: var(--radius-sm);
   padding: 11px 13px;
   font-size: 14px;
-  color: var(--ink);
+  color: var(--ink-legacy);
   background: var(--white);
   outline: none;
 }
@@ -1806,7 +2165,7 @@ button:disabled {
 }
 
 .auth-resume strong {
-  color: var(--ink);
+  color: var(--ink-legacy);
 }
 
 /* 窄屏：图片收成顶部横幅 */
@@ -1952,7 +2311,7 @@ button:disabled {
 .detail-title {
   font-size: 17px;
   font-weight: 700;
-  color: var(--ink);
+  color: var(--ink-legacy);
 }
 
 .detail-sub {
@@ -1977,7 +2336,7 @@ button:disabled {
 
 .detail-close:hover {
   background: var(--canvas-soft);
-  color: var(--ink);
+  color: var(--ink-legacy);
 }
 
 @media (max-width: 820px) {
