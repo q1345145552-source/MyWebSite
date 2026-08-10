@@ -46,33 +46,13 @@ interface Props {
   hideContainerNo?: boolean;
 }
 
-/** 柜子状态 → 颜色映射 */
-function statusColor(status: string): { bg: string; fg: string; border: string } {
-  switch (status) {
-    case "LOADING":
-      return { bg: "var(--c-amber-bg)", fg: "var(--c-amber-deep)", border: "#fde68a" };
-    case "SEALED":
-      return { bg: "#EEF2FB", fg: "#1e3a8a", border: "#E4E6EC" };
-    case "IN_TRANSIT":
-      return { bg: "var(--c-blue-bg-2)", fg: "#1e3a8a", border: "#E4E6EC" };
-    case "DELAY_DEPARTED":
-    case "DELAY_IN_TRANSIT":
-      return { bg: "var(--c-amber-bg)", fg: "#b45309", border: "#fde68a" };
-    case "ARRIVED":
-      return { bg: "#EEF2FB", fg: "#1e3a8a", border: "#E4E6EC" };
-    case "CUSTOMS":
-      return { bg: "#EEF2FB", fg: "#1e3a8a", border: "#E4E6EC" };
-    case "CUSTOMS_CLEARED":
-      return { bg: "#dcfce7", fg: "var(--c-green-dark)", border: "#bbf7d0" };
-    case "IN_WAREHOUSE_TH":
-      return { bg: "#EEF2FB", fg: "#1e3a8a", border: "#E4E6EC" };
-    case "DELIVERING":
-      return { bg: "#fed7aa", fg: "#B45309", border: "#fdba74" };
-    case "SIGNED":
-      return { bg: "#dcfce7", fg: "var(--c-green-dark)", border: "#bbf7d0" };
-    default:
-      return { bg: "var(--s-cool-2)", fg: "var(--t-strong)", border: "var(--l-cool)" };
-  }
+/* 柜子状态一律黑字，不用颜色区分（2026-08-10 用户定的：「不要颜色，就是黑色就行了」）。
+   原来每个状态一个配色，全站换成藏青后有 5 个状态撞成同一个颜色，
+   与其留一半有色一半没色，不如全部去掉 —— 状态本来就写着中文，看字就行。 */
+const STATUS_PLAIN = { bg: "transparent", fg: "var(--ink)", border: "var(--line)" } as const;
+
+function statusColor(_status: string): { bg: string; fg: string; border: string } {
+  return STATUS_PLAIN;
 }
 
 function formatDate(iso: string | null): string {

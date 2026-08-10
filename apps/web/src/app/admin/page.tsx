@@ -12,6 +12,7 @@ import Toast from "../../modules/layout/Toast";
 import ShipmentSearch from "../../modules/shipment/ShipmentSearch";
 import { openPrintLabel } from "../../modules/shipment/ShipmentPrintLabel";
 import { openShipmentTrack } from "../../modules/shipment/ShipmentTrackModal";
+import { ShipmentOverviewStrip } from "../../modules/shipment/ShipmentOverviewStrip";
 import DetailModal from "../../modules/layout/DetailModal";
 import {
   GridColgroup,
@@ -27,6 +28,8 @@ import { shipmentStatusZh, transportModeLabel, warehouseLabelFromId } from "../.
 import ShippingConfig from "../../components/admin/ShippingConfig";
 import {
   fetchAdminOverview,
+  fetchStaffShipmentOverview,
+  type StaffShipmentOverview,
   fetchAdminStaff,
   fetchAdminClients,
   fetchAdminOrders,
@@ -180,6 +183,12 @@ export default function AdminHomePage() {
   const [overviewFlash, setOverviewFlash] = useState(false);
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [opsOverview, setOpsOverview] = useState<AdminOpsOverview | null>(null);
+  /* 运单管理顶部那排数字。拉不到就整排不显示 ——
+     宁可不显示，也不能显示一个假的 0 让人以为「今天没有延迟的」。 */
+  const [shipmentOverview, setShipmentOverview] = useState<StaffShipmentOverview | null>(null);
+  useEffect(() => {
+    fetchStaffShipmentOverview().then(setShipmentOverview).catch(() => setShipmentOverview(null));
+  }, []);
   const [staffList, setStaffList] = useState<AdminUserItem[]>([]);
   const [clientList, setClientList] = useState<AdminUserItem[]>([]);
   const [orderList, setOrderList] = useState<AdminOrderItem[]>([]);
@@ -1481,6 +1490,9 @@ export default function AdminHomePage() {
             </button>
           </div>
         </div>
+        {/* 顶部一排数字（2026-08-10 用户要三端都有，且「跟员工端一模一样」）。
+            用的是员工端同一个接口、同一套口径，三个端对得上数。 */}
+        <ShipmentOverviewStrip data={shipmentOverview} />
         {!ordersPanelCollapsed ? (
           <ShipmentSearch
             value={orderSearch}

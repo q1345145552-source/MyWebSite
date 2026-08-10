@@ -833,7 +833,67 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
   });
 
   /**
-   * 员工端运单列表顶部那排数字（2026-08-09，A3 方案 §3.2）。
+   * 顶部那排数字的统计（2026-08-09，A3 方案 §3.2）。
+   * 2026-08-10 三端共用：员工端/管理员端数全公司，客户端只数自己的，
+   * 差别只有传进来的 where —— 口径必须一模一样，否则三个端对不上数。
+   *
+   * ⚠️ 「在途」用**减法**算，不要列举状态名。理由见下面 /staff 那条注释。
+   */
+  async function countShipmentOverview(where: Record<string, unknown>) {
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+
+    /** 延迟 / 需要盯的：延迟开船、海上延误、口岸滞留、海关查验、异常 */
+    const ATTENTION = ["delayDeparted", "delayInTransit", "borderDelay", "customsInspect", "exception"];
+
+    const [total, created, atWarehouse, delivering, done, attention, signedThisMonth] =
+      await Promise.all([
+        prisma.shipment.count({ where }),
+        prisma.shipment.count({ where: { ...where, currentStatus: "created" } }),
+        prisma.shipment.count({ where: { ...where, currentStatus: "inWarehouseTH" } }),
+        prisma.shipment.count({ where: { ...where, currentStatus: "outForDelivery" } }),
+        prisma.shipment.count({ where: { ...where, currentStatus: { in: [...COMPLETED_STATUSES] } } }),
+        prisma.shipment.count({ where: { ...where, currentStatus: { in: ATTENTION } } }),
+        prisma.shipment.count({
+          where: { ...where, currentStatus: "delivered", updatedAt: { gte: startOfMonth } },
+        }),
+      ]);
+
+    // 剩下的全算「在途」——任何没被上面四类认领的状态都不会凭空消失
+    const inTransit = total - created - atWarehouse - delivering - done;
+
+    return {
+      inTransitCount: Math.max(0, inTransit),
+      attentionCount: attention,
+      atWarehouseCount: atWarehouse,
+      signedThisMonthCount: signedThisMonth,
+      // 下面这几个是给「四段相加等于总数」对账用的，界面上不显示
+      totalCount: total,
+      createdCount: created,
+      deliveringCount: delivering,
+      doneCount: done,
+    };
+  }
+
+  /**
+   * 客户端「我的订单」顶部那排数字（2026-08-10）。
+   * where 比员工端多一条 `order.clientId = 自己`，其余口径完全一致 ——
+   * 列表用的是 /client/shipments/search，那边的 where 也是这三条，改一边必须改另一边。
+   */
+  app.get("/client/shipments/overview", async (req, res) => {
+    const auth = requireRole(req, res, ["client"]);
+    if (!auth) return;
+
+    ok(res, await countShipmentOverview({
+      companyId: auth.companyId,
+      parentTrackingNo: null,
+      order: { clientId: auth.userId },
+    }));
+  });
+
+  /**
+   * 员工端 / 管理员端运单列表顶部那排数字（2026-08-09，A3 方案 §3.2）。
    *
    * 用户选定要这四个：在途 / 延迟·查验 / 已到仓待派送 / 本月已签收。
    * 为什么值得做：有 7 张预报单从 8-01 挂到现在没人收货、有个柜子被误推成
@@ -850,41 +910,9 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
     if (!auth) return;
 
     // 只数父运单，跟列表口径一致（子运单是分柜拆出来的，会重复计数）
-    const base = { companyId: auth.companyId, parentTrackingNo: null };
-
-    const startOfMonth = new Date();
-    startOfMonth.setDate(1);
-    startOfMonth.setHours(0, 0, 0, 0);
-
-    /** 延迟 / 需要盯的：延迟开船、海上延误、口岸滞留、海关查验、异常 */
-    const ATTENTION = ["delayDeparted", "delayInTransit", "borderDelay", "customsInspect", "exception"];
-
-    const [total, created, atWarehouse, delivering, done, attention, signedThisMonth] =
-      await Promise.all([
-        prisma.shipment.count({ where: base }),
-        prisma.shipment.count({ where: { ...base, currentStatus: "created" } }),
-        prisma.shipment.count({ where: { ...base, currentStatus: "inWarehouseTH" } }),
-        prisma.shipment.count({ where: { ...base, currentStatus: "outForDelivery" } }),
-        prisma.shipment.count({ where: { ...base, currentStatus: { in: [...COMPLETED_STATUSES] } } }),
-        prisma.shipment.count({ where: { ...base, currentStatus: { in: ATTENTION } } }),
-        prisma.shipment.count({
-          where: { ...base, currentStatus: "delivered", updatedAt: { gte: startOfMonth } },
-        }),
-      ]);
-
-    // 剩下的全算「在途」——任何没被上面四类认领的状态都不会凭空消失
-    const inTransit = total - created - atWarehouse - delivering - done;
-
-    ok(res, {
-      inTransitCount: Math.max(0, inTransit),
-      attentionCount: attention,
-      atWarehouseCount: atWarehouse,
-      signedThisMonthCount: signedThisMonth,
-      // 下面这几个是给「四段相加等于总数」对账用的，界面上不显示
-      totalCount: total,
-      createdCount: created,
-      deliveringCount: delivering,
-      doneCount: done,
-    });
+    ok(res, await countShipmentOverview({
+      companyId: auth.companyId,
+      parentTrackingNo: null,
+    }));
   });
 }

@@ -24,6 +24,7 @@ import {
   CONTAINER_NEXT_STOP,
   CONTAINER_TO_SHIPMENT_STATUS,
   flowOf,
+  NEVER_GUESS_STATUSES,
 } from "./status-flow";
 
 /**
@@ -425,45 +426,127 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    let dates: Record<string, string> = {};
-    try { dates = container.statusDates ? JSON.parse(container.statusDates) : {}; } catch { dates = {}; }
-
-    const currentTs = dates[container.currentStatus];
-    if (!currentTs) {
+    /* ⚠️ 「派送中 / 已签收」不是装柜页推的，是尾端派送那边推的。
+       在这里撤销会把客户已经签收的单子悄悄退回去，还会删掉尾端派送写的轨迹。
+       2026-08-10 之前这两个状态因为没有时间表记录本来就撤不了，等于被 bug 挡着；
+       现在按流程往回推能算出上一步了，必须显式挡住，否则是「修好一个、放出一个更大的」。
+       生产上现在有 3 个柜子停在「已签收」。 */
+    const LASTMILE_ONLY = new Set(["OUT_FOR_DELIVERY", "SIGNED", "DELIVERING"]);
+    if (LASTMILE_ONLY.has(container.currentStatus)) {
       fail(
         res,
         400,
         "VALIDATION_ERROR",
-        `这个柜子没有记录「${CONTAINER_STATUS_LABEL[container.currentStatus] ?? container.currentStatus}」是什么时候推的（多半是很早以前推的老柜子），整柜撤不了。可以到运单的物流轨迹里一条条删。`,
+        `「${CONTAINER_STATUS_LABEL[container.currentStatus] ?? container.currentStatus}」是尾端派送那边推的，不能在装柜页撤销。要退请到「尾端派送」里操作。`,
       );
       return;
     }
 
-    // 上一步 = statusDates 里时间仅次于当前状态的那个
-    const prevEntry = Object.entries(dates)
-      .filter(([status, ts]) => status !== container.currentStatus && new Date(ts).getTime() <= new Date(currentTs).getTime())
-      .sort((a, b) => new Date(b[1]).getTime() - new Date(a[1]).getTime())[0];
-    if (!prevEntry) {
-      fail(res, 400, "VALIDATION_ERROR", "这是这个柜子的第一个状态，没有上一步可以退。");
-      return;
-    }
-    const prevStatus = prevEntry[0];
+    let dates: Record<string, string> = {};
+    try { dates = container.statusDates ? JSON.parse(container.statusDates) : {}; } catch { dates = {}; }
 
-    const changedAt = new Date(currentTs);
     const shipmentIds = container.items.map((it) => it.shipmentId);
     const shipmentStatusOfThisPush: string | null = CONTAINER_TO_SHIPMENT_STATUS[container.currentStatus] ?? null;
+
+    /* ==================================================================
+       2026-08-10 修：撤销在生产上基本全废了。
+       106 个柜子里 102 个点「撤销」都报「这是第一个状态，没有上一步可以退」——
+       而它们明明是「运输中」「已到仓」这种中间状态。
+
+       原因：这里完全依赖柜子身上那张「状态时间表」(statusDates)。那张表是
+       2026-08-06 才加的，**加之前推过的状态一条都没补记**，所以老柜子要么整张表
+       是空的（68 个），要么只有当前这一条（34 个）→ 找不到上一步 → 报了那句错话。
+       而且那句话本身是错的：不是「第一个状态」，是「前面的没记录」。
+
+       现在两级兜底：
+         ① 这次推进是什么时候发生的：先看时间表；没有就去柜内运单的轨迹里，
+            找「最后一次推到这个状态」的那条 —— 那条就是这次推进留下的痕迹。
+         ② 上一步是哪个状态：先看时间表；没有就按流程往回退一格，
+            但**跳过没记录推过的「意外状态」**（滞留/查验/延迟），
+            否则等于把柜子退回一个它从来没到过的状态。
+       ================================================================== */
+
+    /* ⚠️ 只认「柜子推进状态」自己写的那批轨迹。
+       轨迹按来源分好几种，id 前缀不一样（生产实测 2311 条）：
+         sl_ctn_  柜子推进状态   1516 条  ← 只有这种是本次撤销该动的
+         sl_lm_   尾端派送        619 条
+         sl_mnf_  装柜时随柜补记  113 条
+         sl_new_ / sl_fix_ 等老数据
+       不加这个限制的后果（我拿生产数据算过）：68 个「时间表整张空」的柜子里，
+       有 6 个会去删**别人写的**轨迹 —— 1 个删到尾端派送的、3 个删到装柜补记的、
+       2 个删到老数据。那不是撤销，那是破坏。
+       加了之后这 6 个找不到自己的推进记录，就只退柜子状态、不动运单，宁可少做。 */
+    const PUSH_LOG_PREFIX = "sl_ctn_";
+
+    // ① 这次推进发生的时间
+    let currentTs: string | null = dates[container.currentStatus] ?? null;
+    if (!currentTs && shipmentStatusOfThisPush && shipmentIds.length > 0) {
+      const lastLog = await prisma.statusLog.findFirst({
+        where: {
+          companyId: auth.companyId,
+          shipmentId: { in: shipmentIds },
+          toStatus: shipmentStatusOfThisPush,
+          id: { startsWith: PUSH_LOG_PREFIX },
+        },
+        orderBy: { changedAt: "desc" },
+        select: { changedAt: true },
+      });
+      if (lastLog) currentTs = lastLog.changedAt.toISOString();
+    }
+
+    // ② 上一步是哪个状态
+    let prevStatus: string | null = null;
+    if (currentTs) {
+      const prevEntry = Object.entries(dates)
+        .filter(([status, ts]) => status !== container.currentStatus && new Date(ts).getTime() <= new Date(currentTs!).getTime())
+        .sort((a, b) => new Date(b[1]).getTime() - new Date(a[1]).getTime())[0];
+      if (prevEntry) prevStatus = prevEntry[0];
+    }
+    if (!prevStatus) {
+      // 先按柜子自己的运输方式找；找不到再按另一条流程找 ——
+      // 有柜子中途改过运输方式，当前状态可能压根不在现在这条流程里
+      // （实测：一个标着「陆运」的柜子停在「运输中」，那是海运才有的环节）。
+      const flows = [flowOf(container.transportMode), flowOf(container.transportMode === "land" ? "sea" : "land")];
+      for (const flow of flows) {
+        const idx = flow.indexOf(container.currentStatus);
+        if (idx < 0) continue;
+        for (let i = idx - 1; i >= 0; i--) {
+          const candidate = flow[i]!;
+          // 没记录推过的意外状态，绝不能退到那里去
+          if (NEVER_GUESS_STATUSES.has(candidate) && !dates[candidate]) continue;
+          prevStatus = candidate;
+          break;
+        }
+        if (prevStatus) break;
+      }
+    }
+    if (!prevStatus) {
+      fail(
+        res,
+        400,
+        "VALIDATION_ERROR",
+        `「${CONTAINER_STATUS_LABEL[container.currentStatus] ?? container.currentStatus}」已经是这个柜子流程里的第一步，没有上一步可以退。`,
+      );
+      return;
+    }
+
+    // 找不到推进时间时（老柜子、且运单那边也没留下轨迹）：这次推进没在运单上留下任何痕迹，
+    // 所以只退柜子状态，不去删轨迹、不动运单 —— 见下面 changedAt 为 null 的分支。
+    const changedAt: Date | null = currentTs ? new Date(currentTs) : null;
 
     const result = await prisma.$transaction(async (tx) => {
       let deletedLogs = 0;
       let affectedShipments = 0;
 
-      if (shipmentStatusOfThisPush && shipmentIds.length > 0) {
+      if (changedAt && shipmentStatusOfThisPush && shipmentIds.length > 0) {
         const del = await tx.statusLog.deleteMany({
           where: {
             companyId: auth.companyId,
             shipmentId: { in: shipmentIds },
             changedAt,
             toStatus: shipmentStatusOfThisPush,
+            // 同上：只删柜子推进自己写的那条，别人写的一律不碰
+            id: { startsWith: PUSH_LOG_PREFIX },
           },
         });
         deletedLogs = del.count;
@@ -517,11 +600,12 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
         updatedAt: new Date(),
       };
       // 开船/到港日期如果就是这次推进写进去的，一并撤掉
-      if (container.currentStatus === "IN_TRANSIT" && container.departureDate
+      // （changedAt 为 null 表示找不到这次推进的时间，那就不敢认这个日期是它写的，不动）
+      if (changedAt && container.currentStatus === "IN_TRANSIT" && container.departureDate
           && container.departureDate.getTime() === changedAt.getTime()) {
         containerUpdate.departureDate = null;
       }
-      if (container.currentStatus === "ARRIVED" && container.ata
+      if (changedAt && container.currentStatus === "ARRIVED" && container.ata
           && container.ata.getTime() === changedAt.getTime()) {
         containerUpdate.ata = null;
       }

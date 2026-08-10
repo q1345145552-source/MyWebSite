@@ -7,6 +7,7 @@ import {
   CONTAINER_NEXT_STOP,
   CONTAINER_TO_SHIPMENT_STATUS,
   flowOf,
+  NEVER_GUESS_STATUSES,
 } from "../containers/status-flow";
 
 /**
@@ -337,7 +338,8 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
       const recordedSteps = flow.filter((cs) => recordedDates[cs]);
 
       // 「滞留 / 查验 / 延迟」这类是意外情况，没记录就绝不能凭空补
-      const NEVER_GUESS = new Set(["BORDER_DELAY", "CUSTOMS_INSPECT", "DELAY_DEPARTED", "DELAY_IN_TRANSIT"]);
+      // 名单挪到 containers/status-flow.ts 了（2026-08-10），撤销状态那边也要用同一份
+      const NEVER_GUESS = NEVER_GUESS_STATUSES;
       const passed = recordedSteps.length > 0
         ? recordedSteps
         // 老柜子没有 statusDates（这个功能之前建的），只能按流程尽力补，但跳过意外状态

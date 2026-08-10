@@ -495,6 +495,42 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
 
     const now = new Date();
 
+    /* ==================================================================
+       保存运单时，「还剩多少没装柜」不能直接写成整张单的箱数（2026-08-10）
+
+       现象：运单管理里那张单写着 101 箱，装柜管理里却显示「共30件（剩0件）」，
+       仓库里还有 71 箱装不进柜子（勾选框是灰的）。
+
+       原因就在这里：前端把**产品行的箱数合计**当 packageCount 传上来，
+       后端原样写进运单，**完全不管这张单已经装走了多少**。
+       只要一张已经装过柜的运单被编辑保存过一次，「还剩多少没装」就被冲掉。
+       生产上因此坏了 43 张（表现为父单和子单加起来比订单还多一倍）。
+
+       正确算法：还剩多少没装 = 整张单的箱数 − 已经装走的件数。
+       没拆过柜的运单（绝大多数）子单合计为 0，结果跟原来一模一样。
+       ================================================================== */
+    let parentPackageCount = packageCount;
+    if (packageCount !== undefined) {
+      const parents = await prisma.shipment.findMany({
+        where: { orderId, companyId: auth.companyId, parentTrackingNo: null },
+        select: { trackingNo: true },
+      });
+      if (parents.length > 0) {
+        const loadedRows = await prisma.shipment.groupBy({
+          by: ["parentTrackingNo"],
+          where: {
+            companyId: auth.companyId,
+            parentTrackingNo: { in: parents.map((p) => p.trackingNo) },
+          },
+          _sum: { packageCount: true },
+        });
+        const alreadyLoaded = loadedRows.reduce((s, r) => s + (r._sum.packageCount ?? 0), 0);
+        if (alreadyLoaded > 0) {
+          parentPackageCount = Math.max(0, packageCount - alreadyLoaded);
+        }
+      }
+    }
+
     const txOps: any[] = [
       prisma.order.update({
         where: { id: orderId },
@@ -528,7 +564,9 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
           batchNo,
           transportMode,
           domesticTrackingNo,
-          packageCount,
+          // ⚠️ 这里是「还剩多少没装柜」，不是整张单的箱数 —— 见上面那段说明。
+          // 订单上那个 packageCount 仍然是整张单的总箱数，两者不是一回事。
+          packageCount: parentPackageCount,
           packageUnit,
           weightKg,
           volumeM3,

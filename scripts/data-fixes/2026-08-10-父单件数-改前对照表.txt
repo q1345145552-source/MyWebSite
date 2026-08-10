@@ -1,0 +1,49 @@
+Border style is 2.
++-------------+-------------+----------+--------+--------------+------+----------------+
+|   运单号    |    客户     | 订单件数 | 已装走 | 现在父单挂着 | 改成 |     货现在     |
++-------------+-------------+----------+--------+--------------+------+----------------+
+| SZ260702653 | Hannah      |        4 |      4 |            4 |    0 | delivered      |
+| YW0001296   | Panda-XM68  |       18 |     18 |           18 |    0 | delivered      |
+| YW0001356   | Panda-XM68  |       19 |     19 |           19 |    0 | delivered      |
+| YW0001360   | Panda-XM68  |        4 |      4 |            4 |    0 | delivered      |
+| YW0001371   | 家之肥也    |        1 |      1 |            1 |    0 | customsCleared |
+| YW0001379   | Lian        |      120 |    120 |           68 |    0 | customsCleared |
+| YW0001381   | Panda-SZ-88 |       68 |     68 |           68 |    0 | delivered      |
+| YW0001386   | 晓斌        |        1 |      1 |            1 |    0 | customsCleared |
+| YW0001387   | 晓斌        |        6 |      6 |            6 |    0 | customsCleared |
+| YW0001388   | 高彬彬      |       22 |     22 |           22 |    0 | customsCleared |
+| YW0001389   | Lian        |        2 |      2 |            2 |    0 | customsCleared |
+| YW0001390   | 家之肥也    |       50 |     50 |           50 |    0 | customsCleared |
+| YW0001391   | 家之肥也    |        7 |      7 |            7 |    0 | customsCleared |
+| YW0001392   | 家之肥也    |       10 |     10 |           10 |    0 | delivered      |
+| YW0001393   | 家之肥也    |        3 |      3 |            3 |    0 | customsCleared |
+| YW0001394   | 高彬彬      |       80 |     80 |           80 |    0 | arrivedPort    |
+| YW0001395   | JIN         |       22 |     22 |           22 |    0 | arrivedPort    |
+| YW0001396   | 晓斌        |        1 |      1 |            1 |    0 | delayInTransit |
+| YW0001397   | Hannah      |        4 |      4 |            4 |    0 | delayInTransit |
+| YW0001398   | 6626        |       26 |     26 |           26 |    0 | arrivedPort    |
+| YW0001399   | 家之肥也    |       10 |     10 |           10 |    0 | delayInTransit |
+| YW0001400   | Lian        |        9 |      9 |            9 |    0 | delayInTransit |
+| YW0001401   | π           |        2 |      2 |            2 |    0 | delayInTransit |
+| YW0001402   | 家之肥也    |       18 |     18 |           18 |    0 | delayInTransit |
+| YW0001403   | 高彬彬      |       40 |     40 |           40 |    0 | delayInTransit |
+| YW0001404   | 晓斌        |        1 |      1 |            1 |    0 | delayInTransit |
+| YW0001405   | Panda-SZ-88 |       37 |     37 |           37 |    0 | departed       |
+| YW0001406   | Lian        |       30 |     30 |           30 |    0 | departed       |
+| YW0001407   | Panda-XM68  |        3 |      3 |            3 |    0 | departed       |
+| YW0001408   | 陈嘉成      |       27 |     27 |           27 |    0 | departed       |
+| YW0001410   | Lian        |        4 |      4 |            4 |    0 | departed       |
+| YW0001411   | 家之肥也    |        9 |      9 |            9 |    0 | departed       |
+| YW0001413   | Hannah      |        2 |      2 |            2 |    0 | departed       |
+| YW0001414   | 家之肥也    |      100 |    100 |          100 |    0 | departed       |
+| YW0001415   | Panda-SZ-88 |       16 |     16 |           16 |    0 | departed       |
+| YW0001416   | Panda-SZ-88 |       38 |     38 |           38 |    0 | departed       |
+| YW0001417   | Panda-SZ-88 |       20 |     20 |           20 |    0 | departed       |
+| YW0001418   | Hannah      |        6 |      6 |            6 |    0 | departed       |
+| YW0001419   | 家之肥也    |        1 |      1 |            1 |    0 | departed       |
+| YW0001420   | Panda-XM68  |       17 |     17 |           17 |    0 | departed       |
+| YW0001423   | 家之肥也    |       20 |     20 |           20 |    0 | departed       |
+| YW0001424   | Hannah      |       15 |     15 |           15 |    0 | departed       |
+| YW0001431   | 陈嘉成      |        4 |      4 |            4 |    0 | departed       |
++-------------+-------------+----------+--------+--------------+------+----------------+
+

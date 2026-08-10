@@ -19,14 +19,17 @@ import {
   updateClientPrealert,
   fetchClientOrders,
   fetchClientWalletOverview,
+  fetchClientShipmentOverview,
   uploadStaffOrderProductImage,
   fetchShipmentImages,
   type ClientAddressItem,
   type OrderItem,
   type OrderProductImageItem,
+  type StaffShipmentOverview,
 } from "../../services/business-api";
 import { openPrintLabel, openPrintPrealert } from "../../modules/shipment/ShipmentPrintLabel";
 import { openShipmentTrack } from "../../modules/shipment/ShipmentTrackModal";
+import { ShipmentOverviewStrip } from "../../modules/shipment/ShipmentOverviewStrip";
 import DetailModal from "../../modules/layout/DetailModal";
 import { shipmentStatusZh, CLIENT_STATUS_ZH_OVERRIDES } from "../../modules/shipment/shipment-status";
 import {
@@ -149,6 +152,12 @@ export default function ClientHomePage() {
   const [currentPage, setCurrentPage] = useState(1);
 
   const [queryPanelCollapsed, setQueryPanelCollapsed] = useState(false);
+  /* 「我的运单查询」顶部那排数字。拉不到就整排不显示 ——
+     宁可不显示，也不能显示一个假的 0 让客户以为「没有在途的」。 */
+  const [shipmentOverview, setShipmentOverview] = useState<StaffShipmentOverview | null>(null);
+  useEffect(() => {
+    fetchClientShipmentOverview().then(setShipmentOverview).catch(() => setShipmentOverview(null));
+  }, []);
   const [openLogisticsByOrder, setOpenLogisticsByOrder] = useState<Record<string, boolean>>({});
   const [openDetailsByOrder, setOpenDetailsByOrder] = useState<Record<string, boolean>>({});
   const [detailImagesCache, setDetailImagesCache] = useState<Record<string, OrderProductImageItem[]>>({});
@@ -810,6 +819,10 @@ export default function ClientHomePage() {
             </button>
           </div>
         </div>
+
+        {/* 顶部一排数字（2026-08-10 用户要三端都有，且「跟员工端一模一样」）。
+            客户端走 /client/shipments/overview，只数自己名下的运单。 */}
+        <ShipmentOverviewStrip data={shipmentOverview} />
 
         {!queryPanelCollapsed ? (
           <>

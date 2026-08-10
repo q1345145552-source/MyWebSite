@@ -93,12 +93,9 @@ const WAREHOUSE_ZH: Record<string, string> = {
    页面上就漏出了英文。2026-08-10 改用三端唯一那份 shipmentStatusZh()：
    它查表前统一转小写，查不到也返回「未知状态」并在控制台报一条，不会再漏英文。 */
 
-const STATUS_COLOR: Record<string, string> = {
-  LOADING: "#B45309",
-  SEALED: "var(--c-green-3)",
-  IN_TRANSIT: "var(--c-blue)",
-  ARRIVED: "var(--t-strong)",
-};
+/* 柜子状态一律黑字，不用颜色区分（2026-08-10 用户定的：「不要颜色，就是黑色就行了」）。
+   原来只有 4 个状态有颜色、其余没有，本来就不整齐，索性全去掉。 */
+const STATUS_COLOR: Record<string, string> = {};
 
 const inputStyle = { border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 12px", fontSize: 13, background: "var(--white)" } as const;
 
@@ -552,8 +549,10 @@ export default function StaffContainerLoadingPage() {
                       );
                     })()}
                     {/* 推错了：整柜退回上一步，柜里每张运单那批轨迹一起删掉。
-                        装柜中是第一个状态，没有上一步可退，所以不显示 */}
-                    {detail.status !== "LOADING" && (
+                        「装柜中」是第一步，没有上一步可退；
+                        「派送中 / 已签收」是尾端派送那边推的，不归这里管（后端也会拒）——
+                        所以这三种情况不显示按钮，别让人点了才看到报错。 */}
+                    {!["LOADING", "OUT_FOR_DELIVERY", "SIGNED", "DELIVERING"].includes(detail.status) && (
                       <button
                         onClick={handleUndoStatus}
                         disabled={undoing}

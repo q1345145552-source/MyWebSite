@@ -100,6 +100,23 @@ export function flowOf(transportMode: string | null | undefined): readonly strin
   return transportMode === "land" ? CONTAINER_STATUS_FLOW_LAND : CONTAINER_STATUS_FLOW;
 }
 
+/**
+ * 「意外情况」类状态：滞留、查验、延迟。
+ *
+ * 这四个不是每票货都会经过的，**没有明确记录推过就绝不能假设它发生过** ——
+ * 补记轨迹时凭空补一条「海关查验」，等于给客户编造了没发生过的事（2026-08-06 踩过）；
+ * 撤销状态时往回退到这里，等于把柜子退回一个它从没到过的状态。
+ *
+ * 2026-08-10：原来这份名单抄在 loading-manifests/routes.ts 里，撤销那边要用第二份，
+ * 所以挪到这个「唯一定义处」，两边共用。加新的意外状态只改这里。
+ */
+export const NEVER_GUESS_STATUSES: ReadonlySet<string> = new Set([
+  "BORDER_DELAY",
+  "CUSTOMS_INSPECT",
+  "DELAY_DEPARTED",
+  "DELAY_IN_TRANSIT",
+]);
+
 /** 柜子状态推进时，对应推运单到什么状态 */
 export const CONTAINER_TO_SHIPMENT_STATUS: Record<string, string> = {
   // 陆运专属四步

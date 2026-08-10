@@ -1394,6 +1394,17 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
 
     const now = new Date();
 
+    /* 员工在编辑框里改的是「还剩多少没装柜」（框里预填的就是这个数）。
+       订单上那个「整单箱数」是另一回事 = 还剩没装 + 已经装走。
+       不换算直接写的话，改一张拆过柜的单就会把整单箱数冲成剩余数
+       （YW0001342 那种：整单 101 会被写成 71，真值就找不回来了）。
+       没拆过柜的单已装走为 0，两个数相等，行为跟原来完全一样。 */
+    const loadedForOrder = await prisma.shipment.aggregate({
+      where: { parentTrackingNo: shipment.trackingNo, companyId: auth.companyId },
+      _sum: { packageCount: true },
+    });
+    const alreadyLoadedPkg = loadedForOrder._sum.packageCount ?? 0;
+
     await prisma.$transaction([
       prisma.order.update({
         where: { id: curOrder.id },
@@ -1402,7 +1413,7 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
           batchNo,
           itemName,
           productQuantity: Math.floor(productQuantity),
-          packageCount: Math.floor(packageCount),
+          packageCount: Math.floor(packageCount) + alreadyLoadedPkg,
           packageUnit,
           weightKg: weightKg as unknown as Prisma.Decimal | null,
           volumeM3: (volumeM3 as unknown as Prisma.Decimal | null),
@@ -1420,14 +1431,20 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
           trackingNo,
           batchNo,
           domesticTrackingNo,
-          // 有子运单时父运单件数强制为0，防止重复计算
-          packageCount: await (async () => {
-            const childExists = await prisma.shipment.findFirst({
-              where: { parentTrackingNo: shipment.trackingNo, companyId: auth.companyId },
-              select: { id: true },
-            });
-            return childExists ? 0 : Math.floor(packageCount);
-          })(),
+          /* 这里存的是「还剩多少没装柜」，员工在编辑框里看到、改的就是这个数
+             （编辑框的初值来自 buildShipmentOrderEditDraft → item.packageCount，
+             就是运单自己的件数，也就是剩余），所以**原样存，不要再算**。
+
+             2026-08-10 修：原来写的是「有子运单就强制为 0，防止重复计算」——
+             重复计算是挡住了，但把**还在仓库没装柜的那部分一起抹掉了**。
+             生产实测 YW0001342：整单 101 箱、装走 30 箱，员工编辑保存过一次之后
+             变成 0，装柜管理显示「共30件（剩0件）」，仓库剩的 71 箱勾都勾不上。
+
+             ⚠️ 别学管理员端那条路去减「已装走的」——
+             管理员端编辑框传上来的是**产品行合计（整单箱数）**，那边才需要减；
+             这边传上来的已经是剩余了，再减一次会越保存越少（71 → 41 → 11）。
+             两个端传的含义不一样，这是我第一版改错过的地方。 */
+          packageCount: Math.floor(packageCount),
           packageUnit,
           weightKg: weightKg as unknown as Prisma.Decimal | null,
           volumeM3: (volumeM3 as unknown as Prisma.Decimal | null),

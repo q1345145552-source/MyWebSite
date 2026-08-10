@@ -6,6 +6,7 @@ import { formatCny } from "../../modules/billing/billing-utils";
 import ShipmentSearch from "../../modules/shipment/ShipmentSearch";
 import { openPrintLabel } from "../../modules/shipment/ShipmentPrintLabel";
 import { openShipmentTrack } from "../../modules/shipment/ShipmentTrackModal";
+import { ShipmentOverviewStrip } from "../../modules/shipment/ShipmentOverviewStrip";
 import {
   GridColgroup,
   ProductDetailCell,
@@ -1647,40 +1648,9 @@ const loadLmShipments = async () => {
             <p style={{ margin: "6px 0 8px", fontSize: 12, color: "var(--t-strong)" }}>
               表格展示运单号、用户、状态、加收金额、运输方式、发货时间、件重体、仓库与地址；点击「详情」打开运单详情与物流轨迹。
             </p>
-        {/* ==================================================================
-            顶部一排数字（A3 方案 §3.2，用户选定这四个）
-            只多一行数字，下面的表格排版一点不动。
-            为什么值得做：有 7 张预报单从 8-01 挂到现在没人收货、有个柜子被误推成
-            「延迟运输」也是事后才发现 —— 这排数字就是让这些一进来就看见。
-            ❌ 不做成彩色卡片，就是纯文字排一行。
-            ================================================================== */}
-        {shipmentOverview && (
-          <div style={{ display: "flex", gap: 40, flexWrap: "wrap", margin: "2px 0 14px" }}>
-            {[
-              { n: shipmentOverview.inTransitCount, label: "在途", warn: false },
-              { n: shipmentOverview.attentionCount, label: "延迟 / 查验", warn: true },
-              { n: shipmentOverview.atWarehouseCount, label: "已到仓待派送", warn: false },
-              { n: shipmentOverview.signedThisMonthCount, label: "本月已签收", warn: false },
-            ].map((k) => (
-              <div key={k.label}>
-                <div
-                  style={{
-                    fontFamily: "var(--a3-mono)",
-                    fontSize: 19,
-                    fontVariantNumeric: "tabular-nums",
-                    letterSpacing: "-0.02em",
-                    lineHeight: 1.25,
-                    /* 「延迟 / 查验」有数才变橙 —— 只有需要动手的那个跳出来 */
-                    color: k.warn && k.n > 0 ? "var(--warn)" : "var(--ink)",
-                  }}
-                >
-                  {k.n}
-                </div>
-                <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 2 }}>{k.label}</div>
-              </div>
-            ))}
-          </div>
-        )}
+        {/* 顶部一排数字（A3 方案 §3.2，用户选定这四个）。
+            2026-08-10 抽成三端共用组件，这里只负责把数据递进去。 */}
+        <ShipmentOverviewStrip data={shipmentOverview} />
         <ShipmentSearch value={shipmentSearch} onChange={(key, val) => setShipmentSearch((prev) => ({ ...prev, [key]: val }))} onSearch={runShipmentListSearch} warehouseOptions={warehouseOptions} logisticsStatusOptions={logisticsStatusOptions} inputStyle={orderCreateInputStyle} />
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 2, flexWrap: "wrap" }}>

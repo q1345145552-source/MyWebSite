@@ -862,16 +862,48 @@ export async function splitStaffShipment(payload: {
   return parseApiResponse(response);
 }
 
-export async function fetchStaffShipments(): Promise<ShipmentItem[]> {
-  const response = await fetch(`${apiBaseUrl()}/staff/shipments?pageSize=500&page=1`, {
-    method: "GET",
-    headers: { ...authHeaders() },
-  });
-  const data = await parseApiResponse<{ items: ShipmentItem[] }>(response);
-  return data.items;
+/* ==========================================================================
+   按 total 翻页拿完，不要只拿第一页（2026-08-10）
+   --------------------------------------------------------------------------
+   原来这里写死 `pageSize=500&page=1`，只拿第一页。生产上运单已经 663 条，
+   **第 501 条往后的 163 条在页面上等于不存在** —— 而且搜索是在已拿回来的
+   那批里用 useMemo 筛的，所以那些老运单不管怎么搜都搜不到（用户实测
+   搜 YW0001276 显示「暂无匹配订单」，但它在库里好好的）。
+
+   这跟 CLAUDE.md 第 19 条是同一个坑（尾端派送丢货）：
+   **前端筛只对「已经全拿到」的数据成立。要拿全就得按 total 翻页拿完。**
+   ========================================================================== */
+const PAGE_SIZE = 500;
+/** 安全上限：50 页 = 25000 条。到顶了在控制台喊一声，别再像以前那样静默截断 */
+const MAX_PAGES = 50;
+
+async function fetchAllPages<T>(path: string): Promise<T[]> {
+  const all: T[] = [];
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const sep = path.includes("?") ? "&" : "?";
+    const response = await fetch(`${apiBaseUrl()}${path}${sep}pageSize=${PAGE_SIZE}&page=${page}`, {
+      method: "GET",
+      headers: { ...authHeaders() },
+    });
+    const data = await parseApiResponse<{ items: T[]; total?: number }>(response);
+    const items = data.items ?? [];
+    all.push(...items);
+    // 后端给了 total 就按 total 判断拿完没有；没给就看这一页是不是没装满
+    const done = typeof data.total === "number" ? all.length >= data.total : items.length < PAGE_SIZE;
+    if (done) return all;
+    if (page === MAX_PAGES) {
+      console.warn(`[列表没拿全] ${path} 已拿 ${all.length} 条，到了 ${MAX_PAGES} 页上限还没拿完，请改用后端搜索`);
+    }
+  }
+  return all;
 }
 
-/** 员工端运单列表顶部那排数字（A3 方案 §3.2） */
+export async function fetchStaffShipments(): Promise<ShipmentItem[]> {
+  return fetchAllPages<ShipmentItem>("/staff/shipments");
+}
+
+/** 运单列表顶部那排数字（A3 方案 §3.2）。三端同一套字段，口径一致。
+ *  ⚠️ 必须和后端 countShipmentOverview() 的返回逐字对齐 —— TypeScript 不会替你核对。 */
 export interface StaffShipmentOverview {
   /** 在途：已经发出、还没到泰国仓 */
   inTransitCount: number;
@@ -888,8 +920,18 @@ export interface StaffShipmentOverview {
   doneCount: number;
 }
 
+/** 员工端和管理员端共用这个接口（后端 requireRole 里就允许这两个角色） */
 export async function fetchStaffShipmentOverview(): Promise<StaffShipmentOverview> {
   const response = await fetch(`${apiBaseUrl()}/staff/shipments/overview`, {
+    method: "GET",
+    headers: { ...authHeaders() },
+  });
+  return parseApiResponse<StaffShipmentOverview>(response);
+}
+
+/** 客户端只数自己的运单，所以是另一个接口，返回结构完全一样 */
+export async function fetchClientShipmentOverview(): Promise<StaffShipmentOverview> {
+  const response = await fetch(`${apiBaseUrl()}/client/shipments/overview`, {
     method: "GET",
     headers: { ...authHeaders() },
   });
@@ -1103,13 +1145,9 @@ export async function fetchAdminClients(): Promise<AdminUserItem[]> {
   return data.items;
 }
 
+/** 同 fetchStaffShipments：按 total 翻页拿完，别只拿第一页（见那边的注释） */
 export async function fetchAdminOrders(): Promise<AdminOrderItem[]> {
-  const response = await fetch(`${apiBaseUrl()}/admin/orders?pageSize=500&page=1`, {
-    method: "GET",
-    headers: { ...authHeaders() },
-  });
-  const data = await parseApiResponse<{ items: AdminOrderItem[] }>(response);
-  return data.items;
+  return fetchAllPages<AdminOrderItem>("/admin/orders");
 }
 
 /**
