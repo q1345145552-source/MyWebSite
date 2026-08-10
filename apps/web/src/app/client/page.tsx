@@ -1006,7 +1006,7 @@ export default function ClientHomePage() {
               <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed", minWidth: CLIENT_TABLE_MIN_WIDTH }}>
                 <GridColgroup widths={CLIENT_COL_WIDTHS} flexIndex={CLIENT_FLEX_COL_INDEX} />
                 <thead><tr style={{ borderBottom: "2px solid var(--l-soft)", textAlign: "left", background: "var(--s-cool-2)" }}>
-                  <th style={gridThStyle}>唛头</th><th style={gridThStyle}>运单号</th><th style={gridThStyle}>品名</th><th style={gridThStyle}>尺寸(cm)</th><th style={gridThStyle}>体积(m³)</th><th style={gridThStyle}>重量(kg)</th><th style={gridThStyle}>件</th><th style={gridThStyle}>运输</th><th style={gridThStyle}>物流状态</th><th style={gridThStyle}>备注</th><th style={gridThStyle}>操作</th>
+                  <th style={gridThStyle}>唛头</th><th style={gridThStyle}>运单号</th><th style={gridThStyle}>品名</th><th style={gridThStyle}>尺寸(cm)</th><th style={gridThStyle}>体积(m³)</th><th style={gridThStyle}>重量(kg)</th><th style={gridThStyle}>总箱数</th><th style={gridThStyle}>运输</th><th style={gridThStyle}>物流状态</th><th style={gridThStyle}>备注</th><th style={gridThStyle}>操作</th>
                 </tr></thead>
                 <tbody>
                   {queriedOrders.slice((currentPage - 1) * pageSize, currentPage * pageSize).map((item: any) => {

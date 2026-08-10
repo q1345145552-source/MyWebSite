@@ -19,6 +19,7 @@ import {
   ProductDetailCell,
   PRODUCT_DETAIL_COL_WIDTHS,
   buildProductDetailRows,
+  totalPackageCountOf,
   gridThStyle,
   gridTdStyle,
 } from "../../modules/shipment/ShipmentTableGrid";
@@ -167,15 +168,17 @@ const WAREHOUSE_TRACKING_PREFIX_MAP: Record<string, string[]> = {
 export const dynamic = "force-dynamic";
 
 /* 管理员端运单列表的列宽。排版规则见 modules/shipment/ShipmentTableGrid.tsx。
-   ⚠️ 第 5~10 个必须和 PRODUCT_DETAIL_COL_WIDTHS 完全一致。 */
+   ⚠️ 第 5~10 个必须和 PRODUCT_DETAIL_COL_WIDTHS 完全一致。
+   紧跟在产品明细块后面的 80 是「总箱数」，它和体积、重量一样是整单的合计数，
+   所以放在会滚动的明细块外面 —— 放进去会跟着产品一起滚上去看不见。 */
 const ORDER_COL_WIDTHS = [
   44, 110, 130, 110,
   ...PRODUCT_DETAIL_COL_WIDTHS,
-  100, 90, 90, 170, 330,
+  80, 100, 90, 90, 170, 330,
 ] as const;
 const ORDER_TABLE_MIN_WIDTH = ORDER_COL_WIDTHS.reduce((a, b) => a + b, 0);
-/** 弹性列＝「备注」（表头第 14 个）。操作列有 5 个按钮，宽度必须写死。 */
-const ORDER_FLEX_COL_INDEX = 13;
+/** 弹性列＝「备注」（表头第 15 个）。操作列有 5 个按钮，宽度必须写死。 */
+const ORDER_FLEX_COL_INDEX = 14;
 
 export default function AdminHomePage() {
   const [session, setSession] = useState<AuthSession | null>(null);
@@ -1537,6 +1540,7 @@ export default function AdminHomePage() {
                   <th style={gridThStyle}>长宽高(cm)</th>
                   <th style={gridThStyle}>国内单号</th>
                   <th style={gridThStyle}>货型</th>
+                  <th style={gridThStyle}>总箱数</th>
                   <th style={gridThStyle}>体积</th>
                   <th style={gridThStyle}>重量</th>
                   <th style={gridThStyle}>运输方式</th>
@@ -1564,6 +1568,13 @@ export default function AdminHomePage() {
                     </td>
                     {/* 品名 / 箱数 / 单箱数量 / 长宽高 / 国内单号 / 货型：合并成一块，固定高度一起滚 */}
                     <ProductDetailCell widths={PRODUCT_DETAIL_COL_WIDTHS} rows={detailRows} />
+                    {/* 总箱数＝把左边「箱数」那一列加起来，省得多产品时人工心算 */}
+                    <td style={{ ...gridTdStyle, fontWeight: 600 }}>
+                      {(() => {
+                        const total = totalPackageCountOf(o);
+                        return total != null ? `${total} 箱` : "—";
+                      })()}
+                    </td>
                     <td style={gridTdStyle}>{o.volumeM3 ?? "—"}</td>
                     <td style={gridTdStyle}>{o.weightKg ?? "—"}</td>
                     <td style={gridTdStyle}>{transportModeLabel(o.transportMode)}</td>
@@ -1677,7 +1688,7 @@ export default function AdminHomePage() {
                   {editingOrderId === (o.orderId ?? o.id) ? (
                     <tr key={`edit-${o.id}`}>
                       {/* 编辑表单同样改成全屏弹窗；格子只作挂载点，不占高度 */}
-                      <td colSpan={14} style={{ padding: 0, border: "none" }}>
+                      <td colSpan={ORDER_COL_WIDTHS.length} style={{ padding: 0, border: "none" }}>
                         <DetailModal
                           title="编辑运单"
                           subtitle={o.trackingNo ?? o.orderNo ?? "—"}

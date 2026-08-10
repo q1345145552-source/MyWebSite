@@ -149,3 +149,36 @@ export function buildProductDetailRows(item: ProductCarrier): string[][] {
     cargoTypeLabelOf(item.cargoType),
   ]];
 }
+
+/**
+ * 整单箱数 —— 把上面小表里「箱数」那一列加起来。
+ *
+ * 多产品的运单，「箱数」是一个产品一行，员工要自己心算总数，这里直接算好。
+ *
+ * ⚠️ 口径是「客户报的、到国内仓的总箱数」，**不是「还剩多少没装柜」**。
+ *    已经装走一部分的运单，这个数不会跟着变少。两者的区别见
+ *    docs/交接文档-2026-08-10-完整版.md 第 5.1 节。
+ *
+ * 没有产品行的老运单（「箱数」列显示「—」，加不出来）按这个顺序退：
+ *   1. totalPackageCount —— 后端算好的「父单剩余 + 全部子单」，就是整单箱数
+ *   2. packageCount
+ *
+ * ⚠️ 员工端千万不能直接退到 packageCount：那张表上的 packageCount 是
+ *    **还剩没装**，装走一批就少一批，标成「总箱数」是错的。
+ *    管理员端和客户端的 packageCount 是订单上的整单箱数，退到它才对 ——
+ *    两边同名不同义，所以这里必须先看 totalPackageCount。
+ */
+export function totalPackageCountOf(
+  item: ProductCarrier & { packageCount?: number | null; totalPackageCount?: number | null },
+): number | null {
+  const products = item.products ?? [];
+  if (products.length > 0) {
+    const counts = products
+      .map((p) => p.packageCount)
+      .filter((n): n is number => typeof n === "number" && Number.isFinite(n));
+    // 一行都没填箱数时不要显示 0，那会让人以为真的一箱都没有
+    if (counts.length > 0) return counts.reduce((a, b) => a + b, 0);
+  }
+  if (typeof item.totalPackageCount === "number") return item.totalPackageCount;
+  return typeof item.packageCount === "number" ? item.packageCount : null;
+}

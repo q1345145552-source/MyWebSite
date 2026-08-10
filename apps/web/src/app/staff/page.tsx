@@ -13,6 +13,7 @@ import {
   PRODUCT_DETAIL_COL_WIDTHS,
   PRODUCT_DETAIL_HEADS,
   buildProductDetailRows,
+  totalPackageCountOf,
   gridThStyle,
   gridTdStyle,
 } from "../../modules/shipment/ShipmentTableGrid";
@@ -80,16 +81,18 @@ import {
 } from "../../modules/staff/utils";
 
 /* 员工端运单列表的列宽。排版规则见 modules/shipment/ShipmentTableGrid.tsx。
-   ⚠️ 第 4~9 个必须和 PRODUCT_DETAIL_COL_WIDTHS 完全一致。 */
+   ⚠️ 第 4~9 个必须和 PRODUCT_DETAIL_COL_WIDTHS 完全一致。
+   紧跟在产品明细块后面的 80 是「总箱数」，它和体积、重量一样是整单的合计数，
+   所以放在会滚动的明细块外面 —— 放进去会跟着产品一起滚上去看不见。 */
 const SHIPMENT_COL_WIDTHS = [
   44, 110, 130,
   ...PRODUCT_DETAIL_COL_WIDTHS,
-  100, 90, 90, 110, 170, 190,
+  80, 100, 90, 90, 110, 170, 190,
 ] as const;
 const SHIPMENT_TABLE_MIN_WIDTH = SHIPMENT_COL_WIDTHS.reduce((a, b) => a + b, 0);
-/** 弹性列＝「备注」（表头第 14 个）。备注是长文字，宽一点正好少截断几个字。
+/** 弹性列＝「备注」（表头第 15 个）。备注是长文字，宽一点正好少截断几个字。
  *  ⚠️ 调整列顺序时这个下标要跟着改。 */
-const SHIPMENT_FLEX_COL_INDEX = 13;
+const SHIPMENT_FLEX_COL_INDEX = 14;
 
 export default function StaffHomePage() {
   const [staffClients, setStaffClients] = useState<Array<{ id: string; name: string }>>([]);
@@ -1721,6 +1724,7 @@ const loadLmShipments = async () => {
                       <th style={gridThStyle}>长宽高(cm)</th>
                       <th style={gridThStyle}>国内单号</th>
                       <th style={gridThStyle}>货型</th>
+                      <th style={gridThStyle}>总箱数</th>
                       <th style={gridThStyle}>体积</th>
                       <th style={gridThStyle}>重量</th>
                       <th style={gridThStyle}>运输方式</th>
@@ -1746,6 +1750,13 @@ const loadLmShipments = async () => {
                           </td>
                           {/* 品名 / 箱数 / 单箱数量 / 长宽高 / 国内单号 / 货型：合并成一块，固定高度一起滚 */}
                           <ProductDetailCell widths={PRODUCT_DETAIL_COL_WIDTHS} rows={detailRows} />
+                          {/* 总箱数＝把左边「箱数」那一列加起来，省得多产品时人工心算 */}
+                          <td style={{ ...gridTdStyle, fontWeight: 600 }}>
+                            {(() => {
+                              const total = totalPackageCountOf(item);
+                              return total != null ? `${total} 箱` : "—";
+                            })()}
+                          </td>
                           <td style={gridTdStyle}>{formatMetric(item.volumeM3, 6)}</td>
                           <td style={gridTdStyle}>{formatMetric(item.weightKg, 2)}</td>
                           <td style={gridTdStyle}>{transportModeLabel(item.transportMode)}</td>
