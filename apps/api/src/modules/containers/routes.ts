@@ -21,7 +21,7 @@ import {
   CONTAINER_STATUS_FLOW,
   CONTAINER_STATUS_FLOW_LAND,
   CONTAINER_STATUS_LABEL,
-  CONTAINER_NEXT_STOP,
+  nextStopOf,
   CONTAINER_TO_SHIPMENT_STATUS,
   flowOf,
   NEVER_GUESS_STATUSES,
@@ -289,9 +289,11 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
     }
 
     // 下一站：员工填了就用他填的，没填就用这个状态的默认值（可能没有，那就不写）
+    // ⚠️ 默认值必须按柜子的运输方式取。原来这里不看运输方式，海运柜推到「已封柜」
+    //    也会被填成陆运的「广西凭祥出口」，而且**前端把框清空也照样补上**。
     const nextStop = typeof body.nextStop === "string" && body.nextStop.trim()
       ? body.nextStop.trim().slice(0, 50)
-      : (CONTAINER_NEXT_STOP[toStatus] ?? null);
+      : nextStopOf(toStatus, container.transportMode);
 
     const customDate = typeof body.date === "string" && body.date.trim()
       ? new Date(body.date.trim() + "T00:00:00")

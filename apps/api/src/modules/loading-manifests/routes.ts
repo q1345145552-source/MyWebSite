@@ -4,7 +4,7 @@ import { fail, ok, requireRole } from "../core/http-utils";
 // 柜子状态流程只在 containers/status-flow.ts 定义一处，本文件不再自己抄
 import {
   CONTAINER_STATUS_LABEL,
-  CONTAINER_NEXT_STOP,
+  nextStopOf,
   CONTAINER_TO_SHIPMENT_STATUS,
   flowOf,
   NEVER_GUESS_STATUSES,
@@ -406,7 +406,9 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
             remark: isLast
               ? `装入柜子 ${container.containerNo}${partial}`
               : `${CONTAINER_STATUS_LABEL[s.containerStatus] ?? s.containerStatus}（随柜 ${container.containerNo} 补记）`,
-            nextStop: CONTAINER_NEXT_STOP[s.containerStatus] ?? null,
+            // 默认下一站要按柜子的运输方式取，否则海运柜补出来的轨迹会写成
+            // 陆运的「广西凭祥出口」（2026-08-10 修，同一个病根三处都有）
+            nextStop: nextStopOf(s.containerStatus, container.transportMode),
             changedAt: s.at!,
           },
         });

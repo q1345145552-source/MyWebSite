@@ -79,9 +79,27 @@ export const CONTAINER_STATUS_LABEL: Record<string, string> = {
 /**
  * 每个状态默认的「下一站」，客户在轨迹里能看到货接下来去哪。
  * 员工推进状态时可以手动改（改了以这次填的为准），不填就用这里的默认值。
+ *
+ * 口径：下一站写的是**下一个环节所在的地方**。
+ *   陆运 已封柜 → 下一步是「到达凭祥口岸」→ 所以下一站是「广西凭祥出口」
+ *   海运 运输中 → 下一步是「已到港」    → 所以下一站是「泰国港口」
+ *
+ * ⚠️ 2026-08-10 修：原来这里只有一张表、只按状态查，**没分海运陆运**。
+ *    「已封柜」两条流程都有，而表里填的是陆运的走法，结果**海运柜推到已封柜，
+ *    客户轨迹里被写成「下一站：广西凭祥出口」** —— 海运不走凭祥口岸。
+ *    生产上实测已经写坏 12 个海运柜、67 条轨迹、35 张运单、14 个客户。
+ *    所以拆成两张表，跟 CONTAINER_STATUS_FLOW / _LAND 一一对应。
+ *    加新状态时**两张表都要想一遍这个状态属于哪条流程**。
  */
-export const CONTAINER_NEXT_STOP: Record<string, string> = {
-  // 陆运
+export const CONTAINER_NEXT_STOP_SEA: Record<string, string> = {
+  // 已封柜之后就是开船，所以下一站是装船
+  SEALED: "装船开船",
+  IN_TRANSIT: "泰国港口",
+  ARRIVED: "泰国清关",
+  CUSTOMS_CLEARED: "泰国仓库",
+};
+
+export const CONTAINER_NEXT_STOP_LAND: Record<string, string> = {
   SEALED: "广西凭祥出口",
   AT_PORT_CN: "排队出关口",
   EXPORT_CLEARED: "过境越南",
@@ -90,10 +108,19 @@ export const CONTAINER_NEXT_STOP: Record<string, string> = {
   BORDER_DELAY: "排队出关口",
   CUSTOMS_INSPECT: "泰国仓库",
   CUSTOMS_CLEARED: "泰国仓库",
-  // 海运沿用同样的思路
-  IN_TRANSIT: "泰国港口",
-  ARRIVED: "泰国清关",
 };
+
+/**
+ * 这个柜子推到某个状态时，默认的下一站是什么。
+ * 走哪张表和 flowOf 一个口径：陆运走陆运，其余（含没标运输方式的老柜子）走海运。
+ */
+export function nextStopOf(
+  toStatus: string,
+  transportMode: string | null | undefined,
+): string | null {
+  const table = transportMode === "land" ? CONTAINER_NEXT_STOP_LAND : CONTAINER_NEXT_STOP_SEA;
+  return table[toStatus] ?? null;
+}
 
 /** 这个柜子该按哪条流程走：陆运走陆运，其余（含没标运输方式的老柜子）走海运 */
 export function flowOf(transportMode: string | null | undefined): readonly string[] {

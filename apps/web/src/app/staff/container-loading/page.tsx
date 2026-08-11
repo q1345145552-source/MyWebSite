@@ -63,8 +63,20 @@ const STATUS_FLOW_LAND = ["LOADING", "SEALED", "AT_PORT_CN", "BORDER_DELAY", "EX
 const FILTER_STATUSES_SEA = ["LOADING", "SEALED", "DELAY_DEPARTED", "IN_TRANSIT", "DELAY_IN_TRANSIT", "ARRIVED", "CUSTOMS", "CUSTOMS_CLEARED", "UNLOADING", "IN_WAREHOUSE_TH", "OUT_FOR_DELIVERY", "SIGNED"] as const;
 const FILTER_STATUSES_LAND = ["LOADING", "SEALED", "AT_PORT_CN", "BORDER_DELAY", "EXPORT_CLEARED", "IN_VIETNAM", "LAOS_CLEARED", "CUSTOMS_INSPECT", "CUSTOMS_CLEARED", "UNLOADING", "IN_WAREHOUSE_TH", "OUT_FOR_DELIVERY", "SIGNED"] as const;
 
-/** 每个状态默认的下一站，与后端 CONTAINER_NEXT_STOP 一致；员工可以改 */
-const NEXT_STOP_DEFAULT: Record<string, string> = {
+/**
+ * 每个状态默认的下一站，与后端 status-flow.ts 的两张表一致；员工可以改。
+ *
+ * ⚠️ 必须分海运陆运。「已封柜」两条流程都有，原来只有一张表、填的是陆运的走法，
+ *    海运柜推到已封柜就被写成「广西凭祥出口」—— 海运不走凭祥口岸。
+ */
+const NEXT_STOP_DEFAULT_SEA: Record<string, string> = {
+  SEALED: "装船开船",
+  IN_TRANSIT: "泰国港口",
+  ARRIVED: "泰国清关",
+  CUSTOMS_CLEARED: "泰国仓库",
+};
+
+const NEXT_STOP_DEFAULT_LAND: Record<string, string> = {
   SEALED: "广西凭祥出口",
   AT_PORT_CN: "排队出关口",
   EXPORT_CLEARED: "过境越南",
@@ -73,9 +85,11 @@ const NEXT_STOP_DEFAULT: Record<string, string> = {
   BORDER_DELAY: "排队出关口",
   CUSTOMS_INSPECT: "泰国仓库",
   CUSTOMS_CLEARED: "泰国仓库",
-  IN_TRANSIT: "泰国港口",
-  ARRIVED: "泰国清关",
 };
+
+/** 和后端 nextStopOf 一个口径：陆运走陆运，其余（含没标运输方式的老柜子）走海运 */
+const nextStopDefault = (status: string, transportMode: string | null | undefined): string =>
+  (transportMode === "land" ? NEXT_STOP_DEFAULT_LAND : NEXT_STOP_DEFAULT_SEA)[status] ?? "";
 
 /** 柜子的运输方式。null = 2026-08-05 之前建的老柜子，判不出来，等员工自己补 */
 const MODE_ZH = (mode: string | null | undefined): string =>
@@ -121,6 +135,21 @@ export default function StaffContainerLoadingPage() {
   const [targetStatus, setTargetStatus] = useState("");
   /** 下一站（2026-08-06）：选目标状态时自动填默认值，员工可改 */
   const [nextStop, setNextStop] = useState("");
+
+  /**
+   * 换柜子时把这一排推进用的输入清空。
+   *
+   * ⚠️ 2026-08-10 实测出来的坑：原来不清空。在**陆运**柜上选了「已封柜」，
+   * 下一站会自动填「广西凭祥出口」；这时点到另一个**海运**柜，状态和下一站
+   * 原样留在框里，直接点「确认推进」就把陆运的地名写进海运柜的客户轨迹了。
+   * 光把默认值按运输方式拆开挡不住这条路 —— 那次根本没重新选状态。
+   */
+  useEffect(() => {
+    setTargetStatus("");
+    setNextStop("");
+    setStatusRemark("");
+    setStatusDate("");
+  }, [selectedId]);
     
   // 运单列表搜索
   const [allShipments, setAllShipments] = useState<ShipmentItem[]>([]);
@@ -529,7 +558,7 @@ export default function StaffContainerLoadingPage() {
                             onChange={(e) => {
                               setTargetStatus(e.target.value);
                               // 换目标状态时把下一站换成该状态的默认值，员工再决定要不要改
-                              setNextStop(NEXT_STOP_DEFAULT[e.target.value] ?? "");
+                              setNextStop(nextStopDefault(e.target.value, detail.transportMode));
                             }}
                             style={inputStyle}
                           >
