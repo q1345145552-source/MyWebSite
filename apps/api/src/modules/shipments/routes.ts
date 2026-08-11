@@ -5,6 +5,7 @@ import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
 import { checkRateLimit, getClientIp, rateLimitKey } from "../core/rate-limit";
 import { fail, ok, parseJsonArray, requireRole } from "../core/http-utils";
+import { sanitizeRemarkForClient } from "../core/client-privacy";
 import { logger } from "../core/logger";
 import { loadProductImagesForOrders } from "../orders/product-images";
 import { STATUS_FLOW, STATUS_FLOW_LAND, EXCEPTION_STATUSES, DELAY_STATUSES, COMPLETED_STATUSES } from "./status-flow";
@@ -252,7 +253,9 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
     ok(res, {
       trackingNo: shipment.trackingNo,
       domesticTrackingNo: shipment.domesticTrackingNo ?? undefined,
-      batchNo: shipment.batchNo ?? undefined,
+      // ⚠️ 这条路连账号都不用（运单号 + 手机后 4 位就能查），是最宽的一条。
+      //    batchNo 存的就是柜号，**绝不下发**（2026-08-11 审出来一直在漏：
+      //    19 张运单 / 8 个客户）。要改这里先看 core/client-privacy.ts。
       orderId: shipment.order.id,
       itemName: shipment.order.itemName,
       currentStatus: shipment.currentStatus,
@@ -261,7 +264,9 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
       events: logs.map((item) => ({
         fromStatus: item.fromStatus,
         toStatus: item.toStatus,
-        remark: item.remark ?? "",
+        // 备注正文里藏着「装入柜子 <柜号>」，也要抹掉 ——
+        // 原来这里原样下发，136 张运单 / 21 个客户能看到柜号
+        remark: sanitizeRemarkForClient(item.remark ?? "", true),
         changedAt: item.changedAt.toISOString(),
       })),
     });
@@ -427,7 +432,9 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
         orderId: r.orderId,
         orderNo: r.order.orderNo ?? undefined,
         trackingNo: r.trackingNo,
-        batchNo: r.batchNo,
+        // batchNo 存的就是柜号，客户端不下发（2026-08-11）。
+        // 跟 /client/orders 8-07 那次一个道理 —— 前端不显示不算堵住，
+        // 数据到了浏览器就是泄漏。见 core/client-privacy.ts。
         currentStatus: r.currentStatus,
         currentLocation: r.currentLocation ?? undefined,
         updatedAt: r.updatedAt.toISOString(),

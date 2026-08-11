@@ -76,7 +76,8 @@ export interface ClientAddressItem {
 export interface PublicTrackResult {
   trackingNo: string;
   domesticTrackingNo?: string;
-  batchNo?: string;
+  // batchNo（柜号）已不再下发 —— 客户不能看到柜号，这条路连账号都不用。
+  // 备注里的「装入柜子 <柜号>」也已在后端抹成「已装柜」（2026-08-11）
   orderId: string;
   itemName: string;
   currentStatus: string;

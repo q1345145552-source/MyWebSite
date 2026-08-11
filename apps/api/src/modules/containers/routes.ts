@@ -14,6 +14,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
+import { sanitizeRemarkForClient } from "../core/client-privacy";
 import { logger } from "../core/logger";
 import { canTransitLoose } from "../shipments/routes";
 // 柜子状态流程的唯一定义处，别在本文件里再抄一份
@@ -890,11 +891,12 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
      * 装柜时写的日志内容是「装入柜子 <柜号>（分装 N件）」，柜号就藏在正文里。
      * 客户端本来就不允许看柜号（containers、batchNo 都对客户屏蔽过），
      * 所以这里要把正文里的柜号一并抹掉，只保留「已装柜」和分装件数。
+     *
+     * 2026-08-11：抽到 core/client-privacy.ts，免登录查轨迹那边共用同一份，
+     * 别再各写各的（CLAUDE.md 第 20 条）。
      */
     const sanitizeRemark = (remark: string): string =>
-      // 柜号后面可能紧跟「（分装 N件）」，中间没有空格，
-      // 所以匹配到括号就停，别把后半句一起吃掉
-      isClient ? remark.replace(/装入柜子\s*[^\s（(]+/g, "已装柜") : remark;
+      sanitizeRemarkForClient(remark, isClient);
 
     const mapLog = (
       log: { id: string; fromStatus: string; toStatus: string; remark: string | null; nextStop?: string | null; changedAt: Date; operatorRole: string; operatorName: string | null },
