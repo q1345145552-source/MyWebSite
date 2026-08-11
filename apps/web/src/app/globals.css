@@ -596,7 +596,14 @@ main {
 .dashboard-layout {
   display: flex;
   gap: 16px;
-  padding: 24px;
+  /* 2026-08-11：原来是 padding: 24px，四周留一圈空白，深色侧边栏贴不到浏览器边上，
+     看着像没铺满。改成 0 让外壳撑满整个窗口。
+     ⚠️ 只去掉**最外面**这一圈：
+       - gap: 16px 保留 —— 侧边栏和内容之间的间距不变
+       - .dashboard-content 自己的 padding（0 20px 20px）保留 —— 内容不会贴边
+     所以内部排版一点没动，只是整体往外撑了 24px。
+     手机端本来就是 padding: 0（见文件末尾的 @media），这下两边一致了。 */
+  padding: 0;
   max-width: none;
   width: 100%;
   height: 100vh;
