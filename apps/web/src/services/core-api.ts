@@ -92,6 +92,15 @@ let unexplained401Count = 0;
  */
 export async function parseApiResponse<T>(response: Response): Promise<T> {
   if (response.status === 401) {
+    /**
+     * ⚠️ 登录接口自己也用 401 表示「账号或密码不对」，不能走下面那套「登录过期」的逻辑。
+     * 原来会走 —— 用户在登录页把密码打错，看到的提示是
+     * 「登录失败：登录已过期，请重新登录」。人根本还没登录过，哪来的过期，
+     * 会让人以为是系统坏了而不是自己打错字（2026-08-11 以用户视角走查时发现）。
+     */
+    if (response.url.includes("/auth/login")) {
+      throw new Error("账号或密码不对，请重新输入");
+    }
     const session = typeof window !== "undefined" ? getOptionalSession() : null;
     const exp = readTokenExp(session?.token);
     const nowSec = Math.floor(Date.now() / 1000);
