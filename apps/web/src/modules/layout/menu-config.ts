@@ -132,7 +132,8 @@ export const roleFunctionGroups: Record<AuthRole, MenuGroup[]> = {
           { id: "client-func-whr-consolidation", label: "集货拼柜(仓库版)", href: "/client/whr-consolidation" },
         { id: "client-func-fcl", label: "整柜询价", href: "/client#client-fcl" },
         { id: "client-func-imports", label: "批量下单", href: "/client/imports" },
-        { id: "client-func-track", label: "免登录查轨迹", href: "/client/track" },
+        // 这一页是跳快递100查国内快递，不是查湘泰运单 —— 按实际功能命名（2026-08-11）
+        { id: "client-func-track", label: "查国内快递", href: "/client/track" },
       ],
     },
     {

@@ -79,12 +79,20 @@ export default function ClientTrackPage() {
     [companySearch],
   );
 
+  // 2026-08-11 改名：这一页查的是**国内快递**（跳转快递100），不是湘泰自己的运单轨迹。
+  // 原来叫「物流追踪看板 / Track & Trace（免登录查询）」，客户以为能查自己的湘泰运单，
+  // 点进来发现是查顺丰中通的，容易懵。按实际功能直说，顺带去掉英文（全中文红线）。
   return (
-    <RoleShell allowedRole="client" title="物流追踪看板" variant="a3">
+    <RoleShell allowedRole="client" title="查国内快递" variant="a3">
       <section style={{ border: "1px solid var(--l-soft)", borderRadius: 12, padding: 16, background: "var(--white)" }}>
-        <h2 style={{ marginTop: 0 }}>Track & Trace（免登录查询）</h2>
+        <h2 style={{ marginTop: 0 }}>查国内快递</h2>
         <p style={{ color: "var(--t-strong)", marginTop: 0 }}>
-          点击按钮将<strong>直接打开快递100</strong>（无需先填单号）；填写单号或公司编码后，跳转链接会尽量带上参数。
+          查顺丰、中通这类<strong>国内快递</strong>的走件情况。点按钮会<strong>跳到快递100</strong>；
+          先填单号和快递公司的话，跳过去会自动带上。
+          <br />
+          <span style={{ color: "var(--t-muted)", fontSize: 13 }}>
+            要查自己的湘泰运单，请用左边的「运单查询」。
+          </span>
         </p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 8 }}>
           <input
