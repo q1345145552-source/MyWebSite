@@ -1247,8 +1247,12 @@ const loadLmShipments = async () => {
 
   // variant="a3" 只换外观（深藏青导航 + 细顶栏），不动任何排版。
   // 外壳是三端共用的，所以做成开关：改好一个页面才给那个页面加上。
+  // ⚠️ allowedRole 必须带 admin。管理员菜单里的「整柜询价」指向 /staff#staff-fcl，
+  // 这一页原来写死只准 staff，管理员一点就被弹回管理员工作台，等于按钮是死的。
+  // 员工端另外三页（装柜管理、集货拼柜、集货拼柜仓库版）本来就是 ["staff","admin"]，
+  // 后端那 37 个 /staff 接口也全是 ["staff","admin"] —— 只有这一页漏了（2026-08-11 修）。
   return (
-    <RoleShell allowedRole="staff" title="员工工作台" variant="a3">
+    <RoleShell allowedRole={["staff", "admin"]} title="员工工作台" variant="a3">
       <p style={{ color: "#4B5462", marginBottom: 16 }}>
         员工可创建订单、查看运单列表中的订单信息（只读），并按状态流转规则更新物流状态；订单金额、付款及产品图（已审核订单）请在管理端维护。
       </p>
