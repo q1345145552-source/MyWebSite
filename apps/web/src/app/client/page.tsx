@@ -42,7 +42,6 @@ import FclInquiryPanel from "../../components/client/FclInquiryPanel";
 
 const initialSearch = {
   batchNo: "",
-  orderId: "",
   arrivedDateFrom: "",
   arrivedDateTo: "",
   domesticTrackingNo: "",
@@ -342,7 +341,6 @@ export default function ClientHomePage() {
           : await fetchClientOrders({ statusGroup: queryMode });
       const result = baseOrders
         .filter((item) => !search.batchNo || (item.trackingNo ?? "").toLowerCase().includes(search.batchNo.toLowerCase()))
-        .filter((item) => !search.orderId || (item.trackingNo ?? "").toLowerCase().includes(search.orderId.toLowerCase()))
         .filter((item) => {
           const d = item.createdAt.slice(0, 10);
           if (search.arrivedDateFrom && d < search.arrivedDateFrom) return false;
@@ -362,7 +360,7 @@ export default function ClientHomePage() {
       setQueriedOrders(result);
       setHasQueried(true);
       hasQueriedRef.current = true;
-      if (queryMode === "all" && !search.batchNo && !search.orderId && !search.arrivedDateFrom && !search.arrivedDateTo && !search.domesticTrackingNo && !search.status && !search.transportMode && !search.warehouseId) {
+      if (queryMode === "all" && !search.batchNo && !search.arrivedDateFrom && !search.arrivedDateTo && !search.domesticTrackingNo && !search.status && !search.transportMode && !search.warehouseId) {
         saveOrdersToCache(result);
       }
     } catch (error) {
@@ -436,7 +434,7 @@ export default function ClientHomePage() {
   useEffect(() => {
     if (activeSection !== "client-query") return;
     // 有搜索条件时不自动刷新；纯浏览分组（在途/已完成/全部）正常刷新
-    const hasFilter = search.batchNo || search.orderId || search.domesticTrackingNo || search.status || search.transportMode || search.warehouseId || search.arrivedDateFrom || search.arrivedDateTo;
+    const hasFilter = search.batchNo || search.domesticTrackingNo || search.status || search.transportMode || search.warehouseId || search.arrivedDateFrom || search.arrivedDateTo;
     if (hasFilter || dashboardLoading) return;
     let timer: ReturnType<typeof setTimeout>;
     let cancelled = false;
@@ -454,7 +452,7 @@ export default function ClientHomePage() {
     };
     timer = setTimeout(poll, 10000);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [activeSection, queryMode, dashboardLoading, search.batchNo, search.orderId, search.domesticTrackingNo, search.status, search.transportMode, search.warehouseId, search.arrivedDateFrom, search.arrivedDateTo]);
+  }, [activeSection, queryMode, dashboardLoading, search.batchNo, search.domesticTrackingNo, search.status, search.transportMode, search.warehouseId, search.arrivedDateFrom, search.arrivedDateTo]);
 
   const statusToneClass = (status?: string): string => {
     const value = (status ?? "").toLowerCase();
@@ -873,15 +871,14 @@ export default function ClientHomePage() {
         ) : (
           <>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8, marginBottom: 12 }}>
+              {/* 2026-08-11：原来这里并排放了**两个都写着「运单号」**的框，
+                  客户分不清该填哪个 —— 而且实测两个筛的是同一个字段（都在 trackingNo 上做包含匹配），
+                  填哪个、填一个还是两个都填，结果完全一样。
+                  batchNo 这个名字是早年存柜号留下的，柜号 2026-08-07 已经对客户屏蔽，
+                  这个框就只剩「按运单号筛」一个作用。留一个就够。 */}
               <input
                 value={search.batchNo}
                 onChange={(e) => setSearch((v) => ({ ...v, batchNo: e.target.value }))}
-                placeholder="运单号"
-                style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }}
-              />
-              <input
-                value={search.orderId}
-                onChange={(e) => setSearch((v) => ({ ...v, orderId: e.target.value }))}
                 placeholder="运单号"
                 style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }}
               />
