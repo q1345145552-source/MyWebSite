@@ -150,7 +150,6 @@ export default function ClientHomePage() {
   const [pageSize, setPageSize] = useState(50);
   const [currentPage, setCurrentPage] = useState(1);
 
-  const [queryPanelCollapsed, setQueryPanelCollapsed] = useState(false);
   /* 「我的运单查询」顶部那排数字。拉不到就整排不显示 ——
      宁可不显示，也不能显示一个假的 0 让客户以为「没有在途的」。 */
   const [shipmentOverview, setShipmentOverview] = useState<StaffShipmentOverview | null>(null);
@@ -798,32 +797,19 @@ export default function ClientHomePage() {
         style={{ display: activeSection === "client-query" ? "block" : "none" }}
       >
         <div className="section-label section-label-query">查询区</div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        {/* 2026-08-11：这里原来有个「折叠」按钮，点一下把整个查询区（筛选框 + 三个分组按钮）
+            全收起来。用户判断没用 —— 客户来这一页就是为了查单，把查询框藏起来不是常做的事，
+            不小心点到还会以为「搜索不见了」。整块删掉，查询区常驻。 */}
+        <div style={{ marginBottom: 12 }}>
           <h2 style={{ margin: 0, fontSize: 20 }}>我的运单查询</h2>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <button
-              type="button"
-              onClick={() => setQueryPanelCollapsed((v) => !v)}
-              style={{
-                border: "1px solid var(--l-strong)",
-                borderRadius: 8,
-                padding: "6px 10px",
-                color: "var(--t-strong)",
-                background: "var(--white)",
-                fontWeight: 600,
-              }}
-            >
-              {queryPanelCollapsed ? "展开" : "折叠"}
-            </button>
-          </div>
         </div>
 
         {/* 顶部一排数字（2026-08-10 用户要三端都有，且「跟员工端一模一样」）。
             客户端走 /client/shipments/overview，只数自己名下的运单。 */}
         <ShipmentOverviewStrip data={shipmentOverview} />
 
-        {!queryPanelCollapsed ? (
-          <>
+        {/* 折叠按钮删掉后，这块（分组按钮 + 查询框 + 列表）常驻显示，不再用条件包着 */}
+        <>
             <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
               <button
                 type="button"
@@ -866,8 +852,10 @@ export default function ClientHomePage() {
               </button>
             </div>
 
+        {/* 折叠按钮已删（2026-08-11），这里不能再说「已折叠」「展开搜索框」——
+            现在只是还没选分组，照实说就行 */}
         {!queryMode ? (
-          <EmptyStateCard title="订单已折叠" description="请先点击“订单在途”“订单已完成”或“全部订单”，再展开搜索框进行查询。" />
+          <EmptyStateCard title="请先选择要看哪些订单" description="点上面的「订单在途」「订单已完成」或「全部订单」，下面就会列出来。" />
         ) : (
           <>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8, marginBottom: 12 }}>
@@ -1138,8 +1126,8 @@ export default function ClientHomePage() {
           ) : (
             <EmptyStateCard title="无匹配订单" description="可调整查询条件后重新查询。" />
           )}
-          </>
-        ) : null}
+        </>
+
       </section>
 
       {activeSection === "client-query" || activeSection === "client-prealert" ? (
