@@ -272,7 +272,10 @@ export default function RoleShell(props: {
 
       <aside className={`dashboard-sidebar ${sidebarOpen ? "open" : ""}`}>
         <button type="button" className="sidebar-close-btn" onClick={closeSidebar}>×</button>
-        <h2 className="dashboard-sidebar-title">工作台导航</h2>
+        {/* 左上角这个位置是放品牌的，原来写「工作台导航」——
+            左边一排链接，本来就看得出是导航，等于一句废话。
+            换成公司名，三端每一页都带着（2026-08-11）。 */}
+        <h2 className="dashboard-sidebar-title">湘泰物流</h2>
         <div className="dashboard-sidebar-group">
           {roleMenus[session.role].map((item) => (
             <a
