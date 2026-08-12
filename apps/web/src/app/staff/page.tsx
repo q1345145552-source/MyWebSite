@@ -2528,7 +2528,9 @@ const loadLmShipments = async () => {
                 </div>
               )}
             </div>
-            </div>
+            {/* ⚠️ 这里原来多了一个 </div>，白色弹窗在这一行就收掉了，
+                下面的「备注 + 取消 + 创建订单」被挤成弹窗的兄弟，
+                和弹窗并排摆在遮罩层里，跑到框外压住后面的页面（2026-08-11 修）。 */}
             <div style={{ marginTop: 12 }}>
               <div style={{ fontSize: 12, color: "var(--t-strong)", marginBottom: 4 }}>备注</div>
               <input value={form.remark} onChange={(e) => setForm((v) => ({ ...v, remark: e.target.value }))} placeholder="备注（可选）" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13 }} />
@@ -2541,6 +2543,7 @@ const loadLmShipments = async () => {
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
               <button type="button" onClick={() => { setShowCreateModal(false); setMessage(""); setOrderImageFiles([]); setOrderImagePreviews([]); }} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: "var(--white)", cursor: "pointer", color: "var(--t-strong)" }}>取消</button>
               <button type="button" disabled={loading} onClick={() => void submitOrder()} style={{ border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: loading ? "var(--t-strong)" : "var(--c-blue)", color: "var(--white)", fontWeight: 500, cursor: loading ? "not-allowed" : "pointer" }}>{loading ? "提交中…" : "创建订单"}</button>
+            </div>
             </div>
           </div>
         </div>
