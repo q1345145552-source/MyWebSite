@@ -73,24 +73,6 @@ export interface ClientAddressItem {
   updatedAt: string;
 }
 
-export interface PublicTrackResult {
-  trackingNo: string;
-  domesticTrackingNo?: string;
-  // batchNo（柜号）已不再下发 —— 客户不能看到柜号，这条路连账号都不用。
-  // 备注里的「装入柜子 <柜号>」也已在后端抹成「已装柜」（2026-08-11）
-  orderId: string;
-  itemName: string;
-  currentStatus: string;
-  currentLocation?: string;
-  updatedAt: string;
-  events: Array<{
-    fromStatus: string;
-    toStatus: string;
-    remark: string;
-    changedAt: string;
-  }>;
-}
-
 export interface UniversalExpressTrackResult {
   trackingNo: string;
   companyCode: string;
@@ -597,22 +579,6 @@ export async function deleteClientAddress(id: string): Promise<{ deleted: boolea
   const response = await fetch(`${apiBaseUrl()}/client/addresses?id=${encodeURIComponent(id)}`, {
     method: "DELETE",
     headers: { ...authHeaders() },
-  });
-  return parseApiResponse(response);
-}
-
-/**
- * 通过运单号和手机号后四位进行免登录轨迹查询。
- */
-export async function fetchPublicTrack(params: {
-  trackingNo: string;
-  phoneLast4: string;
-}): Promise<PublicTrackResult> {
-  const query = new URLSearchParams();
-  query.set("trackingNo", params.trackingNo);
-  query.set("phoneLast4", params.phoneLast4);
-  const response = await fetch(`${apiBaseUrl()}/public/track?${query.toString()}`, {
-    method: "GET",
   });
   return parseApiResponse(response);
 }

@@ -3,9 +3,7 @@ import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
-import { checkRateLimit, getClientIp, rateLimitKey } from "../core/rate-limit";
 import { fail, ok, parseJsonArray, requireRole } from "../core/http-utils";
-import { sanitizeRemarkForClient } from "../core/client-privacy";
 import { logger } from "../core/logger";
 import { loadProductImagesForOrders } from "../orders/product-images";
 import { STATUS_FLOW, STATUS_FLOW_LAND, EXCEPTION_STATUSES, DELAY_STATUSES, COMPLETED_STATUSES } from "./status-flow";
@@ -204,73 +202,11 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
     ok(res, { shipmentId, containerNo, updatedAt: updated.updatedAt.toISOString() });
   });
 
-  app.get("/public/track", async (req, res) => {
-    // 速率限制：每个 IP 每分钟最多 30 次查询，防止暴力枚举
-    const ip = getClientIp(req.headers);
-    if (checkRateLimit(rateLimitKey(ip, "track"), 30, 60_000)) {
-      fail(res, 429, "BAD_REQUEST", "too many requests, please try again later");
-      return;
-    }
-    const trackingNo = req.query.trackingNo?.trim();
-    const phoneLast4 = req.query.phoneLast4?.trim();
-    if (!trackingNo || !phoneLast4 || phoneLast4.length !== 4) {
-      fail(res, 400, "BAD_REQUEST", "trackingNo and phoneLast4(4 digits) are required");
-      return;
-    }
-    const shipment = await prisma.shipment.findUnique({
-      where: { trackingNo },
-      include: {
-        order: {
-          select: {
-            id: true,
-            itemName: true,
-            receiverPhoneTh: true,
-            client: { select: { phone: true } },
-          },
-        },
-      },
-    });
-    if (!shipment) {
-      fail(res, 404, "NOT_FOUND", "shipment not found");
-      return;
-    }
-    const receiverPhone = shipment.order.receiverPhoneTh ?? "";
-    const clientPhone = shipment.order.client?.phone ?? "";
-    const receiverTail = receiverPhone.length >= 4 ? receiverPhone.slice(-4) : "";
-    const clientTail = clientPhone.length >= 4 ? clientPhone.slice(-4) : "";
-    if (!receiverTail && !clientTail) {
-      fail(res, 403, "FORBIDDEN", "phone verification failed");
-      return;
-    }
-    if (phoneLast4 !== receiverTail && phoneLast4 !== clientTail) {
-      fail(res, 403, "FORBIDDEN", "phone verification failed");
-      return;
-    }
-    const logs = await prisma.statusLog.findMany({
-      where: { shipmentId: shipment.id },
-      orderBy: { changedAt: "asc" },
-    });
-    ok(res, {
-      trackingNo: shipment.trackingNo,
-      domesticTrackingNo: shipment.domesticTrackingNo ?? undefined,
-      // ⚠️ 这条路连账号都不用（运单号 + 手机后 4 位就能查），是最宽的一条。
-      //    batchNo 存的就是柜号，**绝不下发**（2026-08-11 审出来一直在漏：
-      //    19 张运单 / 8 个客户）。要改这里先看 core/client-privacy.ts。
-      orderId: shipment.order.id,
-      itemName: shipment.order.itemName,
-      currentStatus: shipment.currentStatus,
-      currentLocation: shipment.currentLocation ?? undefined,
-      updatedAt: shipment.updatedAt.toISOString(),
-      events: logs.map((item) => ({
-        fromStatus: item.fromStatus,
-        toStatus: item.toStatus,
-        // 备注正文里藏着「装入柜子 <柜号>」，也要抹掉 ——
-        // 原来这里原样下发，136 张运单 / 21 个客户能看到柜号
-        remark: sanitizeRemarkForClient(item.remark ?? "", true),
-        changedAt: item.changedAt.toISOString(),
-      })),
-    });
-  });
+  // 2026-08-11 删除：/public/track（运单号 + 手机后4位的免登录查单接口）。
+  // 前端从来没有任何页面调它 —— 客户端「查国内快递」跳的是快递100，跟它无关。
+  // 但接口本身对公网开着，凑齐运单号+手机尾号的人能看到品名和国内快递单号（同行能看出走哪家渠道），
+  // 属于「没人用、却开着、还会漏东西」的口子，按用户决定关掉。
+  // 要恢复：git 历史里有完整实现（含速率限制 30次/分、手机尾号校验、柜号脱敏）。
 
   app.get("/client/express/universal", async (req, res) => {
     const auth = requireRole(req, res, ["client", "staff", "admin"]);
