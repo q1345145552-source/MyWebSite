@@ -906,8 +906,14 @@ export async function fetchClientShipmentOverview(): Promise<StaffShipmentOvervi
 }
 
 
-/** 尾端派送能挑的运单状态：已到仓 / 派送中 / 已签收 */
-const LASTMILE_STATUSES = "inWarehouseTH,outForDelivery,delivered";
+/**
+ * 尾端派送能挑的运单状态：已到仓 / 预约派送 / 派送中 / 已签收
+ *
+ * ⚠️ 2026-08-13 补上 deliveryBooked（预约派送）。加这个状态时漏了这里，
+ *    结果是**推到「预约派送」的货在尾端派送页面上直接消失**，员工找不到就发不出去。
+ *    跟 2026-08-06「445 张运单选不到」是同一个坑：状态清单写死在好几处，加状态要全找一遍。
+ */
+const LASTMILE_STATUSES = "inWarehouseTH,deliveryBooked,outForDelivery,delivered";
 
 export interface LastmileShipmentItem {
   id: string;

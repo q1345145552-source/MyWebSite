@@ -63,7 +63,8 @@ const SUGGESTIONS = [
 
 const COMPLETED_STATUSES: ShipmentStatus[] = ["delivered", "returned", "cancelled"];
 const EXCEPTION_STATUSES: ShipmentStatus[] = ["exception", "returned", "cancelled"];
-const IN_TRANSIT_STATUSES: ShipmentStatus[] = ["loaded", "delayDeparted", "departed", "delayInTransit", "arrivedPort", "customsTH", "customsCleared", "inWarehouseTH", "outForDelivery"];
+// 「在途」= 已装柜到派送完成之前的所有环节。2026-08-13 把新加的 8 个也算进在途。
+const IN_TRANSIT_STATUSES: ShipmentStatus[] = ["loaded", "customsInspectCn", "inspectClearedCn", "exportCleared", "delayDeparted", "etaUpdated", "portClosed", "berthed", "departed", "delayInTransit", "arrivedPort", "customsInspectTh", "inspectClearedTh", "customsTH", "customsCleared", "inWarehouseTH", "deliveryBooked", "outForDelivery"];
 const GREETING_RE = /(你好|您好|hi|hello|哈喽|在吗|你在吗)/i;
 const SERVICE_QA_RE =
   /(时效|多久|几天|清关|报关|费用|运费|计费|体积重|实重|禁运|违禁|能寄|可以寄|赔付|理赔|破损|丢件|签收|派送|上门|对账|发票|资料|装箱单|轨迹|查不到)/;

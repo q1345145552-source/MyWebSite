@@ -4,21 +4,50 @@
 // 原来各文件各抄一份，今天就已经抄出两份柜子状态中文了 —— CLAUDE.md 第 20 条讲的就是这个坑。
 // 以后加状态**只改这个文件**，前端 staff/container-loading/page.tsx 里那两份要跟着改。
 
-/** 海运流程（原来的唯一流程，一个字没改） */
+/**
+ * 海运流程。
+ *
+ * 2026-08-13：按用户给的实际业务重排，一次加进 8 个环节（★）。
+ * 用户明确要求：**这些都进主流程，一格一格按顺序排**，不是「事件」。
+ *
+ *   装柜中 → ★暂缓柜 → 已封柜 → ★国内海关查验 → ★国内查验放行 → ★出口已放行
+ *        → 延迟开船 → ★到港时间更新 → ★港口封港暂停作业 → 运输中 → 延迟运输
+ *        → 已到港 → ★泰国海关查验 → ★泰国查验放行 → 清关中 → 清关已放行
+ *        → 正在卸柜 → 已到仓 → ★预约派送 → 派送中 → 已签收
+ *
+ * ⚠️ EXPORT_CLEARED（出口已放行）原来只在陆运，用户说少数海运柜也走报关放行节点，
+ *    所以两条流程都有。它**不再是陆运专属**，改 loading-manifests 的 LAND_ONLY 时要注意。
+ * ⚠️ 查验放行拆成国内 / 泰国两个状态 —— 主流程是一条线，同一个状态不能出现两次。
+ */
 export const CONTAINER_STATUS_FLOW = [
   "LOADING",
+  // 仓库里暂时不装这个柜（等货、等船期、客户要求押后）
+  "HOLD_LOADING",
   "SEALED",
+  "CUSTOMS_INSPECT_CN",
+  "INSPECT_CLEARED_CN",
+  "EXPORT_CLEARED",
   // DELAY_DEPARTED（延迟开船）原来排在 IN_TRANSIT 后面，位置是错的 ——
   // 「没准点开船」只可能发生在开船之前。2026-08-01 挪到 SEALED 和 IN_TRANSIT 中间。
   "DELAY_DEPARTED",
+  // 船期变了，重新给客户一个预计到港时间
+  "ETA_UPDATED",
+  // 台风等原因整个港口停止作业。放在开船之前 = 装货港封港（用户 08-13 确认）
+  "PORT_CLOSED",
+  // 港口拥堵 / 泊位排队，船靠上码头。位置按用户最早发的那份顺序：已靠泊 → 运输中。
+  "BERTHED",
   "IN_TRANSIT",
   // 已经在海上了但延误、还没到港。和 DELAY_DEPARTED 是一对。
   "DELAY_IN_TRANSIT",
   "ARRIVED",
+  "CUSTOMS_INSPECT_TH",
+  "INSPECT_CLEARED_TH",
   "CUSTOMS",
   "CUSTOMS_CLEARED",
   "UNLOADING",
   "IN_WAREHOUSE_TH",
+  // 跟客户约好上门时间，还没发车
+  "DELIVERY_BOOKED",
   "OUT_FOR_DELIVERY",
   "SIGNED",
 ] as const;
@@ -40,13 +69,20 @@ export const CONTAINER_STATUS_FLOW = [
 export const CONTAINER_STATUS_FLOW_LAND = [
   "LOADING",
   "SEALED",
+  // 2026-08-13 新增：国内装柜后被海关拉去查验，海运陆运都可能
+  "CUSTOMS_INSPECT_CN",
+  "INSPECT_CLEARED_CN",
   "AT_PORT_CN",
-  // 堵在口岸出不去 / 被海关拉去查验，都可跳过（不堵就直接推下一步）
+  // 堵在口岸出不去
   "BORDER_DELAY",
   "EXPORT_CLEARED",
   "IN_VIETNAM",
-  "LAOS_CLEARED",
+  // 2026-08-13 挪位：CUSTOMS_INSPECT 指的是**越南口岸抽查**（用户 08-13 说明），
+  // 原来排在 LAOS_CLEARED 后面，位置不对，挪到「过境越南」后面。
   "CUSTOMS_INSPECT",
+  "LAOS_CLEARED",
+  // 2026-08-13 新增：泰国侧清关，少数陆运柜会走。原来只有海运有。
+  "CUSTOMS",
   "CUSTOMS_CLEARED",
   "UNLOADING",
   "IN_WAREHOUSE_TH",
@@ -69,11 +105,22 @@ export const CONTAINER_STATUS_LABEL: Record<string, string> = {
   SIGNED: "已签收",
   // 陆运专属
   AT_PORT_CN: "到达凭祥口岸",
-  EXPORT_CLEARED: "出口已放行",
   IN_VIETNAM: "过境越南",
   LAOS_CLEARED: "老挝边境已放行",
   BORDER_DELAY: "口岸滞留",
   CUSTOMS_INSPECT: "海关查验",
+  // 海运陆运都有（2026-08-13：出口已放行原来只在陆运，海运少数柜也走）
+  EXPORT_CLEARED: "出口已放行",
+  CUSTOMS_INSPECT_CN: "国内海关查验",
+  INSPECT_CLEARED_CN: "国内查验放行",
+  // 海运专属（2026-08-13 新增）
+  HOLD_LOADING: "暂缓柜",
+  ETA_UPDATED: "到港时间更新",
+  PORT_CLOSED: "港口封港暂停作业",
+  BERTHED: "已靠泊",
+  CUSTOMS_INSPECT_TH: "泰国海关查验",
+  INSPECT_CLEARED_TH: "泰国查验放行",
+  DELIVERY_BOOKED: "预约派送",
 };
 
 /**
@@ -142,17 +189,67 @@ export const NEVER_GUESS_STATUSES: ReadonlySet<string> = new Set([
   "CUSTOMS_INSPECT",
   "DELAY_DEPARTED",
   "DELAY_IN_TRANSIT",
+  // 2026-08-13 新增的 8 个环节全部进这份名单。
+  // ⚠️ 这**不是**「往前推可以跳过」（用户明确不要那个），管的是**回退方向**：
+  //    柜子从没查验过，回退时就不能退进「泰国海关查验」——那是它从没到过的状态。
+  //    用户 08-13：「回退这个功能还是要的，怕弄错了」，这条正是让回退不出错的保护。
+  "HOLD_LOADING",
+  "CUSTOMS_INSPECT_CN",
+  "INSPECT_CLEARED_CN",
+  "ETA_UPDATED",
+  "PORT_CLOSED",
+  "CUSTOMS_INSPECT_TH",
+  "INSPECT_CLEARED_TH",
+  "DELIVERY_BOOKED",
+  "BERTHED",
 ]);
+
+/* 「借到另一条流程去」的那两个，只在**借去的那一条**里算意外情况。
+   一份全局名单顾不过来 —— 复审实测：
+     · 出口已放行是陆运的正常一步，却成了海运柜撤销时的落脚点
+       （海运柜停在「运输中」点撤销 → 退到「出口已放行」，柜子根本没走过）
+     · 反过来，清关中是海运的正常一步，陆运柜撤销「清关已放行」会退进它
+   所以按运输方式各给一份，别互相误伤。 */
+const NEVER_GUESS_SEA: ReadonlySet<string> = new Set([
+  ...NEVER_GUESS_STATUSES,
+  // 海运只有少数柜走报关放行节点
+  "EXPORT_CLEARED",
+]);
+
+const NEVER_GUESS_LAND: ReadonlySet<string> = new Set([
+  ...NEVER_GUESS_STATUSES,
+  // 陆运只有少数柜走泰国侧清关
+  "CUSTOMS",
+]);
+
+/**
+ * 这个柜子撤销 / 补记轨迹时，哪些环节「没记录就不能假设它发生过」。
+ * 走哪份和 flowOf 一个口径：陆运走陆运，其余（含没标运输方式的老柜子）走海运。
+ */
+export function neverGuessOf(transportMode: string | null | undefined): ReadonlySet<string> {
+  return transportMode === "land" ? NEVER_GUESS_LAND : NEVER_GUESS_SEA;
+}
 
 /** 柜子状态推进时，对应推运单到什么状态 */
 export const CONTAINER_TO_SHIPMENT_STATUS: Record<string, string> = {
-  // 陆运专属四步
+  // 陆运专属
   AT_PORT_CN: "atPortCn",
-  EXPORT_CLEARED: "exportCleared",
   IN_VIETNAM: "inVietnam",
   LAOS_CLEARED: "laosCleared",
   BORDER_DELAY: "borderDelay",
   CUSTOMS_INSPECT: "customsInspect",
+  // 海运陆运都有
+  EXPORT_CLEARED: "exportCleared",
+  CUSTOMS_INSPECT_CN: "customsInspectCn",
+  INSPECT_CLEARED_CN: "inspectClearedCn",
+  // 2026-08-13 新增的海运环节
+  HOLD_LOADING: "holdLoading",
+  ETA_UPDATED: "etaUpdated",
+  PORT_CLOSED: "portClosed",
+  BERTHED: "berthed",
+  CUSTOMS_INSPECT_TH: "customsInspectTh",
+  INSPECT_CLEARED_TH: "inspectClearedTh",
+  DELIVERY_BOOKED: "deliveryBooked",
   SEALED: "loaded",
   DELAY_DEPARTED: "delayDeparted",
   IN_TRANSIT: "departed",

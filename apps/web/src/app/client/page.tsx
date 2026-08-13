@@ -515,6 +515,25 @@ export default function ClientHomePage() {
     // 延迟运输＝已经开船了、还没到港，时间轴停在「开船」这一格
     if (value === "delayintransit") return "departed";
     if (value === "customscleared") return "inWarehouseTH";
+    /* 2026-08-13 新加的环节，每个都要说清楚停在哪一格。
+       ⚠️ 不认识的状态会让进度条掉回第一格「装柜」——
+       一票已经到港、正在被泰国海关查验的货，客户会看到进度条从「到港」倒退回「装柜」。
+       口径：**只退不进** —— 拿不准就停在靠前那一格，绝不显示得比实际进度超前。 */
+    // 还在国内仓 / 刚装柜这一段
+    if (value === "holdloading") return "loaded";
+    if (value === "customsinspectcn") return "loaded";
+    if (value === "inspectclearedcn") return "loaded";
+    if (value === "exportcleared") return "loaded";
+    // 围绕「开船」这件事的：跟「延迟开船」同一个待遇，停在「开船」格
+    if (value === "etaupdated") return "departed";
+    if (value === "portclosed") return "departed";
+    // 已靠泊：船靠上码头、还没开走，跟上面几个一样归到「开船」这一格
+    if (value === "berthed") return "departed";
+    // 泰国到港后的查验，属于「清关」这一段
+    if (value === "customsinspectth") return "customsTH";
+    if (value === "inspectclearedth") return "customsTH";
+    // 约好了上门时间但还没发车，货还在仓库
+    if (value === "deliverybooked") return "inWarehouseTH";
     return value;
   };
 

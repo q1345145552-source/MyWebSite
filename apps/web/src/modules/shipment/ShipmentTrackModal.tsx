@@ -74,6 +74,17 @@ const STATUS_CONFIG: Record<string, { zh: string; color: string; bg: string; ico
   loaded:         { zh: "已装柜",     color: "#1e3a8a", bg: "#EEF2FB", icon: "" },
   delaydeparted:  { zh: "延迟开船",   color: "#b45309", bg: "var(--c-amber-bg)", icon: "" },
   delay_departed: { zh: "延迟开船",   color: "#b45309", bg: "var(--c-amber-bg)", icon: "" },
+  // 2026-08-13 新增的 8 个环节。查验/封港/暂缓/延误一类给琥珀色（提醒），
+  // 放行/预约一类给绿色和蓝色（正常往前走）。中文一律走 shipment-status.ts 那份。
+  holdloading:      { zh: "暂缓柜",       color: "#b45309", bg: "var(--c-amber-bg)", icon: "" },
+  customsinspectcn: { zh: "国内海关查验", color: "#b45309", bg: "var(--c-amber-bg)", icon: "" },
+  inspectclearedcn: { zh: "国内查验放行", color: "var(--c-green-dark)", bg: "#dcfce7", icon: "" },
+  etaupdated:       { zh: "到港时间更新", color: "#b45309", bg: "var(--c-amber-bg)", icon: "" },
+  portclosed:       { zh: "港口封港暂停作业", color: "#b45309", bg: "var(--c-amber-bg)", icon: "" },
+  berthed:          { zh: "已靠泊",       color: "var(--c-blue-deep)", bg: "var(--c-blue-bg-2)", icon: "" },
+  customsinspectth: { zh: "泰国海关查验", color: "#b45309", bg: "var(--c-amber-bg)", icon: "" },
+  inspectclearedth: { zh: "泰国查验放行", color: "var(--c-green-dark)", bg: "#dcfce7", icon: "" },
+  deliverybooked:   { zh: "预约派送",     color: "#1e3a8a", bg: "#EEF2FB", icon: "" },
   departed:       { zh: "已开船",     color: "var(--c-blue-deep)", bg: "var(--c-blue-bg-2)", icon: "" },
   delayintransit: { zh: "延迟运输",   color: "#b45309", bg: "var(--c-amber-bg)", icon: "" },
   delay_in_transit: { zh: "延迟运输", color: "#b45309", bg: "var(--c-amber-bg)", icon: "" },

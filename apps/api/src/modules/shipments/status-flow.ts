@@ -1,17 +1,34 @@
 // 运单状态流转定义，从 shipments/routes.ts 提取为共享模块
 // 避免多个文件各自定义导致不一致和未导入引用错误
 
+// 海运流程。2026-08-13 按用户给的实际业务加进 8 个环节，
+// 顺序必须和 containers/status-flow.ts 的 CONTAINER_STATUS_FLOW 一一对应。
 export const STATUS_FLOW = [
   "created",
+  // 仓库里暂时不装这个柜
+  "holdLoading",
   "loaded",
+  "customsInspectCn",
+  "inspectClearedCn",
+  "exportCleared",
   "delayDeparted",
+  // 船期变了，重新给一个预计到港时间
+  "etaUpdated",
+  // 台风等原因装货港停止作业
+  "portClosed",
+  // 港口拥堵 / 泊位排队，船靠上码头
+  "berthed",
   "departed",
   // 已开船但海上延误、还没到港。和 delayDeparted 是一对：一个是没准点开、一个是没准点到。
   "delayInTransit",
   "arrivedPort",
+  "customsInspectTh",
+  "inspectClearedTh",
   "customsTH",
   "customsCleared",
   "inWarehouseTH",
+  // 跟客户约好上门时间，还没发车
+  "deliveryBooked",
   "outForDelivery",
   "delivered",
 ] as const;
@@ -25,13 +42,19 @@ export const STATUS_FLOW = [
 export const STATUS_FLOW_LAND = [
   "created",
   "loaded",
+  // 2026-08-13 新增：国内装柜后被海关拉去查验，海运陆运都可能
+  "customsInspectCn",
+  "inspectClearedCn",
   "atPortCn",
-  // 堵在口岸/被查验，都是可跳过的中间态（同海运的 delayDeparted）
+  // 堵在口岸出不去
   "borderDelay",
   "exportCleared",
   "inVietnam",
-  "laosCleared",
+  // 2026-08-13 挪位：这个指的是越南口岸抽查，原来排在 laosCleared 后面
   "customsInspect",
+  "laosCleared",
+  // 2026-08-13 新增：泰国侧清关，少数陆运柜会走
+  "customsTH",
   "customsCleared",
   "inWarehouseTH",
   "outForDelivery",

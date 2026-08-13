@@ -25,7 +25,7 @@ import {
   nextStopOf,
   CONTAINER_TO_SHIPMENT_STATUS,
   flowOf,
-  NEVER_GUESS_STATUSES,
+  neverGuessOf,
 } from "./status-flow";
 
 /**
@@ -516,7 +516,9 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
         for (let i = idx - 1; i >= 0; i--) {
           const candidate = flow[i]!;
           // 没记录推过的意外状态，绝不能退到那里去
-          if (NEVER_GUESS_STATUSES.has(candidate) && !dates[candidate]) continue;
+          // ⚠️ 名单按运输方式取 —— 海运柜不能退进「出口已放行」，
+          //    陆运柜不能退进「清关中」，两边的「少数柜才走」不是同一批。
+          if (neverGuessOf(container.transportMode).has(candidate) && !dates[candidate]) continue;
           prevStatus = candidate;
           break;
         }

@@ -7,7 +7,7 @@ import {
   nextStopOf,
   CONTAINER_TO_SHIPMENT_STATUS,
   flowOf,
-  NEVER_GUESS_STATUSES,
+  neverGuessOf,
 } from "../containers/status-flow";
 
 /**
@@ -134,8 +134,16 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
     if (!container) { fail(res, 404, "NOT_FOUND", "柜子不存在"); return; }
 
     // 两条流程共有的状态才允许切换；陆运/海运专属状态上不许改
-    const SEA_ONLY = ["DELAY_DEPARTED", "IN_TRANSIT", "DELAY_IN_TRANSIT", "ARRIVED", "CUSTOMS"];
-    const LAND_ONLY = ["AT_PORT_CN", "EXPORT_CLEARED", "IN_VIETNAM", "LAOS_CLEARED", "BORDER_DELAY", "CUSTOMS_INSPECT"];
+    // ⚠️ 2026-08-13 跟着流程改了两处归属：
+    //    CUSTOMS（清关中）陆运也有了 → 从 SEA_ONLY 拿掉
+    //    EXPORT_CLEARED（出口已放行）海运也有了 → 从 LAND_ONLY 拿掉
+    //    CUSTOMS_INSPECT_CN / INSPECT_CLEARED_CN 两条流程都有 → 两边都不放
+    const SEA_ONLY = [
+      "HOLD_LOADING", "DELAY_DEPARTED", "ETA_UPDATED", "PORT_CLOSED", "BERTHED",
+      "IN_TRANSIT", "DELAY_IN_TRANSIT", "ARRIVED",
+      "CUSTOMS_INSPECT_TH", "INSPECT_CLEARED_TH", "DELIVERY_BOOKED",
+    ];
+    const LAND_ONLY = ["AT_PORT_CN", "IN_VIETNAM", "LAOS_CLEARED", "BORDER_DELAY", "CUSTOMS_INSPECT"];
     const blocked = mode === "land" ? SEA_ONLY : LAND_ONLY;
     if (blocked.includes(container.currentStatus)) {
       fail(
@@ -339,7 +347,8 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
 
       // 「滞留 / 查验 / 延迟」这类是意外情况，没记录就绝不能凭空补
       // 名单挪到 containers/status-flow.ts 了（2026-08-10），撤销状态那边也要用同一份
-      const NEVER_GUESS = NEVER_GUESS_STATUSES;
+      // 2026-08-13：名单改成按运输方式取，海运陆运各一份（见 status-flow.ts 的 neverGuessOf）
+      const NEVER_GUESS = neverGuessOf(container.transportMode);
       const passed = recordedSteps.length > 0
         ? recordedSteps
         // 老柜子没有 statusDates（这个功能之前建的），只能按流程尽力补，但跳过意外状态
