@@ -32,7 +32,10 @@ export type ShipmentStatus =
   | "berthed"
   | "customsInspectTh"
   | "inspectClearedTh"
-  | "deliveryBooked";
+  | "deliveryBooked"
+  // 2026-08-13：柜子到泰国仓卸货。原来这一步不写客户轨迹，客户看到的是
+  // 「清关已放行」直接跳「已到仓」，中间几天一片空白。海运陆运都有。
+  | "unloading";
 
 /** 海运流程（原来的唯一流程，未改动） */
 export const SHIPMENT_STATUS_FLOW: ShipmentStatus[] = [
@@ -53,6 +56,7 @@ export const SHIPMENT_STATUS_FLOW: ShipmentStatus[] = [
   "inspectClearedTh",
   "customsTH",
   "customsCleared",
+  "unloading",
   "inWarehouseTH",
   "deliveryBooked",
   "outForDelivery",
@@ -78,6 +82,7 @@ export const SHIPMENT_STATUS_FLOW_LAND: ShipmentStatus[] = [
   "laosCleared",
   "customsTH",
   "customsCleared",
+  "unloading",
   "inWarehouseTH",
   "outForDelivery",
   "delivered",

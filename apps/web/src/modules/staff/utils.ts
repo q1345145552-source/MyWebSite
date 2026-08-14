@@ -23,6 +23,7 @@ export const SHIPMENT_STATUS_FLOW = [
   "inspectClearedTh",
   "customsTH",
   "customsCleared",
+  "unloading",
   "inWarehouseTH",
   "deliveryBooked",
   "outForDelivery",

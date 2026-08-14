@@ -23,6 +23,7 @@ export const DEFAULT_STATUS_LABELS: StatusLabelConfig[] = [
   { status: "inspectClearedTh", labelZh: "泰国查验放行" },
   { status: "customsTH", labelZh: "清关中" },
   { status: "customsCleared", labelZh: "清关已放行" },
+  { status: "unloading", labelZh: "正在卸柜" },
   { status: "inWarehouseTH", labelZh: "已到仓" },
   { status: "deliveryBooked", labelZh: "预约派送" },
   { status: "outForDelivery", labelZh: "派送中" },

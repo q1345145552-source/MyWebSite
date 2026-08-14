@@ -98,6 +98,7 @@ const STATUS_CONFIG: Record<string, { zh: string; color: string; bg: string; ico
   customsinspect: { zh: "海关查验",   color: "#b45309", bg: "var(--c-amber-bg)", icon: "" },
   customsth:      { zh: "清关中",     color: "var(--c-amber-deep)", bg: "var(--c-amber-bg)", icon: "" },
   customscleared: { zh: "清关已放行", color: "var(--c-green-dark)", bg: "#dcfce7", icon: "" },
+  unloading:      { zh: "正在卸柜",   color: "var(--c-blue-deep)", bg: "var(--c-blue-bg-2)", icon: "" },
   inwarehouseth:  { zh: "已到仓",     color: "#1e3a8a", bg: "#EEF2FB", icon: "" },
   outfordelivery: { zh: "派送中",     color: "#1e3a8a", bg: "#EEF2FB", icon: "" },
   delivered:      { zh: "派送完成",   color: "var(--c-green-3)", bg: "#f0fdf4", icon: "" },

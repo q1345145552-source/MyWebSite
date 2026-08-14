@@ -257,6 +257,9 @@ export const CONTAINER_TO_SHIPMENT_STATUS: Record<string, string> = {
   ARRIVED: "arrivedPort",
   CUSTOMS: "customsTH",
   CUSTOMS_CLEARED: "customsCleared",
+  // 2026-08-13：原来「正在卸柜」是唯一一个不写客户轨迹的中间步骤，
+  // 客户看到「清关已放行」直接跳「已到仓」，中间几天一片空白。现在补上。
+  UNLOADING: "unloading",
   IN_WAREHOUSE_TH: "inWarehouseTH",
   OUT_FOR_DELIVERY: "outForDelivery",
   SIGNED: "delivered",

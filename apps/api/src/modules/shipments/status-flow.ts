@@ -26,6 +26,8 @@ export const STATUS_FLOW = [
   "inspectClearedTh",
   "customsTH",
   "customsCleared",
+  // 2026-08-13：柜子到泰国仓卸货，原来这一步不写客户轨迹
+  "unloading",
   "inWarehouseTH",
   // 跟客户约好上门时间，还没发车
   "deliveryBooked",
@@ -56,6 +58,8 @@ export const STATUS_FLOW_LAND = [
   // 2026-08-13 新增：泰国侧清关，少数陆运柜会走
   "customsTH",
   "customsCleared",
+  // 2026-08-13：柜子到泰国仓卸货，原来这一步不写客户轨迹
+  "unloading",
   "inWarehouseTH",
   "outForDelivery",
   "delivered",

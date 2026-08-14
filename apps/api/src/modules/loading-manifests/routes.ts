@@ -372,7 +372,7 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
       type Step = { containerStatus: string; shipmentStatus: string; at: Date | null };
       const steps: Step[] = passed
         .map((cs: string) => ({ containerStatus: cs, shipmentStatus: CONTAINER_TO_SHIPMENT_STATUS[cs] ?? "", at: anchor[cs] ?? null }))
-        // LOADING / UNLOADING 不对应运单状态，跳过
+        // LOADING 不对应运单状态，跳过（2026-08-13 起 UNLOADING 已经有了，会被补记）
         .filter((s: Step) => s.shipmentStatus);
       // 柜子还在装柜中：至少给一条「已装柜」，否则这票货的轨迹会完全没有起点
       if (steps.length === 0) steps.push({ containerStatus: "SEALED", shipmentStatus: "loaded", at: container.createdAt ?? now });
