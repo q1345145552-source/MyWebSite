@@ -66,16 +66,12 @@ const warehouseAddressMap: Record<string, string> = {
 
 
 const CLIENT_SECTION_IDS = ["client-main", "client-query", "client-prealert", "client-fcl"] as const;
-const ORDER_TIMELINE = [
-  { key: "loaded", label: "装柜" },
-  { key: "departed", label: "开船" },
-  { key: "arrivedPort", label: "到港" },
-  { key: "customsTH", label: "清关" },
-  { key: "customsCleared", label: "放行" },
-  { key: "inWarehouseTH", label: "到仓" },
-  { key: "outForDelivery", label: "派送" },
-  { key: "delivered", label: "签收" },
-] as const;
+/* ORDER_TIMELINE（装柜→开船→到港→清关→放行→到仓→派送→签收 八格进度条）
+   2026-08-13 删除。它和 buildOrderTimeline / normalizeTimelineStatus 一起，
+   **从来没有被渲染到页面上过** —— 三者互相调用，但没有任何 JSX 用到它们。
+   已在浏览器里确认：客户端页面上找不到这条进度条。
+   客户真正看到的是运单列表那一列状态，和「物流轨迹」弹窗，两处都走
+   shipmentStatusZh，新加的环节都有中文。 */
 
 const VALID_PACKAGE_UNITS = ["bag", "box"] as const;
 const VALID_TRANSPORT_MODES = ["sea", "land"] as const;
@@ -464,92 +460,12 @@ export default function ClientHomePage() {
 
   const warehouseLabel = warehouseLabelFromId;
 
-  const logisticsStatusText = (status?: string): string => {
-    const map: Record<string, string> = {
-      created: "已创建", pickedup: "已揽收", inwarehousecn: "国内仓已收货", receivedcn: "国内仓已收货",
-      customspending: "报关中", loaded: "已装柜", delaydeparted: "延迟开船",
-      departed: "已开船", delayintransit: "延迟运输", arrivedport: "已到港", intransit: "运输中",
-      customs: "清关中", customsth: "清关中", customscleared: "清关已放行",
-      inwarehouseth: "已到仓", warehouseth: "已到仓",
-      loading: "装柜中", sealed: "已封柜", arrived: "已到港",
-      outfordelivery: "派送中", delivered: "派送完成",
-      returned: "已退回", cancelled: "已取消", exception: "异常",
-    };
-    return map[(status ?? "").toLowerCase()] ?? "处理中";
-  };
-
-  /**
-   * 将系统状态值映射为中文订单状态文案。
-   */
-  const orderStatusText = (status?: string): string => {
-    const value = (status ?? "").toLowerCase();
-    if (!value) return "未更新";
-    if (value === "created") return "已创建";
-    if (value === "pickedup") return "已揽收";
-    if (value === "inwarehousecn" || value === "receivedcn") return "国内仓已收货";
-    if (value === "customspending") return "报关中";
-    if (value === "loaded") return "已装柜";
-    if (value === "delaydeparted") return "延迟开船";
-    if (value === "departed") return "已开船";
-    if (value === "delayintransit") return "延迟运输";
-    if (value === "arrivedport") return "已到港";
-    if (value === "intransit") return "运输中";
-    if (value === "customsth") return "清关中";
-    if (value === "customscleared") return "清关已放行";
-    if (value === "inwarehouseth" || value === "warehouseth") return "已到仓";
-    if (value === "outfordelivery") return "派送中";
-    if (value === "delivered") return "派送完成";
-    if (value === "returned") return "已退回";
-    if (value === "cancelled") return "已取消";
-    if (value === "exception") return "异常";
-    return "未更新";
-  };
-
-  /**
-   * 将状态值归一化到订单时间轴节点。
-   */
-  const normalizeTimelineStatus = (status?: string): string => {
-    const value = (status ?? "").toLowerCase();
-    if (!value) return "";
-    if (value === "delaydeparted") return "departed";
-    // 延迟运输＝已经开船了、还没到港，时间轴停在「开船」这一格
-    if (value === "delayintransit") return "departed";
-    if (value === "customscleared") return "inWarehouseTH";
-    /* 2026-08-13 新加的环节，每个都要说清楚停在哪一格。
-       ⚠️ 不认识的状态会让进度条掉回第一格「装柜」——
-       一票已经到港、正在被泰国海关查验的货，客户会看到进度条从「到港」倒退回「装柜」。
-       口径：**只退不进** —— 拿不准就停在靠前那一格，绝不显示得比实际进度超前。 */
-    // 还在国内仓 / 刚装柜这一段
-    if (value === "holdloading") return "loaded";
-    if (value === "customsinspectcn") return "loaded";
-    if (value === "inspectclearedcn") return "loaded";
-    if (value === "exportcleared") return "loaded";
-    // 围绕「开船」这件事的：跟「延迟开船」同一个待遇，停在「开船」格
-    if (value === "etaupdated") return "departed";
-    if (value === "portclosed") return "departed";
-    // 已靠泊：船靠上码头、还没开走，跟上面几个一样归到「开船」这一格
-    if (value === "berthed") return "departed";
-    // 泰国到港后的查验，属于「清关」这一段
-    if (value === "customsinspectth") return "customsTH";
-    if (value === "inspectclearedth") return "customsTH";
-    // 约好了上门时间但还没发车，货还在仓库
-    if (value === "deliverybooked") return "inWarehouseTH";
-    return value;
-  };
-
-  /**
-   * 构建带阶段（已完成/进行中/未开始）的物流时间轴数据。
-   */
-  const buildOrderTimeline = (status?: string): Array<{ key: string; label: string; phase: "done"  |  "active"  |  "pending" }> => {
-    const normalized = normalizeTimelineStatus(status);
-    const activeIndex = ORDER_TIMELINE.findIndex((item) => item.key.toLowerCase() === normalized.toLowerCase());
-    const fallbackIndex = normalized === "delivered" ? ORDER_TIMELINE.length - 1 : Math.max(activeIndex, 0);
-    return ORDER_TIMELINE.map((item, index) => {
-      if (index < fallbackIndex) return { ...item, phase: "done" };
-      if (index === fallbackIndex) return { ...item, phase: "active" };
-      return { ...item, phase: "pending" };
-    });
-  };
+  /* 2026-08-13 删掉三个死函数：logisticsStatusText / orderStatusText / statusLabel。
+     它们各自抄了一份运单状态中文对照表，都停留在加新环节之前的老版本
+     （查不到就返回「处理中」「未更新」）。全库 grep 过，三个都没有任何调用方 ——
+     页面上真正在用的是共用那份 shipmentStatusZh（见第 1046 行那一列），
+     所以删掉它们对界面没有任何影响，留着反而会被下一个人照着抄。
+     ⚠️ 下面的 formatDateTime 原来夹在这三个函数中间，它是**在用**的，别一起删。 */
 
   /**
    * 将时间字符串格式化为“yyyy/MM/dd HH:mm:ss”。
@@ -559,13 +475,6 @@ export default function ClientHomePage() {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return value;
     return date.toLocaleString("zh-CN", { hour12: false });
-  };
-
-  /**
-   * 状态值转中文文案（用于状态变更日志）。
-   */
-  const statusLabel = (value?: string): string => {
-    return orderStatusText(value);
   };
 
   /**
