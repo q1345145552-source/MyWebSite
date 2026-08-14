@@ -62,6 +62,7 @@ import StaffPrealertList from "../../components/staff/StaffPrealertList";
 import type { PrealertSearchState } from "../../components/staff/StaffPrealertList";
 import StaffLastmile from "../../components/staff/StaffLastmile";
 import FclInquiryPanel from "../../components/client/FclInquiryPanel";
+import { SHIPMENT_STATUS_FILTER_OPTIONS } from "../../modules/shipment/shipment-status";
 import {
   shipmentStatusZh,
   warehouseLabelFromId,
@@ -102,7 +103,10 @@ export default function StaffHomePage() {
     { id: "wh_dongguan_01", label: "东莞仓" },
   { id: "wh_shenzhen_01", label: "深圳仓" },
   ];
-  const logisticsStatusOptions = ["已装柜", "延迟开船", "已开船", "延迟运输", "已到港", "清关中", "清关已放行", "已到仓", "派送中", "派送完成"] as const;
+  /* 运单列表「按状态筛选」的选项。2026-08-13 改成从流程表生成（唯一定义处在
+     modules/shipment/shipment-status.ts）—— 原来这里写死 10 个，加状态没人回来改，
+     实测缺 16 个，陆运那五步从上线起就一直筛不到。**别再改回写死。** */
+  const logisticsStatusOptions = SHIPMENT_STATUS_FILTER_OPTIONS;
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [toast, setToast] = useState("");

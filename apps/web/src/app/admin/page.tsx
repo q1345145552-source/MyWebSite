@@ -26,6 +26,7 @@ import {
 import { apiBaseUrl, authHeaders, parseApiResponse } from "../../services/core-api";
 import { DEFAULT_SHIPPING_PRICES, INSPECTION_SURCHARGE, SENSITIVE_SURCHARGE } from "../../../../../packages/shared-types/constants";
 import { shipmentStatusZh, transportModeLabel, warehouseLabelFromId } from "../../modules/staff/utils";
+import { SHIPMENT_STATUS_FILTER_OPTIONS } from "../../modules/shipment/shipment-status";
 import ShippingConfig from "../../components/admin/ShippingConfig";
 import {
   fetchAdminOverview,
@@ -148,12 +149,10 @@ const warehouseOptions = [
   { id: "wh_shenzhen_01", label: "深圳仓" },
 ];
 
-const logisticsStatusOptions = [
-  "已创建", "已揽收", "国内仓已收货", "报关中", "已装柜",
-  // 顺序按真实流程排：「运输中」原来排在「已到港」后面，2026-08-01 挪到前面
-  "延迟开船", "已开船", "运输中", "延迟运输", "已到港",
-  "清关中", "清关已放行", "已到仓", "派送中", "派送完成",
-] as const;
+/* 运单列表「按状态筛选」的选项。2026-08-13 改成从流程表生成（唯一定义处在
+   modules/shipment/shipment-status.ts）—— 原来这里写死 15 个，加状态没人回来改，
+   实测缺 15 个，陆运那五步从上线起就一直筛不到。**别再改回写死。** */
+const logisticsStatusOptions = SHIPMENT_STATUS_FILTER_OPTIONS;
 
 /** 中文状态 → 英文 status */
 /**

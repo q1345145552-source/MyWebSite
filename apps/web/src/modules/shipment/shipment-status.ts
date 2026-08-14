@@ -10,6 +10,8 @@
          补一行颜色（那边只管颜色，中文从这里取）。
    ========================================================================== */
 
+import { SHIPMENT_STATUS_FLOW, SHIPMENT_STATUS_FLOW_LAND } from "../../../../../packages/shared-types/shipment-status";
+
 export const SHIPMENT_STATUS_ZH: Record<string, string> = {
   created: "已创建",
   pickedup: "已揽收",
@@ -77,6 +79,36 @@ export const SHIPMENT_STATUS_ZH: Record<string, string> = {
 export const CLIENT_STATUS_ZH_OVERRIDES: Record<string, string> = {
   delivered: "已签收",
 };
+
+/* ==========================================================================
+   运单列表「按状态筛选」下拉的选项（员工端 + 管理员端共用一份）
+   ------------------------------------------------------------------------
+   2026-08-13：原来员工端和管理员端各自写死一份中文清单（10 个 / 15 个），
+   加状态时没人记得回来改，实测缺了 16 个 / 15 个 ——
+   连 2026-08-06 加的陆运五步（到达凭祥口岸、过境越南、老挝边境已放行……）
+   **从上线那天起就一直筛不到**。筛选本身是好的（比对走的是上面那份中文表），
+   纯粹是选项列表没跟上。
+
+   所以改成从流程表直接生成：加状态只改流程表，这里自动跟着变。
+   顺序＝海运流程走完，再接上陆运独有的几步。
+   ⚠️ 开头那三个（已揽收 / 国内仓已收货 / 报关中）不在任何流程里，
+      是老数据里出现过的状态，原来管理员端筛得到，别把人家的功能筛没了。
+   ========================================================================== */
+
+const LEGACY_FILTER_STATUSES = ["已揽收", "国内仓已收货", "报关中"];
+
+export const SHIPMENT_STATUS_FILTER_OPTIONS: string[] = (() => {
+  const out: string[] = [];
+  const push = (label: string) => {
+    if (label && label !== "未知状态" && !out.includes(label)) out.push(label);
+  };
+  // 「已创建」是两条流程的第一步，先放它，再插老数据那三个，顺序才像话
+  push(shipmentStatusZh(SHIPMENT_STATUS_FLOW[0]));
+  LEGACY_FILTER_STATUSES.forEach(push);
+  SHIPMENT_STATUS_FLOW.forEach((s) => push(shipmentStatusZh(s)));
+  SHIPMENT_STATUS_FLOW_LAND.forEach((s) => push(shipmentStatusZh(s)));
+  return out;
+})();
 
 /**
  * 状态转中文。查不到时返回「未知状态」而不是把英文原样吐给用户，
