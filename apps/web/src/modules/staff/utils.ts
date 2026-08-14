@@ -29,8 +29,9 @@ export const SHIPMENT_STATUS_FLOW = [
   "delivered",
 ] as const;
 
-/** 与后端 DELAY_STATUSES 一致：可跳过的中间态。 */
-export const SHIPMENT_DELAY_STATUSES = new Set(["delayDeparted", "delayInTransit"]);
+/* SHIPMENT_DELAY_STATUSES（可跳过的中间态）2026-08-13 删除：
+   下拉框改成「后面的都能直接选」之后，没有谁需要单独标记哪几个可跳过了。
+   后端的 DELAY_STATUSES 仍然保留 —— 那边管的是别的事，别顺手删掉。 */
 
 export const SHIPMENT_EXCEPTION_STATUSES = new Set(["exception", "returned", "cancelled"]);
 
@@ -178,12 +179,18 @@ export function getValidShipmentStatusTargets(fromStatus: string): string[] {
   }
   const fromIdx = SHIPMENT_STATUS_FLOW.indexOf(from as (typeof SHIPMENT_STATUS_FLOW)[number]);
   if (fromIdx >= 0) {
-    // 往后放一格；如果那一格是「延迟」类的可跳过状态，就把它后面那格也一起放出来，
-    // 否则没延误的单子会被逼着必须先点一下「延迟开船」/「延迟运输」。
+    /* 后面的环节全部放出来，员工可以直接跳，不用一格一格点（2026-08-13 用户定的）。
+     *
+     * 原来的规矩是「只放下一格，遇到延迟类才继续往后放一格」。
+     * 加了 9 个环节之后这条规矩会出事：暂缓柜、海关查验、封港这些**出了状况才有**的环节
+     * 全变成必经之路 —— 「已创建」的下一格是「暂缓柜」，等于逼着每票货都先点一下暂缓，
+     * 这是给正常的货编造没发生过的事。用户原话：「可以直接跳过就行，不要一个一个点」。
+     *
+     * ⚠️ 只放**后面**的，往回退一格都不给 —— 退回去要走「撤销」，那边会连轨迹一起删干净。
+     * ⚠️ 后端 canTransitLoose 本来就只要求「往前不往后」，这里放宽后两边口径才真正一致。
+     */
     for (let i = fromIdx + 1; i < SHIPMENT_STATUS_FLOW.length; i += 1) {
-      const candidate = SHIPMENT_STATUS_FLOW[i]!;
-      out.add(candidate);
-      if (!SHIPMENT_DELAY_STATUSES.has(candidate)) break;
+      out.add(SHIPMENT_STATUS_FLOW[i]!);
     }
   }
   SHIPMENT_EXCEPTION_STATUSES.forEach((s) => out.add(s));
