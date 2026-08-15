@@ -278,7 +278,9 @@ export default function StaffConsolidationPage() {
       const wb = new ExcelJS.Workbook();
       const ws = wb.addWorksheet("集货清单");
       
-      const headers = ["唛头", "运单号", "产品名称", "件数", "装箱数量", "总数量", "单件重量", "总重量", "长(cm)", "宽(cm)", "高(cm)", "体积(m³)", "材质", "货值", "产品图片"];
+      // ⚠️ 这份表头和下面 addRow 的取值顺序必须一一对应，改一处就要改另一处。
+      //    「产品图片」必须留在最后一列：下面用 headers.length 定位图片列。
+      const headers = ["唛头", "运单号", "产品名称", "件数", "装箱数量", "总数量", "单件重量", "总重量", "长(cm)", "宽(cm)", "高(cm)", "体积(m³)", "材质", "货值", "货型", "产品图片"];
       const headerRow = ws.addRow(headers);
       headerRow.font = { bold: true };
       headerRow.alignment = { vertical: "middle", horizontal: "center" };
@@ -299,7 +301,8 @@ export default function StaffConsolidationPage() {
           r.packageCount ?? "", r.quantityPerBox ?? "", r.totalQuantity ?? "",
           r.unitWeight ?? "", r.totalWeight ?? "", r.lengthCm ?? "",
           r.widthCm ?? "", r.heightCm ?? "", r.volumeM3 ?? "",
-          r.material ?? "", r.cargoValue ?? "", ""
+          r.material ?? "", r.cargoValue ?? "", r.cargoType ?? "",
+          "" // 产品图片列：先占位，图片在第二遍统一嵌入
         ]);
         const rowNum = row.number; // addRow 后立即捕获行号，防止后续 addImage 改值
         row.alignment = { vertical: "middle" };
@@ -680,6 +683,7 @@ export default function StaffConsolidationPage() {
                   <th style={thS}>体积</th>
                   <th style={thS}>材质</th>
                   <th style={thS}>货值</th>
+                  <th style={thS}>货型</th>
                 </tr>
               </thead>
               <tbody>
@@ -697,6 +701,7 @@ export default function StaffConsolidationPage() {
                     <td style={tdS}>{p.volume?.toFixed(4)}</td>
                     <td style={tdS}>{p.material}</td>
                     <td style={tdS}>{p.cargoValue}</td>
+                    <td style={tdS}>{p.cargoType === "inspection" ? "商检" : p.cargoType === "sensitive" ? "敏感" : "普货"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -795,6 +800,7 @@ function StaffPrealertRow({
                 <th style={thS}>体积</th>
                 <th style={thS}>材质</th>
                 <th style={thS}>货值</th>
+                <th style={thS}>货型</th>
                 <th style={thS}>图片</th>
               </tr>
             </thead>
@@ -815,6 +821,7 @@ function StaffPrealertRow({
                   <td style={tdS}>{p.volume?.toFixed(4)}</td>
                   <td style={tdS}>{p.material}</td>
                   <td style={tdS}>{p.cargoValue}</td>
+                  <td style={tdS}>{p.cargoType === "inspection" ? "商检" : p.cargoType === "sensitive" ? "敏感" : "普货"}</td>
                   <td style={{ ...tdS, textAlign: "center" }}>
                     {p.productImageBase64 ? (
                       <button

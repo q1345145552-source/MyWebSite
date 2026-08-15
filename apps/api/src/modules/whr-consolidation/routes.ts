@@ -24,6 +24,21 @@ const PLAN_LIST_TAKE = 500;
 /** 一个计划最多参与客户数 */
 const MAX_CUSTOMERS_PER_PLAN = 100;
 
+/** 货型取值 */
+const CARGO_TYPES = ["normal", "inspection", "sensitive"];
+const CARGO_TYPE_ZH: Record<string, string> = { normal: "普货", inspection: "商检", sensitive: "敏感" };
+
+/**
+ * 允许管理员改货型 / 删单件货物的状态（用户 2026-08-15 拍板）。
+ *
+ * 口径是「客户还没交钱」：
+ *   pending                  货还没到，客户自己就能改
+ *   received_pending_payment 仓库已收货、账单已生成但还没付款
+ *                            —— 货型报错通常正是收货时才发现的，卡在 pending 等于功能用不了
+ * payment_submitted 及之后一律不给动：钱已经交了，改了对不上账。
+ */
+const ITEM_EDITABLE_STATUSES = ["pending", "received_pending_payment"];
+
 // ============================================================================
 // 辅助函数
 // ============================================================================
@@ -926,6 +941,159 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
       customerVolume: totals.totalVolumeM3,
       customerTotalFee: totals.totalFee,
       customerPrealerts: totals.totalPrealerts,
+    });
+  });
+
+  // ==========================================================================
+  // 9b. 管理员改单件货物的货型（仓库版，2026-08-15 新增）
+  //     客户报单时经常把商检/敏感报成普货，仓库收货才发现。改完金额立刻重算。
+  // ==========================================================================
+  app.post("/admin/whr-consolidation/prealerts/item-cargo-type", async (req, res) => {
+    const auth = requireRole(req, res, ["admin"]);
+    if (!auth) return;
+
+    const body = (req.body ?? {}) as { itemId?: string; cargoType?: string };
+
+    if (!body.itemId?.trim()) {
+      fail(res, 400, "BAD_REQUEST", "itemId 为必填");
+      return;
+    }
+    if (!body.cargoType || !CARGO_TYPES.includes(body.cargoType)) {
+      fail(res, 400, "BAD_REQUEST", "货型不合法");
+      return;
+    }
+
+    const item = await prisma.whrConsolidationPrealertItem.findFirst({
+      where: { id: body.itemId, companyId: auth.companyId },
+      select: {
+        id: true,
+        productName: true,
+        cargoType: true,
+        prealert: { select: { id: true, status: true, customerId: true } },
+      },
+    });
+
+    if (!item) {
+      fail(res, 404, "NOT_FOUND", "货物明细不存在");
+      return;
+    }
+    if (!ITEM_EDITABLE_STATUSES.includes(item.prealert.status)) {
+      fail(res, 400, "BAD_REQUEST", "该预报单客户已付款或已进入装柜流程，货型不能再改");
+      return;
+    }
+    if (item.cargoType === body.cargoType) {
+      fail(res, 400, "BAD_REQUEST", "货型没有变化");
+      return;
+    }
+
+    const fromZh = CARGO_TYPE_ZH[item.cargoType] ?? item.cargoType;
+    const toZh = CARGO_TYPE_ZH[body.cargoType]!;
+
+    await prisma.$transaction(async (tx) => {
+      await tx.whrConsolidationPrealertItem.update({
+        where: { id: item.id },
+        data: { cargoType: body.cargoType! },
+      });
+
+      await tx.whrConsolidationStatusLog.create({
+        data: {
+          prealertId: item.prealert.id,
+          companyId: auth.companyId,
+          operatorId: auth.userId,
+          operatorRole: auth.role,
+          operatorName: auth.name || auth.userId,
+          fromStatus: item.prealert.status,
+          toStatus: item.prealert.status,
+          remark: `管理员把「${item.productName}」的货型由${fromZh}改为${toZh}`,
+        },
+      });
+
+      // ⚠️ 这里**故意不重算金额**（用户 2026-08-15 拍板：「全部手动报价，系统不用去算价格」）。
+      // 签收那一刻的自动计费保持原样不动，改货型只改记录，钱要不要跟着改由管理员自己定。
+      // 方数和件数也不受影响：换货型不改长宽高，也不改件数。
+    });
+
+    ok(res, {
+      itemId: item.id,
+      cargoType: body.cargoType,
+    });
+  });
+
+  // ==========================================================================
+  // 9c. 管理员删单件货物明细（仓库版，2026-08-15 新增）
+  //     原来只能删整张预报单，客户多报一件就得整张作废重来。
+  //     ⚠️ 这是删数据，删完方数和金额都会变，界面必须先弹窗说清楚影响。
+  // ==========================================================================
+  app.post("/admin/whr-consolidation/prealerts/item-delete", async (req, res) => {
+    const auth = requireRole(req, res, ["admin"]);
+    if (!auth) return;
+
+    const body = (req.body ?? {}) as { itemId?: string };
+
+    if (!body.itemId?.trim()) {
+      fail(res, 400, "BAD_REQUEST", "itemId 为必填");
+      return;
+    }
+
+    const item = await prisma.whrConsolidationPrealertItem.findFirst({
+      where: { id: body.itemId, companyId: auth.companyId },
+      select: {
+        id: true,
+        productName: true,
+        packageCount: true,
+        prealert: {
+          select: {
+            id: true,
+            status: true,
+            customerId: true,
+            _count: { select: { items: true } },
+          },
+        },
+      },
+    });
+
+    if (!item) {
+      fail(res, 404, "NOT_FOUND", "货物明细不存在");
+      return;
+    }
+    if (!ITEM_EDITABLE_STATUSES.includes(item.prealert.status)) {
+      fail(res, 400, "BAD_REQUEST", "该预报单客户已付款或已进入装柜流程，货物不能再删");
+      return;
+    }
+    // 最后一件不给删：空预报单签收时会被挡住，留一张删不掉又签不了的单更麻烦。
+    // 整张不要了要走「取消预报单」，那条路会清费用、退方数、写流转记录。
+    if (item.prealert._count.items <= 1) {
+      fail(res, 400, "BAD_REQUEST", "这是该预报单最后一件货物，不能删。整张不要了请用「取消预报单」");
+      return;
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.whrConsolidationPrealertItem.delete({ where: { id: item.id } });
+
+      await tx.whrConsolidationStatusLog.create({
+        data: {
+          prealertId: item.prealert.id,
+          companyId: auth.companyId,
+          operatorId: auth.userId,
+          operatorRole: auth.role,
+          operatorName: auth.name || auth.userId,
+          fromStatus: item.prealert.status,
+          toStatus: item.prealert.status,
+          remark: `管理员删除了货物「${item.productName}」（${item.packageCount}件）`,
+        },
+      });
+
+      // ⚠️ 只重算「方数 / 件数」这类数量汇总，**不重算金额**
+      //（用户 2026-08-15 拍板：系统不去算价格）。
+      // recalcCustomerTotals 里的 totalFee 只是把各张单已存的金额加起来，不会重新定价。
+      // 删了货但账单金额不变，是有意的 —— 要不要减价由管理员自己决定，界面弹窗已写明。
+      const totals = await recalcCustomerTotals(item.prealert.customerId, tx);
+      return { totals };
+    });
+
+    ok(res, {
+      itemId: item.id,
+      customerVolume: result.totals.totalVolumeM3,
     });
   });
 

@@ -17,6 +17,23 @@ import * as XLSX from "xlsx";
 // 辅助函数
 // ============================================================================
 
+/** 货型取值，与仓库版集货保持一致。普通版只记录，不参与计价。 */
+const CARGO_TYPES = ["normal", "inspection", "sensitive"];
+
+/**
+ * 任务走到这几档之后就不许再删货了（2026-08-15）。
+ *
+ * ⚠️ 这里用「黑名单」不用「白名单」是有原因的：任务状态实际取值是
+ * collecting / full_confirmed / quoted / paid / loading / in_transit /
+ * customs / delivering / completed / cancelled —— 前面能删的有四档，
+ * 白名单漏写一档就会让「明明还没付款却删不了」，而且以后加新状态还会再漏一次。
+ * 黑名单只锁住真正有风险的「已装柜及以后」，新状态默认落在可删这一侧。
+ * 至于付款，另有 paymentStatus 那道判断管着，不靠这里。
+ */
+const TASK_LOCKED_FOR_PRODUCT_DELETE = [
+  "loading", "in_transit", "customs", "delivering", "completed", "cancelled",
+];
+
 /**
  * 生成任务编号 JH + 7位数字（如 JH0000001）
  * 使用数据库事务锁防止并发冲突
@@ -316,6 +333,7 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
         heightCm?: number;
         material?: string;
         cargoValue?: string;
+        cargoType?: string;
         productImage?: { fileName?: string; mime?: string; base64?: string };
       }>;
     };
@@ -356,6 +374,7 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       if (p.heightCm === undefined || p.heightCm === null) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的高为必填`); return; }
       if (!p.material?.trim()) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的材质为必填`); return; }
       if (!p.cargoValue?.trim()) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的货值为必填`); return; }
+      if (p.cargoType && !CARGO_TYPES.includes(p.cargoType)) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的货型不合法`); return; }
     }
 
     const trackingNo = await generateTrackingNo();
@@ -380,6 +399,7 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
         volume: volumeM3,
         material: p.material!.trim(),
         cargoValue: p.cargoValue!.trim(),
+        cargoType: p.cargoType || "normal",
         sortOrder: idx,
       };
     });
@@ -457,6 +477,7 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
         heightCm?: number;
         material?: string;
         cargoValue?: string;
+        cargoType?: string;
         /** 只有本次真的换了图才传；不传表示沿用原图 */
         productImage?: { fileName?: string; mime?: string; base64?: string };
       }>;
@@ -492,6 +513,7 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
         if (p.heightCm === undefined || p.heightCm === null) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的高为必填`); return; }
         if (!p.material?.trim()) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的材质为必填`); return; }
         if (!p.cargoValue?.trim()) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的货值为必填`); return; }
+        if (p.cargoType && !CARGO_TYPES.includes(p.cargoType)) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的货型不合法`); return; }
       }
     }
 
@@ -531,6 +553,7 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
             volume: volumeM3,
             material: p.material!.trim(),
             cargoValue: p.cargoValue!.trim(),
+            cargoType: p.cargoType || "normal",
             sortOrder: idx,
           };
 
@@ -1275,6 +1298,8 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
           volumeM3: p.volume ? Number(p.volume) : null,
           material: p.material,
           cargoValue: p.cargoValue,
+          // 直接给中文：这是导出到 Excel 的展示数据，全中文系统不能漏英文值出去
+          cargoType: p.cargoType === "inspection" ? "商检" : p.cargoType === "sensitive" ? "敏感" : "普货",
           productImageBase64: (() => {
             if (!p.productImageBase64) return null;
             if (p.productImageBase64.startsWith("data:image/")) return p.productImageBase64;
@@ -1309,6 +1334,8 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
         { key: "volumeM3", label: "体积(m³)" },
         { key: "material", label: "材质" },
         { key: "cargoValue", label: "货值" },
+        { key: "cargoType", label: "货型" },
+        // ⚠️ 产品图片必须留在最后一列：员工端导出用 headers.length 定位图片列
         { key: "productImageBase64", label: "产品图片" },
       ],
       rows,
@@ -1470,6 +1497,7 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
         heightCm?: number;
         material?: string;
         cargoValue?: string;
+        cargoType?: string;
         /** 只有本次真的换了图才传；不传表示沿用原图 */
         productImage?: { fileName?: string; mime?: string; base64?: string };
       }>;
@@ -1502,6 +1530,7 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
         if (p.heightCm === undefined || p.heightCm === null) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的高为必填`); return; }
         if (!p.material?.trim()) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的材质为必填`); return; }
         if (!p.cargoValue?.trim()) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的货值为必填`); return; }
+        if (p.cargoType && !CARGO_TYPES.includes(p.cargoType)) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的货型不合法`); return; }
       }
     }
 
@@ -1540,6 +1569,7 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
             volume: volumeM3,
             material: p.material!.trim(),
             cargoValue: p.cargoValue!.trim(),
+            cargoType: p.cargoType || "normal",
             sortOrder: idx,
           };
 
@@ -1607,6 +1637,66 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
     await recalcTaskTotals(pa.taskId);
 
     ok(res, { deleted: true, prealertId: body.prealertId });
+  });
+
+  // 4b) 管理员删单件货物明细（2026-08-15 新增）
+  //     原来只能删整张预报单，客户多报一件就得整张作废重来。
+  //     ⚠️ 普通版的总价是员工手填在任务上的（task.totalFee），删货不会自动改钱，
+  //        界面弹窗必须提醒管理员自己回去核对金额。
+  app.post("/admin/consolidation/prealerts/product-delete", async (req, res) => {
+    const auth = requireRole(req, res, ["admin"]);
+    if (!auth) return;
+
+    const body = (req.body ?? {}) as { productId?: string };
+    if (!body.productId?.trim()) {
+      fail(res, 400, "BAD_REQUEST", "productId 为必填");
+      return;
+    }
+
+    const product = await prisma.consolidationPrealertProduct.findUnique({
+      where: { id: body.productId },
+      select: {
+        id: true,
+        productName: true,
+        prealertId: true,
+        prealert: {
+          select: {
+            id: true,
+            companyId: true,
+            taskId: true,
+            task: { select: { status: true, paymentStatus: true } },
+            _count: { select: { products: true } },
+          },
+        },
+      },
+    });
+
+    if (!product || product.prealert.companyId !== auth.companyId) {
+      fail(res, 404, "NOT_FOUND", "货物明细不存在");
+      return;
+    }
+
+    // 界线同仓库版（用户 2026-08-15 拍板）：客户还没交钱就能删。
+    // 普通版的付款动作在任务上，pending_review 表示客户已交凭证等审核，算已付款。
+    if (product.prealert.task.paymentStatus !== "unpaid") {
+      fail(res, 400, "BAD_REQUEST", "该任务客户已付款或正在审核付款，货物不能再删");
+      return;
+    }
+    if (TASK_LOCKED_FOR_PRODUCT_DELETE.includes(product.prealert.task.status)) {
+      fail(res, 400, "BAD_REQUEST", "该任务已进入装柜流程，货物不能再删");
+      return;
+    }
+    // 最后一件不给删：整张不要了请走「删除预报单」，那条路会一并清干净
+    if (product.prealert._count.products <= 1) {
+      fail(res, 400, "BAD_REQUEST", "这是该预报单最后一件货物，不能删。整张不要了请删除预报单");
+      return;
+    }
+
+    await prisma.consolidationPrealertProduct.delete({ where: { id: product.id } });
+    // 任务的总件数/总方数是按已签收预报单汇总出来的，删完必须重算
+    await recalcTaskTotals(product.prealert.taskId);
+
+    ok(res, { deleted: true, productId: product.id, productName: product.productName });
   });
 
   /**

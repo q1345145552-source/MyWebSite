@@ -276,6 +276,11 @@ export default function AdminWhrConsolidationPage() {
   const [cancelReason, setCancelReason] = useState("");
   const [cancelSubmitting, setCancelSubmitting] = useState(false);
 
+  // --- 改单件货物的货型 / 删单件货物（2026-08-15）---
+  const [itemBusyId, setItemBusyId] = useState("");
+  const [deleteItemTarget, setDeleteItemTarget] = useState<{ item: any; trackingNo: string } | null>(null);
+  const [deleteItemSubmitting, setDeleteItemSubmitting] = useState(false);
+
   // --- 改单价 ---
   const [priceTarget, setPriceTarget] = useState<CustomerDetail | null>(null);
   // 撤销付款（2026-08-07）
@@ -514,6 +519,39 @@ export default function AdminWhrConsolidationPage() {
       loadPlans();
     } catch (e: any) { setToast(e?.message ?? "取消失败"); }
     finally { setCancelSubmitting(false); }
+  };
+
+  /** 只有「货还没到」和「已收货等付款」两档能改货型 / 删货，跟后端同一条界线 */
+  const canEditItems = (status: string) => status === "pending" || status === "received_pending_payment";
+
+  const handleChangeItemCargoType = async (itemId: string, cargoType: string) => {
+    setItemBusyId(itemId);
+    try {
+      await apiRequest<any>(
+        `${apiBaseUrl()}/admin/whr-consolidation/prealerts/item-cargo-type`,
+        { method: "POST", headers: jsonPost, body: JSON.stringify({ itemId, cargoType }) }
+      );
+      setToast("货型已改。金额不会自动变，需要调请自己改单价");
+      if (selectedPlanId) loadDetail(selectedPlanId);
+      loadPlans();
+    } catch (e: any) { setToast(e?.message ?? "改货型失败"); }
+    finally { setItemBusyId(""); }
+  };
+
+  const handleDeleteItem = async () => {
+    if (!deleteItemTarget) return;
+    setDeleteItemSubmitting(true);
+    try {
+      const r = await apiRequest<{ customerVolume?: number }>(
+        `${apiBaseUrl()}/admin/whr-consolidation/prealerts/item-delete`,
+        { method: "POST", headers: jsonPost, body: JSON.stringify({ itemId: deleteItemTarget.item.id }) }
+      );
+      setToast(r?.customerVolume != null ? `已删除，该客户占用方数更新为 ${r.customerVolume} 方。金额不会自动变，请自行核对` : "已删除，金额不会自动变，请自行核对");
+      setDeleteItemTarget(null);
+      if (selectedPlanId) loadDetail(selectedPlanId);
+      loadPlans();
+    } catch (e: any) { setToast(e?.message ?? "删除失败"); }
+    finally { setDeleteItemSubmitting(false); }
   };
 
   const handleUpdatePrice = async () => {
@@ -917,6 +955,7 @@ export default function AdminWhrConsolidationPage() {
                                                 <th style={{ ...thS, padding: "3px 5px", fontSize: 11 }}>材质</th>
                                                 <th style={{ ...thS, padding: "3px 5px", fontSize: 11 }}>货值</th>
                                                 <th style={{ ...thS, padding: "3px 5px", fontSize: 11 }}>图片</th>
+                                                <th style={{ ...thS, padding: "3px 5px", fontSize: 11 }}>操作</th>
                                               </tr></thead>
                                               <tbody>
                                                 {pa.items.map((it: any) => (
@@ -924,7 +963,23 @@ export default function AdminWhrConsolidationPage() {
                                                     <td style={{ ...tdS, padding: "3px 5px", fontSize: 11 }}>{it.productName}</td>
                                                     <td style={{ ...tdS, padding: "3px 5px", fontSize: 11 }}>{it.packageCount}</td>
                                                     <td style={{ ...tdS, padding: "3px 5px", fontSize: 11 }}>{it.volumeM3 != null ? it.volumeM3.toFixed(3) : "-"}</td>
-                                                    <td style={{ ...tdS, padding: "3px 5px", fontSize: 11 }}>{it.cargoType === "inspection" ? "商检" : it.cargoType === "sensitive" ? "敏感" : "普货"}</td>
+                                                    <td style={{ ...tdS, padding: "3px 5px", fontSize: 11 }}>
+                                                      {canEditItems(pa.status) ? (
+                                                        <select
+                                                          value={it.cargoType || "normal"}
+                                                          disabled={itemBusyId === it.id}
+                                                          onClick={(e) => e.stopPropagation()}
+                                                          onChange={(e) => { e.stopPropagation(); handleChangeItemCargoType(it.id, e.target.value); }}
+                                                          style={{ fontSize: 11, padding: "1px 2px" }}
+                                                        >
+                                                          <option value="normal">普货</option>
+                                                          <option value="inspection">商检</option>
+                                                          <option value="sensitive">敏感</option>
+                                                        </select>
+                                                      ) : (
+                                                        it.cargoType === "inspection" ? "商检" : it.cargoType === "sensitive" ? "敏感" : "普货"
+                                                      )}
+                                                    </td>
                                                     <td style={{ ...tdS, padding: "3px 5px", fontSize: 11 }}>{it.material}</td>
                                                     <td style={{ ...tdS, padding: "3px 5px", fontSize: 11 }}>{it.cargoValue}</td>
                                                     <td style={{ ...tdS, padding: "3px 5px", fontSize: 11 }}>
@@ -934,6 +989,14 @@ export default function AdminWhrConsolidationPage() {
                                                           <button onClick={(e) => { e.stopPropagation(); setPreviewImage(it.productImageBase64); }} style={{ ...btnCancel, padding: "2px 6px", fontSize: 10 }}>查看</button>
                                                         </div>
                                                       ) : <span style={{ color: "var(--l-strong)" }}>暂无图片</span>}
+                                                    </td>
+                                                    <td style={{ ...tdS, padding: "3px 5px", fontSize: 11 }}>
+                                                      {canEditItems(pa.status) && pa.items.length > 1 ? (
+                                                        <button
+                                                          onClick={(e) => { e.stopPropagation(); setDeleteItemTarget({ item: it, trackingNo: pa.trackingNo }); }}
+                                                          style={{ ...btnCancel, padding: "2px 6px", fontSize: 10, color: "var(--c-red)" }}
+                                                        >删除</button>
+                                                      ) : <span style={{ color: "var(--l-strong)" }}>-</span>}
                                                     </td>
                                                   </tr>
                                                 ))}
@@ -1084,6 +1147,34 @@ export default function AdminWhrConsolidationPage() {
             <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
               <button onClick={handleCancel} disabled={cancelSubmitting} style={btnDanger}>{cancelSubmitting ? "提交中..." : "确认取消"}</button>
               <button onClick={() => { setCancelTarget(null); setCancelReason(""); }} style={btnCancel}>返回</button>
+            </div>
+          </Modal>
+        )}
+
+        {/* ================================================================ */}
+        {/* 弹窗：删除单件货物（2026-08-15） */}
+        {/* ================================================================ */}
+        {deleteItemTarget && (
+          <Modal onClose={() => setDeleteItemTarget(null)}>
+            <h3 style={{ marginTop: 0 }}>删除这件货物</h3>
+            <p style={{ fontSize: 13, color: "var(--t-muted)", marginBottom: 6 }}>
+              预报单：{deleteItemTarget.trackingNo}
+            </p>
+            <p style={{ fontSize: 14, marginBottom: 10 }}>
+              要删除：<b>{deleteItemTarget.item.productName}</b>
+              （{deleteItemTarget.item.packageCount} 件
+              {deleteItemTarget.item.volumeM3 != null ? ` · ${Number(deleteItemTarget.item.volumeM3).toFixed(3)} 方` : ""}）
+            </p>
+            <div style={{ fontSize: 13, color: "var(--t-muted)", lineHeight: 1.8, marginBottom: 12 }}>
+              删除之后会发生：
+              <div>· 这件货从预报单里消失，<b>删了不能恢复</b></div>
+              <div>· 该客户的总方数、总件数跟着变小</div>
+              <div>· <b style={{ color: "var(--c-red)" }}>应付金额不会自动改</b>，要调请自己改单价</div>
+              <div>· 客户在自己的流转记录里<b>会看到这条删除记录</b></div>
+            </div>
+            <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
+              <button onClick={handleDeleteItem} disabled={deleteItemSubmitting} style={btnDanger}>{deleteItemSubmitting ? "删除中..." : "确认删除"}</button>
+              <button onClick={() => setDeleteItemTarget(null)} style={btnCancel}>返回</button>
             </div>
           </Modal>
         )}

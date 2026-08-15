@@ -56,11 +56,12 @@ interface ProductFormRow {
   heightCm: string;
   material: string;
   cargoValue: string;
+  cargoType: string;
   productImage?: { fileName?: string; mime?: string; base64?: string };
 }
 
 function emptyProductRow(key: number): ProductFormRow {
-  return { key, productName: "", packageCount: "", quantityPerBox: "1", unitWeightKg: "", lengthCm: "", widthCm: "", heightCm: "", material: "", cargoValue: "" };
+  return { key, productName: "", packageCount: "", quantityPerBox: "1", unitWeightKg: "", lengthCm: "", widthCm: "", heightCm: "", material: "", cargoValue: "", cargoType: "normal" };
 }
 
 function calcProductRow(r: ProductFormRow) {
@@ -213,6 +214,7 @@ export default function ClientConsolidationPage() {
           heightCm: String(p.height ?? ""),
           material: p.material,
           cargoValue: p.cargoValue,
+          cargoType: p.cargoType || "normal",
         })),
       );
     } else {
@@ -252,6 +254,7 @@ export default function ClientConsolidationPage() {
         heightCm: parseFloat(r.heightCm),
         material: r.material.trim(),
         cargoValue: r.cargoValue.trim(),
+        cargoType: r.cargoType || "normal",
         productImage: r.productImage,
       }));
 
@@ -659,6 +662,7 @@ export default function ClientConsolidationPage() {
                   <th style={thStyle}>高(cm)</th>
                   <th style={thStyle}>材质</th>
                   <th style={thStyle}>货值</th>
+                  <th style={thStyle}>货型</th>
                   <th style={thStyle}>总数量</th>
                   <th style={thStyle}>总重(kg)</th>
                   <th style={thStyle}>体积(m³)</th>
@@ -679,6 +683,13 @@ export default function ClientConsolidationPage() {
                       <td style={tdStyle}><input value={r.heightCm} onChange={(e) => { const next = [...productRows]; next[i] = { ...next[i], heightCm: e.target.value }; setProductRows(next); }} style={{ ...miniInput, width: 50 }} /></td>
                       <td style={tdStyle}><input value={r.material} onChange={(e) => { const next = [...productRows]; next[i] = { ...next[i], material: e.target.value }; setProductRows(next); }} style={miniInput} /></td>
                       <td style={tdStyle}><input value={r.cargoValue} onChange={(e) => { const next = [...productRows]; next[i] = { ...next[i], cargoValue: e.target.value }; setProductRows(next); }} style={miniInput} /></td>
+                      <td style={tdStyle}>
+                        <select value={r.cargoType} onChange={(e) => { const next = [...productRows]; next[i] = { ...next[i], cargoType: e.target.value }; setProductRows(next); }} style={{ ...miniInput, width: 70 }}>
+                          <option value="normal">普货</option>
+                          <option value="inspection">商检</option>
+                          <option value="sensitive">敏感</option>
+                        </select>
+                      </td>
                       <td style={{ ...tdStyle, color: "var(--t-muted)" }}>{totalQty || "-"}</td>
                       <td style={{ ...tdStyle, color: "var(--t-muted)" }}>{totalW || "-"}</td>
                       <td style={{ ...tdStyle, color: "var(--t-muted)" }}>{vol || "-"}</td>
@@ -844,6 +855,7 @@ function PrealertCard({
                 <th style={thStyle}>体积</th>
                 <th style={thStyle}>材质</th>
                 <th style={thStyle}>货值</th>
+                <th style={thStyle}>货型</th>
                 <th style={thStyle}>图片</th>
               </tr>
             </thead>
@@ -864,6 +876,7 @@ function PrealertCard({
                   <td style={tdStyle}>{p.volume?.toFixed(4)}</td>
                   <td style={tdStyle}>{p.material}</td>
                   <td style={tdStyle}>{p.cargoValue}</td>
+                  <td style={tdStyle}>{p.cargoType === "inspection" ? "商检" : p.cargoType === "sensitive" ? "敏感" : "普货"}</td>
                   <td style={{ ...tdStyle, textAlign: "center" }}>
                     {p.productImageBase64 ? (
                       <button

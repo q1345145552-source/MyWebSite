@@ -444,6 +444,7 @@ WITH expected(table_name, column_name) AS (VALUES
   ('consolidation_prealert_products','volume_m3'),
   ('consolidation_prealert_products','material'),
   ('consolidation_prealert_products','cargo_value'),
+  ('consolidation_prealert_products','cargo_type'),
   ('consolidation_prealert_products','product_image_file_name'),
   ('consolidation_prealert_products','product_image_mime'),
   ('consolidation_prealert_products','product_image_base64'),

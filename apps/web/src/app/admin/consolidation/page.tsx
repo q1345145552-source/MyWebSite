@@ -8,6 +8,7 @@ import {
   deleteAdminConsolidationTask,
   adminForceEditConsolidationPrealert,
   adminDeleteConsolidationPrealert,
+  adminDeleteConsolidationProduct,
   reviewConsolidationPayment,
   rejectConsolidationPayment,
   revokeConsolidationPayment,
@@ -54,11 +55,12 @@ interface ProductFormRow {
   heightCm: string;
   material: string;
   cargoValue: string;
+  cargoType: string;
   productImage?: { fileName?: string; mime?: string; base64?: string };
 }
 
 function emptyProductRow(key: number): ProductFormRow {
-  return { key, productName: "", packageCount: "", quantityPerBox: "1", unitWeightKg: "", lengthCm: "", widthCm: "", heightCm: "", material: "", cargoValue: "" };
+  return { key, productName: "", packageCount: "", quantityPerBox: "1", unitWeightKg: "", lengthCm: "", widthCm: "", heightCm: "", material: "", cargoValue: "", cargoType: "normal" };
 }
 
 function calcProductRow(r: ProductFormRow) {
@@ -103,6 +105,10 @@ export default function AdminConsolidationPage() {
   // 管理员删除预报单
   const [deletePrealertId, setDeletePrealertId] = useState<string | null>(null);
   const [deletePrealertSubmitting, setDeletePrealertSubmitting] = useState(false);
+
+  // 管理员删单件货物（2026-08-15）
+  const [deleteProductTarget, setDeleteProductTarget] = useState<{ product: ConsolidationPrealertItem["products"][number]; trackingNo: string } | null>(null);
+  const [deleteProductSubmitting, setDeleteProductSubmitting] = useState(false);
 
   // 展开
   const [expandedPrealerts, setExpandedPrealerts] = useState<Set<string>>(new Set());
@@ -246,6 +252,7 @@ export default function AdminConsolidationPage() {
         heightCm: String(p.height ?? ""),
         material: p.material,
         cargoValue: p.cargoValue,
+        cargoType: p.cargoType || "normal",
       })),
     );
   };
@@ -278,6 +285,7 @@ export default function AdminConsolidationPage() {
         heightCm: parseFloat(r.heightCm),
         material: r.material.trim(),
         cargoValue: r.cargoValue.trim(),
+        cargoType: r.cargoType || "normal",
         productImage: r.productImage,
       }));
       await adminForceEditConsolidationPrealert({ prealertId: editPrealert.id, mark: editMark.trim(), expressNo: editExpressNo.trim() || undefined, products });
@@ -300,6 +308,26 @@ export default function AdminConsolidationPage() {
       if (selectedTaskId) await loadDetail(selectedTaskId);
       await loadTasks();
     } catch (e: any) { setToast(e.message); } finally { setDeletePrealertSubmitting(false); }
+  };
+
+  // ======== 管理员删单件货物（2026-08-15）========
+  // 界线：客户还没交钱、任务还没进装柜，跟后端同一条。
+  // 状态这里用黑名单（只锁已装柜及以后），跟后端 TASK_LOCKED_FOR_PRODUCT_DELETE 一致；
+  // 用白名单会漏掉 full_confirmed / quoted 这两档还没付款的。
+  const canDeleteProducts = !!taskDetail
+    && taskDetail.paymentStatus === "unpaid"
+    && !["loading", "in_transit", "customs", "delivering", "completed", "cancelled"].includes(taskDetail.status);
+
+  const handleAdminDeleteProduct = async () => {
+    if (!deleteProductTarget) return;
+    setDeleteProductSubmitting(true);
+    try {
+      await adminDeleteConsolidationProduct(deleteProductTarget.product.id);
+      setDeleteProductTarget(null);
+      setToast("货物已删除，请自行核对任务总价");
+      if (selectedTaskId) await loadDetail(selectedTaskId);
+      await loadTasks();
+    } catch (e: any) { setToast(e.message); } finally { setDeleteProductSubmitting(false); }
   };
 
   const pendingPrealerts = useMemo(() => taskDetail?.prealerts?.filter((p) => p.status === "pending") ?? [], [taskDetail]);
@@ -490,6 +518,7 @@ export default function AdminConsolidationPage() {
                 <AdminPrealertRow key={pa.id} pa={pa} expanded={expandedPrealerts} setExpanded={setExpandedPrealerts}
                   setPreviewImage={setPreviewImage}
                   onDelete={() => setDeletePrealertId(pa.id)}
+                  onDeleteProduct={canDeleteProducts ? (p) => setDeleteProductTarget({ product: p, trackingNo: pa.trackingNo }) : undefined}
                   onEdit={pa.status === "received" ? () => openAdminEdit(pa) : undefined} />
               ))}
             </div>
@@ -502,6 +531,7 @@ export default function AdminConsolidationPage() {
                 <AdminPrealertRow key={pa.id} pa={pa} expanded={expandedPrealerts} setExpanded={setExpandedPrealerts}
                   setPreviewImage={setPreviewImage}
                   onEdit={() => openAdminEdit(pa)}
+                  onDeleteProduct={canDeleteProducts ? (p) => setDeleteProductTarget({ product: p, trackingNo: pa.trackingNo }) : undefined}
                   onDelete={() => setDeletePrealertId(pa.id)} />
               ))}
             </div>
@@ -606,6 +636,7 @@ export default function AdminConsolidationPage() {
                   <th style={thS}>高(cm)</th>
                   <th style={thS}>材质</th>
                   <th style={thS}>货值</th>
+                  <th style={thS}>货型</th>
                   <th style={thS}>总数量</th>
                   <th style={thS}>总重(kg)</th>
                   <th style={thS}>体积(m³)</th>
@@ -626,6 +657,13 @@ export default function AdminConsolidationPage() {
                       <td style={tdS}><input value={r.heightCm} onChange={(e) => { const next = [...editProductRows]; next[i] = { ...next[i], heightCm: e.target.value }; setEditProductRows(next); }} style={{ ...miniInput, width: 50 }} /></td>
                       <td style={tdS}><input value={r.material} onChange={(e) => { const next = [...editProductRows]; next[i] = { ...next[i], material: e.target.value }; setEditProductRows(next); }} style={miniInput} /></td>
                       <td style={tdS}><input value={r.cargoValue} onChange={(e) => { const next = [...editProductRows]; next[i] = { ...next[i], cargoValue: e.target.value }; setEditProductRows(next); }} style={miniInput} /></td>
+                      <td style={tdS}>
+                        <select value={r.cargoType} onChange={(e) => { const next = [...editProductRows]; next[i] = { ...next[i], cargoType: e.target.value }; setEditProductRows(next); }} style={{ ...miniInput, width: 70 }}>
+                          <option value="normal">普货</option>
+                          <option value="inspection">商检</option>
+                          <option value="sensitive">敏感</option>
+                        </select>
+                      </td>
                       <td style={{ ...tdS, color: "var(--t-muted)" }}>{totalQty || "-"}</td>
                       <td style={{ ...tdS, color: "var(--t-muted)" }}>{totalW || "-"}</td>
                       <td style={{ ...tdS, color: "var(--t-muted)" }}>{vol || "-"}</td>
@@ -650,6 +688,29 @@ export default function AdminConsolidationPage() {
         </Modal>
       )}
 
+      {/* ======== 弹窗：删除单件货物确认（2026-08-15）======== */}
+      {deleteProductTarget && (
+        <Modal onClose={() => setDeleteProductTarget(null)}>
+          <h3 style={{ marginTop: 0, fontSize: 16 }}>删除这件货物</h3>
+          <p style={{ fontSize: 13, color: "var(--t-muted)", marginBottom: 6 }}>预报单：{deleteProductTarget.trackingNo}</p>
+          <p style={{ fontSize: 14, marginBottom: 10 }}>
+            要删除：<b>{deleteProductTarget.product.productName}</b>
+            （{deleteProductTarget.product.packageCount} 件
+            {deleteProductTarget.product.volume != null ? ` · ${deleteProductTarget.product.volume.toFixed(3)} 方` : ""}）
+          </p>
+          <div style={{ fontSize: 13, color: "var(--t-muted)", lineHeight: 1.8, marginBottom: 12 }}>
+            删除之后会发生：
+            <div>· 这件货从预报单里消失，<b>删了不能恢复</b></div>
+            <div>· 任务的总件数、已收体积跟着变小</div>
+            <div>· <b style={{ color: "var(--c-red)" }}>任务总价不会自动改</b>（普通版的价是手填的），删完请自己回去核对报价</div>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={handleAdminDeleteProduct} disabled={deleteProductSubmitting} style={{ padding: "8px 16px", background: "var(--c-red)", color: "var(--white)", border: "none", borderRadius: 6, cursor: "pointer" }}>{deleteProductSubmitting ? "删除中..." : "确认删除"}</button>
+            <button onClick={() => setDeleteProductTarget(null)} style={{ padding: "8px 16px", border: "1px solid var(--l-strong)", background: "var(--white)", color: "var(--t-muted)", borderRadius: 6, cursor: "pointer" }}>取消</button>
+          </div>
+        </Modal>
+      )}
+
       {/* ======== 弹窗：删除预报单确认 ======== */}
       {deletePrealertId && (
         <Modal onClose={() => setDeletePrealertId(null)}>
@@ -668,7 +729,7 @@ export default function AdminConsolidationPage() {
 // 子组件：管理员预报单行
 // ============================================================================
 function AdminPrealertRow({
-  pa, expanded, setExpanded, setPreviewImage, onEdit, onDelete,
+  pa, expanded, setExpanded, setPreviewImage, onEdit, onDelete, onDeleteProduct,
 }: {
   pa: ConsolidationPrealertItem;
   expanded: Set<string>;
@@ -676,6 +737,8 @@ function AdminPrealertRow({
   setPreviewImage: (url: string | null) => void;
   onEdit?: () => void;
   onDelete?: () => void;
+  /** 传了才显示单件货物的「删除」按钮；由外层按任务付款状态决定给不给 */
+  onDeleteProduct?: (product: ConsolidationPrealertItem["products"][number]) => void;
 }) {
   const open = expanded.has(pa.id);
   const toggle = () => setExpanded((prev) => { const n = new Set(prev); if (n.has(pa.id)) n.delete(pa.id); else n.add(pa.id); return n; });
@@ -730,7 +793,9 @@ function AdminPrealertRow({
                 <th style={thS}>体积</th>
                 <th style={thS}>材质</th>
                 <th style={thS}>货值</th>
+                <th style={thS}>货型</th>
                 <th style={thS}>图片</th>
+                {onDeleteProduct && <th style={thS}>操作</th>}
               </tr>
             </thead>
             <tbody>
@@ -750,6 +815,7 @@ function AdminPrealertRow({
                   <td style={tdS}>{p.volume?.toFixed(4)}</td>
                   <td style={tdS}>{p.material}</td>
                   <td style={tdS}>{p.cargoValue}</td>
+                  <td style={tdS}>{p.cargoType === "inspection" ? "商检" : p.cargoType === "sensitive" ? "敏感" : "普货"}</td>
                   <td style={{ ...tdS, textAlign: "center" }}>
                     {p.productImageBase64 ? (
                       <button
@@ -760,6 +826,18 @@ function AdminPrealertRow({
                       <span style={{ color: "var(--t-faint)", fontSize: 12 }}>暂无图片</span>
                     )}
                   </td>
+                  {onDeleteProduct && (
+                    <td style={{ ...tdS, textAlign: "center" }}>
+                      {pa.products.length > 1 ? (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onDeleteProduct(p); }}
+                          style={{ padding: "3px 10px", border: "1px solid var(--c-red)", color: "var(--c-red)", background: "var(--white)", borderRadius: 4, cursor: "pointer", fontSize: 12 }}
+                        >删除</button>
+                      ) : (
+                        <span style={{ color: "var(--t-faint)", fontSize: 12 }}>-</span>
+                      )}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

@@ -884,6 +884,7 @@ model ConsolidationPrealertProduct {
 
   material   String @map("material")
   cargoValue String @map("cargo_value")
+  cargoType  String @default("normal") @map("cargo_type") // normal | inspection | sensitive（普通版只记录，不参与计价）
 
   productImageFileName String? @map("product_image_file_name")
   productImageMime     String? @map("product_image_mime")

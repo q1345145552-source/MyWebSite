@@ -1780,6 +1780,8 @@ export interface ConsolidationProductItem {
   volume: number | null;
   material: string;
   cargoValue: string;
+  /** 货型：normal | inspection | sensitive。只作记录，不参与计价 */
+  cargoType: string;
   productImageFileName: string | null;
   productImageMime: string | null;
   productImageBase64: string | null;
@@ -1902,6 +1904,7 @@ export async function createConsolidationPrealert(payload: {
     heightCm: number;
     material: string;
     cargoValue: string;
+    cargoType?: string;
     productImage?: { fileName?: string; mime?: string; base64?: string };
   }>;
 }): Promise<ConsolidationPrealertItem> {
@@ -1932,6 +1935,7 @@ export async function updateConsolidationPrealert(payload: {
     heightCm: number;
     material: string;
     cargoValue: string;
+    cargoType?: string;
     productImage?: { fileName?: string; mime?: string; base64?: string };
   }>;
 }): Promise<ConsolidationPrealertItem> {
@@ -2234,6 +2238,7 @@ export async function adminForceEditConsolidationPrealert(payload: {
     heightCm: number;
     material: string;
     cargoValue: string;
+    cargoType?: string;
     productImage?: { fileName?: string; mime?: string; base64?: string };
   }>;
 }): Promise<{ success: boolean; prealertId: string }> {
@@ -2248,6 +2253,18 @@ export async function adminForceEditConsolidationPrealert(payload: {
 }
 
 /** 管理员强制删除预报单 */
+/** 管理员删单件货物明细（普通版集货，2026-08-15）。金额是人工填的，这里不动金额 */
+export async function adminDeleteConsolidationProduct(productId: string): Promise<{ deleted: boolean; productId: string; productName: string }> {
+  try {
+    return await apiRequest<{ deleted: boolean; productId: string; productName: string }>(
+      `${apiBaseUrl()}/admin/consolidation/prealerts/product-delete`,
+      { method: "POST", body: JSON.stringify({ productId }) },
+    );
+  } catch (error) {
+    throw new Error(`删除货物失败：${error instanceof Error ? error.message : "未知错误"}`);
+  }
+}
+
 export async function adminDeleteConsolidationPrealert(prealertId: string): Promise<{ deleted: boolean; prealertId: string }> {
   try {
     return await apiRequest<{ deleted: boolean; prealertId: string }>(
