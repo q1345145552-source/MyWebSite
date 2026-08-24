@@ -7,6 +7,10 @@ import { CONSOLIDATION_CURRENCY, recordRechargeCredit } from "../wallet/consolid
 import { loadProductImagesForOrders } from "../orders/product-images";
 import { loadOrderProducts } from "../orders/routes";
 import { hashPassword } from "../auth/crypto-utils";
+import { IN_TRANSIT_STATUSES } from "../../../../../packages/shared-types/shipment-status";
+// 柜子状态中文名只有这一份（后端 status-flow.ts）。前端管理员页不再自己抄一份，
+// 由接口直接下发中文 —— 抄第二份就一定会漏掉后加的状态。
+import { CONTAINER_STATUS_LABEL } from "../containers/status-flow";
 import { checkPasswordStrength } from "../auth/password-policy";
 
 /** Decimal | null → number | null */
@@ -124,8 +128,23 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
     const auth = requireRole(req, res, ["admin"]);
     if (!auth) return;
 
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
+    /**
+     * 「今天」按**北京时间**算（2026-08-21 改）。
+     *
+     * 后端容器跑在 UTC（实测 `TZ` 是空的），原来 `setHours(0,0,0,0)` 得到的是
+     * UTC 零点 = **北京时间早上 8 点**。结果半夜到早 8 点之间下的单，
+     * 在看板上会被算进「昨天」，老板早上看这个数字永远是不准的。
+     *
+     * ⚠️ 这里**故意不去改容器的 TZ 环境变量** —— 那会影响所有跟时间有关的东西
+     * （备份文件名的日期、日志时间戳、定时任务），风险面大得多。
+     * 只在这一处按 UTC+8 换算，影响范围可控。中国不实行夏令时，偏移固定 8 小时。
+     */
+    const CHINA_OFFSET_MS = 8 * 60 * 60 * 1000;
+    const startOfToday = (() => {
+      const beijing = new Date(Date.now() + CHINA_OFFSET_MS);
+      beijing.setUTCHours(0, 0, 0, 0);
+      return new Date(beijing.getTime() - CHINA_OFFSET_MS);
+    })();
 
     /**
      * 柜子分三段统计（2026-08-07 新增）。
@@ -148,7 +167,11 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
     // 列举法只要漏一个状态，柜子就凭空消失且没人发现（CLAUDE.md 第 19/21 条：不许静默丢数据）。
     // 现在只精确列举「装柜中 / 已到仓 / 已完成」三类，其余一律算在路上，
     // 以后加了新状态也不会漏掉。
-    const AT_WAREHOUSE = ["IN_WAREHOUSE_TH", "OUT_FOR_DELIVERY", "DELIVERING"];
+    // ⚠️ 2026-08-21 补上 DELIVERY_BOOKED（预约派送）。
+    // 它是 08-13 新加的状态，位置在「已到仓」之后、「派送中」之前 —— 货已经在泰国仓了。
+    // 当时没回来同步这份清单，生产实测有 3 个柜子被算成了「在路上」。
+    // 上面那条注释早就警告过「加了新状态要回来同步」，还是漏了 —— 这就是写死清单的代价。
+    const AT_WAREHOUSE = ["IN_WAREHOUSE_TH", "DELIVERY_BOOKED", "OUT_FOR_DELIVERY", "DELIVERING"];
 
     const [staff, client, newOrder, inTransit, volumeAgg,
            ctnTotal, ctnLoading, ctnAtWarehouse, ctnDone] = await Promise.all([
@@ -157,11 +180,29 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
       prisma.order.count({
         where: { companyId: auth.companyId, createdAt: { gte: startOfToday } },
       }),
+      // ⚠️ 2026-08-21 修：原来数的是 currentStatus === "inTransit"，
+      // 但**系统里根本没有 inTransit 这个状态**（合法状态见 shipment-status.ts），
+      // 所以这个数字从上线起一直是 0。生产实测：显示 0，实际在途 366 张。
+      // 现在用从流程表自动推导的 IN_TRANSIT_STATUSES，并且只数父单
+      // （原来连子单一起数，分柜的货会重复计）。
       prisma.shipment.count({
-        where: { companyId: auth.companyId, currentStatus: "inTransit" },
+        where: {
+          companyId: auth.companyId,
+          parentTrackingNo: null,
+          currentStatus: { in: IN_TRANSIT_STATUSES },
+        },
       }),
+      // ⚠️ 2026-08-21 修：原来是 updatedAt >= 今天，等于「今天被改动过的运单」——
+      // 员工改一张三个月前的老单，那单的方数也会加进来，而且父单子单都算、同一批货算两遍。
+      // 生产实测：显示 526.478 方，去掉子单只有 295.332 方。
+      // 现在按用户的业务口径（交接文档 1.5「运单出现在运单列表 = 货已经到国内仓库了」）
+      // 改成「今天新进国内仓的货」= 今天创建的父单方数。
       prisma.shipment.aggregate({
-        where: { companyId: auth.companyId, updatedAt: { gte: startOfToday } },
+        where: {
+          companyId: auth.companyId,
+          parentTrackingNo: null,
+          createdAt: { gte: startOfToday },
+        },
         _sum: { volumeM3: true },
       }),
       prisma.container.count({ where: { companyId: auth.companyId } }),
@@ -181,6 +222,133 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
 
     const totalVolume = volumeAgg._sum.volumeM3 ? Number(volumeAgg._sum.volumeM3.toString()) : 0;
 
+    /**
+     * 真实时效趋势（2026-08-21 新增，替换掉前端那条编出来的曲线）。
+     *
+     * 原来「中泰线路时效分析图」的数据是前端按 `2.5 + 第几个订单×0.6 + (海运4.2/陆运1.4)`
+     * 算出来的，**一个日期计算都没有**，跟真实时效毫无关系，而且永远单调上升。
+     *
+     * 现在按轨迹真算：同一票货「第一次变成已装柜」到「第一次变成已到仓」隔了几天，
+     * 按到仓那一周聚合，海运陆运分开（两者差 3 倍多，混在一条线里没有意义：
+     * 生产实测海运平均 14.7 天、陆运 4.1 天）。
+     *
+     * ⚠️ 轨迹是写在**子单**上的，所以这里**不能**按 parent_tracking_no IS NULL 过滤 ——
+     * 那样会一条都查不到（CLAUDE.md 第 24 条踩过这个坑）。
+     */
+    const transitRows = await prisma.$queryRaw<
+      Array<{ week_start: Date; sea_days: unknown; land_days: unknown; samples: bigint }>
+    >`
+      WITH t AS (
+        SELECT l.shipment_id,
+               MIN(l.changed_at) FILTER (WHERE l.to_status = 'loaded')        AS loaded_at,
+               MIN(l.changed_at) FILTER (WHERE l.to_status = 'inWarehouseTH') AS arrived_at
+        FROM status_logs l
+        GROUP BY l.shipment_id
+      )
+      SELECT date_trunc('week', t.arrived_at)::date AS week_start,
+             ROUND(AVG(EXTRACT(EPOCH FROM (t.arrived_at - t.loaded_at)) / 86400.0)
+                   FILTER (WHERE s.transport_mode = 'sea')::numeric, 1)  AS sea_days,
+             ROUND(AVG(EXTRACT(EPOCH FROM (t.arrived_at - t.loaded_at)) / 86400.0)
+                   FILTER (WHERE s.transport_mode = 'land')::numeric, 1) AS land_days,
+             COUNT(*) AS samples
+      FROM t
+      JOIN shipments s ON s.id = t.shipment_id
+      WHERE t.loaded_at IS NOT NULL
+        AND t.arrived_at IS NOT NULL
+        AND t.arrived_at > t.loaded_at
+        AND s.company_id = ${auth.companyId}
+      GROUP BY date_trunc('week', t.arrived_at)
+      ORDER BY date_trunc('week', t.arrived_at) DESC
+      LIMIT 8
+    `;
+
+    /**
+     * 卡住的柜子（2026-08-21 新增）。
+     *
+     * 起因：生产上有个柜子 UETU7068621（9 票货）7-22 装柜，中间 28 天没推过任何状态，
+     * 8-19 才被推到「国内海关查验」，到今天装柜满 30 天还没到仓 —— 而海运平均 14.7 天就到了。
+     * 这种事系统里查得到，但**看板上没有任何地方会告诉你**，只能靠人去翻。
+     *
+     * 两条规则并用，缺一个就会漏：
+     *   ① 超期未到仓：装柜到现在太久了还没到仓（海运 21 天 / 陆运 7 天）—— 抓「一直在路上」的
+     *   ② 长时间没推进：距上次推状态太久（海运 14 天 / 陆运 7 天）
+     *      —— 抓「刚封柜就没人管了」的（Y2608067567 就只有这条能抓到）
+     *
+     * 阈值是拿生产数据试出来的：海运在途 60 个柜，超 14 天有 8 个（平均 14.7 天，太宽），
+     * 超 21 天只有 1 个 —— 那个才是真异常；陆运在途 3 个柜，超 7 天 0 个。
+     * 两条合起来正好命中 2 个柜。**改阈值前先拿生产数据重新试一遍命中数。**
+     *
+     * ⚠️ 柜子和货的关系在 shipment_container_items，**不是** shipments.batch_no ——
+     * 那个柜号是员工手填的可选字段，全库 1830 张单只有 38 张填了，拿它 join 等于白查。
+     * ⚠️ 已到泰国仓（含预约派送/派送中/已签收）的不算卡住，那是尾端派送的事。
+     */
+    const stalledRows = await prisma.$queryRaw<
+      Array<{
+        container_no: string; transport_mode: string; current_status: string;
+        loaded_days: number | null; idle_days: number | null;
+        shipment_count: bigint; reason: string;
+      }>
+    >`
+      WITH ld AS (
+        SELECT i.container_id,
+               MIN(l.changed_at) FILTER (WHERE l.to_status = 'loaded') AS loaded_at,
+               MAX(l.changed_at) AS last_at
+        FROM shipment_container_items i
+        JOIN status_logs l ON l.shipment_id = i.shipment_id
+        GROUP BY i.container_id
+      )
+      SELECT c.container_no, c.transport_mode, c.current_status,
+             EXTRACT(DAY FROM now() - ld.loaded_at)::int AS loaded_days,
+             EXTRACT(DAY FROM now() - ld.last_at)::int   AS idle_days,
+             COUNT(i.id) AS shipment_count,
+             CASE WHEN now() - ld.loaded_at >
+                       (CASE WHEN c.transport_mode = 'land' THEN interval '7 days' ELSE interval '21 days' END)
+                  THEN 'overdue' ELSE 'idle' END AS reason
+      FROM containers c
+      JOIN ld ON ld.container_id = c.id
+      JOIN shipment_container_items i ON i.container_id = c.id
+      WHERE c.company_id = ${auth.companyId}
+        AND c.current_status NOT IN ('SIGNED', 'IN_WAREHOUSE_TH', 'DELIVERY_BOOKED', 'OUT_FOR_DELIVERY', 'DELIVERING')
+        AND (
+          now() - ld.loaded_at > (CASE WHEN c.transport_mode = 'land' THEN interval '7 days'  ELSE interval '21 days' END)
+          OR
+          now() - ld.last_at   > (CASE WHEN c.transport_mode = 'land' THEN interval '7 days'  ELSE interval '14 days' END)
+        )
+      GROUP BY c.container_no, c.transport_mode, c.current_status, ld.loaded_at, ld.last_at
+      ORDER BY EXTRACT(DAY FROM now() - ld.loaded_at)::int DESC
+      LIMIT 10
+    `;
+
+    const stalledContainers = stalledRows.map((r) => ({
+      containerNo: r.container_no,
+      transportMode: r.transport_mode,
+      currentStatus: r.current_status,
+      currentStatusZh: CONTAINER_STATUS_LABEL[r.current_status] ?? r.current_status,
+      loadedDays: r.loaded_days ?? null,
+      idleDays: r.idle_days ?? null,
+      shipmentCount: Number(r.shipment_count),
+      reason: r.reason as "overdue" | "idle",
+    }));
+
+    const num = (v: unknown): number | null =>
+      v === null || v === undefined ? null : Number(v.toString());
+
+    // 查出来是倒序（最近的在前），图上要按时间从左到右，所以反过来
+    const transitTrend = transitRows
+      .slice()
+      .reverse()
+      .map((r) => {
+        const d = new Date(r.week_start);
+        const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+        const dd = String(d.getUTCDate()).padStart(2, "0");
+        return {
+          label: `${mm}-${dd}那周`,
+          seaDays: num(r.sea_days),
+          landDays: num(r.land_days),
+          samples: Number(r.samples),
+        };
+      });
+
     ok(res, {
       staffAccountCount: staff,
       clientAccountCount: client,
@@ -192,6 +360,8 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
       containerAtWarehouseCount: ctnAtWarehouse,
       containerDoneCount: ctnDone,
       containerTotalCount: ctnTotal,
+      transitTrend,
+      stalledContainers,
     });
   });
 

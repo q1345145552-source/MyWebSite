@@ -4,7 +4,7 @@ import type {
   AiSuggestionResponse,
 } from "../../../../../packages/shared-types/common-response";
 import type { AiKnowledgeItem, AiQueryAuditLog, Shipment } from "../../../../../packages/shared-types/entities";
-import type { ShipmentStatus } from "../../../../../packages/shared-types/shipment-status";
+import { IN_TRANSIT_STATUSES, type ShipmentStatus } from "../../../../../packages/shared-types/shipment-status";
 import type {
   AiSessionMemoryStore,
   AiKnowledgeGapStore,
@@ -64,7 +64,11 @@ const SUGGESTIONS = [
 const COMPLETED_STATUSES: ShipmentStatus[] = ["delivered", "returned", "cancelled"];
 const EXCEPTION_STATUSES: ShipmentStatus[] = ["exception", "returned", "cancelled"];
 // 「在途」= 已装柜到派送完成之前的所有环节。2026-08-13 把新加的 8 个也算进在途。
-const IN_TRANSIT_STATUSES: ShipmentStatus[] = ["loaded", "customsInspectCn", "inspectClearedCn", "exportCleared", "delayDeparted", "etaUpdated", "portClosed", "berthed", "departed", "delayInTransit", "arrivedPort", "customsInspectTh", "inspectClearedTh", "customsTH", "customsCleared", "unloading", "inWarehouseTH", "deliveryBooked", "outForDelivery"];
+// ⚠️ 2026-08-21：原来这里手写了一份在途状态清单，**漏掉了全部 5 个陆运状态**
+// （到达凭祥口岸 / 口岸滞留 / 过境越南 / 海关查验 / 老挝边境已放行）——
+// 客户问 AI「现在在途多少票」，陆运的货一票都不算（生产实测漏掉 30 张父单）。
+// 现在改用 shared-types 里从流程表自动推导的那份，跟管理员看板同一个口径，
+// 以后往流程里加环节这里会自己跟上。**别再在这里写死清单。**
 const GREETING_RE = /(你好|您好|hi|hello|哈喽|在吗|你在吗)/i;
 const SERVICE_QA_RE =
   /(时效|多久|几天|清关|报关|费用|运费|计费|体积重|实重|禁运|违禁|能寄|可以寄|赔付|理赔|破损|丢件|签收|派送|上门|对账|发票|资料|装箱单|轨迹|查不到)/;

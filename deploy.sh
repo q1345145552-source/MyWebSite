@@ -106,33 +106,43 @@ else
   fi
 fi
 
-# 9. 构建成功才切换
-if [ "$BUILD_OK" = true ]; then
-  echo "✅ 构建成功，切换容器..."
-  docker compose up -d
-else
-  echo "⛔ 构建失败，保留旧容器"
+# ⚠️ 构建失败就到此为止，**别再往下走**（2026-08-24 从第 10 节挪上来）。
+#
+# 这道闸原来放在第 10 节「切容器」前面。拦是拦住了，但下面第 9 节
+# 会先去连数据库、可能还备份一次、跑一遍迁移 —— 而新代码根本切不上去，
+# 那趟纯属白跑，还平白碰了一次生产库。构建都失败了，数据库一个字都不该动。
+if [ "$BUILD_OK" != true ]; then
+  echo "⛔ 构建失败，保留旧容器，数据库不做任何改动"
   docker compose up -d
   exit 1
 fi
 
-# 10. 等待 API 就绪（最多 60s）
-echo "⏳ 等待 API 就绪..."
-API_READY=false
-for i in $(seq 1 20); do
-  if curl -sf http://localhost:3001/ -o /dev/null 2>/dev/null; then
-    API_READY=true
-    echo "✅ API 已就绪"
-    break
-  fi
-  sleep 3
-done
-
-if [ "$API_READY" = false ]; then
-  note_issue "API 在 60 秒内没就绪，后续步骤可能不准"
-fi
-
-# 11a. 这次部署到底要不要动数据库？
+# ============================================================================
+# 9. 先把数据库准备好，再切新容器（2026-08-22 调整顺序）
+# ============================================================================
+#
+# 原来的顺序是【先切容器 → 再改数据库】，中间有个窗口：新代码已经在服务客户，
+# 数据库却还是旧结构。新代码只要用到新字段，那段时间**读也读不了、写也写不了**。
+#
+# ⚠️ 这不是纸上谈兵，2026-08-16 上线「集货货型」时真出现过：
+#   08:19:56 新容器起来 → 08:20:13 迁移才跑完，中间 17 秒。
+#   那 17 秒里，只要有人打开集货页面就会报错（Prisma 读表时会点名要 cargo_type 这一列，
+#   数据库里还没有 → 直接失败）。当天翻日志确认 0 条报错 —— 纯属运气：
+#   窗口短 + 集货是冷门功能。要是改的是运单表，那 17 秒整个系统都在报错。
+#
+# 现在改成【备份 → 迁移 → 切容器】，数据库永远先准备好。
+#
+# ⚠️ 这么排的前提：**迁移必须是「只加不删」的**。
+#   迁移期间跑的是**旧代码 + 新结构**，加字段旧代码不受影响（它不认识就不读）；
+#   但删字段/改字段名会让旧代码当场崩。
+#   红线 2.1 本来就禁止删字段（`db push` 就是因为这个被换掉的），所以这个前提成立。
+#   哪天真要删字段，必须拆成两次上线：先上不再用该字段的代码，下次再删。
+#
+# ⚠️ 迁移用 `docker compose run --rm` 起一次性容器跑，**用的是刚构建好的新镜像**，
+#   同时**不动正在服务客户的旧容器**。不能用 `exec`：那是钻进旧容器里跑旧代码，
+#   拿到的迁移文件清单也是旧的。
+#
+# 9a. 这次部署到底要不要动数据库？
 #
 # 绝大多数部署只改代码、根本不碰数据库结构，那次备份（约 9 秒 + 130MB 磁盘）是白花的。
 # 所以先问一句 Prisma：还有没有没执行的迁移文件？
@@ -143,7 +153,7 @@ fi
 # 宁可白备一次，也不能在该备的时候没备。
 echo "🔍 检查这次部署要不要动数据库..."
 NEED_DB_WORK=true
-MIGRATE_STATUS=$(docker compose exec -T api npx prisma migrate status --schema=apps/api/prisma/schema.prisma 2>&1)
+MIGRATE_STATUS=$(docker compose run --rm -T api npx prisma migrate status --schema=apps/api/prisma/schema.prisma 2>&1)
 if echo "$MIGRATE_STATUS" | grep -q "Database schema is up to date"; then
   NEED_DB_WORK=false
   echo "✅ 没有待执行的迁移，这次不动数据库（跳过备份，省下约 9 秒和 130MB）"
@@ -152,7 +162,7 @@ else
   echo "$MIGRATE_STATUS" | grep -iE "have not yet been applied|migration.*found|^  " | head -8
 fi
 
-# 11b. 要动数据库才备份
+# 9b. 要动数据库才备份
 BACKUP_OK=false
 if [ "$NEED_DB_WORK" = false ]; then
   BACKUP_OK=true   # 不动数据库，不需要退路
@@ -169,7 +179,7 @@ else
   fi
 fi
 
-# 11c. 执行迁移文件（原来这里是 `prisma db push --accept-data-loss`）
+# 9c. 执行迁移文件（原来这里是 `prisma db push --accept-data-loss`）
 #
 # 为什么换掉 db push：它的职责是让数据库和 schema.prisma 长得一模一样 ——
 # 设计图里没有的字段会被删掉；改字段名在它眼里是「删旧的、加一个新的空的」，
@@ -189,7 +199,7 @@ else
 echo "🗄️  执行数据库迁移..."
 for i in 1 2 3; do
   echo "  第${i}次尝试..."
-  if docker compose exec -T api npx prisma migrate deploy --schema=apps/api/prisma/schema.prisma 2>&1; then
+  if docker compose run --rm -T api npx prisma migrate deploy --schema=apps/api/prisma/schema.prisma 2>&1; then
     DB_SYNC_OK=true
     break
   fi
@@ -203,11 +213,12 @@ elif [ "$NEED_DB_WORK" = true ] && [ "$DB_SYNC_OK" = true ]; then
   # 只有真的改过结构才重启 API 让它重新认识数据库。
   # 没改结构还重启，纯粹是多一次没必要的服务中断。
   echo "✅ 数据库迁移完成"
-  docker compose restart api 2>&1 | tail -1
-  sleep 5
 fi
 
-# 11d. 数据库结构体检（纯只读，一个字都不改）
+# 9d. 数据库结构体检（纯只读，一个字都不改）
+#
+# ⚠️ 2026-08-22 从「切容器之后」挪到了「切容器之前」。
+# 放在后面等于白检：等发现少字段时，新代码已经在服务客户了。
 #
 # 换成 migrate deploy 之后，就没有「谁改了设计图但忘了写迁移文件、db push 也能自动补上」
 # 这个兜底了。所以每次部署都得体检一遍：设计图有、数据库没有的字段会被列出来。
@@ -226,11 +237,64 @@ else
     if [ -n "$DRIFT" ]; then
       echo "$DRIFT"
       DRIFT_COUNT=$(echo "$DRIFT" | wc -l | tr -d ' ')
-      note_issue "数据库结构与设计图有 ${DRIFT_COUNT} 处对不上（见上面几行）：「A 缺失」是数据库少了字段，相关页面会报错，要补一个迁移文件；「B 多余」不影响使用，不用管"
+      # 「A 缺失」= 数据库少字段 → 新代码一上去相关页面就报错，必须拦住部署。
+      # 「B 多余」= 数据库多字段 → 不影响使用，只提醒。
+      if echo "$DRIFT" | grep -q "^A"; then
+        echo ""
+        echo "⛔ 数据库缺少设计图里的字段（上面以 A 开头的几行），**不切换新容器**。"
+        echo "   新代码用到这些字段时会直接报错。请补一个迁移文件再重跑部署。"
+        echo ""
+        docker compose up -d   # 旧容器继续服务
+        exit 1
+      fi
+      note_issue "数据库结构与设计图有 ${DRIFT_COUNT} 处对不上（见上面几行）：均为「B 多余」，不影响使用"
     else
       echo "✅ 结构与设计图一致"
     fi
   fi
+fi
+
+# ============================================================================
+# 10. 数据库就绪之后，才切新容器
+# ============================================================================
+#
+# ⚠️⚠️ 这道闸是整个「先改库、后换代码」顺序的关键。
+# 2026-08-22 第一版把备份/迁移提到了前面，**但切容器时只检查了 BUILD_OK** ——
+# 迁移失败时只记一条警告就照样把新代码切上去，新代码跑在旧结构上，
+# 跟调整顺序的初衷正好相反。这里必须把数据库的结果也作为切换前提。
+#
+# 判断口径：
+#   - 这次不用动数据库（NEED_DB_WORK=false）→ 无条件放行
+#   - 要动数据库 → 备份和迁移都必须成功，否则保留旧容器、直接退出
+if [ "$NEED_DB_WORK" = true ] && { [ "$BACKUP_OK" != true ] || [ "$DB_SYNC_OK" != true ]; }; then
+  echo ""
+  echo "⛔ 数据库没准备好，**不切换新容器**，旧版本继续服务客户。"
+  [ "$BACKUP_OK" != true ] && echo "   原因：改结构前的备份没成功"
+  [ "$DB_SYNC_OK" != true ] && echo "   原因：数据库迁移没成功"
+  echo "   新代码需要新字段，此时切上去会让相关页面直接报错。"
+  echo "   请先解决上面的问题再重跑部署。代码已经拉到本地，服务本身不受影响。"
+  echo ""
+  docker compose up -d   # 确保旧容器还在跑
+  exit 1
+fi
+
+echo "✅ 构建成功、数据库就绪，切换容器..."
+docker compose up -d
+
+# 11. 等待 API 就绪（最多 60s）
+echo "⏳ 等待 API 就绪..."
+API_READY=false
+for i in $(seq 1 20); do
+  if curl -sf http://localhost:3001/ -o /dev/null 2>/dev/null; then
+    API_READY=true
+    echo "✅ API 已就绪"
+    break
+  fi
+  sleep 3
+done
+
+if [ "$API_READY" = false ]; then
+  note_issue "API 在 60 秒内没就绪，后续步骤可能不准"
 fi
 
 # 12. 健康检查
@@ -255,6 +319,19 @@ wait_for_service() {
 
 wait_for_service "http://localhost:3001" "API" || note_issue "API 健康检查未通过 —— 后台可能不可用"
 wait_for_service "http://localhost:3000" "Web" || note_issue "Web 健康检查未通过 —— 前台可能打不开"
+
+# 上面两个只证明「进程活着、端口通了」——它们**都不碰数据库**。
+# 数据库连不上、结构对不上，这两项照样全绿（2026-08-22 加这一段的原因）。
+# 所以再补一刀：让新容器用 Prisma 真去连一次数据库。
+# 用 migrate status 是因为它既要连库、又要读迁移账本，一次同时验证「连得上」和「结构对得上」。
+echo "🔌 验证新容器真的能连上数据库..."
+DB_PROBE=$(docker compose exec -T api npx prisma migrate status --schema=apps/api/prisma/schema.prisma 2>&1)
+if echo "$DB_PROBE" | grep -q "Database schema is up to date"; then
+  echo "✅ 数据库连得上，结构与迁移账本一致"
+else
+  echo "$DB_PROBE" | tail -5
+  note_issue "新容器连数据库或对账失败（上面是原始输出）—— 页面可能大面积报错，先看这条再说别的"
+fi
 
 # 13. 图片完整性检查
 echo "🖼️  图片文件检查..."

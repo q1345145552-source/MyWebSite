@@ -112,3 +112,27 @@ export const COMPLETED_STATUSES: ShipmentStatus[] = [
   "returned",
   "cancelled",
 ];
+/**
+ * 「在途」= 已经装柜发走了、但还没签收的全部状态（2026-08-21 新增）。
+ *
+ * ⚠️ **从两条流程表自动推导，不要手写清单。**
+ * 之前有两处各写了一份写死的名单，两份都出过错：
+ *   ① 管理员看板数的是 `currentStatus === "inTransit"` —— 系统里**根本没有这个状态**，
+ *      所以「在途订单」这个数字从上线起就一直是 0（生产实测：显示 0，实际 366 张）。
+ *   ② AI 模块的 IN_TRANSIT_STATUSES 只列了海运，**漏掉全部 5 个陆运状态**
+ *      （过境越南、老挝边境已放行等），问「在途多少」会少报陆运的货。
+ * 自动推导之后，以后往流程里加环节这里会自己跟上。
+ *
+ * 口径按用户的业务说法（交接文档 1.5）：**装柜了 = 发走了**，所以从 loaded 起算；
+ * 「已创建」「暂缓柜」还没发走不算在途，已签收/退回/取消也不算。
+ */
+const NOT_IN_TRANSIT: ShipmentStatus[] = [
+  "created",
+  "holdLoading",
+  ...COMPLETED_STATUSES,
+  ...SHIPMENT_EXCEPTION_STATUSES,
+];
+
+export const IN_TRANSIT_STATUSES: ShipmentStatus[] = Array.from(
+  new Set([...SHIPMENT_STATUS_FLOW, ...SHIPMENT_STATUS_FLOW_LAND]),
+).filter((s) => !NOT_IN_TRANSIT.includes(s));

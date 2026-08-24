@@ -5,7 +5,7 @@ import { apiBaseUrl, authHeaders, parseApiResponse } from "../../services/core-a
 import { openShipmentTrack } from "../../modules/shipment/ShipmentTrackModal";
 
 type LmShipment = { id: string; trackingNo: string; clientId: string; itemName: string; packageCount: number; containerNo?: string };
-type LmOrderItem = { id: string; deliveryNo: string; shipmentId: string; trackingNo?: string; driverName?: string; licensePlate?: string; phoneNumber?: string; deliveryDate?: string; clientId?: string; status: string; signImageBase64?: string | null };
+type LmOrderItem = { id: string; deliveryNo: string; shipmentId: string; trackingNo?: string; driverName?: string; licensePlate?: string; phoneNumber?: string; deliveryDate?: string; clientId?: string; status: string; hasSignImage?: boolean };
 
 export type StaffLastmileProps = {
   visible: boolean;
@@ -57,6 +57,25 @@ export default function StaffLastmile(props: StaffLastmileProps) {
       props.onToast(e.message || "创建失败");
     } finally {
       setBusy(false);
+    }
+  };
+
+  /**
+   * 点开签收凭证时才取那一张图（2026-08-22）。
+   * 原来列表接口把 570 条派送单的签收图 base64 全带回来（实测每次 113 MB），
+   * 页面卡、后端每 6 天被内存撑爆，而图只显示成 40×40 缩略图。
+   */
+  const openSignImage = async (id: string) => {
+    try {
+      const res = await fetch(apiBaseUrl() + "/admin/lastmile/sign-image?id=" + encodeURIComponent(id), {
+        headers: { ...authHeaders() },
+      });
+      const data = await parseApiResponse(res);
+      const b64 = (data as any)?.signImageBase64;
+      if (b64) setPreviewImg("data:image/jpeg;base64," + b64);
+      else props.onToast("这条派送单没有签收凭证");
+    } catch (e: any) {
+      props.onToast(e?.message || "取签收凭证失败");
     }
   };
 
@@ -234,7 +253,7 @@ export default function StaffLastmile(props: StaffLastmileProps) {
                     <td style={{ padding: "4px 6px" }}>{o.phoneNumber ?? "-"}</td>
                     <td style={{ padding: "4px 6px" }}>{o.deliveryDate || "-"}</td>
                     <td style={{ padding: "4px 6px" }}>
-                      {o.status === "SIGNED" ? <span>已签收{o.signImageBase64 ? <img src={"data:image/jpeg;base64,"+o.signImageBase64} alt="签收凭证" onClick={() => setPreviewImg("data:image/jpeg;base64,"+o.signImageBase64!)} style={{ maxWidth:40, maxHeight:40, borderRadius:4, marginLeft:4, cursor:"pointer", border:"1px solid var(--l-soft)" }} /> : null}</span> : " 派送中"}
+                      {o.status === "SIGNED" ? <span>已签收{o.hasSignImage ? <button onClick={() => openSignImage(o.id)} style={{ marginLeft:6, padding:"2px 8px", fontSize:11, border:"1px solid var(--c-blue)", color:"var(--c-blue)", background:"var(--white)", borderRadius:4, cursor:"pointer" }}>看凭证</button> : null}</span> : " 派送中"}
                     </td>
                     <td style={{ padding: "4px 6px" }}>
                       {o.status !== "SIGNED" && (

@@ -2,7 +2,8 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
-import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { COMPLETED_STATUSES, IN_TRANSIT_STATUSES } from "../../../../../packages/shared-types/shipment-status";
+import { Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { AiKnowledgeItem } from "../../../../../packages/shared-types/entities";
 import { getOptionalSession, type AuthSession } from "../../auth/auth-session";
 import CountUpNumber from "../../modules/layout/CountUpNumber";
@@ -264,10 +265,29 @@ export default function AdminHomePage() {
     try { setLmShipments(await fetchLastmileShipments()); }
     catch (e) { console.error(e); setMessage(`尾端运单加载失败：${e instanceof Error ? e.message : "未知错误"}`); }
   };
-  const [lmOrders, setLmOrders] = useState<Array<{id:string;deliveryNo:string;shipmentId:string;trackingNo?:string;driverName?:string|null;licensePlate?:string|null;phoneNumber?:string|null;deliveryDate?:string|null;signImageBase64?:string|null;status:string}>>([]);
+  const [lmOrders, setLmOrders] = useState<Array<{id:string;deliveryNo:string;shipmentId:string;trackingNo?:string;driverName?:string|null;licensePlate?:string|null;phoneNumber?:string|null;deliveryDate?:string|null;hasSignImage?:boolean;status:string}>>([]);
   const loadLastmileOrders = async () => {
     try { const res = await fetch(`${apiBaseUrl()}/admin/lastmile/orders`, { headers: authHeaders() }); const d = await parseApiResponse<{items:any[]}>(res); setLmOrders(d.items ?? []); } catch (e) { console.error(e); }
   };
+  /**
+   * 点开签收凭证时，才去取那一张图（2026-08-22）。
+   *
+   * 原来列表接口把 570 条派送单的签收图 base64 全带回来 —— 实测每次 113 MB，
+   * 页面卡、后端每 6 天被内存撑爆一次，而图在界面上只显示成 40×40 的缩略图。
+   * 现在列表只回 hasSignImage，图点开才取。
+   */
+  const openSignImage = async (id: string) => {
+    try {
+      const res = await fetch(`${apiBaseUrl()}/admin/lastmile/sign-image?id=${encodeURIComponent(id)}`, { headers: { ...authHeaders() } });
+      const data = await parseApiResponse(res);
+      const b64 = (data as any)?.signImageBase64;
+      if (b64) setPreviewImg("data:image/jpeg;base64," + b64);
+      else setToast("这条派送单没有签收凭证");
+    } catch (e: any) {
+      setToast(e?.message || "取签收凭证失败");
+    }
+  };
+
   const updateLastmileStatus = async (id: string, status: string, signImageBase64?: string) => {
     const res = await fetch(`${apiBaseUrl()}/admin/lastmile/status`, { method: "POST", headers: {"Content-Type":"application/json",...authHeaders()}, body: JSON.stringify({id, status, signImageBase64: signImageBase64 || undefined}) });
     return parseApiResponse(res);
@@ -334,21 +354,37 @@ export default function AdminHomePage() {
   /**
    * 看板状态分布：用于状态卡片与柱状图展示。
    */
+  /**
+   * 订单状态分布。
+   *
+   * ⚠️ 2026-08-21 改：原来只看 statusGroup，凡是「没完成」一律算「在途」——
+   * 连**还没装柜发走**的「已创建」也算进去了。结果同一屏上，上面 KPI 的「在途订单」
+   * 和这里的「在途」是两个不同口径、两个不同数字，看的人只会觉得数据不可信。
+   * 现在改成跟 KPI 用**同一份** IN_TRANSIT_STATUSES（从流程表自动推导），两处必然一致。
+   *
+   * 口径按用户的业务说法（交接文档 1.5）：**装柜了 = 发走了**。
+   * 所以「已创建 / 暂缓柜」= 货在国内仓还没发走 → 算「处理中」，不算在途。
+   */
   const statusDistribution = useMemo(() => {
     const bucket = { delivered: 0, inTransit: 0, processing: 0, exception: 0 };
+    const inTransit = new Set<string>(IN_TRANSIT_STATUSES);
+    const completed = new Set<string>(COMPLETED_STATUSES);
     orderList.forEach((item) => {
-      const status = (item.statusGroup ?? "").toLowerCase();
-      const approval = (item.approvalStatus ?? "").toLowerCase();
-      if (approval !== "approved") {
-        bucket.processing += 1;
-        return;
-      }
-      if (status === "completed") {
+      // ⚠️ 不要先按「订单审核状态」分流。原来的写法是「没审核 → 一律处理中」，
+      // 结果一张已经在泰国「正在卸柜」的货，因为订单标着未审核，被算成了处理中，
+      // 让这里的「在途」比上面 KPI 少 1（实测就是 YWYB0000001 这张）。
+      // 货走到哪一步看状态就够了，审核与否不改变它在不在路上。
+      const cur = item.currentStatus ?? "";
+      if (cur === "delivered") {
         bucket.delivered += 1;
-      } else if (status === "unfinished") {
+      } else if (inTransit.has(cur)) {
         bucket.inTransit += 1;
-      } else {
+      } else if (completed.has(cur)) {
+        // 退回 / 取消：算结束了，但不是正常送达
         bucket.exception += 1;
+      } else {
+        // 已创建 / 暂缓柜 / 未审核 / 没认出来的状态 —— 都还没发走
+        bucket.processing += 1;
       }
     });
     return [
@@ -360,15 +396,29 @@ export default function AdminHomePage() {
   }, [orderList]);
 
   /**
-   * 中泰线路时效趋势：按最近订单的创建时间模拟时效天数用于趋势观察。
+   * 中泰线路时效趋势 —— 用后端按真实轨迹算出来的天数。
+   *
+   * ⚠️ 2026-08-21 之前这里是**编的**：
+   *     days = 2.5 + 第几个订单 × 0.6 + (海运 4.2 / 陆运 1.4)
+   * 里面一个日期计算都没有，跟真实时效毫无关系，而且因为带着「第几个」这一项，
+   * 曲线**永远单调上升**，换一批订单形状还是那样。页面上却挂着「时效分析图」的名字，
+   * 看的人没法知道它是假的。**别再往这里塞公式，要真数据就从后端拿。**
+   *
+   * 现在后端按「第一次已装柜 → 第一次已到仓」真算（生产实测：海运平均 14.7 天、
+   * 陆运 4.1 天，差 3 倍多，所以两条线分开画）。
    */
-  const etaTrendData = useMemo(() => {
-    return orderList.slice(0, 8).map((item, index) => ({
-      label: `订单${index + 1}`,
-      orderId: item.id,
-      days: Number((2.5 + index * 0.6 + (item.transportMode === "sea" ? 4.2 : 1.4)).toFixed(1)),
-    }));
-  }, [orderList]);
+  const etaTrendData = overview?.transitTrend ?? [];
+
+  /**
+   * ⚠️ 必须用 `?? []` 兜底，不能写 `overview.stalledContainers.length`。
+   *
+   * 部署时 web 容器和 api 容器不是同一秒起来的，中间几秒里新版前端会拿到**旧版后端**
+   * 的返回 —— 那份返回里没有新加的字段，直接读 `.length` 就是
+   * 「Cannot read properties of undefined」**整页白屏**。
+   * 2026-08-21 本地实测崩过一次；CLAUDE.md 第 22 条也是同一类事故（客户首页白屏）。
+   * **凡是读后端新加的数组字段，一律 `?? []`。**
+   */
+  const stalledContainers = overview?.stalledContainers ?? [];
 
   // 2026-08-07 删除 inTransitContainerCount：原来按「柜号」去重数在途柜子。
   // 那个柜号是员工在预报单审核里手填的，生产库 357 张在途单只有 1 张填了，
@@ -637,9 +687,12 @@ export default function AdminHomePage() {
     setSession(next);
     void loadAll(next);
 
-    // 10 秒自动刷新同步
+    // 10 秒自动刷新同步。看板的 KPI / 柜量 / 告警必须和运单列表一起刷新，
+    // 否则右侧状态图已经变了，顶部 KPI 还停在首次打开页面时的旧值。
     const interval = window.setInterval(() => {
       if (document.hidden) return;
+      loadOverview().catch(() => {});
+      loadOpsOverview().catch(() => {});
       loadStaff().catch(() => {});
       loadClients().catch(() => {});
       loadOrders().catch(() => {});
@@ -1105,7 +1158,7 @@ export default function AdminHomePage() {
               </div>
             </div>
             <div className={overviewFlash ? "kpi-flash" : ""} style={cardStyle}>
-              <div style={{ color: "var(--t-strong)", fontSize: 12 }}>在途订单</div>
+              <div style={{ color: "var(--t-strong)", fontSize: 12 }}>在途运单</div>
               <div style={{ fontSize: 22, fontWeight: 700 }}>
                 <CountUpNumber value={overview.inTransitOrderCount} />
               </div>
@@ -1123,24 +1176,33 @@ export default function AdminHomePage() {
         <div style={{ marginTop: 14, display: "grid", gap: 12 }}>
           <div className="dashboard-grid-2">
             <div className="dashboard-panel">
-              <div className="dashboard-panel-title">中泰线路时效分析图</div>
+              <div className="dashboard-panel-title">中泰线路时效分析图（装柜 → 到仓，天）</div>
               <div style={{ width: "100%", height: 240 }}>
-                <ResponsiveContainer>
-                  <LineChart data={etaTrendData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#E4E6EC" />
-                    <XAxis dataKey="label" stroke="#8B94A3" />
-                    <YAxis stroke="#8B94A3" />
-                    <Tooltip
-                      formatter={(value) => [`${String(value ?? "-")} 天`, "时效"]}
-                      labelFormatter={(label) => (label ? `订单号：${String(label)}` : "时效详情")}
-                    />
-                    <Line type="monotone" dataKey="days" stroke="#1e3a8a" strokeWidth={2} dot={false} />
-                  </LineChart>
-                </ResponsiveContainer>
+                {etaTrendData.length > 0 ? (
+                  <ResponsiveContainer>
+                    <LineChart data={etaTrendData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#E4E6EC" />
+                      <XAxis dataKey="label" stroke="#8B94A3" />
+                      <YAxis stroke="#8B94A3" />
+                      <Tooltip
+                        formatter={(value, name) => [value == null ? "无数据" : `${String(value)} 天`, String(name)]}
+                      />
+                      <Legend />
+                      {/* connectNulls={false}：某一周没有海运（或陆运）的货时线断开，
+                          不要连成直线假装有数据 */}
+                      <Line type="monotone" dataKey="seaDays" name="海运" stroke="#1e3a8a" strokeWidth={2} connectNulls={false} />
+                      <Line type="monotone" dataKey="landDays" name="陆运" stroke="#B45309" strokeWidth={2} connectNulls={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div style={{ fontSize: 13, color: "var(--t-strong)", padding: "8px 2px" }}>
+                    暂无时效数据（需要运单同时有「已装柜」和「已到仓」两条轨迹才能算）
+                  </div>
+                )}
               </div>
             </div>
             <div className="dashboard-panel">
-              <div className="dashboard-panel-title">订单状态分布</div>
+              <div className="dashboard-panel-title">运单状态分布</div>
               <div style={{ width: "100%", height: 240 }}>
                 <ResponsiveContainer>
                   <BarChart data={statusDistribution}>
@@ -1180,7 +1242,14 @@ export default function AdminHomePage() {
           </div>
           <div style={{ border: "1px solid var(--l-cool)", borderRadius: 10, padding: 10, background: "var(--s-cool)" }}>
             <div style={{ fontWeight: 700, marginBottom: 6 }}>毛利率趋势（最近结算）</div>
-            {opsOverview ? (
+            {/* ⚠️ 2026-08-21：结算表一条记录都没有时，原来照样显示
+                「总收入 0.00 / 毛利率 0.00%」—— 看的人会以为这生意一分不赚，
+                实际是**还没人录结算数据**。两回事，必须分开说。 */}
+            {opsOverview && opsOverview.profitTrend.length === 0 ? (
+              <div style={{ fontSize: 13, color: "var(--t-strong)" }}>
+                还没有结算数据（去「财务结算与利润」录入后，这里才会有毛利率）
+              </div>
+            ) : opsOverview ? (
               <>
                 <div style={{ fontSize: 13, color: "var(--t-strong)", marginBottom: 8 }}>
                   总收入 {opsOverview.profitSummary.totalRevenue.toFixed(2)} / 总成本{" "}
@@ -1200,9 +1269,44 @@ export default function AdminHomePage() {
               <div style={{ fontSize: 13, color: "var(--t-strong)" }}>暂无利润趋势数据</div>
             )}
           </div>
-          <div style={{ border: "1px solid #fde68a", borderRadius: 10, padding: 10, background: "#fffbeb" }}>
-            <div style={{ fontWeight: 700, marginBottom: 6 }}>关务查验预警</div>
-            {opsOverview && opsOverview.customsAlerts.length > 0 ? (
+          {/* 卡住的柜子（2026-08-21 新增）。
+              放在关务预警上面：这是目前看板上唯一会主动告诉你「出事了」的地方。
+              判定规则和阈值都在后端 /admin/dashboard/overview 里，那边有详细注释。 */}
+          <div style={{ border: "1px solid var(--l-cool)", borderRadius: 10, padding: 10, background: "var(--s-cool)" }}>
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>
+              卡住的柜子
+              {stalledContainers.length > 0 ? `（${stalledContainers.length} 个）` : ""}
+            </div>
+            {stalledContainers.length > 0 ? (
+              <div style={{ display: "grid", gap: 5 }}>
+                {stalledContainers.map((c) => (
+                  <div key={c.containerNo} style={{ fontSize: 12.5, color: "var(--t-body)" }}>
+                    <b>{c.containerNo}</b>
+                    <span style={{ color: "var(--t-muted)" }}>
+                      （{c.transportMode === "land" ? "陆运" : "海运"} · {c.shipmentCount} 票货 · 现在是「{c.currentStatusZh}」）
+                    </span>
+                    <span style={{ color: "var(--c-red)", marginLeft: 6 }}>
+                      {c.reason === "overdue"
+                        ? `装柜已 ${c.loadedDays} 天还没到仓`
+                        : `已经 ${c.idleDays} 天没推进状态`}
+                    </span>
+                  </div>
+                ))}
+                <div style={{ fontSize: 11, color: "var(--t-faint)", marginTop: 2 }}>
+                  判定：海运装柜超 21 天没到仓 / 超 14 天没推状态；陆运都是超 7 天。已到泰国仓的不算。
+                </div>
+              </div>
+            ) : (
+              <div style={{ fontSize: 13, color: "var(--t-strong)" }}>没有卡住的柜子</div>
+            )}
+          </div>
+          {/* 关务查验预警：没有告警就整块不显示（2026-08-21）。
+              原来无论如何都占一块地方写「暂无查验/待处理告警」，
+              生产上这张表只有 1 条、还没关联运单，等于常年是块空版面。
+              告警类面板的价值在于「出现了就说明有事」，没事就不该占地方。 */}
+          {opsOverview && opsOverview.customsAlerts.length > 0 && (
+            <div style={{ border: "1px solid #fde68a", borderRadius: 10, padding: 10, background: "#fffbeb" }}>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>关务查验预警</div>
               <div style={{ display: "grid", gap: 4 }}>
                 {opsOverview.customsAlerts.slice(0, 6).map((item: any) => (
                   <div key={item.id} style={{ fontSize: 12, color: "var(--c-amber-deep)" }}>
@@ -1211,26 +1315,25 @@ export default function AdminHomePage() {
                   </div>
                 ))}
               </div>
-            ) : (
-              <div style={{ fontSize: 13, color: "var(--t-strong)" }}>暂无查验/待处理告警</div>
-            )}
-          </div>
-          <div style={{ border: "1px solid #E4E6EC", borderRadius: 10, padding: 10, background: "var(--c-blue-bg)" }}>
-            <div style={{ fontWeight: 700, marginBottom: 6 }}>供应商报价变化提醒</div>
-            {opsOverview && opsOverview.supplierPriceAlerts.length > 0 ? (
+            </div>
+          )}
+          {/* 供应商报价变化提醒：没有变动就整块不显示（2026-08-21）。
+              ⚠️ 这个面板要出内容，同一条「线路+供应商+运输方式+季节+币种」至少得有 2 条报价记录才比得出变化。
+              生产上整张报价表只有 1 条，所以它**永远**不会有内容 —— 不是坏了，是没数据。 */}
+          {opsOverview && opsOverview.supplierPriceAlerts.length > 0 && (
+            <div style={{ border: "1px solid #E4E6EC", borderRadius: 10, padding: 10, background: "var(--c-blue-bg)" }}>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>供应商报价变化提醒</div>
               <div style={{ display: "grid", gap: 4 }}>
                 {opsOverview.supplierPriceAlerts.slice(0, 6).map((item) => (
-                  <div key={`${item.routeCode}-${item.supplierName}-${item.updatedAt}`} style={{ fontSize: 12, color: "var(--c-navy)" }}>
-                    {item.routeCode} / {item.supplierName}：{item.previousQuotePrice.toFixed(2)} →{" "}
+                  <div key={`${item.routeCode}-${item.supplierName}-${item.transportMode}-${item.seasonTag}-${item.currency}-${item.updatedAt}`} style={{ fontSize: 12, color: "var(--c-navy)" }}>
+                    {item.routeCode} / {item.supplierName} / {item.transportMode === "land" ? "陆运" : "海运"} / {item.seasonTag} / {item.currency}：{item.previousQuotePrice.toFixed(2)} →{" "}
                     {item.latestQuotePrice.toFixed(2)}（变动 {item.delta > 0 ? "+" : ""}
                     {item.delta.toFixed(2)}）
                   </div>
                 ))}
               </div>
-            ) : (
-              <div style={{ fontSize: 13, color: "var(--t-strong)" }}>暂无报价变动提醒</div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </section>
 
@@ -1879,7 +1982,7 @@ export default function AdminHomePage() {
                     <td style={{ padding: "6px 8px" }}>{o.licensePlate ?? "-"}</td>
                     <td style={{ padding: "6px 8px" }}>{o.phoneNumber ?? "-"}</td>
                     <td style={{ padding: "6px 8px" }}>{o.deliveryDate || "-"}</td>
-                    <td style={{ padding: "6px 8px" }}>{o.status === "SIGNED" ? <span>已签收{o.signImageBase64 ? <img src={"data:image/jpeg;base64,"+o.signImageBase64} alt="签收凭证" onClick={() => setPreviewImg("data:image/jpeg;base64,"+o.signImageBase64!)} style={{ maxWidth:40, maxHeight:40, borderRadius:4, marginLeft:4, cursor:"pointer", border:"1px solid var(--l-soft)" }} /> : null}</span> : o.status === "DELIVERING" ? " 派送中" : o.status}</td>
+                    <td style={{ padding: "6px 8px" }}>{o.status === "SIGNED" ? <span>已签收{o.hasSignImage ? <button onClick={() => openSignImage(o.id)} style={{ marginLeft:6, padding:"2px 8px", fontSize:11, border:"1px solid var(--c-blue)", color:"var(--c-blue)", background:"var(--white)", borderRadius:4, cursor:"pointer" }}>看凭证</button> : null}</span> : o.status === "DELIVERING" ? " 派送中" : o.status}</td>
                     <td style={{ padding: "6px 8px" }}>
                       {o.status !== "SIGNED" && (
                         <button onClick={async () => {

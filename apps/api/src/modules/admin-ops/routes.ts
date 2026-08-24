@@ -1,6 +1,7 @@
 // B-7: 已从 node:sqlite 迁移到 Prisma + PostgreSQL（2026-05-20）
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../db/prisma";
+import { syncParentStatusFromChildren } from "../shipments/parent-status";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
 
@@ -137,11 +138,57 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
   app.get("/admin/lastmile/orders", async (req, res) => {
     const auth = requireRole(req, res, ["staff", "admin"]);
     if (!auth) return;
+    /**
+     * ⚠️⚠️ 这里必须用 select 一个个点名要字段，**绝不能用 include 或不写 select**。
+     *
+     * 2026-08-22 实测：原来这里是 include（等于把所有标量字段都查出来），
+     * 而这张表里 `signImageBase64`（数据库列 sign_product_image_base64）存的是签收凭证 base64 原图 ——
+     * 570 条派送单里 553 条带图，**光图片就 181 MB，最大单张 4.9 MB**。
+     * nginx 日志实测：这个接口**平均每次返回 113 MB**，118 次调用烧掉 13.4 GB 流量。
+     *
+     * 后果是三重的：
+     *   ① 后端每被调一次就吞 100 多 MB 内存 —— 线上 API 因此**每 6 天被 V8 堆撑爆一次**
+     *      （日志原话：FATAL ERROR: JavaScript heap out of memory，崩时已跑 144 小时）
+     *   ② 员工每打开一次「尾端派送」就要下 113 MB，页面自然慢（用户原话：「每次都加载很慢」）
+     *   ③ 白烧流量
+     *
+     * 而页面上那些图**只显示成 40×40 的缩略图** —— 为了一个指甲盖大的图下载 113 MB。
+     *
+     * 现在列表只回一个「有没有图」的布尔值；真要看图时走
+     * `/admin/lastmile/sign-image?id=xxx` 单张取。
+     * （CLAUDE.md 第 3 条早就写了「大数据量字段不要随列表返回」，这里是同一个错换了个地方。）
+     */
     const rows = await prisma.adminLastmileOrder.findMany({
       where: { companyId: auth.companyId },
       orderBy: { updatedAt: "desc" },
-      include: { shipment: { select: { trackingNo: true, order: { select: { clientId: true } } } } },
+      select: {
+        id: true,
+        deliveryNo: true,
+        shipmentId: true,
+        deliveryDate: true,
+        carrierName: true,
+        externalTrackingNo: true,
+        driverName: true,
+        licensePlate: true,
+        phoneNumber: true,
+        status: true,
+        updatedAt: true,
+        // signImageBase64（数据库列 sign_product_image_base64）故意不查 —— 见上面那段
+        shipment: { select: { trackingNo: true, order: { select: { clientId: true } } } },
+      },
     });
+
+    // 「这条有没有签收图」单独用一次轻量查询算出来：只取 id，不碰图片内容。
+    // 用 `not: null` + `not: ""` 是因为历史数据里两种空值都有。
+    const withImageIds = new Set(
+      (await prisma.adminLastmileOrder.findMany({
+        where: {
+          companyId: auth.companyId,
+          AND: [{ signImageBase64: { not: null } }, { signImageBase64: { not: "" } }],
+        },
+        select: { id: true },
+      })).map((r) => r.id),
+    );
     ok(res, {
       items: rows.map((item) => ({
         id: item.id,
@@ -155,11 +202,39 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
         driverName: item.driverName,
         licensePlate: item.licensePlate,
         phoneNumber: item.phoneNumber,
-        signImageBase64: item.signImageBase64,
+        // 只告诉前端「有没有图」，图本身走 /admin/lastmile/sign-image 单张取
+        hasSignImage: withImageIds.has(item.id),
         status: item.status,
         updatedAt: item.updatedAt.toISOString(),
       })),
     });
+  });
+
+  /**
+   * 单独取一张签收凭证（2026-08-22 新增）。
+   *
+   * 配合上面列表接口的瘦身：列表只回 hasSignImage，用户点「看凭证」时才来这里取那一张。
+   * 一次只查一条、只取图片一个字段，最大 4.9 MB —— 而原来是一次 113 MB。
+   *
+   * ⚠️ 必须带 companyId 查，别只按 id 查（同文件里创建派送单那处就是漏了公司条件的反面教材）。
+   */
+  app.get("/admin/lastmile/sign-image", async (req, res) => {
+    const auth = requireRole(req, res, ["staff", "admin"]);
+    if (!auth) return;
+    const id = typeof req.query?.id === "string" ? req.query.id.trim() : "";
+    if (!id) {
+      fail(res, 400, "BAD_REQUEST", "id 为必填");
+      return;
+    }
+    const row = await prisma.adminLastmileOrder.findFirst({
+      where: { id, companyId: auth.companyId },
+      select: { signImageBase64: true },
+    });
+    if (!row) {
+      fail(res, 404, "NOT_FOUND", "派送单不存在");
+      return;
+    }
+    ok(res, { signImageBase64: row.signImageBase64 || null });
   });
 
   app.post("/admin/lastmile/orders", async (req, res) => {
@@ -245,8 +320,9 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
               data: { id: `sl_lm_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, companyId: auth.companyId, shipmentId: sid, operatorId: auth.userId, operatorRole: auth.role, operatorName: auth.name ?? "", fromStatus: ship.currentStatus, toStatus: "outForDelivery", remark: departRemark, changedAt: now },
             });
             if (ship.parentTrackingNo) {
-              const parent = await tx.shipment.findFirst({ where: { trackingNo: ship.parentTrackingNo, companyId: auth.companyId }, select: { id: true } });
-              if (parent) { await tx.shipment.update({ where: { id: parent.id }, data: { currentStatus: "outForDelivery", updatedAt: now } }); }
+              // ⚠️ 不能直接把父单写成 outForDelivery：分柜后可能只有一个子单出去派送，
+              // 其余还在仓库。按全部子单重新推算（2026-08-22）。
+              await syncParentStatusFromChildren(tx, ship.parentTrackingNo, auth.companyId);
             }
           }
           results.push({ id, shipmentId: sid });
@@ -296,10 +372,11 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
           });
           // 同步父运单
           if (shipment.parentTrackingNo) {
-            const parent = await tx.shipment.findFirst({ where: { trackingNo: shipment.parentTrackingNo, companyId: auth.companyId }, select: { id: true } });
-            if (parent) {
-              await tx.shipment.update({ where: { id: parent.id }, data: { currentStatus: "delivered", updatedAt: now } });
-            }
+            // ⚠️⚠️ 这里原来是「任何一个子单签收 → 父单直接写成已签收」。
+            // 生产实测造成 7 张父单显示「已签收」，子单却还在「已到仓」——
+            // 客户订单列表看到已签收、点开轨迹却看到货在仓库。改成按全部子单推算：
+            // **全部子单都签收了，父单才签收**（2026-08-22）。
+            await syncParentStatusFromChildren(tx, shipment.parentTrackingNo, auth.companyId);
           }
         }
       });
@@ -346,25 +423,14 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
         },
       });
 
-      // 父单：只有当它名下**再没有**任何还在派送中或已签收的子单时才一起退回，
-      // 否则说明另一票子货还在路上/已送到，父单不该被拉回来
+      // 父单按全部子单重新推算（2026-08-22 统一成 syncParentStatusFromChildren）。
+      //
+      // 这里原来自己写了一套「名下没有其他派送中/已签收的子单才退回」的判断 ——
+      // 方向是对的（比另外两处强），但只处理 outForDelivery → inWarehouseTH 这一种情形，
+      // 其余情形照样会把父单留在错误状态上。四个改父单状态的地方共用同一个函数，
+      // 才不会下次又有人只改其中一处。
       if (ship.parentTrackingNo) {
-        const parent = await tx.shipment.findFirst({
-          where: { trackingNo: ship.parentTrackingNo, companyId: auth.companyId },
-          select: { id: true, currentStatus: true },
-        });
-        if (parent && parent.currentStatus === "outForDelivery") {
-          const busySiblings = await tx.shipment.count({
-            where: {
-              parentTrackingNo: ship.parentTrackingNo, companyId: auth.companyId,
-              id: { not: ship.id },
-              currentStatus: { in: ["outForDelivery", "delivered"] },
-            },
-          });
-          if (busySiblings === 0) {
-            await tx.shipment.update({ where: { id: parent.id }, data: { currentStatus: "inWarehouseTH", updatedAt: now } });
-          }
-        }
+        await syncParentStatusFromChildren(tx, ship.parentTrackingNo, auth.companyId);
       }
       return { deleted: true, reverted: true };
     });
@@ -464,11 +530,19 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
     const auth = requireRole(req, res, ["admin"]);
     if (!auth) return;
 
-    const profitRows = await prisma.adminSettlementEntry.findMany({
-      where: { companyId: auth.companyId },
-      orderBy: { updatedAt: "desc" },
-      take: 20,
-    });
+    // 趋势只需要最近 7 条；顶部“总收入/总成本/总利润”必须汇总全部结算，
+    // 不能拿最近 20 条冒充总计。
+    const [profitRows, profitTotals] = await Promise.all([
+      prisma.adminSettlementEntry.findMany({
+        where: { companyId: auth.companyId },
+        orderBy: { updatedAt: "desc" },
+        take: 7,
+      }),
+      prisma.adminSettlementEntry.aggregate({
+        where: { companyId: auth.companyId },
+        _sum: { clientReceivable: true, supplierPayable: true, taxFee: true },
+      }),
+    ]);
     const profitNumeric = profitRows.map((item) => ({
       orderId: item.orderId,
       clientReceivable: decToNumber(item.clientReceivable),
@@ -476,8 +550,9 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
       taxFee: decToNumber(item.taxFee),
       updatedAt: item.updatedAt.toISOString(),
     }));
-    const totalRevenue = profitNumeric.reduce((sum, item) => sum + item.clientReceivable, 0);
-    const totalCost = profitNumeric.reduce((sum, item) => sum + item.supplierPayable + item.taxFee, 0);
+    const totalRevenue = decToNumber(profitTotals._sum.clientReceivable);
+    const totalCost =
+      decToNumber(profitTotals._sum.supplierPayable) + decToNumber(profitTotals._sum.taxFee);
     const totalProfit = totalRevenue - totalCost;
     const grossMarginPercent = totalRevenue > 0 ? Number(((totalProfit / totalRevenue) * 100).toFixed(2)) : 0;
     const profitOrderIds = [...new Set(profitNumeric.map((item) => item.orderId))];
@@ -500,11 +575,36 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
       where: { companyId: auth.companyId },
       orderBy: [{ routeCode: "asc" }, { supplierName: "asc" }, { updatedAt: "desc" }],
     });
-    const latestByKey = new Map<string, { quotePrice: number; updatedAt: string }>();
-    const previousByKey = new Map<string, { quotePrice: number; updatedAt: string }>();
+    type RateSnapshot = {
+      routeCode: string;
+      supplierName: string;
+      transportMode: string;
+      seasonTag: string;
+      currency: string;
+      quotePrice: number;
+      updatedAt: string;
+    };
+    const latestByKey = new Map<string, RateSnapshot>();
+    const previousByKey = new Map<string, RateSnapshot>();
     lmpRows.forEach((item) => {
-      const key = `${item.routeCode}__${item.supplierName}`;
-      const snapshot = { quotePrice: decToNumber(item.quotePrice), updatedAt: item.updatedAt.toISOString() };
+      // 同一路线和供应商也可能同时有海/陆运、不同季节和不同币种报价；
+      // 这些维度不相同时不能互相比较，否则会制造假涨价/假降价提醒。
+      const key = JSON.stringify([
+        item.routeCode,
+        item.supplierName,
+        item.transportMode,
+        item.seasonTag,
+        item.currency,
+      ]);
+      const snapshot: RateSnapshot = {
+        routeCode: item.routeCode,
+        supplierName: item.supplierName,
+        transportMode: item.transportMode,
+        seasonTag: item.seasonTag,
+        currency: item.currency,
+        quotePrice: decToNumber(item.quotePrice),
+        updatedAt: item.updatedAt.toISOString(),
+      };
       if (!latestByKey.has(key)) {
         latestByKey.set(key, snapshot);
       } else if (!previousByKey.has(key)) {
@@ -515,12 +615,14 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
       .map(([key, latest]) => {
         const previous = previousByKey.get(key);
         if (!previous) return null;
-        const [routeCode, supplierName] = key.split("__");
         const delta = Number((latest.quotePrice - previous.quotePrice).toFixed(2));
         if (Math.abs(delta) < 0.01) return null;
         return {
-          routeCode,
-          supplierName,
+          routeCode: latest.routeCode,
+          supplierName: latest.supplierName,
+          transportMode: latest.transportMode,
+          seasonTag: latest.seasonTag,
+          currency: latest.currency,
           previousQuotePrice: previous.quotePrice,
           latestQuotePrice: latest.quotePrice,
           delta,

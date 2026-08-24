@@ -278,6 +278,32 @@ export interface AdminOverview {
   containerAtWarehouseCount: number;
   containerDoneCount: number;
   containerTotalCount: number;
+  /**
+   * 真实时效趋势（2026-08-21 新增）：按「已装柜 → 已到仓」真算出来的天数，
+   * 按到仓那一周聚合，海运陆运分开。取代前端原来那条按公式编出来的曲线。
+   * 某一周没有对应运输方式的货时，那一项是 null（图上断开，不画成 0）。
+   */
+  transitTrend: Array<{
+    label: string;
+    seaDays: number | null;
+    landDays: number | null;
+    samples: number;
+  }>;
+  /**
+   * 卡住的柜子（2026-08-21 新增）：装柜太久还没到仓，或者太久没人推状态。
+   * reason: overdue=超期未到仓，idle=长时间没推进。
+   */
+  stalledContainers: Array<{
+    containerNo: string;
+    transportMode: string;
+    currentStatus: string;
+    /** 中文状态名，由后端下发（前端不再自己维护一份对照表） */
+    currentStatusZh: string;
+    loadedDays: number | null;
+    idleDays: number | null;
+    shipmentCount: number;
+    reason: "overdue" | "idle";
+  }>;
 }
 
 export interface AdminUserItem {
@@ -434,6 +460,9 @@ export interface AdminOpsOverview {
   supplierPriceAlerts: Array<{
     routeCode: string;
     supplierName: string;
+    transportMode: string;
+    seasonTag: string;
+    currency: string;
     previousQuotePrice: number;
     latestQuotePrice: number;
     delta: number;

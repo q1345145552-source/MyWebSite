@@ -1,4 +1,5 @@
 import { prisma } from "../../db/prisma";
+import { syncParentStatusFromChildren } from "../shipments/parent-status";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
 // 柜子状态流程只在 containers/status-flow.ts 定义一处，本文件不再自己抄
@@ -261,11 +262,33 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
       const reqPieces = typeof body.pieceCount === "number" && body.pieceCount > 0 ? body.pieceCount : totalPkg;
       if (reqPieces > totalPkg) throw new Error(`装柜件数(${reqPieces})超过运单总件数(${totalPkg})`);
 
+      /**
+       * ⚠️⚠️ 这里的 vol / weight 必须是**父单当前剩下的**，不是原始总量。
+       *
+       * 2026-08-22 修复的 bug：分柜时件数会从父单扣掉（`packageCount - reqPieces`），
+       * **但体积和重量以前从来不扣**。于是第二次分柜时算式变成
+       *   childVolume = 原始总体积 × 本次件数 ÷ 剩余件数
+       * 剩余件数已经变小、分子却还是整票的体积 —— 分母减了分子不减。
+       *
+       * 生产实测样本 GZ260801300（客户报 233 件、每件 45×43×32 = 0.06192 方）：
+       *   第一次拆 212 件 → 14.427 × 212/233 = 13.127 方 ✅ 对
+       *   第二次拆  21 件 → 14.427 ×  21/ 21 = 14.427 方 ❌ 应为 1.300 方
+       * 21 件货被记成了整票 233 件的体积，这个数还写进了柜子的已装体积。
+       * 全库核查：36 张运单多算、累计 166.474 方、涉及 20 个柜子
+       *（最严重的 FFAU7779699 系统认为装 38.38 方，实际只有 9.19 方）。
+       *
+       * 重量同理：以前直接 `weightKg: shipment.weightKg` 把整票重量复制给每个子单。
+       *
+       * 修法：拆的时候父单同步扣减体积和重量，下一次分柜自然按剩余的算。
+       */
       const vol = locked?.volumeM3 ? Number(locked.volumeM3) : 0;
+      const weight = locked?.weightKg != null ? Number(locked.weightKg) : null;
       if (reqPieces === 0) throw new Error("装柜件数不能为0");
 
       let loadShipmentId = shipment.id;
       let loadTrackingNo = shipment.trackingNo;
+      // 这一票实际装进柜子的体积 —— 由下面切分子单时算出，装柜记录直接复用同一个数
+      let childVolumeForItem = 0;
 
       // 全部走子运单，不再区分部分装/全部装
       {
@@ -281,7 +304,13 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
         }
         const childTrackingNo = `${shipment.trackingNo}-${nextSeq}`;
         const childId = `s_${Date.now()}`;
-        const childVolume = Number(((vol * reqPieces) / totalPkg).toFixed(3));
+        // 按「父单当前剩余」的比例切分；全部拆完时直接给剩余量，避免除法留下零头
+        const childVolume: number = reqPieces === totalPkg
+          ? Number(vol.toFixed(3))
+          : Number(((vol * reqPieces) / totalPkg).toFixed(3));
+        const childWeight = weight == null
+          ? null
+          : (reqPieces === totalPkg ? Number(weight.toFixed(2)) : Number(((weight * reqPieces) / totalPkg).toFixed(2)));
 
         await tx.shipment.create({
           data: {
@@ -289,19 +318,28 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
             trackingNo: childTrackingNo, parentTrackingNo: shipment.trackingNo,
             batchNo: shipment.batchNo, currentStatus: "loaded",
             packageCount: reqPieces, packageUnit: shipment.packageUnit,
-            weightKg: shipment.weightKg, volumeM3: childVolume,
+            weightKg: childWeight, volumeM3: childVolume,
             transportMode: shipment.transportMode, domesticTrackingNo: shipment.domesticTrackingNo,
             warehouseId: shipment.warehouseId, itemName: shipment.itemName,
           },
         });
 
+        // 父单同步扣减：件数、体积、重量三样一起减，缺一样下次分柜就会算错
         await tx.shipment.update({
           where: { id: shipment.id },
-          data: { packageCount: totalPkg - reqPieces, updatedAt: new Date() },
+          data: {
+            packageCount: totalPkg - reqPieces,
+            volumeM3: Number((vol - childVolume).toFixed(3)),
+            ...(weight == null || childWeight == null
+              ? {}
+              : { weightKg: Number((weight - childWeight).toFixed(2)) }),
+            updatedAt: new Date(),
+          },
         });
 
         loadShipmentId = childId;
         loadTrackingNo = childTrackingNo;
+        childVolumeForItem = childVolume;
       }
 
       // 装柜
@@ -311,7 +349,9 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
       if (existing) throw new Error("该运单已在本柜中");
 
       const loadPieces = reqPieces;
-      const loadVolume = Number(((totalPkg > 0 ? (vol * reqPieces) / totalPkg : 0)).toFixed(3));
+      // 装柜体积直接用上面切好的子单体积 —— 同一个数不要再算第二遍，
+      // 以前这里重复了一次同样的错误算式（分母是剩余件数、分子是原始体积）
+      const loadVolume = childVolumeForItem;
       const itemId = `sci_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
       try {
         await tx.shipmentContainerItem.create({
@@ -424,10 +464,14 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
       }
       const syncStatus = finalStatus;
 
-      // 同步父运单状态
+      // 同步父运单状态（2026-08-22 改成统一推算）
+      //
+      // ⚠️ 原来这里是「把父单直接写成本次子单的状态」，不看其它子单走到哪 ——
+      // 分柜后另一票子货还在更早的环节时，父单会被推快。
+      // 现在交给 syncParentStatusFromChildren：父单自己还有货就不动它，
+      // 货全在子单上时按**最慢的子单**推算。
       if (loadShipmentId !== shipment.id) {
-        const parentStatus = syncStatus ?? "loaded";
-        await tx.shipment.update({ where: { id: shipment.id }, data: { currentStatus: parentStatus, updatedAt: now } });
+        await syncParentStatusFromChildren(tx, shipment.trackingNo, auth.companyId);
       }
 
       // 2026-08-05：柜子和运单的运输方式对不上时给个提醒，**但不拦**。
@@ -469,7 +513,9 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
       await tx.$queryRaw`SELECT id FROM shipment_container_items WHERE id = ${body.itemId} FOR UPDATE`;
       const item = await tx.shipmentContainerItem.findFirst({
         where: { id: body.itemId, container: { companyId: auth.companyId } },
-        include: { shipment: { select: { id: true, parentTrackingNo: true, packageCount: true, volumeM3: true } } },
+        // ⚠️ weightKg 必须一起查：2026-08-22 分柜改成从父单扣体积和重量之后，
+        // 卸柜就必须把这两样也还回去，否则一装一卸这票货的体积重量会凭空变小。
+        include: { shipment: { select: { id: true, parentTrackingNo: true, packageCount: true, volumeM3: true, weightKg: true } } },
       });
       if (!item) throw new Error("装柜记录不存在");
 
@@ -477,31 +523,50 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
       const reqPieces = typeof body.pieceCount === "number" && body.pieceCount > 0 && body.pieceCount < totalLoaded ? body.pieceCount : totalLoaded;
       const childPkg = item.shipment.packageCount ?? 0;
       const childVol = item.shipment.volumeM3 ? Number(item.shipment.volumeM3) : 0;
+      const childWt = item.shipment.weightKg != null ? Number(item.shipment.weightKg) : null;
 
       // 部分卸柜：减子运单件数 + 减装柜件数 + 恢复父运单
       if (reqPieces < totalLoaded) {
         const newLoaded = totalLoaded - reqPieces;
         const newPkg = childPkg - reqPieces;
         const newVol = Number((newPkg > 0 && childPkg > 0 ? (childVol * newPkg) / childPkg : 0).toFixed(3));
+        // 卸下这部分对应的体积/重量 —— 要原样加回父单，不能凭空消失
+        const backVol = Number((childVol - newVol).toFixed(3));
+        const newWt = childWt == null ? null
+          : Number((newPkg > 0 && childPkg > 0 ? (childWt * newPkg) / childPkg : 0).toFixed(2));
+        const backWt = childWt == null || newWt == null ? null : Number((childWt - newWt).toFixed(2));
+
         await tx.shipmentContainerItem.update({
           where: { id: body.itemId },
           data: { loadedPieceCount: newLoaded, loadedVolumeM3: newVol },
         });
         await tx.shipment.update({
           where: { id: item.shipment.id },
-          data: { packageCount: newPkg, volumeM3: newVol as any, updatedAt: new Date() },
+          data: {
+            packageCount: newPkg,
+            volumeM3: newVol as any,
+            ...(newWt == null ? {} : { weightKg: newWt as any }),
+            updatedAt: new Date(),
+          },
         });
         // 恢复父运单
         if (item.shipment.parentTrackingNo) {
           await tx.$queryRaw`SELECT id FROM shipments WHERE tracking_no = ${item.shipment.parentTrackingNo} FOR UPDATE`;
           const parent = await tx.shipment.findFirst({
             where: { trackingNo: item.shipment.parentTrackingNo, companyId: auth.companyId },
-            select: { id: true, packageCount: true },
+            select: { id: true, packageCount: true, volumeM3: true, weightKg: true },
           });
           if (parent) {
+            const pv = parent.volumeM3 != null ? Number(parent.volumeM3) : 0;
+            const pw = parent.weightKg != null ? Number(parent.weightKg) : null;
             await tx.shipment.update({
               where: { id: parent.id },
-              data: { packageCount: (parent.packageCount ?? 0) + reqPieces, updatedAt: new Date() },
+              data: {
+                packageCount: (parent.packageCount ?? 0) + reqPieces,
+                volumeM3: Number((pv + backVol).toFixed(3)) as any,
+                ...(pw == null || backWt == null ? {} : { weightKg: Number((pw + backWt).toFixed(2)) as any }),
+                updatedAt: new Date(),
+              },
             });
           }
         }
@@ -512,12 +577,21 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
           await tx.$queryRaw`SELECT id FROM shipments WHERE tracking_no = ${item.shipment.parentTrackingNo} FOR UPDATE`;
           const parent = await tx.shipment.findFirst({
             where: { trackingNo: item.shipment.parentTrackingNo, companyId: auth.companyId },
-            select: { id: true, packageCount: true },
+            select: { id: true, packageCount: true, volumeM3: true, weightKg: true },
           });
           if (parent) {
+            // ⚠️ 子单马上要被删掉，它身上的体积和重量必须先全部加回父单，
+            // 否则这两个数随子单一起消失（2026-08-22）。
+            const pv = parent.volumeM3 != null ? Number(parent.volumeM3) : 0;
+            const pw = parent.weightKg != null ? Number(parent.weightKg) : null;
             await tx.shipment.update({
               where: { id: parent.id },
-              data: { packageCount: (parent.packageCount ?? 0) + (item.shipment.packageCount ?? 0), updatedAt: new Date() },
+              data: {
+                packageCount: (parent.packageCount ?? 0) + (item.shipment.packageCount ?? 0),
+                volumeM3: Number((pv + childVol).toFixed(3)) as any,
+                ...(pw == null || childWt == null ? {} : { weightKg: Number((pw + childWt).toFixed(2)) as any }),
+                updatedAt: new Date(),
+              },
             });
           }
           await tx.shipment.delete({ where: { id: item.shipment.id } });

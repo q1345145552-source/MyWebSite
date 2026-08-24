@@ -12,6 +12,7 @@
 
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../db/prisma";
+import { syncParentStatusFromChildren } from "../shipments/parent-status";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
 import { sanitizeRemarkForClient } from "../core/client-privacy";
@@ -316,6 +317,9 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
       updateData.statusDates = JSON.stringify(dates);
     }
     const shipmentIds = container.items.map((it) => it.shipmentId);
+    // 这批子单涉及的父单号，等主体事务提交后统一重算父单状态
+    let parentNosToSync: string[] = [];
+
     const ops: Prisma.PrismaPromise<unknown>[] = [
       prisma.container.update({ where: { id: container.id }, data: updateData }),
     ];
@@ -347,16 +351,13 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
         }),
       );
 
-      // 同步父运单状态
-      const parentNos = [...new Set(shipments.filter(s => s.parentTrackingNo).map(s => s.parentTrackingNo!))];
-      if (parentNos.length > 0) {
-        ops.push(
-          prisma.shipment.updateMany({
-            where: { trackingNo: { in: parentNos }, companyId: auth.companyId },
-            data: { currentStatus: shipmentNextStatus, updatedAt: now },
-          }),
-        );
-      }
+      // 同步父运单状态 —— 见下面 $transaction(ops) 之后那一段。
+      //
+      // ⚠️ 原来这里是把父单直接 updateMany 成 shipmentNextStatus，等于
+      //    「这批子单推到哪，父单就跟到哪」，完全没看其他子单走到哪了。
+      //    分柜后另一个子单还在更早的环节时，父单就被推快了。
+      //    改成推完之后按全部子单重新推算（2026-08-22）。
+      parentNosToSync = [...new Set(shipments.filter(s => s.parentTrackingNo).map(s => s.parentTrackingNo!))];
 
       for (let i = 0; i < shipmentIds.length; i++) {
         const sid = shipmentIds[i];
@@ -381,6 +382,25 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
     }
 
     await prisma.$transaction(ops);
+
+    /**
+     * 父单状态在主体事务之后单独重算（2026-08-22）。
+     *
+     * ⚠️ 为什么没塞进上面那个事务：上面用的是**批量事务**（一个 PrismaPromise 数组），
+     * 里面只能放预先构造好的语句，没法在中途读一次子单再决定写什么。
+     * 而父单状态必须「先看全部子单、再决定」，只能用交互式事务。
+     *
+     * 分成两个事务的代价：万一这一段失败，子单已经推进、父单还停在旧状态。
+     * 这个函数是**幂等**的（按当前子单重算一遍），重跑一次就能补上，
+     * 比「父单被推到一个假状态」安全得多。
+     */
+    if (parentNosToSync.length > 0) {
+      await prisma.$transaction(async (tx) => {
+        for (const no of parentNosToSync) {
+          await syncParentStatusFromChildren(tx, no, auth.companyId);
+        }
+      });
+    }
 
     ok(res, {
       id: container.id,
@@ -580,21 +600,19 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
           affectedShipments += ids.length;
         }
 
-        // 父运单当初是跟着一起改的，这里也要跟着退
+        // 父运单当初是跟着一起改的，这里也要跟着退（2026-08-22 改成统一推算）
+        //
+        // ⚠️ 原来是拿一个 Map<父单号, 状态> 收集，同一个父单下有多个子单时，
+        //    **循环里后一个子单会覆盖前一个**，最后把「最后那个子单的状态」写给父单 ——
+        //    典型的「最后写入者赢」，父单可能被退到一个跟实际不符的状态。
+        //    现在只收集父单号，逐个按**全部子单**重算。
         const kids = await tx.shipment.findMany({
           where: { id: { in: shipmentIds }, companyId: auth.companyId },
           select: { id: true, parentTrackingNo: true },
         });
-        const parentTargets = new Map<string, string>();
-        for (const kid of kids) {
-          const newStatus = kid.parentTrackingNo ? latestByShipment.get(kid.id) : undefined;
-          if (kid.parentTrackingNo && newStatus) parentTargets.set(kid.parentTrackingNo, newStatus);
-        }
-        for (const [trackingNo, status] of parentTargets) {
-          await tx.shipment.updateMany({
-            where: { trackingNo, companyId: auth.companyId },
-            data: { currentStatus: status, updatedAt: new Date() },
-          });
+        const parentNos = [...new Set(kids.map((k) => k.parentTrackingNo).filter((v): v is string => !!v))];
+        for (const trackingNo of parentNos) {
+          await syncParentStatusFromChildren(tx, trackingNo, auth.companyId);
         }
       }
 
