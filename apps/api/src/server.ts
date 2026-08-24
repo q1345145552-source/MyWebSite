@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { URL } from "node:url";
 import { describeTokenFailure, verifyAuthToken } from "./modules/auth/token";
+import { isSessionStillValid } from "./modules/auth/session-guard";
 import { logger } from "./modules/core/logger";
 
 export interface HttpRequest {
@@ -38,7 +39,7 @@ type RouteTable = Record<string, Handler>;
  * 2026-08-07：认证失败原来一声不吭，前端拿到 401 就把用户踢回登录页，
  * 排查时完全没有线索。这里补上日志（只记原因和路径，绝不记令牌内容）。
  */
-function parseAuth(headers: IncomingMessage["headers"], path?: string): HttpRequest["auth"] {
+async function parseAuth(headers: IncomingMessage["headers"], path?: string): Promise<HttpRequest["auth"]> {
   const authHeader = typeof headers.authorization === "string" ? headers.authorization.trim() : "";
   const match = authHeader.match(/^Bearer\s+(.+)$/i);
   if (!match?.[1]) {
@@ -50,6 +51,16 @@ function parseAuth(headers: IncomingMessage["headers"], path?: string): HttpRequ
   const payload = verifyAuthToken(match[1].trim());
   if (!payload) {
     logger.warn("认证失败：令牌没通过", { path, 原因: describeTokenFailure(match[1].trim()) });
+    return undefined;
+  }
+  /**
+   * ⚠️ 签名对、没过期，**还不够**（2026-08-25 新增）。
+   * 账号可能已经被封禁、或者密码已经改过 —— 那两种情况下这张令牌必须当场作废，
+   * 不能让它继续用满 7 天。详见 session-guard.ts。
+   */
+  const live = await isSessionStillValid(payload);
+  if (!live.ok) {
+    logger.warn("认证失败：登录状态已失效", { path, 用户: payload.userId, 原因: live.reason });
     return undefined;
   }
   return {
@@ -182,7 +193,7 @@ export function createApp(): MinimalHttpApp {
           query,
           headers: rawReq.headers,
           body: method === "POST" || method === "DELETE" ? await readJsonBody(rawReq) : undefined,
-          auth: parseAuth(rawReq.headers, path),
+          auth: await parseAuth(rawReq.headers, path),
         };
 
         try {

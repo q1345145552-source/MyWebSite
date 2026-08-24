@@ -6,6 +6,15 @@ export interface AuthTokenPayload {
   role: "admin" | "staff" | "client";
   userName: string;
   exp: number;
+  /**
+   * 密码指纹（2026-08-25 新增）。改了密码之后，旧令牌的这个值就对不上了，
+   * 认证时会被拒掉 —— 不用等它自己 7 天后过期。
+   * ⚠️ 这是拿 AUTH_SECRET 对密码哈希再算一次 HMAC 的前 16 位，
+   *    反推不出密码，也反推不出密码哈希。
+   * ⚠️ 老令牌里没有这个字段，那种一律放行（它们最多 7 天就自己过期了），
+   *    否则这次上线会把所有人当场踢下线。
+   */
+  pv?: string;
 }
 
 function base64UrlEncode(input: Buffer | string): string {
@@ -27,12 +36,26 @@ function tokenSecret(): string {
   return secret;
 }
 
+/**
+ * 由密码哈希算出的指纹，放进令牌用来判断「密码是不是换过了」。
+ * 用 HMAC 而不是直接哈希：令牌内容客户端能看见，直接放密码哈希的摘要不合适。
+ */
+export function passwordFingerprint(passwordHash: string | null | undefined): string {
+  return crypto
+    .createHmac("sha256", tokenSecret())
+    .update(`pw:${passwordHash ?? ""}`)
+    .digest("base64url")
+    .slice(0, 16);
+}
+
 export function signAuthToken(input: {
   userId: string;
   companyId: string;
   role: "admin" | "staff" | "client";
   userName: string;
   expiresInSeconds?: number;
+  /** 传了就把密码指纹写进令牌；改密码后旧令牌立刻失效 */
+  passwordHash?: string | null;
 }): string {
   const header = { alg: "HS256", typ: "JWT" };
   const nowSec = Math.floor(Date.now() / 1000);
@@ -43,6 +66,7 @@ export function signAuthToken(input: {
     role: input.role,
     userName: input.userName,
     exp,
+    ...(input.passwordHash === undefined ? {} : { pv: passwordFingerprint(input.passwordHash) }),
   };
   const encodedHeader = base64UrlEncode(JSON.stringify(header));
   const encodedPayload = base64UrlEncode(JSON.stringify(payload));
@@ -101,6 +125,7 @@ export function verifyAuthToken(token: string): AuthTokenPayload | null {
     if (payload.role !== "admin" && payload.role !== "staff" && payload.role !== "client") return null;
     if (Math.floor(Date.now() / 1000) >= payload.exp) return null;
     return {
+      pv: payload.pv,
       userId: payload.userId,
       companyId: payload.companyId,
       role: payload.role,

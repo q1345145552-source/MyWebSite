@@ -320,8 +320,19 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
     // 这批子单涉及的父单号，等主体事务提交后统一重算父单状态
     let parentNosToSync: string[] = [];
 
-    const ops: Prisma.PrismaPromise<unknown>[] = [
-      prisma.container.update({ where: { id: container.id }, data: updateData }),
+    /**
+     * ⚠️ 这里存的是「拿到事务后再执行」的函数，不是已经发出去的 PrismaPromise（2026-08-25 改）。
+     *
+     * 原来是 `prisma.xxx()` 直接塞数组，最后 `prisma.$transaction(ops)` —— 那是**批量事务**，
+     * 中途没法读一次数据再决定写什么，所以父单重算只能另开一个事务放在后面。
+     * 两个事务之间断一下，就会留下「柜子和子单都推进了、父单还停在旧状态」的半截数据。
+     * 说「重跑一次就好」也不成立：同一个状态再推一遍会**再写一批轨迹**，客户轨迹里多出重复的一行。
+     *
+     * 换成函数之后，下面用交互式事务把「柜子 + 子单 + 轨迹 + 父单」一次做完，
+     * 要么全成，要么全不写。
+     */
+    const ops: Array<(tx: any) => Promise<unknown>> = [
+      (tx) => tx.container.update({ where: { id: container.id }, data: updateData }),
     ];
 
     const shipmentNextStatus: string | null = CONTAINER_TO_SHIPMENT_STATUS[toStatus] ?? null;
@@ -344,8 +355,8 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
         return;
       }
 
-      ops.push(
-        prisma.shipment.updateMany({
+      ops.push((tx) =>
+        tx.shipment.updateMany({
           where: { id: { in: shipmentIds }, companyId: auth.companyId },
           data: { currentStatus: shipmentNextStatus, updatedAt: now },
         }),
@@ -359,48 +370,46 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
       //    改成推完之后按全部子单重新推算（2026-08-22）。
       parentNosToSync = [...new Set(shipments.filter(s => s.parentTrackingNo).map(s => s.parentTrackingNo!))];
 
-      for (let i = 0; i < shipmentIds.length; i++) {
-        const sid = shipmentIds[i];
-        ops.push(
-          prisma.statusLog.create({
-            data: {
-              id: `sl_ctn_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`,
-              companyId: auth.companyId,
-              shipmentId: sid,
-              operatorId: auth.userId,
-              operatorRole: auth.role,
-              operatorName: auth.name,
-              fromStatus: statusMap.get(sid) ?? "loaded",
-              toStatus: shipmentNextStatus,
-              remark: body.remark?.trim() || `${CONTAINER_STATUS_LABEL[toStatus] ?? toStatus}`,
-              nextStop,
-              changedAt: now,
-            },
-          }),
-        );
-      }
+      // 轨迹一次性写进去，不要一条一条发 —— 一个柜子里几十票货就是几十次往返，
+      // 交互式事务默认 5 秒超时，逐条写很容易撞上。id 前缀必须保持 sl_ctn_，
+      // 撤销柜子状态就是靠这个前缀认出「哪些轨迹是柜子推进写的」（红线 2.10）。
+      const stamp = Date.now();
+      const logRows = shipmentIds.map((sid, i) => ({
+        id: `sl_ctn_${stamp}_${i}_${Math.random().toString(36).slice(2, 6)}`,
+        companyId: auth.companyId,
+        shipmentId: sid,
+        operatorId: auth.userId,
+        operatorRole: auth.role,
+        operatorName: auth.name,
+        fromStatus: statusMap.get(sid) ?? "loaded",
+        toStatus: shipmentNextStatus,
+        remark: body.remark?.trim() || `${CONTAINER_STATUS_LABEL[toStatus] ?? toStatus}`,
+        nextStop,
+        changedAt: now,
+      }));
+      ops.push((tx) => tx.statusLog.createMany({ data: logRows }));
     }
-
-    await prisma.$transaction(ops);
 
     /**
-     * 父单状态在主体事务之后单独重算（2026-08-22）。
+     * 柜子 + 子单 + 轨迹 + 父单，**一个事务全做完**（2026-08-25 合并）。
      *
-     * ⚠️ 为什么没塞进上面那个事务：上面用的是**批量事务**（一个 PrismaPromise 数组），
-     * 里面只能放预先构造好的语句，没法在中途读一次子单再决定写什么。
-     * 而父单状态必须「先看全部子单、再决定」，只能用交互式事务。
+     * 之前是分两个事务：前一个批量写柜子/子单/轨迹，后一个重算父单。
+     * 中间断掉就留下「柜子和子单推进了、父单没推」的半截数据。
      *
-     * 分成两个事务的代价：万一这一段失败，子单已经推进、父单还停在旧状态。
-     * 这个函数是**幂等**的（按当前子单重算一遍），重跑一次就能补上，
-     * 比「父单被推到一个假状态」安全得多。
+     * ⚠️ 超时给到 30 秒：一个柜子里可能装着几十票货，父单也可能有好几个，
+     * 默认 5 秒在网络慢的时候不够。maxWait 是「等空闲连接」的时间，跟执行时长无关。
      */
-    if (parentNosToSync.length > 0) {
-      await prisma.$transaction(async (tx) => {
-        for (const no of parentNosToSync) {
+    await prisma.$transaction(
+      async (tx) => {
+        for (const run of ops) await run(tx);
+        // ⚠️ 排序后再逐个锁父单：两个柜子同时推进、又正好涉及同几张父单时，
+        // 加锁顺序相反会被 PostgreSQL 判定死锁掐掉一个。固定顺序就不会打架。
+        for (const no of [...parentNosToSync].sort()) {
           await syncParentStatusFromChildren(tx, no, auth.companyId);
         }
-      });
-    }
+      },
+      { timeout: 30000, maxWait: 10000 },
+    );
 
     ok(res, {
       id: container.id,

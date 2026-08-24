@@ -56,6 +56,11 @@ export interface Shipment {
   companyId?: string;
   orderId: string;
   trackingNo: string;
+  /**
+   * 分柜出来的子单才有值，指向父单单号（2026-08-25 新增）。
+   * ⚠️ AI 汇总靠它把父子合并成「一票货」，不加这个字段就会把一票货数成两票。
+   */
+  parentTrackingNo?: string;
   currentStatus: ShipmentStatus;
   currentLocation?: string;
   weightKg?: number;

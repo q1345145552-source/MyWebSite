@@ -95,8 +95,8 @@ export default function RoleShell(props: {
     setPwdError("");
     try {
       await changeOwnPassword({ oldPassword: oldPwd, newPassword: newPwd });
-      // 改完必须重新登录：令牌是改密码之前签发的，后端认不出新旧，
-      // 留着容易让人误以为「没改成功」。这里直接清掉，逼一次重新登录最省事。
+      // 改完必须重新登录：2026-08-25 起后端会把改密码之前签发的令牌全部作废
+      //（包括这个人在别的设备上登着的），留着也用不了。
       setPwdDone(true);
       setOldPwd("");
       setNewPwd("");

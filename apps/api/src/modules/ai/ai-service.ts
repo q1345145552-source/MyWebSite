@@ -5,6 +5,7 @@ import type {
 } from "../../../../../packages/shared-types/common-response";
 import type { AiKnowledgeItem, AiQueryAuditLog, Shipment } from "../../../../../packages/shared-types/entities";
 import { IN_TRANSIT_STATUSES, type ShipmentStatus } from "../../../../../packages/shared-types/shipment-status";
+import { pickSlowestStatus } from "../shipments/parent-status";
 import type {
   AiSessionMemoryStore,
   AiKnowledgeGapStore,
@@ -69,6 +70,9 @@ const EXCEPTION_STATUSES: ShipmentStatus[] = ["exception", "returned", "cancelle
 // 客户问 AI「现在在途多少票」，陆运的货一票都不算（生产实测漏掉 30 张父单）。
 // 现在改用 shared-types 里从流程表自动推导的那份，跟管理员看板同一个口径，
 // 以后往流程里加环节这里会自己跟上。**别再在这里写死清单。**
+/** 合并后的「一票货」：父单 + 它全部子单算作一条，memberIds 留着原始行 id */
+type Ticket = Shipment & { memberIds: string[] };
+
 const GREETING_RE = /(你好|您好|hi|hello|哈喽|在吗|你在吗)/i;
 const SERVICE_QA_RE =
   /(时效|多久|几天|清关|报关|费用|运费|计费|体积重|实重|禁运|违禁|能寄|可以寄|赔付|理赔|破损|丢件|签收|派送|上门|对账|发票|资料|装箱单|轨迹|查不到)/;
@@ -128,6 +132,19 @@ export class ClientAiService implements AiService {
     const scope = { companyId: auth.companyId, clientId: auth.userId };
     const orders = await this.deps.dataSource.listOrders(scope);
     const shipments = await this.deps.dataSource.listShipments(scope);
+    /**
+     * ⚠️ 汇总一律用 tickets，**不要用 shipments**（2026-08-25 修）。
+     *
+     * `shipments` 是数据库原始行，分柜后一票货会占好几行（父单 + 每个子单各一行）。
+     * 原来汇总直接数行数，等于**把一票货数成好几票**：
+     *   生产实测 —— 客户问「在途多少票」，AI 答 726，实际 367；
+     *   问「一共多少票」，AI 答 1862，实际 978。**真客户已经这么问过 9 次。**
+     * 而管理员看板 2026-08-21 已经改成只数父单了，AI 不改就是两边对着报不同的数。
+     *
+     * ⚠️ 单号精确查询那条分支**必须继续用 shipments 原始行** ——
+     * 客户可能拿子单号（如 SZ260801388-2）来查，合并后就查不到了。
+     */
+    const tickets = this.collapseToTickets(shipments);
     const knowledgeItems = await this.deps.knowledgeStore.list(auth.companyId);
 
     const modelIntent = await this.parseIntentWithModel(question, orders, memory);
@@ -179,7 +196,7 @@ export class ClientAiService implements AiService {
         isFollowUp ? memory?.metric : undefined,
       );
       const filteredShipments = this.filterShipmentsByScope(
-        shipments,
+        tickets,
         orders,
         timeWindow,
         statusScope,
@@ -188,7 +205,8 @@ export class ClientAiService implements AiService {
       const evidenceOrderIdSet = new Set(
         filteredShipments.map((item) => item.orderId).filter((id): id is string => Boolean(id)),
       );
-      evidenceShipmentIds = filteredShipments.map((item) => item.id);
+      // 证据要展开成原始行 id（一票货可能对应父单+多个子单），方便事后追溯
+      evidenceShipmentIds = filteredShipments.flatMap((item) => (item as Ticket).memberIds ?? [item.id]);
       evidenceOrderIds = orders
         .filter((item) => evidenceOrderIdSet.has(item.id))
         .map((item) => item.id);
@@ -220,7 +238,7 @@ export class ClientAiService implements AiService {
         metric,
       };
     } else {
-      const summary = this.buildCompanySummary(shipments);
+      const summary = this.buildCompanySummary(tickets);
       answerDraft = this.formatSummaryAnswer(summary, {
         timeLabel: "当前公司账号数据",
         statusLabel: "全部运单",
@@ -640,6 +658,65 @@ export class ClientAiService implements AiService {
     if (statusScope === "unfinished") return "未完成运单";
     if (statusScope === "exception") return "异常/退回/取消运单";
     return "全部运单";
+  }
+
+  /**
+   * 把数据库原始行合并成「一票货」（2026-08-25 新增）。
+   *
+   * 分柜后一票货在 shipments 表里占好几行：父单一行、每个子单一行。
+   * 客户心里的「一票」是父单那一票，所以汇总必须按 `parentTrackingNo ?? trackingNo`
+   * 分组，每组算 1 票。生产实测 1862 行 = 978 票。
+   *
+   * 几个口径：
+   * - **状态**取父单的。父单状态由 syncParentStatusFromChildren 维护，
+   *   本来就等于「走得最慢的子单」，跟运单列表、管理员看板同一个口径。
+   *   万一这组里没有父单行，就用同一个 pickSlowestStatus 现算一遍 —— 用的是同一份规则，
+   *   不会出现两处算法打架。
+   * - **重量/体积/件数**是**整组相加**。分柜时这三样会从父单扣、分到子单上
+   *  （2026-08-22 的修复），父单 + 全部子单加起来才等于整票的量。
+   *   ⚠️ 这跟改之前的行为一致（原来也是把所有行加起来），所以这次只影响「票数」，不影响重量体积。
+   * - **memberIds** 留着原始行 id，证据链要展开回具体哪几行。
+   */
+  private collapseToTickets(shipments: Shipment[]): Ticket[] {
+    const groups = new Map<string, Shipment[]>();
+    for (const row of shipments) {
+      const key = row.parentTrackingNo ?? row.trackingNo;
+      const bucket = groups.get(key);
+      if (bucket) bucket.push(row);
+      else groups.set(key, [row]);
+    }
+
+    const tickets: Ticket[] = [];
+    for (const [key, rows] of groups) {
+      // 没分过柜的占绝大多数，原样返回，别做无谓的对象拷贝
+      if (rows.length === 1 && !rows[0].parentTrackingNo) {
+        tickets.push({ ...rows[0], memberIds: [rows[0].id] });
+        continue;
+      }
+      const parent = rows.find((r) => !r.parentTrackingNo);
+      const base = parent ?? rows[0];
+      const status =
+        parent?.currentStatus ??
+        (pickSlowestStatus(
+          rows.map((r) => r.currentStatus),
+          base.transportMode,
+        ) as Shipment["currentStatus"] | null) ??
+        base.currentStatus;
+      const sum = (pick: (r: Shipment) => number | undefined) =>
+        rows.reduce((acc, r) => acc + (Number(pick(r) ?? 0) || 0), 0);
+
+      tickets.push({
+        ...base,
+        trackingNo: key,
+        parentTrackingNo: undefined,
+        currentStatus: status,
+        weightKg: sum((r) => r.weightKg),
+        volumeM3: sum((r) => r.volumeM3),
+        packageCount: sum((r) => r.packageCount),
+        memberIds: rows.map((r) => r.id),
+      });
+    }
+    return tickets;
   }
 
   private buildCompanySummary(shipments: Shipment[]): {

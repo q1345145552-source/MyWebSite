@@ -7,7 +7,11 @@ export function login(payload: { account: string; password: string; role?: "admi
 }
 
 /**
- * 改自己的密码（三端通用）。改完令牌不会自动失效，调用方要负责清登录信息、让用户重新登录。
+ * 改自己的密码（三端通用）。
+ *
+ * ⚠️ 2026-08-25 起，改完密码**后端会立刻作废这张令牌**（也包括这个人在别的设备上
+ * 登着的所有旧令牌）。前端本来就是改完清会话跳登录页，所以流程没变 ——
+ * 但别再依赖「旧令牌还能用一会儿」这个假设去做任何事。
  */
 export function changeOwnPassword(payload: { oldPassword: string; newPassword: string }) {
   return apiRequest<{ changed: boolean }>(

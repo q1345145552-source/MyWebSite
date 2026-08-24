@@ -27,6 +27,8 @@ export class InsufficientBalanceError extends Error {
 }
 
 type Tx = {
+  /** 加行锁用。调用方传进来的都是真事务，这个方法一定有 */
+  $queryRaw: (strings: TemplateStringsArray, ...values: any[]) => Promise<any>;
   clientWalletAccount: {
     findUnique: (args: any) => Promise<any>;
     upsert: (args: any) => Promise<any>;
@@ -34,6 +36,49 @@ type Tx = {
   };
   consolidationBalanceLedger: { create: (args: any) => Promise<any> };
 };
+
+/** 单据已经被别的请求付掉了 / 状态变了，调用方据此返回 400 */
+export class PaymentConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PaymentConflictError";
+  }
+}
+
+/**
+ * 锁住这个客户的钱包行（2026-08-25 新增）。**改余额之前必须先调这个。**
+ *
+ * ## 不锁会少扣钱
+ *
+ * 原来三个函数都是「先读余额、算一个新数、再把这个数写回去」。
+ * 两笔付款同时进来就会互相覆盖：
+ * ```
+ *   请求A 读到 12000 → 算出 11000
+ *   请求B 读到 12000 → 算出 11000   （A 还没提交，B 读到的还是旧值）
+ *   两个都写 11000，流水各记一笔 -1000
+ *   结果：账上只少了 1000，流水显示少了 2000 —— 公司白亏 1000
+ * ```
+ * 生产已有 ¥12,450 真实余额、¥27,700 已付款业务，触发条件是真实存在的。
+ *
+ * 加了 FOR UPDATE 之后，B 会卡在这一行等 A 提交完，然后读到 11000，算出 10000。
+ *
+ * ⚠️ 账户行还不存在时（客户从没有过余额），这里锁不到任何东西 ——
+ *    扣款那条路不受影响（读出来是 0，直接报余额不足）；
+ *    退款/充值那条路走 upsert 新建，极端情况下两个并发新建会撞唯一约束报错，
+ *    **报错总比静默算错强**，而且要同时满足「客户零余额 + 两笔退款同秒发生」，实际碰不到。
+ */
+async function lockAccount(tx: Tx, clientId: string): Promise<void> {
+  // ⚠️ 列名是 "clientId" 不是 client_id ——
+  // 这张表的 clientId 字段在 schema.prisma 里**没写 @map**，所以数据库里就是驼峰的，
+  // 而同一张表的 company_id / updated_at 又是下划线的。手写 SQL 前必须逐列确认，
+  // 大小写混合的列名在 PostgreSQL 里还必须加双引号，否则会被当成全小写。
+  // （2026-08-25 第一版就是写成 client_id，测试库一跑直接报 column does not exist。）
+  await tx.$queryRaw`
+    SELECT "clientId" FROM client_wallet_accounts
+    WHERE "clientId" = ${clientId} AND currency = ${CONSOLIDATION_CURRENCY}
+    FOR UPDATE
+  `;
+}
 
 /** 读当前集货余额（元）。没有账户当 0 处理。 */
 export async function readBalance(tx: Tx, clientId: string): Promise<number> {
@@ -67,6 +112,7 @@ export async function chargeForConsolidation(tx: Tx, args: MoveArgs): Promise<nu
   const amount = round2(args.amount);
   if (!(amount > 0)) throw new Error("扣款金额必须大于 0");
 
+  await lockAccount(tx, args.clientId);
   const have = await readBalance(tx, args.clientId);
   if (have < amount) throw new InsufficientBalanceError(amount, have);
 
@@ -87,6 +133,7 @@ export async function refundToConsolidation(tx: Tx, args: MoveArgs): Promise<num
   const amount = round2(args.amount);
   if (!(amount > 0)) throw new Error("退款金额必须大于 0");
 
+  await lockAccount(tx, args.clientId);
   const have = await readBalance(tx, args.clientId);
   const after = round2(have + amount);
   await tx.clientWalletAccount.upsert({
@@ -109,6 +156,9 @@ export async function refundToConsolidation(tx: Tx, args: MoveArgs): Promise<num
  */
 export async function recordRechargeCredit(tx: Tx, args: MoveArgs): Promise<number> {
   const amount = round2(args.amount);
+  // 充值的加钱动作在审核那边做，这里只补流水；但 balanceAfter 要读准，
+  // 所以同样先锁 —— 不锁的话并发时这个数会记成别人扣款前的旧值。
+  await lockAccount(tx, args.clientId);
   const after = await readBalance(tx, args.clientId);
   await writeLedger(tx, args, "recharge", amount, after);
   return after;
@@ -229,7 +279,11 @@ export async function refundPendingOnDelete(
   },
 ): Promise<number> {
   let total = 0;
-  for (const r of args.refunds) {
+  // ⚠️ 按 clientId 排序再退：一个计划下有多个客户时会依次锁多行，
+  // 两个并发的删除操作如果加锁顺序相反，PostgreSQL 会判定死锁、掐掉其中一个。
+  // 固定成同一个顺序就不会打架。
+  const ordered = [...args.refunds].sort((a, b) => a.clientId.localeCompare(b.clientId));
+  for (const r of ordered) {
     await refundToConsolidation(tx, {
       companyId: args.companyId,
       clientId: r.clientId,

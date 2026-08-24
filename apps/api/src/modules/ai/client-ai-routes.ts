@@ -68,6 +68,7 @@ class PrismaClientScopedDataSource implements QueryDataSource {
       companyId: r.companyId,
       orderId: r.orderId,
       trackingNo: r.trackingNo,
+      parentTrackingNo: r.parentTrackingNo ?? undefined,
       currentStatus: r.currentStatus as Shipment["currentStatus"],
       currentLocation: r.currentLocation ?? undefined,
       weightKg: r.weightKg !== null ? Number(r.weightKg.toString()) : undefined,

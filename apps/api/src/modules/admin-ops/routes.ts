@@ -5,6 +5,14 @@ import { syncParentStatusFromChildren } from "../shipments/parent-status";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
 
+/** 同一票货重复进派送单时抛这个，调用方转成 400 而不是 500 */
+class LastmileConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LastmileConflictError";
+  }
+}
+
 /** Decimal | null → number */
 function decToNumber(value: Prisma.Decimal | null | undefined): number {
   if (value === null || value === undefined) return 0;
@@ -307,6 +315,34 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
     try {
       await prisma.$transaction(async (tx) => {
         for (const sid of shipmentIds) {
+          /**
+           * ⚠️ 一票货不能同时在两张「还没签收」的派送单里（2026-08-25 新增）。
+           *
+           * 数据库的唯一约束只管住了「同一张派送单里不能重复放同一票货」
+           * （@@unique([deliveryNo, shipmentId])），**管不住跨派送单**。
+           * 生产实测 4 票货进了两张单、5 行状态互相打架，比如：
+           *   SZ260702524-1  WD000326 显示「派送中」，WD000379 显示「已签收」
+           * 更麻烦的是删单：删掉其中一张会把运单退回「已到仓」，
+           * 另一张明明还在派送中，货就从流程里消失了。
+           *
+           * ⚠️ 只挡「派送中」，**不挡已签收** —— 「删单重派 / 真的派两趟」是正常业务
+           * （2026-08-14 用户拍板：数据忠实记录，不算毛病）。签收完再派一趟要放行。
+           *
+           * ⚠️ 先给运单行上锁再查：两个员工同时把同一票货加进各自的派送单时，
+           * 不锁的话两边都查到「没有在途派送单」，双双放行。
+           */
+          await tx.$queryRaw`SELECT id FROM shipments WHERE id = ${sid} FOR UPDATE`;
+          const busy = await tx.adminLastmileOrder.findFirst({
+            where: { shipmentId: sid, companyId: auth.companyId, status: "DELIVERING" },
+            select: { deliveryNo: true },
+          });
+          if (busy) {
+            const no = await tx.shipment.findUnique({ where: { id: sid }, select: { trackingNo: true } });
+            throw new LastmileConflictError(
+              `运单 ${no?.trackingNo ?? sid} 已经在派送单 ${busy.deliveryNo} 里派送中了，不能重复派。要改派请先把那张单删掉或签收。`,
+            );
+          }
+
           const id = `lm_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
           const now = new Date();
           await tx.adminLastmileOrder.create({
@@ -333,6 +369,10 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
       // 注意：ApiCode 里没有 CONFLICT（只有 BAD_REQUEST/UNAUTHORIZED/FORBIDDEN/
       // NOT_FOUND/VALIDATION_ERROR/INTERNAL_ERROR），别顺手写 "CONFLICT" ——
       // 项目里已经有两处那么写、常年挂在 tsc 基线错误里了，不要再添一处
+      if (e instanceof LastmileConflictError) {
+        fail(res, 409, "VALIDATION_ERROR", e.message);
+        return;
+      }
       if (e?.code === "P2002") {
         fail(res, 409, "VALIDATION_ERROR", "选中的运单里有已经在这张派送单里的，请去掉后重试");
         return;
@@ -350,13 +390,33 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
     if (!body.id || !body.status) { fail(res, 400, "BAD_REQUEST", "id and status required"); return; }
     const updateData: any = { status: body.status };
     if (body.signImageBase64) updateData.signImageBase64 = body.signImageBase64;
-    const updated = await prisma.adminLastmileOrder.update({
-      where: { id: body.id },
-      data: updateData,
-    });
     const now = new Date();
-    if (body.status === "SIGNED") {
-      await prisma.$transaction(async (tx) => {
+
+    /**
+     * ⚠️ 整个签收动作必须在**同一个事务**里（2026-08-25 改）。
+     *
+     * 原来是两段：先单独 `update` 派送单（状态 + 签收图立刻提交），
+     * 再另开一个事务改运单、写轨迹、算父单。第二段失败就留下
+     * **「派送单显示已签收、还有签收凭证，但运单还停在派送中」** ——
+     * 员工看到货签收了，客户看到货还在路上，两边对不上而且没人会发现。
+     *
+     * 合成一个事务之后：要么全部生效，要么一个字都不写，派送单也不会单独变成已签收。
+     *
+     * ⚠️ 顺带补上 companyId 过滤 —— 原来只按 id 查，等于别家公司的派送单也能改。
+     * 目前生产只有一家公司，暂时没影响，但接第二家之前必须是现在这样。
+     */
+    const updated = await prisma.$transaction(async (tx) => {
+      const own = await tx.adminLastmileOrder.findFirst({
+        where: { id: body.id, companyId: auth.companyId },
+        select: { id: true },
+      });
+      if (!own) return null;
+
+      const row = await tx.adminLastmileOrder.update({ where: { id: own.id }, data: updateData });
+      if (body.status !== "SIGNED") return row;
+
+      {
+        const updated = row;
         const shipment = await tx.shipment.findUnique({ where: { id: updated.shipmentId }, select: { id: true, currentStatus: true, parentTrackingNo: true } });
         if (shipment) {
           await tx.shipment.update({ where: { id: shipment.id }, data: { currentStatus: "delivered", updatedAt: now } });
@@ -379,8 +439,11 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
             await syncParentStatusFromChildren(tx, shipment.parentTrackingNo, auth.companyId);
           }
         }
-      });
-    }
+      }
+      return row;
+    });
+
+    if (!updated) { fail(res, 404, "NOT_FOUND", "派送单不存在"); return; }
     ok(res, { id: updated.id, status: updated.status });
   });
 
@@ -412,6 +475,19 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
       // 只在「还在派送中」时退回。已经签收的不动 —— 货都签收了，不该因为删一张单就变回没送。
       if (!ship || ship.currentStatus !== "outForDelivery") return { deleted: true, reverted: false };
 
+      /**
+       * ⚠️ 这票货可能还在**别的**派送单里派着（2026-08-25 新增）。
+       *
+       * 历史数据里有 4 票货同时进了两张派送单。删掉其中一张就把运单退回「已到仓」，
+       * 可另一张还在「派送中」—— 员工看着车已经出去了，系统却说货在仓库。
+       * 上面新加的拦截能防止以后再出现，但**存量数据还在**，所以删除这边也得防一手。
+       */
+      const stillOut = await tx.adminLastmileOrder.findFirst({
+        where: { shipmentId: ship.id, companyId: auth.companyId, status: "DELIVERING" },
+        select: { deliveryNo: true },
+      });
+      if (stillOut) return { deleted: true, reverted: false, stillIn: stillOut.deliveryNo };
+
       await tx.shipment.update({ where: { id: ship.id }, data: { currentStatus: "inWarehouseTH", updatedAt: now } });
       await tx.statusLog.create({
         data: {
@@ -436,7 +512,14 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
     });
 
     if (!result.deleted) { fail(res, 404, "NOT_FOUND", "派送单不存在"); return; }
-    ok(res, { deleted: true, reverted: result.reverted });
+    ok(res, {
+      deleted: true,
+      reverted: result.reverted,
+      // 这票货还在别的派送单里，所以没退回「已到仓」—— 说清楚，别让员工以为没生效
+      message: (result as any).stillIn
+        ? `已删除。这票货还在派送单 ${(result as any).stillIn} 里派送中，所以运单状态保持「派送中」。`
+        : undefined,
+    });
   });
 
   app.get("/admin/settlement/entries", async (req, res) => {

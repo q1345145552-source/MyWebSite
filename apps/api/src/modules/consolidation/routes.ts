@@ -6,6 +6,7 @@ import { verifyPassword } from "../auth/crypto-utils";
 import {
   InsufficientBalanceError,
   chargeForConsolidation,
+  PaymentConflictError,
   computePendingRefunds,
   refundPendingOnDelete,
   refundToConsolidation,
@@ -669,7 +670,36 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
     }
 
     try {
-      const balanceAfter = await prisma.$transaction(async (tx) => {
+      const paid = await prisma.$transaction(async (tx) => {
+        /**
+         * ⚠️⚠️ 事务里必须**重新读一遍并锁住这张任务**（2026-08-25 新增）。
+         *
+         * 上面那几道 `if` 是在事务**外面**查的。客户手抖点两下「付款」，
+         * 两个请求会同时通过那几道检查、各自开事务、各扣一次钱 ——
+         * 单子只有一张，钱扣了两遍。前端禁用按钮挡不住（抓包重放、网络重试都能绕过）。
+         *
+         * FOR UPDATE 之后，第二个请求会卡在这里等第一个提交完，
+         * 然后读到 paymentStatus 已经是 paid，直接报「已付款」退出，一分钱不扣。
+         *
+         * ⚠️ 金额也要用**事务里读出来的**：员工可能正好在这一刻改了报价，
+         * 用事务外那个旧金额会扣错数。
+         */
+        await tx.$queryRaw`SELECT id FROM consolidation_tasks WHERE id = ${task.id} FOR UPDATE`;
+        const fresh = await tx.consolidationTask.findUnique({
+          where: { id: task.id },
+          select: { status: true, paymentStatus: true, totalFee: true },
+        });
+        if (!fresh || fresh.status !== "quoted") {
+          throw new PaymentConflictError("这个任务的状态刚刚变了，请刷新页面后再试");
+        }
+        if (fresh.paymentStatus === "paid") {
+          throw new PaymentConflictError("该任务已付款，不用重复付");
+        }
+        const amount = fresh.totalFee == null ? 0 : Number(fresh.totalFee);
+        if (!(amount > 0)) {
+          throw new PaymentConflictError("这个任务还没有报价金额，请联系客服核对后再付款");
+        }
+
         // 扣钱和改状态必须在同一个事务里
         const after = await chargeForConsolidation(tx as any, {
           companyId: auth.companyId,
@@ -702,18 +732,18 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
             remark: `客户用集货余额付款 ¥${amount.toFixed(2)}`,
           },
         });
-        return after;
+        return { balanceAfter: after, amount };
       });
 
       ok(res, {
         success: true,
         taskId: task.id,
-        paidAmount: amount,
-        balanceAfter,
-        message: `付款成功，已扣 ¥${amount.toFixed(2)}，集货余额剩余 ¥${balanceAfter.toFixed(2)}`,
+        paidAmount: paid.amount,
+        balanceAfter: paid.balanceAfter,
+        message: `付款成功，已扣 ¥${paid.amount.toFixed(2)}，集货余额剩余 ¥${paid.balanceAfter.toFixed(2)}`,
       });
     } catch (e) {
-      if (e instanceof InsufficientBalanceError) {
+      if (e instanceof InsufficientBalanceError || e instanceof PaymentConflictError) {
         fail(res, 400, "BAD_REQUEST", e.message);
         return;
       }

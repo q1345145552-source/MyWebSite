@@ -67,6 +67,8 @@ export function registerAuthRoutes(app: MinimalHttpApp): void {
       companyId: user.companyId,
       role: user.role as "admin" | "staff" | "client",
       userName: user.name,
+      // 把密码指纹写进令牌：以后改了密码，这张令牌立刻失效，不用等 7 天
+      passwordHash: user.passwordHash,
     });
 
     ok(res, {

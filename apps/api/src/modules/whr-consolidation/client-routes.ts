@@ -1,7 +1,7 @@
 import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
-import { InsufficientBalanceError, chargeForConsolidation } from "../wallet/consolidation-balance";
+import { InsufficientBalanceError, PaymentConflictError, chargeForConsolidation } from "../wallet/consolidation-balance";
 import { saveImageToDisk, deleteImageFile } from "../orders/image-storage";
 import {
   ACTIVE_PREALERT_WHERE,
@@ -510,7 +510,37 @@ export function registerWhrConsolidationClientRoutes(app: MinimalHttpApp): void 
     }
 
     try {
-      const balanceAfter = await prisma.$transaction(async (tx) => {
+      const paid = await prisma.$transaction(async (tx) => {
+        /**
+         * ⚠️⚠️ 事务里必须**重新读一遍并锁住这张预报单**（2026-08-25 新增）。
+         *
+         * 上面那几道 `if` 是在事务**外面**查的。客户手抖点两下「付款」，
+         * 两个请求会同时通过检查、各自开事务、各扣一次钱 —— 单子一张，钱扣两遍。
+         * 前端禁用按钮挡不住（抓包重放、网络重试都能绕过）。
+         *
+         * FOR UPDATE 之后第二个请求会等第一个提交完，读到状态已是 paid，
+         * 直接报「已付款」退出，一分钱不扣。
+         *
+         * ⚠️ 金额也要用事务里读出来的：仓库版是签收那一刻按方数×单价自动算的，
+         * 管理员改单价会重算 totalFee，用事务外那个旧金额会扣错数。
+         */
+        await tx.$queryRaw`SELECT id FROM whr_consolidation_prealerts WHERE id = ${prealert.id} FOR UPDATE`;
+        const fresh = await tx.whrConsolidationPrealert.findUnique({
+          where: { id: prealert.id },
+          select: { status: true, totalFee: true },
+        });
+        if (!fresh || fresh.status !== "received_pending_payment") {
+          throw new PaymentConflictError(
+            fresh?.status === "paid"
+              ? "这张预报单已付款，不用重复付"
+              : "这张预报单的状态刚刚变了，请刷新页面后再试",
+          );
+        }
+        const amount = fresh.totalFee == null ? 0 : Number(fresh.totalFee);
+        if (!(amount > 0)) {
+          throw new PaymentConflictError("这张预报单还没有计费金额，请联系客服核对后再付款");
+        }
+
         // 扣钱和改状态必须在同一个事务里，不能出现「钱扣了单子没付上」
         const after = await chargeForConsolidation(tx as any, {
           companyId: auth.companyId,
@@ -544,18 +574,18 @@ export function registerWhrConsolidationClientRoutes(app: MinimalHttpApp): void 
             remark: `客户用集货余额付款 ¥${amount.toFixed(2)}`,
           },
         });
-        return after;
+        return { balanceAfter: after, amount };
       });
 
       ok(res, {
         prealertId: prealert.id,
         status: "paid",
-        paidAmount: amount,
-        balanceAfter,
-        message: `付款成功，已扣 ¥${amount.toFixed(2)}，集货余额剩余 ¥${balanceAfter.toFixed(2)}`,
+        paidAmount: paid.amount,
+        balanceAfter: paid.balanceAfter,
+        message: `付款成功，已扣 ¥${paid.amount.toFixed(2)}，集货余额剩余 ¥${paid.balanceAfter.toFixed(2)}`,
       });
     } catch (e) {
-      if (e instanceof InsufficientBalanceError) {
+      if (e instanceof InsufficientBalanceError || e instanceof PaymentConflictError) {
         fail(res, 400, "BAD_REQUEST", e.message);
         return;
       }
