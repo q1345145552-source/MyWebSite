@@ -914,17 +914,18 @@ main {
     display: inline-flex;
     flex-direction: column;
     gap: 4px;
-    background: none;
-    border: none;
+    padding: 7px 6px;
+    border: 1px solid var(--hairline);
+    border-radius: 3px;
+    background: transparent !important;
     cursor: pointer;
-    padding: 4px;
   }
   .hamburger-line {
     display: block;
     width: 20px;
     height: 2px;
     border-radius: 2px;
-    background: var(--brand);
+    background: var(--ink-mute);
   }
 
   .dashboard-sidebar {
@@ -2467,4 +2468,1040 @@ button:disabled {
 
 @media (prefers-reduced-motion: reduce) {
   .track-overlay { animation: none; }
+}
+
+/* ==========================================================================
+   尾端派送工作台
+   只在 .lastmile-workspace 下生效，避免影响其他 A3 页面。
+   ========================================================================== */
+.a3-shell .lastmile-workspace {
+  color: var(--ink);
+  font-family: var(--a3-font);
+}
+
+.a3-shell .lastmile-workspace--page {
+  margin-bottom: 18px;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--panel);
+}
+
+.a3-shell .lastmile-workspace--embedded {
+  min-width: 0;
+}
+
+.a3-shell .lastmile-page-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.a3-shell .lastmile-page-heading h2 {
+  margin: 2px 0 4px;
+  font-size: 20px;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+}
+
+.a3-shell .lastmile-page-heading p,
+.a3-shell .lastmile-panel-heading p {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.a3-shell .lastmile-eyebrow {
+  color: var(--ink-3);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.a3-shell .lastmile-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 14px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--white);
+}
+
+.a3-shell .lastmile-summary > div {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+  padding: 10px 14px;
+  border-right: 1px solid var(--line);
+}
+
+.a3-shell .lastmile-summary > div:last-child {
+  border-right: 0;
+}
+
+.a3-shell .lastmile-summary strong {
+  color: var(--ink);
+  font-family: var(--a3-mono);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.a3-shell .lastmile-summary span {
+  color: var(--ink-2);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.a3-shell .lastmile-tabs {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 13px;
+  border-bottom: 1px solid var(--line);
+}
+
+.a3-shell .lastmile-tabs button,
+.a3-shell .lastmile-filter-buttons button,
+.a3-shell .lastmile-quick-clients button,
+.a3-shell .lastmile-pagination button {
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--ink-2);
+  cursor: pointer;
+  font: inherit;
+}
+
+.a3-shell .lastmile-tabs button {
+  margin-bottom: -1px;
+  padding: 7px 1px 8px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.a3-shell .lastmile-tabs button.is-active {
+  border-bottom-color: var(--ink);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.a3-shell .lastmile-filter-buttons button.is-active,
+.a3-shell .lastmile-quick-clients button.is-active {
+  border-color: var(--ink-3);
+  background: #f3f4f6 !important;
+  color: var(--ink);
+}
+
+.a3-shell .lastmile-tabs button span {
+  margin-left: 5px;
+  font-family: var(--a3-mono);
+  font-size: 10px;
+  opacity: 0.82;
+}
+
+.a3-shell .lastmile-button {
+  min-height: 32px;
+  padding: 6px 11px;
+  border-radius: 3px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.a3-shell .lastmile-button--primary {
+  border: 1px solid var(--ink);
+  color: var(--white);
+}
+
+.a3-shell .lastmile-button--secondary {
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+}
+
+.a3-shell .lastmile-button--export {
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+}
+
+.a3-shell .lastmile-create-panel,
+.a3-shell .lastmile-task-panel {
+  min-width: 0;
+}
+
+.a3-shell .lastmile-create-panel {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--white);
+}
+
+.a3-shell .lastmile-panel-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.a3-shell .lastmile-panel-heading > div:first-child,
+.a3-shell .lastmile-panel-heading--compact {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 9px;
+}
+
+.a3-shell .lastmile-panel-heading h3 {
+  margin: 0 0 3px;
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.a3-shell .lastmile-step-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: var(--white);
+  color: var(--ink-2);
+  font-family: var(--a3-mono);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.a3-shell .lastmile-create-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(270px, 0.8fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.a3-shell .lastmile-shipment-picker,
+.a3-shell .lastmile-trip-form {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--white);
+}
+
+.a3-shell .lastmile-field {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 10px;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.a3-shell .lastmile-field span {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.a3-shell .lastmile-field em {
+  color: var(--ink-3);
+  font-style: normal;
+  font-weight: 400;
+}
+
+.a3-shell .lastmile-field input,
+.a3-shell .lastmile-field textarea,
+.a3-shell .lastmile-search-field input {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
+.a3-shell .lastmile-field input:focus,
+.a3-shell .lastmile-field textarea:focus,
+.a3-shell .lastmile-search-field input:focus {
+  border-color: var(--ink-2) !important;
+  box-shadow: 0 0 0 1px rgba(31, 41, 55, 0.08);
+}
+
+.a3-shell .lastmile-field textarea {
+  min-height: 54px;
+  resize: vertical;
+}
+
+.a3-shell .lastmile-inline-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.a3-shell .lastmile-alert {
+  display: grid;
+  gap: 3px;
+  margin: -2px 0 10px;
+  padding: 9px 10px;
+  border-radius: 2px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.a3-shell .lastmile-alert--error {
+  border: 1px solid rgba(176, 42, 37, 0.2);
+  background: #fff5f4;
+  color: var(--bad);
+}
+
+.a3-shell .lastmile-quick-clients {
+  display: flex;
+  gap: 5px;
+  margin: 2px 0 9px;
+  padding-bottom: 2px;
+  overflow-x: auto;
+}
+
+.a3-shell .lastmile-quick-clients button {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  font-family: var(--a3-mono);
+  font-size: 10px;
+}
+
+.a3-shell .lastmile-picker-list {
+  max-height: 330px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: var(--panel);
+}
+
+.a3-shell .lastmile-shipment-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  min-height: 48px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line-2);
+  cursor: pointer;
+}
+
+.a3-shell .lastmile-shipment-option:last-child {
+  border-bottom: 0;
+}
+
+.a3-shell .lastmile-shipment-option:hover,
+.a3-shell .lastmile-shipment-option.is-selected {
+  background: #f5f5f4;
+}
+
+.a3-shell .lastmile-shipment-option input {
+  accent-color: var(--ink);
+}
+
+.a3-shell .lastmile-option-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.a3-shell .lastmile-option-main strong {
+  color: var(--ink);
+  font-family: var(--a3-mono);
+  font-size: 11px;
+}
+
+.a3-shell .lastmile-option-main span,
+.a3-shell .lastmile-option-main small {
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.a3-shell .lastmile-option-main small {
+  color: var(--ink-3);
+  font-size: 10px;
+}
+
+.a3-shell .lastmile-shipment-option > b {
+  color: var(--ink-2);
+  font-family: var(--a3-mono);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.a3-shell .lastmile-picker-state {
+  padding: 30px 12px;
+  color: var(--ink-3);
+  font-size: 12px;
+  text-align: center;
+}
+
+.a3-shell .lastmile-picker-state--error {
+  color: var(--bad);
+}
+
+.a3-shell .lastmile-picker-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 7px;
+  color: var(--ink-3);
+  font-size: 10.5px;
+}
+
+.a3-shell .lastmile-picker-footer button,
+.a3-shell .lastmile-row-status button {
+  padding: 0;
+  border: 0;
+  color: var(--ink-2);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10.5px;
+}
+
+.a3-shell .lastmile-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 9px;
+}
+
+.a3-shell .lastmile-create-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 5px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--white);
+}
+
+.a3-shell .lastmile-create-summary span,
+.a3-shell .lastmile-create-summary b {
+  color: var(--ink-2);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.a3-shell .lastmile-create-summary strong {
+  color: var(--ink);
+  font-family: var(--a3-mono);
+  font-size: 22px;
+}
+
+.a3-shell .lastmile-submit {
+  width: 100%;
+  margin-top: 10px;
+  padding: 9px 12px;
+}
+
+.a3-shell .lastmile-submit-note {
+  margin: 8px 0 0;
+  color: var(--ink-3);
+  font-size: 10.5px;
+  line-height: 1.55;
+}
+
+.a3-shell .lastmile-task-toolbar {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) auto auto;
+  gap: 7px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.a3-shell .lastmile-search-field {
+  position: relative;
+  min-width: 0;
+}
+
+.a3-shell .lastmile-search-field input {
+  padding-left: 29px;
+}
+
+.a3-shell .lastmile-search-icon {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 10px;
+  color: var(--ink-3);
+  font-size: 14px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.a3-shell .lastmile-filter-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+.a3-shell .lastmile-filter-buttons button {
+  padding: 6px 8px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.a3-shell .lastmile-results-meta {
+  margin: 2px 0 8px;
+  color: var(--ink-3);
+  font-size: 10.5px;
+}
+
+.a3-shell .lastmile-wd-list {
+  display: grid;
+  gap: 10px;
+}
+
+.a3-shell .lastmile-wd-card {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--panel);
+}
+
+.a3-shell .lastmile-wd-card.is-done {
+  border-color: var(--line);
+}
+
+.a3-shell .lastmile-wd-header {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(130px, 210px) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.a3-shell .lastmile-wd-identity > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.a3-shell .lastmile-wd-identity > div > strong {
+  color: var(--ink);
+  font-family: var(--a3-mono);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+
+.a3-shell .lastmile-wd-identity p {
+  margin: 4px 0 0;
+  color: var(--ink-2);
+  font-size: 10.5px;
+}
+
+.a3-shell .lastmile-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: max-content;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.a3-shell .lastmile-status-badge::before {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ink-3);
+  content: "";
+}
+
+.a3-shell .lastmile-status-badge.is-active {
+  color: var(--ink-2);
+}
+
+.a3-shell .lastmile-status-badge.is-done {
+  color: var(--ink-3);
+}
+
+.a3-shell .lastmile-status-badge.is-done::before {
+  background: #9ca3af;
+}
+
+/* 2026-08-26：进度条已删（旁边就写着 3/5）。那条 margin-bottom 是给进度条留的位置，一并去掉。 */
+.a3-shell .lastmile-wd-progress > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--ink-3);
+  font-size: 10px;
+}
+
+.a3-shell .lastmile-wd-progress strong {
+  color: var(--ink-2);
+  font-family: var(--a3-mono);
+}
+
+
+.a3-shell .lastmile-trip-meta {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  background: #fafafa;
+  border-bottom: 1px solid var(--line);
+}
+
+.a3-shell .lastmile-trip-meta > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 12px;
+  border-right: 1px solid var(--line);
+}
+
+.a3-shell .lastmile-trip-meta > div:last-child {
+  border-right: 0;
+}
+
+.a3-shell .lastmile-trip-meta span {
+  color: var(--ink-3);
+  font-size: 9.5px;
+}
+
+.a3-shell .lastmile-trip-meta strong {
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.a3-shell .lastmile-customer-list {
+  display: grid;
+}
+
+.a3-shell .lastmile-customer-group + .lastmile-customer-group {
+  border-top: 1px solid var(--line);
+}
+
+.a3-shell .lastmile-customer-group > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--white);
+}
+
+.a3-shell .lastmile-customer-group > header > div {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.a3-shell .lastmile-customer-group > header strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-family: var(--a3-mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.a3-shell .lastmile-customer-group > header span {
+  color: var(--ink-3);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.a3-shell .lastmile-stop-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.6fr) minmax(160px, 1fr) minmax(78px, auto) auto;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+  padding: 10px 12px;
+  border-top: 1px solid var(--line-2);
+}
+
+.a3-shell .lastmile-address-cell,
+.a3-shell .lastmile-shipment-cell {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.a3-shell .lastmile-address-cell strong,
+.a3-shell .lastmile-shipment-cell strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.a3-shell .lastmile-shipment-cell strong {
+  color: var(--ink);
+  font-family: var(--a3-mono);
+}
+
+.a3-shell .lastmile-address-cell span,
+.a3-shell .lastmile-shipment-cell span {
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: 10.5px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.a3-shell .lastmile-row-status {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+}
+
+.a3-shell .lastmile-row-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.a3-shell .lastmile-row-actions button {
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--ink-2);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.a3-shell .lastmile-row-actions button.is-sign {
+  border-color: var(--line);
+  color: var(--ink-2);
+}
+
+.a3-shell .lastmile-row-actions button.is-danger {
+  border-color: rgba(176, 42, 37, 0.25);
+  color: var(--bad);
+}
+
+.a3-shell .lastmile-load-state,
+.a3-shell .lastmile-empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 130px;
+  padding: 20px;
+  border: 1px dashed var(--line);
+  border-radius: 3px;
+  background: var(--white);
+  color: var(--ink-2);
+  text-align: center;
+}
+
+.a3-shell .lastmile-empty-state,
+.a3-shell .lastmile-load-state > div {
+  flex-direction: column;
+}
+
+.a3-shell .lastmile-empty-state strong,
+.a3-shell .lastmile-load-state strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.a3-shell .lastmile-empty-state span,
+.a3-shell .lastmile-load-state span {
+  color: var(--ink-2);
+  font-size: 11px;
+}
+
+.a3-shell .lastmile-load-state--error {
+  justify-content: space-between;
+  border-color: rgba(176, 42, 37, 0.25);
+  background: #fff8f7;
+  color: var(--bad);
+  text-align: left;
+}
+
+.a3-shell .lastmile-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.a3-shell .lastmile-pagination button {
+  padding: 5px 10px;
+  font-size: 11px;
+}
+
+.a3-shell .lastmile-pagination span {
+  color: var(--ink-2);
+  font-family: var(--a3-mono);
+  font-size: 11px;
+}
+
+.a3-shell .lastmile-image-preview {
+  position: fixed;
+  z-index: 9999;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 24px 24px;
+  background: rgba(20, 28, 46, 0.82);
+}
+
+.a3-shell .lastmile-image-preview > button {
+  position: absolute;
+  top: 18px;
+  right: 22px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: var(--a3-radius);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.a3-shell .lastmile-image-preview img {
+  max-width: min(100%, 1100px);
+  max-height: 100%;
+  border-radius: var(--a3-radius-lg);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.35);
+}
+
+@media (max-width: 1100px) {
+  .a3-shell .lastmile-create-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .a3-shell .lastmile-wd-header {
+    grid-template-columns: minmax(200px, 1fr) minmax(130px, 190px);
+  }
+
+  .a3-shell .lastmile-wd-header > .lastmile-button {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+
+  .a3-shell .lastmile-stop-row {
+    grid-template-columns: minmax(190px, 1.5fr) minmax(150px, 1fr) auto;
+  }
+
+  .a3-shell .lastmile-row-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 760px) {
+  .a3-shell .lastmile-workspace--page {
+    padding: 14px;
+  }
+
+  .a3-shell .lastmile-page-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .a3-shell .lastmile-page-heading > .lastmile-button {
+    align-self: flex-start;
+  }
+
+  .a3-shell .lastmile-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .a3-shell .lastmile-summary > div:nth-child(2) {
+    border-right: 0;
+  }
+
+  .a3-shell .lastmile-summary > div:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--line);
+  }
+
+  .a3-shell .lastmile-task-toolbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .a3-shell .lastmile-search-field {
+    grid-column: 1 / -1;
+  }
+
+  .a3-shell .lastmile-wd-header {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .a3-shell .lastmile-wd-header > .lastmile-button {
+    grid-column: auto;
+  }
+
+  .a3-shell .lastmile-trip-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .a3-shell .lastmile-trip-meta > div:nth-child(2) {
+    border-right: 0;
+  }
+
+  .a3-shell .lastmile-trip-meta > div:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--line);
+  }
+
+  .a3-shell .lastmile-stop-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+
+  .a3-shell .lastmile-address-cell,
+  .a3-shell .lastmile-shipment-cell,
+  .a3-shell .lastmile-row-actions {
+    grid-column: 1 / -1;
+  }
+
+  .a3-shell .lastmile-address-cell span,
+  .a3-shell .lastmile-shipment-cell span {
+    overflow: visible;
+    white-space: normal;
+  }
+
+  .a3-shell .lastmile-row-status {
+    grid-column: 1 / -1;
+    grid-auto-flow: column;
+    justify-content: start;
+    align-items: center;
+  }
+}
+
+@media (max-width: 520px) {
+  .a3-shell .lastmile-summary > div {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 3px;
+    padding: 10px 12px;
+  }
+
+  .a3-shell .lastmile-tabs,
+  .a3-shell .lastmile-filter-buttons {
+    width: 100%;
+  }
+
+  .a3-shell .lastmile-tabs button,
+  .a3-shell .lastmile-filter-buttons button {
+    flex: 1;
+  }
+
+  .a3-shell .lastmile-create-panel,
+  .a3-shell .lastmile-shipment-picker,
+  .a3-shell .lastmile-trip-form {
+    padding: 11px;
+  }
+
+  .a3-shell .lastmile-inline-field,
+  .a3-shell .lastmile-form-grid,
+  .a3-shell .lastmile-task-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .a3-shell .lastmile-task-toolbar > .lastmile-button,
+  .a3-shell .lastmile-filter-buttons {
+    grid-column: 1;
+  }
+
+  .a3-shell .lastmile-customer-group > header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .a3-shell .lastmile-customer-group > header > div {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .a3-shell .lastmile-customer-group > header strong {
+    overflow: visible;
+    white-space: normal;
+    text-overflow: clip;
+    overflow-wrap: anywhere;
+  }
+
+  .a3-shell .lastmile-customer-group > header .lastmile-button {
+    width: 100%;
+  }
+
+  .a3-shell .lastmile-row-actions button {
+    flex: 1;
+  }
+}
+
+.a3-shell .lastmile-admin-section {
+  min-width: 0;
+}
+
+
+/* 全站旧规则会给每个 header/section 强制加边框和阴影；尾端内部是语义分组，在本工作台内局部复位。 */
+.a3-shell section.lastmile-workspace,
+.a3-shell .lastmile-workspace section,
+.a3-shell .lastmile-workspace header,
+.a3-shell .lastmile-admin-section > .lastmile-page-heading {
+  box-shadow: none !important;
+}
+
+.a3-shell .lastmile-workspace section,
+.a3-shell .lastmile-workspace header,
+.a3-shell .lastmile-admin-section > .lastmile-page-heading {
+  border: 0 !important;
+}
+
+.a3-shell .lastmile-workspace section {
+  background: transparent;
+  transition: none;
+}
+
+.a3-shell .lastmile-workspace section:hover,
+.a3-shell .lastmile-workspace header:hover {
+  box-shadow: none !important;
+}
+
+.a3-shell section.lastmile-workspace--embedded {
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.a3-shell section.lastmile-workspace--page {
+  border: 1px solid var(--line) !important;
+  background: var(--panel) !important;
+}
+
+/* 全局 reset 用了 !important；把工作台真正需要的层级分隔线明确补回来。 */
+.a3-shell .lastmile-workspace .lastmile-wd-header {
+  border-bottom: 1px solid var(--line) !important;
+}
+
+.a3-shell .lastmile-workspace .lastmile-customer-group + .lastmile-customer-group {
+  border-top: 1px solid var(--line) !important;
 }

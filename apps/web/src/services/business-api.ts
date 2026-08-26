@@ -174,6 +174,8 @@ export interface ShipmentItem {
   productQuantity?: number;
   weightKg?: number;
   volumeM3?: number;
+  totalWeightKg?: number | null;
+  totalVolumeM3?: number | null;
   arrivedAt?: string;
   currentStatus: string;
   currentLocation?: string;
@@ -182,6 +184,8 @@ export interface ShipmentItem {
   remark?: string | null;
   transportMode?: string;
   shipDate?: string;
+  receiverNameTh?: string;
+  receiverPhoneTh?: string;
   receiverAddressTh?: string;
   receivableAmountCny?: number;
   receivableCurrency?: string;
@@ -245,6 +249,8 @@ export interface OrderItem {
   packageUnit: string;
   weightKg?: number;
   volumeM3?: number;
+  totalWeightKg?: number | null;
+  totalVolumeM3?: number | null;
   receivableAmountCny?: number | null;
   receivableCurrency?: "CNY" | "THB";
   paymentStatus?: "paid" | "unpaid";
@@ -337,6 +343,8 @@ export interface AdminOrderItem {
   packageUnit: string;
   weightKg: number | null;
   volumeM3: number | null;
+  totalWeightKg?: number | null;
+  totalVolumeM3?: number | null;
   receiverAddressTh?: string;
   containerNo?: string;
   remark?: string | null;
@@ -438,19 +446,11 @@ export interface AdminProfitItem {
 }
 
 export interface AdminOpsOverview {
-  profitSummary: {
-    totalRevenue: number;
-    totalCost: number;
-    totalProfit: number;
-    grossMarginPercent: number;
-  };
-  profitTrend: Array<{
-    orderId: string;
-    profit: number;
-    updatedAt: string;
-  }>;
+  // 2026-08-27：后端已不再返回 profitSummary / profitTrend（按运单算利润那套已废弃）
   customsAlerts: Array<{
     id: string;
+    /** 2026-08-27 补：后端一直在返回，类型里漏了，页面只能用 any 绕过 */
+    shipmentTrackingNo?: string | null;
     shipmentId?: string;
     orderId?: string;
     status: string;
@@ -470,23 +470,38 @@ export interface AdminOpsOverview {
   }>;
 }
 
+/**
+ * 财务页的一行 = 一张集货单（2026-08-27 改）。
+ * 改之前这一行是「一张运单」，但老板口径：运单跟钱无关，钱只在集货那两个功能里。
+ */
 export interface FinanceRow {
-  id: string;
-  orderNo: string;
-  clientName: string;
-  transportMode: string;
-  warehouse: string;
-  weightKg: number;
-  volumeM3: number;
-  paymentStatus: string;
+  /** normal=普通版集货 | warehouse=仓库版集货 */
+  kind: "normal" | "warehouse";
+  kindLabel: string;
+  /** 普通版是任务号 JH…，仓库版是预报单号 WHRP… */
+  no: string;
+  /** 普通版是客户名，仓库版是唛头 */
+  client: string;
+  status: string;
+  statusZh: string;
+  /** ⚠️ null = 还没报价，页面上要显示「—」，不能显示 ¥0.00 */
+  amount: number | null;
+  paid: boolean;
   createdAt: string;
 }
 
 export interface FinanceSummary {
-  totalOrders: number;
-  totalWeight: number;
-  totalVolume: number;
-  monthOrders: number;
+  /** 货已到仓、报了价、客户还没付 —— 真正该催的钱 */
+  receivableAmount: number;
+  receivableCount: number;
+  receivedAmount: number;
+  receivedCount: number;
+  /** 还没到该收钱的环节：仓库版「等收货」+ 普通版「收集中/已满待报价」。不算应收 */
+  notYetAmount: number;
+  notYetCount: number;
+  /** 客户充值了还没花掉的钱 */
+  balanceAmount: number;
+  balanceClientCount: number;
   rows: FinanceRow[];
 }
 
@@ -753,15 +768,9 @@ export async function fetchClientOrders(params?: {
   statusGroup?: "completed" | "unfinished";
 }): Promise<OrderItem[]> {
   const query = new URLSearchParams();
-  query.set("pageSize", "500");
-  query.set("page", "1");
   if (params?.statusGroup) query.set("statusGroup", params.statusGroup);
-  const response = await fetch(`${apiBaseUrl()}/client/orders?${query.toString()}`, {
-    method: "GET",
-    headers: { ...authHeaders() },
-  });
-  const data = await parseApiResponse<{ items: OrderItem[] }>(response);
-  return data.items;
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
+  return fetchAllPages<OrderItem>(`/client/orders${suffix}`);
 }
 
 /**
@@ -884,8 +893,10 @@ async function fetchAllPages<T>(path: string): Promise<T[]> {
     const data = await parseApiResponse<{ items: T[]; total?: number }>(response);
     const items = data.items ?? [];
     all.push(...items);
-    // 后端给了 total 就按 total 判断拿完没有；没给就看这一页是不是没装满
-    const done = typeof data.total === "number" ? all.length >= data.total : items.length < PAGE_SIZE;
+    // 有些老接口是先分页、再做状态筛选，total 仍是筛选前总数。
+    // 因此不能用 all.length >= total：筛选后每页可能少于 500，
+    // all.length 永远追不上 total，会白跑到 50 页上限。按后端页进度才能既拿全又正确停止。
+    const done = typeof data.total === "number" ? page * PAGE_SIZE >= data.total : items.length < PAGE_SIZE;
     if (done) return all;
     if (page === MAX_PAGES) {
       console.warn(`[列表没拿全] ${path} 已拿 ${all.length} 条，到了 ${MAX_PAGES} 页上限还没拿完，请改用后端搜索`);
@@ -951,6 +962,9 @@ export interface LastmileShipmentItem {
   itemName: string;
   packageCount: number;
   containerNo?: string;
+  receiverName?: string;
+  receiverPhone?: string;
+  receiverAddress?: string;
 }
 
 /**
@@ -988,6 +1002,9 @@ export async function fetchLastmileShipments(): Promise<LastmileShipmentItem[]> 
     itemName: s.itemName ?? "",
     packageCount: s.packageCount ?? 0,
     containerNo: s.containerNo || undefined,
+    receiverName: s.receiverNameTh || undefined,
+    receiverPhone: s.receiverPhoneTh || undefined,
+    receiverAddress: s.receiverAddressTh || undefined,
   }));
 }
 
@@ -1481,6 +1498,54 @@ export async function fetchAdminOpsOverview(): Promise<AdminOpsOverview> {
 /**
  * 获取财务汇总数据。
  */
+/* ── 一个柜收了客户多少钱（2026-08-27）──────────────────────────
+   ⚠️ 这几个类型是手写的，TypeScript 不会去核对后端。
+   改后端 ok(res, {...}) 的结构后必须回来同步（CLAUDE.md 第 22 条）。 */
+export interface ContainerRevenueCustomer {
+  name: string;
+  received: number;
+  receivable: number;
+  /** 还没到该收钱的环节（仓库版等收货 / 普通版收集中、已满待报价），不算待收 */
+  notYet: number;
+  orderCount: number;
+  /** 名下真报过价的单数；0 = 一张都没报价 → 金额要显示「—」不是「¥0.00」 */
+  quotedCount: number;
+}
+export interface ContainerRevenueRow {
+  kind: "normal" | "warehouse";
+  kindLabel: string;
+  /** 普通版是任务号 JH…，仓库版是计划号 WHR… */
+  no: string;
+  /** 仓库版是柜型 40HQ，普通版是员工手填的柜号（可能是「—」） */
+  containerType: string;
+  status: string;
+  customerCount: number;
+  orderCount: number;
+  quotedCount: number;
+  received: number;
+  receivable: number;
+  notYet: number;
+  total: number;
+  /** ⚠️ 页面目前不显示它，只用于后端排序；要加日期列时直接用（注意按北京时间换算） */
+  createdAt: string;
+  customers: ContainerRevenueCustomer[];
+}
+export interface ContainerRevenueSummary {
+  totalReceived: number;
+  totalReceivable: number;
+  totalNotYet: number;
+  containerCount: number;
+  rows: ContainerRevenueRow[];
+}
+
+export async function fetchContainerRevenue(): Promise<ContainerRevenueSummary> {
+  const response = await fetch(`${apiBaseUrl()}/admin/settlement/by-container`, {
+    method: "GET",
+    headers: { ...authHeaders() },
+  });
+  return parseApiResponse(response);
+}
+
 export async function fetchFinanceSummary(): Promise<FinanceSummary> {
   const response = await fetch(`${apiBaseUrl()}/admin/finance/summary`, {
     method: "GET",

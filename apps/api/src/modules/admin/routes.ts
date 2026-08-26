@@ -12,6 +12,7 @@ import { IN_TRANSIT_STATUSES } from "../../../../../packages/shared-types/shipme
 // 由接口直接下发中文 —— 抄第二份就一定会漏掉后加的状态。
 import { CONTAINER_STATUS_LABEL } from "../containers/status-flow";
 import { checkPasswordStrength } from "../auth/password-policy";
+import { loadOrderTotalMetrics } from "../shipments/total-metrics";
 
 /** Decimal | null → number | null */
 function decToNumber(value: Prisma.Decimal | null | undefined): number | null {
@@ -447,6 +448,15 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
       }),
     ]);
 
+    const totalMetricsByOrderId = await loadOrderTotalMetrics(
+      auth.companyId,
+      rows.map((row) => ({
+        orderId: row.orderId,
+        orderVolumeM3: row.order?.volumeM3,
+        orderWeightKg: row.order?.weightKg,
+      })),
+    );
+
     const items = rows.map((r) => ({
       id: r.id,
       orderId: r.order?.id ?? undefined,
@@ -462,6 +472,12 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
       productQuantity: r.order?.productQuantity ?? undefined,
       weightKg: decToNumber(r.weightKg) ?? undefined,
       volumeM3: decToNumber(r.volumeM3) ?? undefined,
+      totalWeightKg: r.parentTrackingNo === null
+        ? totalMetricsByOrderId.get(r.orderId)?.totalWeightKg
+        : undefined,
+      totalVolumeM3: r.parentTrackingNo === null
+        ? totalMetricsByOrderId.get(r.orderId)?.totalVolumeM3
+        : undefined,
       currentStatus: r.currentStatus,
       warehouseId: r.warehouseId,
       updatedAt: r.updatedAt.toISOString(),

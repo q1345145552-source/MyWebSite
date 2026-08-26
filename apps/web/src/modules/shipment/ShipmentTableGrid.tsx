@@ -182,3 +182,28 @@ export function totalPackageCountOf(
   if (typeof item.totalPackageCount === "number") return item.totalPackageCount;
   return typeof item.packageCount === "number" ? item.packageCount : null;
 }
+
+/**
+ * 整票体积。
+ *
+ * totalVolumeM3 由列表接口按「订单合计 → 父子单家族合计」算好；
+ * 老接口或无合计值时才退回当前运单字段。显式 0 是有效数值，保留不丢。
+ */
+export function totalVolumeOf(
+  item: { volumeM3?: number | null; totalVolumeM3?: number | null },
+): number | null {
+  if (typeof item.totalVolumeM3 === "number" && Number.isFinite(item.totalVolumeM3)) {
+    return item.totalVolumeM3;
+  }
+  return typeof item.volumeM3 === "number" && Number.isFinite(item.volumeM3) ? item.volumeM3 : null;
+}
+
+/** 整票重量；取值顺序与 totalVolumeOf 一致。 */
+export function totalWeightOf(
+  item: { weightKg?: number | null; totalWeightKg?: number | null },
+): number | null {
+  if (typeof item.totalWeightKg === "number" && Number.isFinite(item.totalWeightKg)) {
+    return item.totalWeightKg;
+  }
+  return typeof item.weightKg === "number" && Number.isFinite(item.weightKg) ? item.weightKg : null;
+}

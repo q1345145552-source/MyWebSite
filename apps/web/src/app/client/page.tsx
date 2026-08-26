@@ -37,6 +37,8 @@ import {
   ProductDetailCell,
   gridThStyle,
   gridTdStyle,
+  totalVolumeOf,
+  totalWeightOf,
 } from "../../modules/shipment/ShipmentTableGrid";
 import FclInquiryPanel from "../../components/client/FclInquiryPanel";
 
@@ -936,6 +938,8 @@ export default function ClientHomePage() {
                     const isExpanded = !!openDetailsByOrder[item.id];
                     const cargoTypeLabel = item.cargoType === "inspection" ? "商检" : item.cargoType === "sensitive" ? "敏感" : "普货";
                     const images = detailImagesCache[item.id] ?? [];
+                    const totalVolumeM3 = totalVolumeOf(item);
+                    const totalWeightKg = totalWeightOf(item);
                     return (
                       <Fragment key={item.id}>
                         <tr style={{ borderBottom: isExpanded ? "none" : "1px solid var(--l-soft)", background: isExpanded ? "var(--s-cool)" : "var(--white)" }}>
@@ -948,8 +952,8 @@ export default function ClientHomePage() {
                           </td>
                           {/* 品名 / 尺寸：合并成一块，固定高度一起滚 */}
                           <ProductDetailCell widths={CLIENT_DETAIL_COL_WIDTHS} rows={detailRows} />
-                          <td style={gridTdStyle} className="col-num">{item.volumeM3 != null ? Number(item.volumeM3).toFixed(3) : "—"}</td>
-                          <td style={gridTdStyle} className="col-num">{item.weightKg != null ? Number(item.weightKg).toFixed(2) : "—"}</td>
+                          <td style={gridTdStyle} className="col-num">{totalVolumeM3 != null ? totalVolumeM3.toFixed(3) : "—"}</td>
+                          <td style={gridTdStyle} className="col-num">{totalWeightKg != null ? totalWeightKg.toFixed(2) : "—"}</td>
                           <td style={gridTdStyle} className="col-num">{item.packageCount} {item.packageUnit === "box" ? "箱" : "袋"}</td>
                           <td style={gridTdStyle}><span className={item.transportMode === "sea" ? "tag tag-sea" : "tag tag-land"}>{item.transportMode === "sea" ? "海运" : "陆运"}</span></td>
                           <td style={gridTdStyle}>{shipmentStatusZh(st, CLIENT_STATUS_ZH_OVERRIDES)}</td>

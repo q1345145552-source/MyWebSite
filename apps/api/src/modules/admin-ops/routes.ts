@@ -2,14 +2,25 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../db/prisma";
 import { syncParentStatusFromChildren } from "../shipments/parent-status";
+import { whrBucket, taskBucket, isDead } from "../finance/money-rules";
+import { metricByPieceShare, reconcileFamilyMetric } from "../shipments/split-metrics";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
+import { sanitizeRemarkForClient } from "../core/client-privacy";
 
 /** 同一票货重复进派送单时抛这个，调用方转成 400 而不是 500 */
 class LastmileConflictError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "LastmileConflictError";
+  }
+}
+
+/** 选中的运单不存在或不属于当前公司；整车事务必须一起回滚 */
+class LastmileShipmentNotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LastmileShipmentNotFoundError";
   }
 }
 
@@ -182,7 +193,37 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
         status: true,
         updatedAt: true,
         // signImageBase64（数据库列 sign_product_image_base64）故意不查 —— 见上面那段
-        shipment: { select: { trackingNo: true, order: { select: { clientId: true } } } },
+        shipment: {
+          select: {
+            trackingNo: true,
+            itemName: true,
+            packageCount: true,
+            packageUnit: true,
+            order: {
+              select: {
+                clientId: true,
+                receiverNameTh: true,
+                receiverPhoneTh: true,
+                receiverAddressTh: true,
+                client: {
+                  select: {
+                    name: true,
+                    phone: true,
+                    addresses: {
+                      orderBy: [{ isDefault: "desc" }, { updatedAt: "desc" }],
+                      take: 1,
+                      select: {
+                        contactName: true,
+                        contactPhone: true,
+                        addressDetail: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
       },
     });
 
@@ -198,23 +239,268 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
       })).map((r) => r.id),
     );
     ok(res, {
-      items: rows.map((item) => ({
-        id: item.id,
-        deliveryNo: item.deliveryNo,
-        shipmentId: item.shipmentId,
-        trackingNo: item.shipment?.trackingNo ?? item.shipmentId,
-        clientId: item.shipment?.order?.clientId ?? null,
-        deliveryDate: item.deliveryDate,
-        carrierName: item.carrierName,
-        externalTrackingNo: item.externalTrackingNo,
-        driverName: item.driverName,
-        licensePlate: item.licensePlate,
-        phoneNumber: item.phoneNumber,
-        // 只告诉前端「有没有图」，图本身走 /admin/lastmile/sign-image 单张取
-        hasSignImage: withImageIds.has(item.id),
-        status: item.status,
-        updatedAt: item.updatedAt.toISOString(),
-      })),
+      items: rows.map((item) => {
+        const order = item.shipment?.order;
+        const defaultAddress = order?.client?.addresses[0];
+        return {
+          id: item.id,
+          deliveryNo: item.deliveryNo,
+          shipmentId: item.shipmentId,
+          trackingNo: item.shipment?.trackingNo ?? item.shipmentId,
+          clientId: order?.clientId ?? null,
+          clientName: order?.client?.name ?? null,
+          receiverName: order?.receiverNameTh || defaultAddress?.contactName || order?.client?.name || null,
+          receiverPhone: order?.receiverPhoneTh || defaultAddress?.contactPhone || order?.client?.phone || null,
+          receiverAddress: order?.receiverAddressTh || defaultAddress?.addressDetail || null,
+          itemName: item.shipment?.itemName ?? null,
+          packageCount: item.shipment?.packageCount ?? null,
+          packageUnit: item.shipment?.packageUnit ?? null,
+          deliveryDate: item.deliveryDate,
+          carrierName: item.carrierName,
+          externalTrackingNo: item.externalTrackingNo,
+          driverName: item.driverName,
+          licensePlate: item.licensePlate,
+          phoneNumber: item.phoneNumber,
+          // 只告诉前端「有没有图」，图本身走 /admin/lastmile/sign-image 单张取
+          hasSignImage: withImageIds.has(item.id),
+          status: item.status,
+          updatedAt: item.updatedAt.toISOString(),
+        };
+      }),
+    });
+  });
+
+  /**
+   * WD 创建后，按客户导出客户签收单。
+   *
+   * 必须显式传 clientId；同一辆车可有多个客户和地址，服务端先收窄范围，
+   * 返回结构也不查询柜号，防止客户模板误带其它客户或内部柜号。
+   */
+  app.get("/admin/lastmile/customer-export-data", async (req, res) => {
+    const auth = requireRole(req, res, ["staff", "admin"]);
+    if (!auth) return;
+    const deliveryNo = req.query.deliveryNo?.trim() ?? "";
+    const clientId = req.query.clientId?.trim() ?? "";
+    if (!deliveryNo || !clientId) {
+      fail(res, 400, "BAD_REQUEST", "deliveryNo 和 clientId 为必填");
+      return;
+    }
+
+    const rows = await prisma.adminLastmileOrder.findMany({
+      where: { companyId: auth.companyId, deliveryNo },
+      orderBy: { updatedAt: "asc" },
+      select: {
+        id: true,
+        carrierName: true,
+        driverName: true,
+        licensePlate: true,
+        phoneNumber: true,
+        deliveryDate: true,
+        status: true,
+        shipment: {
+          select: {
+            trackingNo: true,
+            parentTrackingNo: true,
+            itemName: true,
+            packageCount: true,
+            packageUnit: true,
+            weightKg: true,
+            volumeM3: true,
+            remark: true,
+            order: {
+              select: {
+                clientId: true,
+                itemName: true,
+                packageCount: true,
+                packageUnit: true,
+                weightKg: true,
+                volumeM3: true,
+                receiverNameTh: true,
+                receiverPhoneTh: true,
+                receiverAddressTh: true,
+                client: {
+                  select: {
+                    name: true,
+                    phone: true,
+                    addresses: {
+                      orderBy: [{ isDefault: "desc" }, { updatedAt: "desc" }],
+                      take: 1,
+                      select: { contactName: true, contactPhone: true, addressDetail: true, label: true },
+                    },
+                  },
+                },
+                products: {
+                  orderBy: { sortOrder: "asc" },
+                  select: {
+                    itemName: true,
+                    packageCount: true,
+                    lengthCm: true,
+                    widthCm: true,
+                    heightCm: true,
+                    weightKg: true,
+                  },
+                },
+                // 取订单完整父子家族；不能只看当前 WD，子单可能在其它 WD。
+                shipments: {
+                  select: {
+                    trackingNo: true,
+                    parentTrackingNo: true,
+                    packageCount: true,
+                    weightKg: true,
+                    volumeM3: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (rows.length === 0) {
+      fail(res, 404, "NOT_FOUND", "派送单不存在");
+      return;
+    }
+    const selectedRows = rows.filter((row) => row.shipment.order?.clientId === clientId);
+    if (selectedRows.length === 0) {
+      fail(res, 404, "NOT_FOUND", "这张派送单里没有该客户");
+      return;
+    }
+
+    const firstOrder = selectedRows[0].shipment.order;
+    const defaultAddress = firstOrder?.client?.addresses?.[0];
+    const contactName = firstOrder?.receiverNameTh?.trim() || defaultAddress?.contactName || firstOrder?.client?.name || "";
+    const contactPhone = firstOrder?.receiverPhoneTh?.trim() || defaultAddress?.contactPhone || firstOrder?.client?.phone || "";
+    const address = firstOrder?.receiverAddressTh?.trim() || defaultAddress?.addressDetail || "";
+    const splitParentTrackingNos = new Set<string>();
+    const splitParentsWithMissingWeight = new Set<string>();
+    const splitParentsWithMissingVolume = new Set<string>();
+    for (const row of selectedRows) {
+      if (row.shipment.parentTrackingNo) {
+        splitParentTrackingNos.add(row.shipment.parentTrackingNo);
+        if (row.shipment.weightKg == null) splitParentsWithMissingWeight.add(row.shipment.parentTrackingNo);
+        if (row.shipment.volumeM3 == null) splitParentsWithMissingVolume.add(row.shipment.parentTrackingNo);
+      }
+      for (const child of row.shipment.order?.shipments ?? []) {
+        if (!child.parentTrackingNo) continue;
+        splitParentTrackingNos.add(child.parentTrackingNo);
+        if (child.weightKg == null) splitParentsWithMissingWeight.add(child.parentTrackingNo);
+        if (child.volumeM3 == null) splitParentsWithMissingVolume.add(child.parentTrackingNo);
+      }
+    }
+    const shipments = selectedRows.map((row) => {
+      const shipment = row.shipment;
+      const order = shipment.order;
+      // 子单缺件数时宁可输出 0，也不能再回退成订单整票件数。
+      const packageCount = shipment.packageCount
+        ?? (shipment.parentTrackingNo ? 0 : (order?.packageCount ?? 0));
+      const isSplitParent = !shipment.parentTrackingNo && splitParentTrackingNos.has(shipment.trackingNo);
+      const familyKey = shipment.parentTrackingNo ?? shipment.trackingNo;
+      const familyRows = (order?.shipments ?? [])
+        .filter((part) => (part.parentTrackingNo ?? part.trackingNo) === familyKey)
+        .map((part) => ({ ...part, key: part.trackingNo, isParent: !part.parentTrackingNo }));
+      if (!familyRows.some((part) => part.key === shipment.trackingNo)) {
+        familyRows.push({
+          trackingNo: shipment.trackingNo,
+          parentTrackingNo: shipment.parentTrackingNo,
+          packageCount,
+          weightKg: shipment.weightKg,
+          volumeM3: shipment.volumeM3,
+          key: shipment.trackingNo,
+          isParent: !shipment.parentTrackingNo,
+        });
+      }
+      const familyHasChildren = familyRows.some((part) => !!part.parentTrackingNo);
+      const weightFamily = reconcileFamilyMetric(
+        order?.weightKg,
+        order?.packageCount,
+        familyRows.map((part) => ({ ...part, pieceCount: part.packageCount, value: part.weightKg })),
+        2,
+      );
+      const volumeFamily = reconcileFamilyMetric(
+        order?.volumeM3,
+        order?.packageCount,
+        familyRows.map((part) => ({ ...part, pieceCount: part.packageCount, value: part.volumeM3 })),
+        3,
+      );
+      // 历史手工分柜只扣了父单件数，子单重量/体积为空、父单仍留着整票总量。
+      // 空子单按件数补算，父单吸收舍入余数或不守恒差额。
+      const weightKg = familyHasChildren && weightFamily[shipment.trackingNo] != null
+        ? weightFamily[shipment.trackingNo]
+        : (isSplitParent && splitParentsWithMissingWeight.has(shipment.trackingNo)
+        ? metricByPieceShare(order?.weightKg, packageCount, order?.packageCount, 2)
+        : (shipment.weightKg == null
+          ? metricByPieceShare(order?.weightKg, packageCount, order?.packageCount, 2)
+          : decToNumber(shipment.weightKg)));
+      const volumeM3 = familyHasChildren && volumeFamily[shipment.trackingNo] != null
+        ? volumeFamily[shipment.trackingNo]
+        : (isSplitParent && splitParentsWithMissingVolume.has(shipment.trackingNo)
+        ? metricByPieceShare(order?.volumeM3, packageCount, order?.packageCount, 3)
+        : (shipment.volumeM3 == null
+          ? metricByPieceShare(order?.volumeM3, packageCount, order?.packageCount, 3)
+          : decToNumber(shipment.volumeM3)));
+      return {
+        lastmileOrderId: row.id,
+        trackingNo: shipment.trackingNo,
+        parentTrackingNo: shipment.parentTrackingNo ?? "",
+        itemName: shipment.itemName || order?.itemName || "",
+        packageCount,
+        packageUnit: shipment.packageUnit || order?.packageUnit || "",
+        // ⚠️ 这里**必须原样下发 null**，不能 `?? 0`（2026-08-26 修）。
+        // 上面那一大段已经会在「订单也没填」时正确返回 null，
+        // 结果被这一句抹成 0，导出的客户签收单上就印成「0 m³ / 0 kg」——
+        // 那是给客户签字的纸质单据，等于白纸黑字说这箱货没有重量。
+        // 生成器早就会把 null 写成空格子了，问题一直卡在这一句。
+        weightKg: weightKg ?? null,
+        volumeM3: volumeM3 ?? null,
+        remark: sanitizeRemarkForClient(shipment.remark || "", true),
+        status: row.status,
+        containerNos: [],
+        receiverName: order?.receiverNameTh?.trim() || contactName,
+        receiverPhone: order?.receiverPhoneTh?.trim() || contactPhone,
+        receiverAddress: order?.receiverAddressTh?.trim() || address,
+        products: (shipment.parentTrackingNo || isSplitParent ? [] : (order?.products ?? [])).map((product) => ({
+          itemName: product.itemName,
+          packageCount: product.packageCount,
+          lengthCm: product.lengthCm,
+          widthCm: product.widthCm,
+          heightCm: product.heightCm,
+          weightKg: product.weightKg,
+        })),
+      };
+    });
+    const first = selectedRows[0];
+    ok(res, {
+      containerId: "",
+      containerNo: "",
+      containerType: "",
+      origin: "",
+      destination: "",
+      carrierInfo: "",
+      deliveryNo,
+      scope: "customer",
+      carrierName: first.carrierName,
+      driverName: first.driverName ?? "",
+      licensePlate: first.licensePlate ?? "",
+      phoneNumber: first.phoneNumber ?? "",
+      deliveryDate: first.deliveryDate ?? "",
+      status: selectedRows.every((row) => row.status === "SIGNED") ? "SIGNED" : "DELIVERING",
+      customerCount: 1,
+      shipmentCount: shipments.length,
+      signedCount: shipments.filter((shipment) => shipment.status === "SIGNED").length,
+      totalPackageCount: shipments.reduce((sum, shipment) => sum + Number(shipment.packageCount || 0), 0),
+      totalVolumeM3: Number(shipments.reduce((sum, shipment) => sum + Number(shipment.volumeM3 || 0), 0).toFixed(3)),
+      totalWeightKg: Number(shipments.reduce((sum, shipment) => sum + Number(shipment.weightKg || 0), 0).toFixed(2)),
+      containerNos: [],
+      customers: [{
+        clientId,
+        clientName: firstOrder?.client?.name ?? clientId,
+        contactName,
+        contactPhone,
+        address,
+        addressLabel: defaultAddress?.label || "",
+        shipments,
+      }],
+      generatedAt: new Date().toISOString(),
     });
   });
 
@@ -332,14 +618,20 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
            * 不锁的话两边都查到「没有在途派送单」，双双放行。
            */
           await tx.$queryRaw`SELECT id FROM shipments WHERE id = ${sid} FOR UPDATE`;
+          const ownShipment = await tx.shipment.findFirst({
+            where: { id: sid, companyId: auth.companyId },
+            select: { id: true, trackingNo: true, currentStatus: true, parentTrackingNo: true },
+          });
+          if (!ownShipment) {
+            throw new LastmileShipmentNotFoundError(`运单 ${sid} 不存在或不属于当前公司`);
+          }
           const busy = await tx.adminLastmileOrder.findFirst({
             where: { shipmentId: sid, companyId: auth.companyId, status: "DELIVERING" },
             select: { deliveryNo: true },
           });
           if (busy) {
-            const no = await tx.shipment.findUnique({ where: { id: sid }, select: { trackingNo: true } });
             throw new LastmileConflictError(
-              `运单 ${no?.trackingNo ?? sid} 已经在派送单 ${busy.deliveryNo} 里派送中了，不能重复派。要改派请先把那张单删掉或签收。`,
+              `运单 ${ownShipment.trackingNo} 已经在派送单 ${busy.deliveryNo} 里派送中了，不能重复派。要改派请先把那张单删掉或签收。`,
             );
           }
 
@@ -349,22 +641,23 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
             data: { id, companyId: auth.companyId, deliveryNo, shipmentId: sid, carrierName: "自营", driverName, licensePlate, phoneNumber, deliveryDate, externalTrackingNo: "", status },
           });
           // 同步运单状态 + 日志
-          const ship = await tx.shipment.findUnique({ where: { id: sid }, select: { currentStatus: true, parentTrackingNo: true } });
-          if (ship) {
-            await tx.shipment.update({ where: { id: sid }, data: { currentStatus: "outForDelivery", updatedAt: now } });
-            await tx.statusLog.create({
-              data: { id: `sl_lm_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, companyId: auth.companyId, shipmentId: sid, operatorId: auth.userId, operatorRole: auth.role, operatorName: auth.name ?? "", fromStatus: ship.currentStatus, toStatus: "outForDelivery", remark: departRemark, changedAt: now },
-            });
-            if (ship.parentTrackingNo) {
-              // ⚠️ 不能直接把父单写成 outForDelivery：分柜后可能只有一个子单出去派送，
-              // 其余还在仓库。按全部子单重新推算（2026-08-22）。
-              await syncParentStatusFromChildren(tx, ship.parentTrackingNo, auth.companyId);
-            }
+          await tx.shipment.update({ where: { id: ownShipment.id }, data: { currentStatus: "outForDelivery", updatedAt: now } });
+          await tx.statusLog.create({
+            data: { id: `sl_lm_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, companyId: auth.companyId, shipmentId: ownShipment.id, operatorId: auth.userId, operatorRole: auth.role, operatorName: auth.name ?? "", fromStatus: ownShipment.currentStatus, toStatus: "outForDelivery", remark: departRemark, changedAt: now },
+          });
+          if (ownShipment.parentTrackingNo) {
+            // ⚠️ 不能直接把父单写成 outForDelivery：分柜后可能只有一个子单出去派送，
+            // 其余还在仓库。按全部子单重新推算（2026-08-22）。
+            await syncParentStatusFromChildren(tx, ownShipment.parentTrackingNo, auth.companyId);
           }
           results.push({ id, shipmentId: sid });
         }
       });
     } catch (e: any) {
+      if (e instanceof LastmileShipmentNotFoundError) {
+        fail(res, 404, "NOT_FOUND", e.message);
+        return;
+      }
       // 重复装同一票货（(delivery_no, shipment_id) 唯一）说人话，别把 Prisma 原文抛给员工
       // 注意：ApiCode 里没有 CONFLICT（只有 BAD_REQUEST/UNAUTHORIZED/FORBIDDEN/
       // NOT_FOUND/VALIDATION_ERROR/INTERNAL_ERROR），别顺手写 "CONFLICT" ——
@@ -522,6 +815,162 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
     });
   });
 
+  /**
+   * 「一个柜收了客户多少钱」（2026-08-27 重做）。
+   *
+   * 这个接口以前是「结算与利润」：管理员手工填客户应收 − 供应商应付 − 税费 = 利润。
+   * 生产实测：1063 张订单里 0 张录过应收、结算表 0 行 —— 从上线到现在完全没人用，
+   * 因为它是按「每张运单算钱」设计的，而老板的口径是**运单跟钱无关**。
+   *
+   * 老板 2026-08-27 定的新口径：**不用算利润，就是这条柜收客户多少钱。**
+   *
+   * 「一个柜」在两个集货版本里分别是：
+   *   - 普通版：一个 ConsolidationTask（JH…），一个任务一个客户，默认 68 方
+   *   - 仓库版：一个 WhrConsolidationPlan（WHR…），一个计划一个柜，底下挂多个客户，
+   *             每个客户挂多张预报单，钱按 预报单 → 客户 → 柜 逐层汇总
+   *
+   * ⚠️ 已取消的单不计入任何金额（黑名单判断，见 CLAUDE.md 第 13 条）。
+   */
+  app.get("/admin/settlement/by-container", async (req, res) => {
+    const auth = requireRole(req, res, ["admin"]);
+    if (!auth) return;
+
+    const num = (v: any) => (v == null ? 0 : Number(v.toString()));
+
+    const [plans, tasks] = await Promise.all([
+      prisma.whrConsolidationPlan.findMany({
+        where: { companyId: auth.companyId },
+        select: {
+          planNo: true, containerType: true, status: true, createdAt: true,
+          customers: {
+            select: {
+              clientId: true,
+              client: { select: { name: true } },
+              prealerts: { select: { trackingNo: true, mark: true, status: true, totalFee: true } },
+            },
+          },
+        },
+      }),
+      prisma.consolidationTask.findMany({
+        where: { companyId: auth.companyId },
+        select: {
+          taskNo: true, status: true, paymentStatus: true, totalFee: true,
+          containerNo: true, createdAt: true,
+          // ⚠️ 单数不能写死 1：生产实测 JH0000001 底下有 2 张预报单
+          _count: { select: { prealerts: true } },
+          client: { select: { id: true, name: true } },
+        },
+      }),
+    ]);
+
+    /**
+     * ⚠️ `quotedCount` 和 `orderCount` 不是一回事（2026-08-27 修）：
+     *   orderCount  = 名下有几张单
+     *   quotedCount = 其中**真报过价**的有几张（totalFee 不为 null）
+     * 只看 orderCount 会把「有单但一张都没报价」显示成 ¥0.00，
+     * 跟「报价就是 0 元」混在一起 —— 那是两回事。
+     */
+    type Customer = { name: string; received: number; receivable: number; notYet: number; orderCount: number; quotedCount: number };
+    type Row = {
+      kind: "normal" | "warehouse";
+      kindLabel: string;
+      no: string;
+      containerType: string;
+      status: string;
+      customerCount: number;
+      orderCount: number;
+      /** 名下真报过价的单数；0 = 一张都没报价，金额要显示「—」不是「¥0.00」 */
+      quotedCount: number;
+      received: number;
+      receivable: number;
+      notYet: number;
+      total: number;
+      createdAt: string;
+      customers: Customer[];
+    };
+
+    const rows: Row[] = [];
+
+    for (const pl of plans) {
+      // ⚠️ 已取消的柜整个跳过：不进柜子数，也不进任何金额
+      if (isDead(pl.status)) continue;
+      const customers: Customer[] = [];
+      let received = 0, receivable = 0, notYet = 0, orderCount = 0, quotedTotal = 0;
+      for (const c of pl.customers) {
+        let cr = 0, cv = 0, cn0 = 0, cn = 0, quoted = 0;
+        for (const pa of c.prealerts) {
+          const b = whrBucket(pa.status);
+          if (b === "dead") continue;
+          const amt = num(pa.totalFee);
+          cn++;
+          if (pa.totalFee != null) quoted++;
+          // ⚠️「等收货」的钱不算待收 —— 货还没到仓，报的价只是预估，不该去催
+          if (b === "received") cr += amt;
+          else if (b === "receivable") cv += amt;
+          else cn0 += amt;
+        }
+        received += cr; receivable += cv; notYet += cn0; orderCount += cn; quotedTotal += quoted;
+        customers.push({
+          name: c.client?.name || c.clientId,
+          received: Math.round(cr * 100) / 100,
+          receivable: Math.round(cv * 100) / 100,
+          notYet: Math.round(cn0 * 100) / 100,
+          orderCount: cn,
+          quotedCount: quoted,
+        });
+      }
+      rows.push({
+        kind: "warehouse", kindLabel: "仓库版", no: pl.planNo,
+        containerType: pl.containerType, status: pl.status,
+        customerCount: pl.customers.length, orderCount, quotedCount: quotedTotal,
+        received: Math.round(received * 100) / 100,
+        receivable: Math.round(receivable * 100) / 100,
+        notYet: Math.round(notYet * 100) / 100,
+        total: Math.round((received + receivable + notYet) * 100) / 100,
+        createdAt: pl.createdAt.toISOString(),
+        customers,
+      });
+    }
+
+    for (const t of tasks) {
+      const b = taskBucket(t.status, t.paymentStatus, t.totalFee != null);
+      if (b === "dead") continue;
+      const amt = num(t.totalFee);
+      const name = t.client?.name || t.client?.id || "—";
+      const quoted = t.totalFee != null ? 1 : 0;
+      const one = {
+        name,
+        received: b === "received" ? amt : 0,
+        receivable: b === "receivable" ? amt : 0,
+        notYet: b === "notYet" ? amt : 0,
+        orderCount: t._count.prealerts,
+        quotedCount: quoted,
+      };
+      rows.push({
+        kind: "normal", kindLabel: "普通版", no: t.taskNo,
+        // 普通版没有柜型字段；柜号是员工可选手填的
+        containerType: t.containerNo || "—",
+        status: t.status,
+        // 普通版一个任务就是一个客户；单数用真实的预报单条数，不能写死 1
+        customerCount: 1, orderCount: t._count.prealerts, quotedCount: quoted,
+        received: one.received, receivable: one.receivable, notYet: one.notYet,
+        total: amt,
+        createdAt: t.createdAt.toISOString(),
+        customers: [one],
+      });
+    }
+
+    rows.sort((a, b) => b.total - a.total || b.createdAt.localeCompare(a.createdAt));
+
+    ok(res, {
+      totalReceived: Math.round(rows.reduce((s, r) => s + r.received, 0) * 100) / 100,
+      totalReceivable: Math.round(rows.reduce((s, r) => s + r.receivable, 0) * 100) / 100,
+      totalNotYet: Math.round(rows.reduce((s, r) => s + r.notYet, 0) * 100) / 100,
+      containerCount: rows.length,
+      rows,
+    });
+  });
+
   app.get("/admin/settlement/entries", async (req, res) => {
     const auth = requireRole(req, res, ["admin"]);
     if (!auth) return;
@@ -613,40 +1062,12 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
     const auth = requireRole(req, res, ["admin"]);
     if (!auth) return;
 
-    // 趋势只需要最近 7 条；顶部“总收入/总成本/总利润”必须汇总全部结算，
-    // 不能拿最近 20 条冒充总计。
-    const [profitRows, profitTotals] = await Promise.all([
-      prisma.adminSettlementEntry.findMany({
-        where: { companyId: auth.companyId },
-        orderBy: { updatedAt: "desc" },
-        take: 7,
-      }),
-      prisma.adminSettlementEntry.aggregate({
-        where: { companyId: auth.companyId },
-        _sum: { clientReceivable: true, supplierPayable: true, taxFee: true },
-      }),
-    ]);
-    const profitNumeric = profitRows.map((item) => ({
-      orderId: item.orderId,
-      clientReceivable: decToNumber(item.clientReceivable),
-      supplierPayable: decToNumber(item.supplierPayable),
-      taxFee: decToNumber(item.taxFee),
-      updatedAt: item.updatedAt.toISOString(),
-    }));
-    const totalRevenue = decToNumber(profitTotals._sum.clientReceivable);
-    const totalCost =
-      decToNumber(profitTotals._sum.supplierPayable) + decToNumber(profitTotals._sum.taxFee);
-    const totalProfit = totalRevenue - totalCost;
-    const grossMarginPercent = totalRevenue > 0 ? Number(((totalProfit / totalRevenue) * 100).toFixed(2)) : 0;
-    const profitOrderIds = [...new Set(profitNumeric.map((item) => item.orderId))];
-    const profitOrders = await prisma.order.findMany({ where: { id: { in: profitOrderIds }, companyId: auth.companyId }, select: { id: true, shipments: { take: 1, orderBy: { updatedAt: "desc" }, select: { trackingNo: true } } } });
-    const trackingNoByOrderId = new Map(profitOrders.map((o) => [o.id, o.shipments[0]?.trackingNo ?? null]));
-    const profitTrend = profitNumeric.slice(0, 7).map((item) => ({
-      orderId: item.orderId,
-      trackingNo: trackingNoByOrderId.get(item.orderId) ?? null,
-      profit: Number((item.clientReceivable - item.supplierPayable - item.taxFee).toFixed(2)),
-      updatedAt: item.updatedAt,
-    }));
+    /* 2026-08-27：这里原来每次都查结算表算「总收入/总成本/总利润/毛利率」和最近 7 条利润趋势，
+       整块删掉。原因三条：
+         ① 管理员首页那块「毛利率趋势」UI 已经删了，**前端一个字段都不消费**
+         ② 老板口径：运单跟钱无关，钱只在集货那两个功能里 —— 按运单算利润这套方向就不对
+         ③ 首页每 10 秒轮询一次这个接口，等于每 10 秒白查一遍结算表
+       结算表本身（admin_settlement_entries）没动，生产上也是 0 行。 */
 
     const customsRows = await prisma.adminCustomsCase.findMany({
       where: { companyId: auth.companyId, status: { in: ["inspection", "pending"] } },
@@ -720,13 +1141,6 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
     const trackingNoByShipmentId = new Map(customsOrders.map((s) => [s.id, s.trackingNo]));
 
     ok(res, {
-      profitSummary: {
-        totalRevenue: Number(totalRevenue.toFixed(2)),
-        totalCost: Number(totalCost.toFixed(2)),
-        totalProfit: Number(totalProfit.toFixed(2)),
-        grossMarginPercent,
-      },
-      profitTrend,
       customsAlerts: customsRows.map((item) => ({
         id: item.id,
         shipmentId: item.shipmentId ?? undefined,

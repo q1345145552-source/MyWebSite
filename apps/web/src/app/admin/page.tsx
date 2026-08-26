@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import { COMPLETED_STATUSES, IN_TRANSIT_STATUSES } from "../../../../../packages/shared-types/shipment-status";
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -13,6 +13,8 @@ import Toast from "../../modules/layout/Toast";
 import ShipmentSearch from "../../modules/shipment/ShipmentSearch";
 import { openPrintLabel } from "../../modules/shipment/ShipmentPrintLabel";
 import { openShipmentTrack } from "../../modules/shipment/ShipmentTrackModal";
+import LastmileDispatchWorkspace from "../../modules/lastmile/LastmileDispatchWorkspace";
+import type { LastmileOrderItem, LastmileShipmentOption } from "../../modules/lastmile/types";
 import { ShipmentOverviewStrip } from "../../modules/shipment/ShipmentOverviewStrip";
 import DetailModal from "../../modules/layout/DetailModal";
 import {
@@ -21,6 +23,8 @@ import {
   PRODUCT_DETAIL_COL_WIDTHS,
   buildProductDetailRows,
   totalPackageCountOf,
+  totalVolumeOf,
+  totalWeightOf,
   gridThStyle,
   gridTdStyle,
 } from "../../modules/shipment/ShipmentTableGrid";
@@ -155,6 +159,7 @@ const warehouseOptions = [
    实测缺 15 个，陆运那五步从上线起就一直筛不到。**别再改回写死。** */
 const logisticsStatusOptions = SHIPMENT_STATUS_FILTER_OPTIONS;
 
+
 /** 中文状态 → 英文 status */
 /**
  * 管理端运单号前缀规则：仓库与单号前缀必须匹配。
@@ -253,46 +258,41 @@ export default function AdminHomePage() {
   const [calcHeight, setCalcHeight] = useState("");
   const [calcQty, setCalcQty] = useState("1");
   const [calcResult, setCalcResult] = useState("");
-  const [lmForm, setLmForm] = useState({ driverName: "", licensePlate: "", phoneNumber: "", deliveryDate: "" });
-  const [lmShipments, setLmShipments] = useState<Array<{id:string;trackingNo:string;clientId:string;itemName:string;packageCount:number}>>([]);
-  const [lmSelected, setLmSelected] = useState<Set<string>>(new Set());
-  const [lmShipSearch, setLmShipSearch] = useState("");
-  const lmSignFileRef = useRef<HTMLInputElement>(null);
-  const [lmSignData, setLmSignData] = useState<{id:string;base64:string}|null>(null);
+  const [lmShipments, setLmShipments] = useState<LastmileShipmentOption[]>([]);
+  const [lmShipmentsLoading, setLmShipmentsLoading] = useState(false);
+  const [lmShipmentsError, setLmShipmentsError] = useState("");
   const loadLmShipments = async () => {
     // 2026-08-06：和员工端犯的是同一个错 —— 只拿第 1 页 500 条再在前端筛状态，
     // 能派送的 571 张里只到 126 张。改为统一走 fetchLastmileShipments()（后端按状态筛 + 翻页拿完）。
+    setLmShipmentsLoading(true);
+    setLmShipmentsError("");
     try { setLmShipments(await fetchLastmileShipments()); }
-    catch (e) { console.error(e); setMessage(`尾端运单加载失败：${e instanceof Error ? e.message : "未知错误"}`); }
-  };
-  const [lmOrders, setLmOrders] = useState<Array<{id:string;deliveryNo:string;shipmentId:string;trackingNo?:string;driverName?:string|null;licensePlate?:string|null;phoneNumber?:string|null;deliveryDate?:string|null;hasSignImage?:boolean;status:string}>>([]);
-  const loadLastmileOrders = async () => {
-    try { const res = await fetch(`${apiBaseUrl()}/admin/lastmile/orders`, { headers: authHeaders() }); const d = await parseApiResponse<{items:any[]}>(res); setLmOrders(d.items ?? []); } catch (e) { console.error(e); }
-  };
-  /**
-   * 点开签收凭证时，才去取那一张图（2026-08-22）。
-   *
-   * 原来列表接口把 570 条派送单的签收图 base64 全带回来 —— 实测每次 113 MB，
-   * 页面卡、后端每 6 天被内存撑爆一次，而图在界面上只显示成 40×40 的缩略图。
-   * 现在列表只回 hasSignImage，图点开才取。
-   */
-  const openSignImage = async (id: string) => {
-    try {
-      const res = await fetch(`${apiBaseUrl()}/admin/lastmile/sign-image?id=${encodeURIComponent(id)}`, { headers: { ...authHeaders() } });
-      const data = await parseApiResponse(res);
-      const b64 = (data as any)?.signImageBase64;
-      if (b64) setPreviewImg("data:image/jpeg;base64," + b64);
-      else setToast("这条派送单没有签收凭证");
-    } catch (e: any) {
-      setToast(e?.message || "取签收凭证失败");
+    catch (e) {
+      console.error(e);
+      const reason = e instanceof Error ? e.message : "未知错误";
+      setLmShipmentsError(reason);
+      setToast(`可派送运单加载失败：${reason}`);
+    } finally {
+      setLmShipmentsLoading(false);
     }
   };
-
-  const updateLastmileStatus = async (id: string, status: string, signImageBase64?: string) => {
-    const res = await fetch(`${apiBaseUrl()}/admin/lastmile/status`, { method: "POST", headers: {"Content-Type":"application/json",...authHeaders()}, body: JSON.stringify({id, status, signImageBase64: signImageBase64 || undefined}) });
-    return parseApiResponse(res);
+  const [lmOrders, setLmOrders] = useState<LastmileOrderItem[]>([]);
+  const [lmOrdersLoading, setLmOrdersLoading] = useState(false);
+  const [lmOrdersError, setLmOrdersError] = useState("");
+  const loadLastmileOrders = async () => {
+    setLmOrdersLoading(true);
+    setLmOrdersError("");
+    try {
+      const response = await fetch(`${apiBaseUrl()}/admin/lastmile/orders`, { headers: authHeaders() });
+      const data = await parseApiResponse<{ items: LastmileOrderItem[] }>(response);
+      setLmOrders(data.items ?? []);
+    } catch (e) {
+      console.error(e);
+      setLmOrdersError(e instanceof Error ? e.message : "未知错误");
+    } finally {
+      setLmOrdersLoading(false);
+    }
   };
-  const [previewImg, setPreviewImg] = useState<string | null>(null);
   // 充值审核
   const [rechargeList, setRechargeList] = useState<AdminWalletRechargeItem[]>([]);
   const [rechargeStatusFilter, setRechargeStatusFilter] = useState("");
@@ -1240,35 +1240,6 @@ export default function AdminHomePage() {
               </div>
             </div>
           </div>
-          <div style={{ border: "1px solid var(--l-cool)", borderRadius: 10, padding: 10, background: "var(--s-cool)" }}>
-            <div style={{ fontWeight: 700, marginBottom: 6 }}>毛利率趋势（最近结算）</div>
-            {/* ⚠️ 2026-08-21：结算表一条记录都没有时，原来照样显示
-                「总收入 0.00 / 毛利率 0.00%」—— 看的人会以为这生意一分不赚，
-                实际是**还没人录结算数据**。两回事，必须分开说。 */}
-            {opsOverview && opsOverview.profitTrend.length === 0 ? (
-              <div style={{ fontSize: 13, color: "var(--t-strong)" }}>
-                还没有结算数据（去「财务结算与利润」录入后，这里才会有毛利率）
-              </div>
-            ) : opsOverview ? (
-              <>
-                <div style={{ fontSize: 13, color: "var(--t-strong)", marginBottom: 8 }}>
-                  总收入 {opsOverview.profitSummary.totalRevenue.toFixed(2)} / 总成本{" "}
-                  {opsOverview.profitSummary.totalCost.toFixed(2)} / 总利润{" "}
-                  {opsOverview.profitSummary.totalProfit.toFixed(2)} / 毛利率{" "}
-                  {opsOverview.profitSummary.grossMarginPercent.toFixed(2)}%
-                </div>
-                <div style={{ display: "grid", gap: 4 }}>
-                  {opsOverview.profitTrend.map((item: any) => (
-                    <div key={`${item.orderId}-${item.updatedAt}`} style={{ fontSize: 12, color: "var(--t-strong)" }}>
-                      运单 {item.trackingNo ?? item.orderId ?? "—"}：利润 {item.profit.toFixed(2)}（{item.updatedAt.slice(0, 16)}）
-                    </div>
-                  ))}
-                </div>
-              </>
-            ) : (
-              <div style={{ fontSize: 13, color: "var(--t-strong)" }}>暂无利润趋势数据</div>
-            )}
-          </div>
           {/* 卡住的柜子（2026-08-21 新增）。
               放在关务预警上面：这是目前看板上唯一会主动告诉你「出事了」的地方。
               判定规则和阈值都在后端 /admin/dashboard/overview 里，那边有详细注释。 */}
@@ -1308,7 +1279,7 @@ export default function AdminHomePage() {
             <div style={{ border: "1px solid #fde68a", borderRadius: 10, padding: 10, background: "#fffbeb" }}>
               <div style={{ fontWeight: 700, marginBottom: 6 }}>关务查验预警</div>
               <div style={{ display: "grid", gap: 4 }}>
-                {opsOverview.customsAlerts.slice(0, 6).map((item: any) => (
+                {opsOverview.customsAlerts.slice(0, 6).map((item) => (
                   <div key={item.id} style={{ fontSize: 12, color: "var(--c-amber-deep)" }}>
                     [{item.status === "inspection" ? "查验" : item.status === "released" ? "放行" : item.status === "pending" ? "待处理" : item.status}] 运单 {item.shipmentTrackingNo ?? item.shipmentId ?? "-"} /{" "}
                     {item.remark ?? "无备注"}
@@ -1677,8 +1648,8 @@ export default function AdminHomePage() {
                         return total != null ? `${total} 箱` : "—";
                       })()}
                     </td>
-                    <td style={gridTdStyle}>{o.volumeM3 ?? "—"}</td>
-                    <td style={gridTdStyle}>{o.weightKg ?? "—"}</td>
+                    <td style={gridTdStyle}>{totalVolumeOf(o) ?? "—"}</td>
+                    <td style={gridTdStyle}>{totalWeightOf(o) ?? "—"}</td>
                     <td style={gridTdStyle}>{transportModeLabel(o.transportMode)}</td>
                     <td style={{ ...gridTdStyle, fontSize: 12 }} title={o.remark || ""}>{o.remark || ""}</td>
                     <td style={gridTdStyle}>
@@ -1912,122 +1883,33 @@ export default function AdminHomePage() {
       </section>
 
       {/* 尾端派送 */}
-      <section id="lastmile" style={{ ...sectionStyle, display: activeSection === "lastmile" ? "block" : "none" }}>
-        <h2 style={{ margin: "0 0 16px", fontSize: 18 }}>{SECTION_LABELS["lastmile"]}</h2>
-
-        {/* 创建派送单 */}
-        <div style={{ border: "1px solid var(--l-soft)", borderRadius: 8, padding: 16, marginBottom: 16, background: "var(--s-cool)" }}>
-          <h4 style={{ margin: "0 0 12px", fontSize: 14 }}>创建派送单</h4>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, maxWidth: 600 }}>
-            <div style={{ border: "1px solid var(--l-soft)", borderRadius: 6, padding: 8, background: "var(--white)", gridColumn: "1/-1" }}>
-              <input value={lmShipSearch} onChange={e=>setLmShipSearch(e.target.value)} onFocus={()=>loadLmShipments()} placeholder="搜索运单（已到泰国的）..." style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "6px 8px", fontSize: 12, width: "100%", marginBottom: 4 }} />
-              {/* 2026-08-06：原来写死 .slice(0, 20)，超出的不显示也不提示 */}
-              <div style={{ maxHeight: 150, overflow: "auto" }}>
-                {lmShipments.filter(s=>!lmShipSearch||(s.trackingNo||"").includes(lmShipSearch)||(s.clientId||"").includes(lmShipSearch)).map(s=>(
-                  <label key={s.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "2px 0", fontSize: 12, cursor: "pointer" }}>
-                    <input type="checkbox" checked={lmSelected.has(s.id)} onChange={()=>{const n=new Set(lmSelected);n.has(s.id)?n.delete(s.id):n.add(s.id);setLmSelected(n)}} />
-                    <span style={{ fontFamily: "monospace", color: "var(--c-navy)", minWidth: 150 }}>{s.trackingNo}</span>
-                    <span style={{ color: "#14171D", minWidth: 60 }}>{s.clientId}</span>
-                    <span style={{ color: "var(--t-body)" }}>{s.itemName} · {s.packageCount}件</span>
-                  </label>
-                ))}
-              </div>
-              <div style={{ fontSize: 11, color: "var(--t-muted)", marginTop: 4 }}>
-                已选 {lmSelected.size} 个运单 · 当前列出 {lmShipments.filter(s=>!lmShipSearch||(s.trackingNo||"").includes(lmShipSearch)||(s.clientId||"").includes(lmShipSearch)).length} 条
-                {lmShipSearch ? `（共 ${lmShipments.length} 条，已按「${lmShipSearch}」筛选）` : ""}
-              </div>
-            </div>
-            <input value={lmForm.driverName} onChange={e => setLmForm(f => ({...f, driverName: e.target.value}))} placeholder="司机姓名" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 12px", fontSize: 13 }} />
-            <input value={lmForm.licensePlate} onChange={e => setLmForm(f => ({...f, licensePlate: e.target.value}))} placeholder="车牌号" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 12px", fontSize: 13 }} />
-            <input value={lmForm.phoneNumber} onChange={e => setLmForm(f => ({...f, phoneNumber: e.target.value}))} placeholder="电话" />
-            <input type="date" value={lmForm.deliveryDate} onChange={e => setLmForm(f => ({...f, deliveryDate: e.target.value}))} placeholder="派送日期" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 12px", fontSize: 13 }} />
+      <section
+        id="lastmile"
+        className="lastmile-admin-section"
+        style={{ ...sectionStyle, display: activeSection === "lastmile" ? "block" : "none" }}
+      >
+        <header className="lastmile-page-heading">
+          <div>
+            <span className="lastmile-eyebrow">尾端运营</span>
+            <h2>{SECTION_LABELS.lastmile}</h2>
+            <p>派送作业按 WD 管理；一张 WD 代表一辆车的一趟路线，可包含多个客户和多个地址。</p>
           </div>
-          <button disabled={loading || lmSelected.size===0} onClick={async () => {
-            setLoading(true);
-            try {
-              // 【审查问题 3 + 漏 await】原来这个立即执行函数返回的 Promise 没被 await：
-              // 请求还没回来就先弹「派送单已创建」，失败时里面的 throw 也接不到，
-              // 变成浏览器里的 unhandled rejection。现在改成等结果再提示。
-              const ids = Array.from(lmSelected);
-              const res = await fetch(apiBaseUrl()+"/admin/lastmile/orders",{method:"POST",headers:{"Content-Type":"application/json",...authHeaders()},body:JSON.stringify({shipmentIds:ids,driverName:lmForm.driverName.trim(),licensePlate:lmForm.licensePlate.trim(),phoneNumber:lmForm.phoneNumber.trim(),deliveryDate:lmForm.deliveryDate})});
-              const created = await parseApiResponse<{ deliveryNo: string; count: number }>(res);
-              setToast(`${created.deliveryNo} 已创建（${created.count}个运单）`);
-              setLmForm({ driverName: "", licensePlate: "", phoneNumber: "", deliveryDate: "" }); setLmSelected(new Set());
-              loadLastmileOrders();
-            } catch (e: any) { setToast(e.message ?? "创建失败"); }
-            finally { setLoading(false); }
-          }} style={{ marginTop: 8, border: "none", borderRadius: 6, padding: "8px 16px", background: "var(--c-blue)", color: "var(--white)", cursor: "pointer", fontSize: 13 }}>创建派送单</button>
-        </div>
+        </header>
 
-        {/* 派送列表 */}
-        {lmOrders.length === 0 ? <p style={{ color: "var(--t-muted)", fontSize: 13 }}>暂无派送单</p> : (
-          <div style={{ overflowX: "auto" }}>
-            <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-              <thead><tr style={{ borderBottom: "2px solid var(--l-cool)", textAlign: "left" }}>
-                <th style={{ padding: "6px 8px" }}>派送单号</th>
-                <th style={{ padding: "6px 8px" }}>运单号</th>
-                <th style={{ padding: "6px 8px" }}>司机</th>
-                <th style={{ padding: "6px 8px" }}>车牌</th>
-                <th style={{ padding: "6px 8px" }}>电话</th>
-                <th style={{ padding: "6px 8px" }}>派送日期</th>
-                <th style={{ padding: "6px 8px" }}>状态</th>
-                <th style={{ padding: "6px 8px" }}>操作</th>
-              </tr></thead>
-              <tbody>
-                {lmOrders.map(o => (
-                  <tr key={o.id} style={{ borderBottom: "1px solid var(--l-cool)" }}>
-                    <td style={{ padding: "6px 8px", fontFamily: "monospace", fontSize: 11 }}>{o.deliveryNo}</td>
-                    <td style={{ padding: "6px 8px", fontFamily: "monospace" }}>{o.trackingNo || o.shipmentId}</td>
-                    <td style={{ padding: "6px 8px" }}>{o.driverName ?? "-"}</td>
-                    <td style={{ padding: "6px 8px" }}>{o.licensePlate ?? "-"}</td>
-                    <td style={{ padding: "6px 8px" }}>{o.phoneNumber ?? "-"}</td>
-                    <td style={{ padding: "6px 8px" }}>{o.deliveryDate || "-"}</td>
-                    <td style={{ padding: "6px 8px" }}>{o.status === "SIGNED" ? <span>已签收{o.hasSignImage ? <button onClick={() => openSignImage(o.id)} style={{ marginLeft:6, padding:"2px 8px", fontSize:11, border:"1px solid var(--c-blue)", color:"var(--c-blue)", background:"var(--white)", borderRadius:4, cursor:"pointer" }}>看凭证</button> : null}</span> : o.status === "DELIVERING" ? " 派送中" : o.status}</td>
-                    <td style={{ padding: "6px 8px" }}>
-                      {o.status !== "SIGNED" && (
-                        <button onClick={async () => {
-                          setLmSignData({id:o.id,base64:""}); lmSignFileRef.current?.click();
-                        }} style={{ border: "1px solid var(--c-green-3)", borderRadius: 4, padding: "2px 8px", fontSize: 11, background: "var(--white)", color: "var(--c-green-3)", cursor: "pointer" }}>签收</button>
-                      )}
-                      {/* 2026-08-06：这张表原来只有状态，看不到轨迹（员工端同时也补了同一处） */}
-                      <button
-                        disabled={!o.trackingNo}
-                        onClick={() => o.trackingNo && openShipmentTrack(o.trackingNo)}
-                        style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "2px 8px", fontSize: 11, background: "var(--white)", color: o.trackingNo ? "var(--c-navy)" : "var(--t-faint)", cursor: o.trackingNo ? "pointer" : "not-allowed", marginLeft: 4, whiteSpace: "nowrap" }}
-                      >
-                        物流轨迹
-                      </button>
-                      {/* 【审查问题 2】原来删除不看返回就弹「已删除」，删失败刷新一下单子又回来了 */}
-                      <button onClick={async ()=>{if(!confirm("确定删除？"))return;try{const res=await fetch(apiBaseUrl()+"/admin/lastmile/orders?id="+o.id,{method:"DELETE",headers:authHeaders()});await parseApiResponse(res);setToast("已删除");loadLastmileOrders()}catch(e:any){setToast(e.message||"删除失败，请重试")}}} style={{ border: "1px solid #fca5a5", borderRadius: 4, padding: "2px 6px", fontSize: 11, background: "var(--white)", color: "var(--c-red-2)", cursor: "pointer", marginLeft: 4 }}>删除</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-        <input ref={lmSignFileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={async (e) => {
-          const f = e.target.files?.[0]; e.target.value = "";
-          if (!f || !lmSignData) return;
-          const reader = new FileReader();
-          reader.onload = async () => {
-            const base64 = (reader.result as string).split(",")[1] || "";
-            try {
-              await updateLastmileStatus(lmSignData.id, "SIGNED", base64);
-              loadLastmileOrders();
-              setToast("已签收");
-            } catch(ee:any) { setToast(ee.message||"失败"); }
-            setLmSignData(null);
-          };
-          reader.readAsDataURL(f);
-        }} />
-
-      {/* 签收图片放大预览 */}
-      {previewImg && (
-        <div onClick={() => setPreviewImg(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
-          <img src={previewImg} alt="签收凭证" onClick={e => e.stopPropagation()} style={{ maxWidth: "90vw", maxHeight: "90vh", borderRadius: 8 }} />
-        </div>
-      )}
+          <LastmileDispatchWorkspace
+            id="admin-lastmile-dispatch"
+            surface="embedded"
+            showHeading={false}
+            lmShipments={lmShipments}
+            lmOrderList={lmOrders}
+            ordersLoading={lmOrdersLoading}
+            ordersError={lmOrdersError}
+            shipmentsLoading={lmShipmentsLoading}
+            shipmentsError={lmShipmentsError}
+            onToast={setToast}
+            onReloadOrders={loadLastmileOrders}
+            onLoadShipments={loadLmShipments}
+          />
       </section>
 
       {/* 尾端地址 */}

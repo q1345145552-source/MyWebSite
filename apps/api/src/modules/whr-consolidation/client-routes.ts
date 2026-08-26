@@ -2,6 +2,7 @@ import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
 import { InsufficientBalanceError, PaymentConflictError, chargeForConsolidation } from "../wallet/consolidation-balance";
+import { lockPlanAliveByPrealert, PlanCancelledError, PlanMissingError } from "./plan-guard";
 import { saveImageToDisk, deleteImageFile } from "../orders/image-storage";
 import {
   ACTIVE_PREALERT_WHERE,
@@ -524,6 +525,9 @@ export function registerWhrConsolidationClientRoutes(app: MinimalHttpApp): void 
          * ⚠️ 金额也要用事务里读出来的：仓库版是签收那一刻按方数×单价自动算的，
          * 管理员改单价会重算 totalFee，用事务外那个旧金额会扣错数。
          */
+        // ⚠️ 锁序固定为【计划 → 预报单 → 钱包】，四条碰钱的路都按这个顺序拿锁，
+        // 反着拿会死锁。所以先锁柜、再锁单，别调换。
+        await lockPlanAliveByPrealert(tx, prealert.id);
         await tx.$queryRaw`SELECT id FROM whr_consolidation_prealerts WHERE id = ${prealert.id} FOR UPDATE`;
         const fresh = await tx.whrConsolidationPrealert.findUnique({
           where: { id: prealert.id },
@@ -585,6 +589,10 @@ export function registerWhrConsolidationClientRoutes(app: MinimalHttpApp): void 
         message: `付款成功，已扣 ¥${paid.amount.toFixed(2)}，集货余额剩余 ¥${paid.balanceAfter.toFixed(2)}`,
       });
     } catch (e) {
+      if (e instanceof PlanCancelledError || e instanceof PlanMissingError) {
+        fail(res, 400, "BAD_REQUEST", e.message);
+        return;
+      }
       if (e instanceof InsufficientBalanceError || e instanceof PaymentConflictError) {
         fail(res, 400, "BAD_REQUEST", e.message);
         return;

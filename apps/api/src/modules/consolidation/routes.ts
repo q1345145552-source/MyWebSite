@@ -297,7 +297,12 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    const task = await prisma.consolidationTask.findUnique({ where: { id: body.taskId } });
+    const task = await prisma.consolidationTask.findFirst({
+      // ⚠️ 必须带 companyId（2026-08-27 补）：原来只按 id 查，
+      // 外部复审实测跨公司请求能返回 200 并改掉别家公司的数据。
+      // 生产目前只有一家公司，暂时没影响，接第二家之前必须是现在这样。
+      where: { id: body.taskId, companyId: auth.companyId },
+    });
     if (!task || task.clientId !== auth.userId) {
       fail(res, 403, "FORBIDDEN", "无权操作该任务");
       return;
@@ -353,7 +358,12 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
     }
 
     // 校验任务
-    const task = await prisma.consolidationTask.findUnique({ where: { id: body.taskId } });
+    const task = await prisma.consolidationTask.findFirst({
+      // ⚠️ 必须带 companyId（2026-08-27 补）：原来只按 id 查，
+      // 外部复审实测跨公司请求能返回 200 并改掉别家公司的数据。
+      // 生产目前只有一家公司，暂时没影响，接第二家之前必须是现在这样。
+      where: { id: body.taskId, companyId: auth.companyId },
+    });
     if (!task || task.clientId !== auth.userId) {
       fail(res, 403, "FORBIDDEN", "无权操作该任务");
       return;
@@ -649,7 +659,12 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    const task = await prisma.consolidationTask.findUnique({ where: { id: body.taskId } });
+    const task = await prisma.consolidationTask.findFirst({
+      // ⚠️ 必须带 companyId（2026-08-27 补）：原来只按 id 查，
+      // 外部复审实测跨公司请求能返回 200 并改掉别家公司的数据。
+      // 生产目前只有一家公司，暂时没影响，接第二家之前必须是现在这样。
+      where: { id: body.taskId, companyId: auth.companyId },
+    });
     if (!task || task.clientId !== auth.userId) {
       fail(res, 403, "FORBIDDEN", "无权操作该任务");
       return;
@@ -716,6 +731,12 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
           where: { id: task.id },
           data: {
             paymentStatus: "paid",
+            // ⚠️ 流程状态也要往前走（2026-08-27 补）。
+            // 原来只改 paymentStatus，status 还停在 quoted，后果实测有三条：
+            //   ① 已经付过钱的任务进不了装柜（装柜要求 status=paid）
+            //   ② 员工还能重新报价，把已付款任务的金额从 100 改成 999
+            //   ③ 还能被取消，而且一分钱不退
+            status: "paid",
             paymentProofUploadedAt: new Date(),
             paymentRejectReason: null,
           },
@@ -728,7 +749,7 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
             operatorRole: auth.role,
             operatorName: auth.name || auth.userId,
             fromStatus: "quoted",
-            toStatus: "quoted", // 任务流程状态不变，只是付款状态变了
+            toStatus: "paid",
             remark: `客户用集货余额付款 ¥${amount.toFixed(2)}`,
           },
         });
@@ -767,7 +788,12 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    const task = await prisma.consolidationTask.findUnique({ where: { id: body.taskId } });
+    const task = await prisma.consolidationTask.findFirst({
+      // ⚠️ 必须带 companyId（2026-08-27 补）：原来只按 id 查，
+      // 外部复审实测跨公司请求能返回 200 并改掉别家公司的数据。
+      // 生产目前只有一家公司，暂时没影响，接第二家之前必须是现在这样。
+      where: { id: body.taskId, companyId: auth.companyId },
+    });
     if (!task || task.companyId !== auth.companyId) {
       fail(res, 403, "FORBIDDEN", "无权操作该任务");
       return;
@@ -825,7 +851,12 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    const task = await prisma.consolidationTask.findUnique({ where: { id: body.taskId } });
+    const task = await prisma.consolidationTask.findFirst({
+      // ⚠️ 必须带 companyId（2026-08-27 补）：原来只按 id 查，
+      // 外部复审实测跨公司请求能返回 200 并改掉别家公司的数据。
+      // 生产目前只有一家公司，暂时没影响，接第二家之前必须是现在这样。
+      where: { id: body.taskId, companyId: auth.companyId },
+    });
     if (!task || task.companyId !== auth.companyId) {
       fail(res, 403, "FORBIDDEN", "无权操作该任务");
       return;
@@ -1006,7 +1037,12 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    const task = await prisma.consolidationTask.findUnique({ where: { id: body.taskId } });
+    const task = await prisma.consolidationTask.findFirst({
+      // ⚠️ 必须带 companyId（2026-08-27 补）：原来只按 id 查，
+      // 外部复审实测跨公司请求能返回 200 并改掉别家公司的数据。
+      // 生产目前只有一家公司，暂时没影响，接第二家之前必须是现在这样。
+      where: { id: body.taskId, companyId: auth.companyId },
+    });
     if (!task) {
       fail(res, 404, "NOT_FOUND", "任务不存在");
       return;
@@ -1069,7 +1105,44 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    const task = await prisma.consolidationTask.findUnique({ where: { id: body.taskId } });
+    /**
+     * ⚠️ 三个费用必须是**有限的非负数**（2026-08-27 补）。
+     * 原来只判了「有没有传」，不判值 —— 实测提交 -10 会返回 200、
+     * 把 totalFee 写成 -10 并把状态改成「已报价」，负数直接进财务合计。
+     * 字符串同理：`"abc" + 0 + 0` 会算出 NaN。
+     */
+    // ⚠️ 用 unknown：body 是 JSON 传进来的，类型声明说是 number 不代表运行时就是 number
+    const feeFields: Array<[string, unknown]> = [
+      ["订舱费", body.bookingFee], ["清关费", body.customsFee], ["装柜费", body.loadingFee],
+    ];
+    for (const [label, v] of feeFields) {
+      // ⚠️ 不能直接 Number()：`Number("")`、`Number(" ")`、`Number(false)` 都等于 0，
+      // 会被当成「报价 0 元」放过去，再在 Prisma 那边炸成 500（外部复审实测）。
+      if (typeof v !== "number" && typeof v !== "string") {
+        fail(res, 400, "BAD_REQUEST", `${label}必须填数字`);
+        return;
+      }
+      if (typeof v === "string" && v.trim() === "") {
+        fail(res, 400, "BAD_REQUEST", `${label}不能为空`);
+        return;
+      }
+      const n = Number(v);
+      if (!Number.isFinite(n) || n < 0) {
+        fail(res, 400, "BAD_REQUEST", `${label}必须是 0 或正数`);
+        return;
+      }
+      if (n > 10_000_000) {
+        fail(res, 400, "BAD_REQUEST", `${label}超出合理范围，请核对后重填`);
+        return;
+      }
+    }
+
+    const task = await prisma.consolidationTask.findFirst({
+      // ⚠️ 必须带 companyId（2026-08-27 补）：原来只按 id 查，
+      // 外部复审实测跨公司请求能返回 200 并改掉别家公司的数据。
+      // 生产目前只有一家公司，暂时没影响，接第二家之前必须是现在这样。
+      where: { id: body.taskId, companyId: auth.companyId },
+    });
     if (!task) {
       fail(res, 404, "NOT_FOUND", "任务不存在");
       return;
@@ -1079,7 +1152,8 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    const totalFee = parseFloat((body.bookingFee + body.customsFee + body.loadingFee).toFixed(2));
+
+    const totalFee = parseFloat((Number(body.bookingFee) + Number(body.customsFee) + Number(body.loadingFee)).toFixed(2));
     const isFirstQuote = task.status === "full_confirmed";
 
     await prisma.$transaction(async (tx) => {
@@ -1136,7 +1210,12 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       delivering: "completed",
     };
 
-    const task = await prisma.consolidationTask.findUnique({ where: { id: body.taskId } });
+    const task = await prisma.consolidationTask.findFirst({
+      // ⚠️ 必须带 companyId（2026-08-27 补）：原来只按 id 查，
+      // 外部复审实测跨公司请求能返回 200 并改掉别家公司的数据。
+      // 生产目前只有一家公司，暂时没影响，接第二家之前必须是现在这样。
+      where: { id: body.taskId, companyId: auth.companyId },
+    });
     if (!task) {
       fail(res, 404, "NOT_FOUND", "任务不存在");
       return;
@@ -1189,7 +1268,12 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    const task = await prisma.consolidationTask.findUnique({ where: { id: body.taskId } });
+    const task = await prisma.consolidationTask.findFirst({
+      // ⚠️ 必须带 companyId（2026-08-27 补）：原来只按 id 查，
+      // 外部复审实测跨公司请求能返回 200 并改掉别家公司的数据。
+      // 生产目前只有一家公司，暂时没影响，接第二家之前必须是现在这样。
+      where: { id: body.taskId, companyId: auth.companyId },
+    });
     if (!task) {
       fail(res, 404, "NOT_FOUND", "任务不存在");
       return;
@@ -1239,7 +1323,12 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    const task = await prisma.consolidationTask.findUnique({ where: { id: body.taskId } });
+    const task = await prisma.consolidationTask.findFirst({
+      // ⚠️ 必须带 companyId（2026-08-27 补）：原来只按 id 查，
+      // 外部复审实测跨公司请求能返回 200 并改掉别家公司的数据。
+      // 生产目前只有一家公司，暂时没影响，接第二家之前必须是现在这样。
+      where: { id: body.taskId, companyId: auth.companyId },
+    });
     if (!task) {
       fail(res, 404, "NOT_FOUND", "任务不存在");
       return;

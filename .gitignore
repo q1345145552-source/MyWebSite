@@ -13,4 +13,8 @@ apps/api/data/
 .reasonix/
 *.tsbuildinfo
 tools/
+/outputs/
+# codex 的工作留档（改动前后快照、补丁、回滚脚本、截图）。
+# 只对本机有用，505 个文件 18MB，提交上去会永久留在仓库历史里删不掉。
+/.audit/
 docs/交接文档*

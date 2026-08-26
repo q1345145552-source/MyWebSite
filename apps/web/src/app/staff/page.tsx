@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import { formatCny } from "../../modules/billing/billing-utils";
 import ShipmentSearch from "../../modules/shipment/ShipmentSearch";
@@ -14,6 +14,8 @@ import {
   PRODUCT_DETAIL_HEADS,
   buildProductDetailRows,
   totalPackageCountOf,
+  totalVolumeOf,
+  totalWeightOf,
   gridThStyle,
   gridTdStyle,
 } from "../../modules/shipment/ShipmentTableGrid";
@@ -61,6 +63,7 @@ import ShipmentEditFormField from "../../components/staff/ShipmentEditFormField"
 import StaffPrealertList from "../../components/staff/StaffPrealertList";
 import type { PrealertSearchState } from "../../components/staff/StaffPrealertList";
 import StaffLastmile from "../../components/staff/StaffLastmile";
+import type { LastmileOrderItem, LastmileShipmentOption } from "../../modules/lastmile/types";
 import FclInquiryPanel from "../../components/client/FclInquiryPanel";
 import { SHIPMENT_STATUS_FILTER_OPTIONS } from "../../modules/shipment/shipment-status";
 import {
@@ -341,26 +344,43 @@ export default function StaffHomePage() {
   const [photoList, setPhotoList] = useState<StaffInboundPhotoItem[]>([]);
   const [activeSection, setActiveSection] = useState<StaffSectionId>("staff-prealert-review");
 
-  const [lmDriverName, setLmDriverName] = useState("");
-  const [lmLicensePlate, setLmLicensePlate] = useState("");
-  const [lmPhoneNumber, setLmPhoneNumber] = useState("");
-  const [lmShipments, setLmShipments] = useState<Array<{id:string;trackingNo:string;clientId:string;itemName:string;packageCount:number}>>([]);
-  const [lmDeliveryDate, setLmDeliveryDate] = useState("");
-  const [lmSignData, setLmSignData] = useState<{id:string;action:string}|null>(null);
-  const lmSignFileRef = useRef<HTMLInputElement>(null);
-  const [lmSelected, setLmSelected] = useState<Set<string>>(new Set());
-  const [lmShipSearch, setLmShipSearch] = useState("");
-  const [lmBatchInput, setLmBatchInput] = useState("");
-const loadLmShipments = async () => {
+  const [lmShipments, setLmShipments] = useState<LastmileShipmentOption[]>([]);
+  const [lmShipmentsLoading, setLmShipmentsLoading] = useState(false);
+  const [lmShipmentsError, setLmShipmentsError] = useState("");
+  const loadLmShipments = async () => {
     // 2026-08-06：原来是自己拼 `?pageSize=500&all=1` 再在前端筛状态 ——
     // 只拿到第 1 页 500 条（所有状态混着排），571 张能派送的里只到 126 张，漏了 445 张。
     // 改为统一走 fetchLastmileShipments()：后端按状态筛 + 翻页拿完。
+    setLmShipmentsLoading(true);
+    setLmShipmentsError("");
     try { setLmShipments(await fetchLastmileShipments()); }
-    catch (e) { console.error(e); setMessage(`尾端运单加载失败：${e instanceof Error ? e.message : "未知错误"}`); }
+    catch (e) {
+      console.error(e);
+      const reason = e instanceof Error ? e.message : "未知错误";
+      setLmShipmentsError(reason);
+      setToast(`可派送运单加载失败：${reason}`);
+    } finally {
+      setLmShipmentsLoading(false);
+    }
   };
-  const [lmOrderList, setLmOrderList] = useState<Array<{id:string;deliveryNo:string;shipmentId:string;trackingNo?:string;driverName?:string;licensePlate?:string;phoneNumber?:string;deliveryDate?:string;clientId?:string;status:string}>>([]);
+  const [lmOrderList, setLmOrderList] = useState<LastmileOrderItem[]>([]);
+  const [lmOrdersLoading, setLmOrdersLoading] = useState(false);
+  const [lmOrdersError, setLmOrdersError] = useState("");
   // 【审查问题 3】走 parseApiResponse：401 会自动跳登录页
-  const loadLmOrders = async () => { try { const r=await fetch(apiBaseUrl()+"/admin/lastmile/orders",{headers:authHeaders()}); const d=await parseApiResponse<{items:typeof lmOrderList}>(r); setLmOrderList(d.items ?? []); } catch (e) { console.error(e); setMessage(`派送单加载失败：${e instanceof Error ? e.message : "未知错误"}`); } };
+  const loadLmOrders = async () => {
+    setLmOrdersLoading(true);
+    setLmOrdersError("");
+    try {
+      const response = await fetch(`${apiBaseUrl()}/admin/lastmile/orders`, { headers: authHeaders() });
+      const data = await parseApiResponse<{ items: LastmileOrderItem[] }>(response);
+      setLmOrderList(data.items ?? []);
+    } catch (e) {
+      console.error(e);
+      setLmOrdersError(e instanceof Error ? e.message : "未知错误");
+    } finally {
+      setLmOrdersLoading(false);
+    }
+  };
 
   // 客户余额
   const [walletBalances, setWalletBalances] = useState<StaffWalletBalanceItem[]>([]);
@@ -1765,8 +1785,8 @@ const loadLmShipments = async () => {
                               return total != null ? `${total} 箱` : "—";
                             })()}
                           </td>
-                          <td style={gridTdStyle}>{formatMetric(item.volumeM3, 6)}</td>
-                          <td style={gridTdStyle}>{formatMetric(item.weightKg, 2)}</td>
+                          <td style={gridTdStyle}>{formatMetric(totalVolumeOf(item), 6)}</td>
+                          <td style={gridTdStyle}>{formatMetric(totalWeightOf(item), 2)}</td>
                           <td style={gridTdStyle}>{transportModeLabel(item.transportMode)}</td>
                           <td style={{ ...gridTdStyle, color: "var(--t-strong)" }}>
                             {item.shipDate ?? formatDateTime(item.arrivedAt)}
@@ -2266,6 +2286,10 @@ const loadLmShipments = async () => {
         visible={activeSection === "staff-lastmile"}
         lmShipments={lmShipments}
         lmOrderList={lmOrderList}
+        ordersLoading={lmOrdersLoading}
+        ordersError={lmOrdersError}
+        shipmentsLoading={lmShipmentsLoading}
+        shipmentsError={lmShipmentsError}
         onToast={setToast}
         onReloadOrders={loadLmOrders}
         onLoadShipments={loadLmShipments}
@@ -2351,7 +2375,6 @@ const loadLmShipments = async () => {
 
 
       {message ? <p style={{ marginTop: 12, color: message.includes("失败") ? "var(--c-red-deep)" : "var(--c-green-deep)" }}>{message}</p> : null}
-            <input ref={lmSignFileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={async (e: any) => { const f = e.target.files?.[0]; e.target.value = ""; if (!f || !lmSignData) return; const rdr = new FileReader(); rdr.onload = async () => { const b64 = (rdr.result as string).split(",")[1] || ""; try { const res = await fetch(apiBaseUrl()+"/admin/lastmile/status", { method: "POST", headers: {"Content-Type":"application/json",...authHeaders()}, body: JSON.stringify({ id: lmSignData.id, status: lmSignData.action === "sign" ? "SIGNED" : undefined, signImageBase64: b64 }) }); /* 【审查问题 3】原来只看 res.ok，200 但业务失败照样弹「已签收」；也不跳登录页 */ await parseApiResponse(res); setToast(lmSignData.action === "sign" ? "已签收" : "图片已上传"); loadLmOrders(); } catch(e: any) { setToast(e.message||"操作失败，请重试"); } setLmSignData(null); }; rdr.readAsDataURL(f); }} />
 <Toast open={toast.length > 0} message={toast} />
       {/* 预报单审核弹窗 */}
       {approvingPrealert && (

@@ -2,6 +2,7 @@ import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
 import { saveImageToDisk, deleteImageFile } from "../orders/image-storage";
+import { lockPlanAliveByPrealert, PlanCancelledError, PlanMissingError } from "./plan-guard";
 import {
   buildFeeBreakdown,
   calcFeeFromItems,
@@ -310,6 +311,10 @@ export function registerWhrConsolidationStaffRoutes(app: MinimalHttpApp): void {
 
     try {
       await prisma.$transaction(async (tx) => {
+        // ⚠️ 整柜取消了就不该再签收计费（2026-08-27 第二版：挪进事务并加锁）。
+        // 放在事务第一句 = 锁序【计划 → 预报单】的第一环；
+        // 第一版放在事务外面，读到「柜还活着」之后柜被取消了，账单照样生成。
+        await lockPlanAliveByPrealert(tx, prealert.id);
         await tx.whrConsolidationPrealert.update({
           where: { id: prealert.id },
           data: {
@@ -339,6 +344,11 @@ export function registerWhrConsolidationStaffRoutes(app: MinimalHttpApp): void {
     } catch (e) {
       for (const pf of receiptProofs) {
         try { deleteImageFile(pf.base64Path); } catch { /* ignore */ }
+      }
+      // 整柜已取消 / 找不到柜：给员工一句人话，别抛成 500
+      if (e instanceof PlanCancelledError || e instanceof PlanMissingError) {
+        fail(res, 400, "BAD_REQUEST", e.message);
+        return;
       }
       throw e;
     }

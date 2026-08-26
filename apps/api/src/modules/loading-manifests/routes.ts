@@ -1,5 +1,6 @@
 import { prisma } from "../../db/prisma";
 import { syncParentStatusFromChildren } from "../shipments/parent-status";
+import { metricByPieceShare, reconcileFamilyMetric } from "../shipments/split-metrics";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
 // 柜子状态流程只在 containers/status-flow.ts 定义一处，本文件不再自己抄
@@ -210,6 +211,209 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
         loadedPieces: item.loadedPieceCount,
         loadedVolume: Number(item.loadedVolumeM3),
       })),
+    });
+  });
+
+  /**
+   * 给尾端拆柜仓的整柜派送清单数据。
+   *
+   * 入口放在装柜管理，所以唯一主键就是 Container.id：不生成 WD，也不读取司机/车辆。
+   * 一票装柜记录输出一行，严格使用该柜实际装入的件数和方数，避免分柜子单被按原订单重复计算。
+   */
+  app.get("/staff/loading-manifests/export-data", async (req, res) => {
+    const auth = requireRole(req, res, ["staff", "admin"]);
+    if (!auth) return;
+    const id = req.query.id?.trim();
+    if (!id) { fail(res, 400, "BAD_REQUEST", "id is required"); return; }
+
+    const container = await prisma.container.findFirst({
+      where: { id, companyId: auth.companyId },
+      include: {
+        items: {
+          orderBy: { createdAt: "asc" },
+          include: {
+            shipment: {
+              select: {
+                id: true,
+                trackingNo: true,
+                parentTrackingNo: true,
+                itemName: true,
+                packageCount: true,
+                packageUnit: true,
+                weightKg: true,
+                remark: true,
+                currentStatus: true,
+                order: {
+                  select: {
+                    clientId: true,
+                    itemName: true,
+                    packageCount: true,
+                    weightKg: true,
+                    volumeM3: true,
+                    receiverNameTh: true,
+                    receiverPhoneTh: true,
+                    receiverAddressTh: true,
+                    client: {
+                      select: {
+                        name: true,
+                        phone: true,
+                        addresses: {
+                          orderBy: [{ isDefault: "desc" }, { updatedAt: "desc" }],
+                          take: 1,
+                          select: { contactName: true, contactPhone: true, addressDetail: true, label: true },
+                        },
+                      },
+                    },
+                    shipments: {
+                      select: {
+                        trackingNo: true,
+                        parentTrackingNo: true,
+                        packageCount: true,
+                        weightKg: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!container) { fail(res, 404, "NOT_FOUND", "装柜任务不存在"); return; }
+    if (container.items.length === 0) { fail(res, 400, "VALIDATION_ERROR", "空柜没有可导出的货物"); return; }
+
+    const customerMap = new Map<string, {
+      clientId: string;
+      clientName: string;
+      contactName: string;
+      contactPhone: string;
+      address: string;
+      addressLabel: string;
+      shipments: Array<Record<string, unknown>>;
+    }>();
+
+    for (const item of container.items) {
+      const shipment = item.shipment;
+      const order = shipment.order;
+      const clientId = order?.clientId ?? "未关联客户";
+      const defaultAddress = order?.client?.addresses?.[0];
+      let customer = customerMap.get(clientId);
+      if (!customer) {
+        customer = {
+          clientId,
+          clientName: order?.client?.name ?? clientId,
+          contactName: order?.receiverNameTh?.trim() || defaultAddress?.contactName || order?.client?.name || "",
+          contactPhone: order?.receiverPhoneTh?.trim() || defaultAddress?.contactPhone || order?.client?.phone || "",
+          address: order?.receiverAddressTh?.trim() || defaultAddress?.addressDetail || "",
+          addressLabel: defaultAddress?.label || "",
+          shipments: [],
+        };
+        customerMap.set(clientId, customer);
+      }
+      const receiverName = order?.receiverNameTh?.trim() || customer.contactName;
+      const receiverPhone = order?.receiverPhoneTh?.trim() || customer.contactPhone;
+      const receiverAddress = order?.receiverAddressTh?.trim() || customer.address;
+      const shipmentPackageCount = shipment.packageCount
+        ?? (shipment.parentTrackingNo ? item.loadedPieceCount : (order?.packageCount ?? 0));
+      const familyKey = shipment.parentTrackingNo ?? shipment.trackingNo;
+      const familyRows = (order?.shipments ?? [])
+        .filter((part) => (part.parentTrackingNo ?? part.trackingNo) === familyKey)
+        .map((part) => ({ ...part, key: part.trackingNo, isParent: !part.parentTrackingNo }));
+      if (!familyRows.some((part) => part.key === shipment.trackingNo)) {
+        familyRows.push({
+          trackingNo: shipment.trackingNo,
+          parentTrackingNo: shipment.parentTrackingNo,
+          packageCount: shipmentPackageCount,
+          weightKg: shipment.weightKg,
+          key: shipment.trackingNo,
+          isParent: !shipment.parentTrackingNo,
+        });
+      }
+      const familyHasChildren = familyRows.some((part) => !!part.parentTrackingNo);
+      const weightFamily = reconcileFamilyMetric(
+        order?.weightKg,
+        order?.packageCount,
+        familyRows.map((part) => ({ ...part, pieceCount: part.packageCount, value: part.weightKg })),
+        2,
+      );
+      // 整柜重量必须和客户单使用同一票货口径，同时再按本柜实际装入件数缩放。
+      // 历史缺重量的分柜家族从订单总量按“实际装入件数/订单件数”计算；
+      // 新子单已有分配重量时，则按“实际装入件数/子单件数”计算。
+      const orderShareWeight = metricByPieceShare(
+        order?.weightKg,
+        item.loadedPieceCount,
+        order?.packageCount,
+        2,
+      );
+      const shipmentFamilyWeight = familyHasChildren
+        ? weightFamily[shipment.trackingNo]
+        : (shipment.weightKg == null
+          ? metricByPieceShare(order?.weightKg, shipmentPackageCount, order?.packageCount, 2)
+          : Number(shipment.weightKg));
+      const loadedWeight = shipmentFamilyWeight == null
+        ? orderShareWeight
+        : (metricByPieceShare(
+          shipmentFamilyWeight,
+          item.loadedPieceCount,
+          shipmentPackageCount,
+          2,
+        ) ?? orderShareWeight);
+      customer.shipments.push({
+        lastmileOrderId: item.id,
+        trackingNo: shipment.trackingNo,
+        parentTrackingNo: shipment.parentTrackingNo ?? "",
+        itemName: shipment.itemName || order?.itemName || "",
+        packageCount: item.loadedPieceCount,
+        packageUnit: shipment.packageUnit || "",
+        // ⚠️ 同 admin-ops：没填就是没填，不要变成 0（2026-08-26 修）
+        weightKg: loadedWeight ?? null,
+        volumeM3: Number(item.loadedVolumeM3),
+        remark: shipment.remark || "",
+        status: shipment.currentStatus,
+        containerNos: [container.containerNo],
+        receiverName,
+        receiverPhone,
+        receiverAddress,
+        // 柜内通常是分柜后的子运单，产品行属于原订单，直接展开会把件数重复算回整票。
+        products: [],
+      });
+    }
+
+    const customers = [...customerMap.values()];
+    const shipments = customers.flatMap((customer) => customer.shipments) as Array<Record<string, any>>;
+    const warehouseName: Record<string, string> = {
+      wh_yiwu_01: "义乌",
+      wh_guangzhou_01: "广州",
+      wh_dongguan_01: "东莞",
+      wh_shenzhen_01: "深圳",
+    };
+    ok(res, {
+      containerId: container.id,
+      containerNo: container.containerNo,
+      containerType: container.containerType,
+      origin: warehouseName[container.warehouseId ?? ""] ?? (container.warehouseId || ""),
+      destination: container.transportMode === "land"
+        ? "泰国仓库"
+        : (container.transportMode === "sea" ? "林查班" : ""),
+      carrierInfo: container.carrierName ?? "",
+      deliveryNo: "",
+      scope: "container",
+      carrierName: "",
+      driverName: "",
+      licensePlate: "",
+      phoneNumber: "",
+      deliveryDate: "",
+      status: container.currentStatus,
+      customerCount: customers.length,
+      shipmentCount: shipments.length,
+      signedCount: 0,
+      totalPackageCount: shipments.reduce((sum, shipment) => sum + Number(shipment.packageCount || 0), 0),
+      totalVolumeM3: Number(shipments.reduce((sum, shipment) => sum + Number(shipment.volumeM3 || 0), 0).toFixed(3)),
+      totalWeightKg: Number(shipments.reduce((sum, shipment) => sum + Number(shipment.weightKg || 0), 0).toFixed(2)),
+      containerNos: [container.containerNo],
+      customers,
+      generatedAt: new Date().toISOString(),
     });
   });
 

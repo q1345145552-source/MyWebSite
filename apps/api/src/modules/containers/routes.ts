@@ -362,7 +362,7 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
         }),
       );
 
-      // 同步父运单状态 —— 见下面 $transaction(ops) 之后那一段。
+      // 同步父运单状态 —— 收集父单号，下面那个事务里统一重算。
       //
       // ⚠️ 原来这里是把父单直接 updateMany 成 shipmentNextStatus，等于
       //    「这批子单推到哪，父单就跟到哪」，完全没看其他子单走到哪了。

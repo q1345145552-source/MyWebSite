@@ -1,0 +1,687 @@
+import JSZip from "jszip";
+import { apiBaseUrl, authHeaders, parseApiResponse } from "../../services/core-api";
+
+export type LastmileExportShipment = {
+  lastmileOrderId: string;
+  trackingNo: string;
+  parentTrackingNo: string;
+  itemName: string;
+  packageCount: number;
+  packageUnit: string;
+  /** null = 这票货没填重量。⚠️ 后端会原样下发 null，别在类型上写死非空 */
+  weightKg: number | null;
+  /** null = 没填体积，同上 */
+  volumeM3: number | null;
+  remark: string;
+  status: string;
+  containerNos: string[];
+  receiverName: string;
+  receiverPhone: string;
+  receiverAddress: string;
+  products: Array<{
+    itemName: string;
+    packageCount: number;
+    lengthCm: number | null;
+    widthCm: number | null;
+    heightCm: number | null;
+    weightKg: number | null;
+  }>;
+};
+
+export type LastmileExportCustomer = {
+  clientId: string;
+  clientName: string;
+  contactName: string;
+  contactPhone: string;
+  address: string;
+  addressLabel: string;
+  shipments: LastmileExportShipment[];
+};
+
+export type LastmileExportData = {
+  containerId: string;
+  containerNo: string;
+  containerType: string;
+  origin: string;
+  destination: string;
+  carrierInfo: string;
+  deliveryNo: string;
+  scope: "container" | "customer";
+  carrierName: string;
+  driverName: string;
+  licensePlate: string;
+  phoneNumber: string;
+  deliveryDate: string;
+  status: string;
+  customerCount: number;
+  shipmentCount: number;
+  signedCount: number;
+  totalPackageCount: number;
+  totalVolumeM3: number;
+  totalWeightKg: number;
+  containerNos: string[];
+  customers: LastmileExportCustomer[];
+  generatedAt: string;
+};
+
+type TemplateLine = {
+  clientId: string;
+  clientName: string;
+  trackingNo: string;
+  itemName: string;
+  packageCount: number;
+  /** null = 这票货压根没填体积，不是 0。导出时要留空格子，不能印成 0 */
+  volumeM3: number | null;
+  /** null = 没填重量，同上 */
+  weightKg: number | null;
+  lengthCm: number | null;
+  widthCm: number | null;
+  heightCm: number | null;
+  receiverName: string;
+  receiverPhone: string;
+  receiverAddress: string;
+  remark: string;
+};
+
+const TEMPLATE_PATHS = {
+  container: "/templates/lastmile/internal-dispatch-template.xlsx",
+  customer: "/templates/lastmile/customer-receipt-template.xlsx",
+} as const;
+const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+export async function fetchContainerExportData(containerId: string): Promise<LastmileExportData> {
+  const query = new URLSearchParams({ id: containerId });
+  const response = await fetch(`${apiBaseUrl()}/staff/loading-manifests/export-data?${query.toString()}`, {
+    headers: { ...authHeaders() },
+  });
+  return parseApiResponse<LastmileExportData>(response);
+}
+
+export async function fetchLastmileCustomerExportData(deliveryNo: string, clientId: string): Promise<LastmileExportData> {
+  const query = new URLSearchParams({ deliveryNo, clientId });
+  const response = await fetch(`${apiBaseUrl()}/admin/lastmile/customer-export-data?${query.toString()}`, {
+    headers: { ...authHeaders() },
+  });
+  return parseApiResponse<LastmileExportData>(response);
+}
+
+function escapeXml(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+class SharedStringsEditor {
+  private readonly additions: string[] = [];
+  private readonly originalCount: number;
+  private readonly originalUniqueCount: number;
+  private readonly prefix: string;
+
+  constructor(private readonly xml: string) {
+    this.prefix = /<([A-Za-z_][\w.-]*:)?sst\b/.exec(xml)?.[1] ?? "";
+    const itemCount = [...xml.matchAll(new RegExp(`<${escapeRegExp(this.prefix)}si\\b`, "g"))].length;
+    this.originalCount = Number(/\bcount="(\d+)"/.exec(xml)?.[1] ?? itemCount);
+    this.originalUniqueCount = Number(/\buniqueCount="(\d+)"/.exec(xml)?.[1] ?? itemCount);
+  }
+
+  add(value: string | number | null | undefined): number {
+    const index = this.originalUniqueCount + this.additions.length;
+    this.additions.push(String(value ?? ""));
+    return index;
+  }
+
+  finish(): string {
+    if (this.additions.length === 0) return this.xml;
+    const items = this.additions.map((value) => `<${this.prefix}si><${this.prefix}t xml:space="preserve">${escapeXml(value)}</${this.prefix}t></${this.prefix}si>`).join("");
+    const count = this.originalCount + this.additions.length;
+    const uniqueCount = this.originalUniqueCount + this.additions.length;
+    let output = this.xml;
+    output = /\bcount="\d+"/.test(output)
+      ? output.replace(/\bcount="\d+"/, `count="${count}"`)
+      : output.replace(`<${this.prefix}sst`, `<${this.prefix}sst count="${count}"`);
+    output = /\buniqueCount="\d+"/.test(output)
+      ? output.replace(/\buniqueCount="\d+"/, `uniqueCount="${uniqueCount}"`)
+      : output.replace(`<${this.prefix}sst`, `<${this.prefix}sst uniqueCount="${uniqueCount}"`);
+    return output.replace(`</${this.prefix}sst>`, `${items}</${this.prefix}sst>`);
+  }
+}
+
+function xmlPrefix(xml: string, localName: string): string {
+  return new RegExp(`<([A-Za-z_][\\w.-]*:)?${localName}\\b`).exec(xml)?.[1] ?? "";
+}
+
+function withCellType(attributes: string, type: "s" | "n"): string {
+  return `${attributes.replace(/\s+t="[^"]*"/g, "")} t="${type}"`;
+}
+
+function withoutCellType(attributes: string): string {
+  return attributes.replace(/\s+t="[^"]*"/g, "");
+}
+
+function replaceCellXml(sheetXml: string, ref: string, type: "s" | "n", innerXml: string): string {
+  const escapedRef = escapeRegExp(ref);
+  const prefix = xmlPrefix(sheetXml, "c");
+  const tag = `${prefix}c`;
+  const emptyCell = new RegExp(`<${escapeRegExp(tag)}\\b([^>]*\\br="${escapedRef}"[^>]*)\\s*\\/>`);
+  if (emptyCell.test(sheetXml)) {
+    return sheetXml.replace(emptyCell, (_match, attributes: string) => `<${tag}${withCellType(attributes, type)}>${innerXml}</${tag}>`);
+  }
+  const fullCell = new RegExp(`<${escapeRegExp(tag)}\\b([^>]*\\br="${escapedRef}"[^>]*)>[\\s\\S]*?<\\/${escapeRegExp(tag)}>`);
+  if (fullCell.test(sheetXml)) {
+    return sheetXml.replace(fullCell, (_match, attributes: string) => `<${tag}${withCellType(attributes, type)}>${innerXml}</${tag}>`);
+  }
+  throw new Error(`模板格式不符：找不到单元格 ${ref}`);
+}
+
+function clearCellXml(sheetXml: string, ref: string): string {
+  const escapedRef = escapeRegExp(ref);
+  const prefix = xmlPrefix(sheetXml, "c");
+  const tag = `${prefix}c`;
+  const emptyCell = new RegExp(`<${escapeRegExp(tag)}\\b([^>]*\\br="${escapedRef}"[^>]*)\\s*\\/>`);
+  if (emptyCell.test(sheetXml)) {
+    return sheetXml.replace(emptyCell, (_match, attributes: string) => `<${tag}${withoutCellType(attributes)}/>`);
+  }
+  const fullCell = new RegExp(`<${escapeRegExp(tag)}\\b([^>]*\\br="${escapedRef}"[^>]*)>[\\s\\S]*?<\\/${escapeRegExp(tag)}>`);
+  if (fullCell.test(sheetXml)) {
+    return sheetXml.replace(fullCell, (_match, attributes: string) => `<${tag}${withoutCellType(attributes)}/>`);
+  }
+  throw new Error(`模板格式不符：找不到单元格 ${ref}`);
+}
+
+function setTextCell(sheetXml: string, ref: string, value: string | number | null | undefined, strings: SharedStringsEditor): string {
+  if (String(value ?? "") === "") return clearCellXml(sheetXml, ref);
+  const prefix = xmlPrefix(sheetXml, "c");
+  return replaceCellXml(sheetXml, ref, "s", `<${prefix}v>${strings.add(value)}</${prefix}v>`);
+}
+
+function setNumberCell(sheetXml: string, ref: string, value: number): string {
+  const prefix = xmlPrefix(sheetXml, "c");
+  return replaceCellXml(sheetXml, ref, "n", `<${prefix}v>${Number.isFinite(value) ? String(value) : "0"}</${prefix}v>`);
+}
+
+/**
+ * 数值格子，但**没值时留空而不是写 0**（2026-08-25 新增）。
+ *
+ * 客户派送签收单是给客户签字的纸质单据。这票货没填体积重量时，
+ * 原来会印成「0 m³ / 0 kg」—— 等于白纸黑字告诉客户这箱货没有重量。
+ * 空着才是诚实的：不知道就是不知道。
+ */
+function setOptionalNumberCell(sheetXml: string, ref: string, value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return clearCellXml(sheetXml, ref);
+  return setNumberCell(sheetXml, ref, value);
+}
+
+function setFormulaCell(sheetXml: string, ref: string, formula: string, cachedValue: number): string {
+  const prefix = xmlPrefix(sheetXml, "c");
+  return replaceCellXml(sheetXml, ref, "n", `<${prefix}f>${escapeXml(formula)}</${prefix}f><${prefix}v>${Number.isFinite(cachedValue) ? String(cachedValue) : "0"}</${prefix}v>`);
+}
+
+function columnName(index: number): string {
+  let value = index;
+  let output = "";
+  while (value > 0) {
+    value -= 1;
+    output = String.fromCharCode(65 + (value % 26)) + output;
+    value = Math.floor(value / 26);
+  }
+  return output;
+}
+
+function clearRange(sheetXml: string, startRow: number, endRow: number, startColumn: number, endColumn: number, strings: SharedStringsEditor): string {
+  let output = sheetXml;
+  for (let row = startRow; row <= endRow; row += 1) {
+    for (let column = startColumn; column <= endColumn; column += 1) {
+      output = setTextCell(output, `${columnName(column)}${row}`, "", strings);
+    }
+  }
+  return output;
+}
+
+function round(value: number, digits: number): number {
+  const factor = 10 ** digits;
+  return Math.round((value + Number.EPSILON) * factor) / factor;
+}
+
+function expandTemplateLines(data: LastmileExportData): TemplateLine[] {
+  const lines: TemplateLine[] = [];
+  for (const customer of data.customers) {
+    for (const shipment of customer.shipments) {
+      const products = shipment.products.length > 0 ? shipment.products : [{
+        itemName: shipment.itemName,
+        packageCount: shipment.packageCount,
+        lengthCm: null,
+        widthCm: null,
+        heightCm: null,
+        // 运单 weightKg 是整票总重；只有真实产品的 weightKg 才是单箱重。
+        weightKg: null,
+      }];
+      const packageTotal = products.reduce((sum, product) => sum + Number(product.packageCount || 0), 0) || 1;
+      products.forEach((product) => {
+        const share = Number(product.packageCount || 0) / packageTotal;
+        // ⚠️ shipment.volumeM3 可能是 null（这票货没填）。`null * share` 在 JS 里等于 0，
+        // 直接算就会把「没填」变成「0 方」，所以必须先判空。重量同理。
+        const volume = product.lengthCm && product.widthCm && product.heightCm
+          ? Number(product.packageCount || 0) * product.lengthCm * product.widthCm * product.heightCm / 1_000_000
+          : (shipment.volumeM3 == null ? null : Number(shipment.volumeM3) * share);
+        const weight = product.weightKg == null
+          ? (shipment.weightKg == null ? null : Number(shipment.weightKg) * share)
+          : Number(product.weightKg) * Number(product.packageCount || 0);
+        const receiverName = shipment.receiverName || customer.contactName;
+        const phone = shipment.receiverPhone || customer.contactPhone;
+        const address = shipment.receiverAddress || customer.address;
+        lines.push({
+          clientId: customer.clientId,
+          clientName: customer.clientName,
+          trackingNo: shipment.trackingNo,
+          itemName: product.itemName || shipment.itemName,
+          packageCount: Number(product.packageCount || 0),
+          volumeM3: volume == null ? null : round(volume, 6),
+          weightKg: weight == null ? null : round(weight, 2),
+          lengthCm: product.lengthCm,
+          widthCm: product.widthCm,
+          heightCm: product.heightCm,
+          receiverName,
+          receiverPhone: phone,
+          receiverAddress: address,
+          remark: shipment.remark || "",
+        });
+      });
+    }
+  }
+  return lines;
+}
+
+function paginate<T>(items: T[], pageSize: number): T[][] {
+  if (items.length === 0) return [[]];
+  const pages: T[][] = [];
+  for (let index = 0; index < items.length; index += pageSize) pages.push(items.slice(index, index + pageSize));
+  return pages;
+}
+
+/**
+ * 同一客户可能有多个收货人或地址。客户模板的表头只有一个地址栏，不能把不同站点
+ * 硬塞进固定行高的备注格（会遮挡下一行），所以先按站点分组，再按模板容量分页。
+ * 每组保留第一次出现的顺序，组内保留原运单顺序。
+ */
+function paginateCustomerLines(lines: TemplateLine[], pageSize: number): TemplateLine[][] {
+  if (lines.length === 0) return [[]];
+  const stops = new Map<string, TemplateLine[]>();
+  for (const line of lines) {
+    const key = JSON.stringify([line.receiverName, line.receiverPhone, line.receiverAddress]);
+    const stopLines = stops.get(key);
+    if (stopLines) stopLines.push(line);
+    else stops.set(key, [line]);
+  }
+  return [...stops.values()].flatMap((stopLines) => paginate(stopLines, pageSize));
+}
+
+/**
+ * 合计，但**整列一个值都没有时返回 null**（留空），而不是合计成 0。
+ * 跟 setOptionalNumberCell 是同一个道理：一行都没填，合计栏印个 0 更误导人。
+ */
+function optionalLineTotal(lines: TemplateLine[], key: "volumeM3" | "weightKg"): number | null {
+  if (!lines.some((line) => line[key] != null)) return null;
+  return lineTotal(lines, key);
+}
+
+function lineTotal(lines: TemplateLine[], key: "packageCount" | "volumeM3" | "weightKg" | "lengthCm" | "widthCm" | "heightCm"): number {
+  return round(
+    lines.reduce((sum, line) => sum + Number(line[key] || 0), 0),
+    key === "volumeM3" ? 6 : 2,
+  );
+}
+
+function patchInternalTemplate(
+  sheetXml: string,
+  strings: SharedStringsEditor,
+  data: LastmileExportData,
+  lines: TemplateLine[],
+  sequenceStart: number,
+  allLines: TemplateLine[],
+): string {
+  let xml = clearRange(sheetXml, 10, 34, 1, 14, strings);
+  xml = setTextCell(xml, "B3", data.containerNo, strings);
+  // 当前系统没有提单号和封条号字段，模板对应业务值保持空白。
+  xml = setTextCell(xml, "B5", "", strings);
+  xml = setTextCell(xml, "E3", data.origin, strings);
+  xml = setTextCell(xml, "E5", data.destination, strings);
+  xml = setTextCell(xml, "I3", data.carrierInfo, strings);
+  // 当前数据模型没有封条号，原模板的封条号值保持空白。
+  xml = setTextCell(xml, "I5", "", strings);
+  // “总票数 / 总件数”是整柜汇总；分页后的每一张工作表都显示同一个整柜总数。
+  xml = setNumberCell(xml, "L3", new Set(allLines.map((line) => line.trackingNo)).size);
+  xml = setNumberCell(xml, "L5", lineTotal(allLines, "packageCount"));
+  lines.forEach((line, index) => {
+    const row = 10 + index;
+    xml = setTextCell(xml, `B${row}`, line.trackingNo, strings);
+    xml = setTextCell(xml, `C${row}`, line.itemName, strings);
+    xml = setNumberCell(xml, `D${row}`, line.packageCount);
+    xml = setOptionalNumberCell(xml, `E${row}`, line.volumeM3);
+    xml = setOptionalNumberCell(xml, `F${row}`, line.weightKg);
+    if (line.lengthCm != null) xml = setNumberCell(xml, `G${row}`, line.lengthCm);
+    if (line.widthCm != null) xml = setNumberCell(xml, `H${row}`, line.widthCm);
+    if (line.heightCm != null) xml = setNumberCell(xml, `I${row}`, line.heightCm);
+    xml = setTextCell(xml, `J${row}`, line.receiverPhone, strings);
+    xml = setTextCell(xml, `L${row}`, line.receiverAddress, strings);
+    const mark = line.clientId && line.clientId !== "未关联客户" ? `唛头：${line.clientId}` : "";
+    xml = setTextCell(xml, `N${row}`, [mark, line.remark].filter(Boolean).join("；"), strings);
+  });
+  // 整柜接口固定一条装柜记录一行，不动模板原有的 J:K、L:M 合并范围。
+  // 这样空白预留行的结构也与用户模板逐项一致。
+  lines.forEach((_line, index) => {
+    xml = setNumberCell(xml, `A${10 + index}`, sequenceStart + index + 1);
+  });
+  xml = setFormulaCell(xml, "E35", "SUM(E10:E34)", lineTotal(lines, "volumeM3"));
+  xml = setFormulaCell(xml, "F35", "SUM(F10:F34)", lineTotal(lines, "weightKg"));
+  xml = setFormulaCell(xml, "G35", "SUM(G10:G34)", lineTotal(lines, "lengthCm"));
+  xml = setFormulaCell(xml, "H35", "SUM(H10:H34)", lineTotal(lines, "widthCm"));
+  return setFormulaCell(xml, "I35", "SUM(I10:I34)", lineTotal(lines, "heightCm"));
+}
+
+function patchCustomerChineseTemplate(
+  sheetXml: string,
+  strings: SharedStringsEditor,
+  data: LastmileExportData,
+  lines: TemplateLine[],
+  sequenceStart: number,
+): string {
+  const customer = data.customers[0];
+  if (!customer) throw new Error("客户派送单没有客户数据");
+  const stop = lines[0];
+  let xml = clearRange(sheetXml, 6, 15, 1, 8, strings);
+  xml = setTextCell(xml, "C3", customer.clientId, strings);
+  xml = setTextCell(xml, "H3", stop?.receiverPhone || customer.contactPhone, strings);
+  xml = setTextCell(xml, "C4", stop?.receiverAddress || customer.address, strings);
+  xml = setTextCell(xml, "A6", customer.clientId, strings);
+  lines.forEach((line, index) => {
+    const row = 6 + index;
+    xml = setNumberCell(xml, `B${row}`, sequenceStart + index + 1);
+    xml = setTextCell(xml, `C${row}`, line.trackingNo, strings);
+    xml = setTextCell(xml, `D${row}`, line.itemName, strings);
+    xml = setNumberCell(xml, `E${row}`, line.packageCount);
+    xml = setOptionalNumberCell(xml, `F${row}`, line.volumeM3);
+    xml = setOptionalNumberCell(xml, `G${row}`, line.weightKg);
+    xml = setTextCell(xml, `H${row}`, line.remark, strings);
+  });
+  xml = setFormulaCell(xml, "E16", "SUM(E6:E15)", lineTotal(lines, "packageCount"));
+  xml = setFormulaCell(xml, "F16", "SUM(F6:F15)", lineTotal(lines, "volumeM3"));
+  xml = setFormulaCell(xml, "G16", "SUM(G6:G15)", lineTotal(lines, "weightKg"));
+  xml = setTextCell(xml, "H16", "", strings);
+  xml = setTextCell(xml, "G18", data.deliveryDate, strings);
+  return setTextCell(xml, "G19", [data.driverName, data.phoneNumber].filter(Boolean).join(" / "), strings);
+}
+
+function patchCustomerThaiTemplate(
+  sheetXml: string,
+  strings: SharedStringsEditor,
+  data: LastmileExportData,
+  lines: TemplateLine[],
+  sequenceStart: number,
+): string {
+  const customer = data.customers[0];
+  if (!customer) throw new Error("客户派送单没有客户数据");
+  const stop = lines[0];
+  // 泰文模板 A8:A27 预置了 1..20。必须连序号列一起清空，否则短页/续页的
+  // 空白明细行会残留假序号，看起来像还有未填内容的货物。
+  let xml = clearRange(sheetXml, 8, 27, 1, 10, strings);
+  xml = setTextCell(xml, "C3", customer.clientId, strings);
+  xml = setTextCell(xml, "I3", stop?.receiverPhone || customer.contactPhone, strings);
+  xml = setTextCell(xml, "C4", stop?.receiverAddress || customer.address, strings);
+  lines.forEach((line, index) => {
+    const row = 8 + index;
+    xml = setNumberCell(xml, `A${row}`, sequenceStart + index + 1);
+    xml = setTextCell(xml, `B${row}`, line.clientName, strings);
+    xml = setTextCell(xml, `C${row}`, line.clientId, strings);
+    xml = setTextCell(xml, `D${row}`, line.itemName, strings);
+    xml = setNumberCell(xml, `E${row}`, line.packageCount);
+    xml = setOptionalNumberCell(xml, `F${row}`, line.volumeM3);
+    xml = setOptionalNumberCell(xml, `G${row}`, line.weightKg);
+    xml = setTextCell(xml, `H${row}`, "", strings);
+    xml = setTextCell(xml, `I${row}`, line.remark, strings);
+    xml = setTextCell(xml, `J${row}`, "", strings);
+  });
+  xml = setFormulaCell(xml, "E28", "SUM(E8:E27)", lineTotal(lines, "packageCount"));
+  // 泰文模板的体积、重量合计原本就是数值单元格，保留原结构，仅改成页内明细合计。
+  xml = setOptionalNumberCell(xml, "F28", optionalLineTotal(lines, "volumeM3"));
+  xml = setOptionalNumberCell(xml, "G28", optionalLineTotal(lines, "weightKg"));
+  for (const ref of ["D28", "H28", "I28", "J28"]) xml = setTextCell(xml, ref, "", strings);
+  xml = setTextCell(xml, "B31", data.deliveryDate, strings);
+  xml = setTextCell(xml, "E31", stop?.receiverName || customer.contactName, strings);
+  xml = setTextCell(xml, "H31", stop?.receiverPhone || customer.contactPhone, strings);
+  return xml;
+}
+
+type WorksheetClone = {
+  name: string;
+  xml: string;
+};
+
+const WORKSHEET_RELATIONSHIP_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet";
+const WORKSHEET_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml";
+
+function decodeXmlAttribute(value: string): string {
+  return value
+    .replace(/&quot;/g, "\"")
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
+function workbookSheetNames(workbookXml: string): string[] {
+  const prefix = xmlPrefix(workbookXml, "sheet");
+  const tag = `${prefix}sheet`;
+  return [...workbookXml.matchAll(new RegExp(`<${escapeRegExp(tag)}\\b([^>]*)\\/?>`, "g"))]
+    .map((match) => /\bname="([^"]*)"/.exec(match[1])?.[1])
+    .filter((name): name is string => name != null)
+    .map(decodeXmlAttribute);
+}
+
+function pageWorksheetName(baseName: string, pageNumber: number, existingNames: Set<string>): string {
+  const suffix = `-${pageNumber}`;
+  const sanitizedBase = baseName.replace(/[\\/*?:[\]]/g, "_") || "Sheet";
+  let candidate = `${sanitizedBase.slice(0, 31 - suffix.length)}${suffix}`;
+  let duplicate = 2;
+  while (existingNames.has(candidate)) {
+    const duplicateSuffix = `${suffix}-${duplicate}`;
+    candidate = `${sanitizedBase.slice(0, 31 - duplicateSuffix.length)}${duplicateSuffix}`;
+    duplicate += 1;
+  }
+  existingNames.add(candidate);
+  return candidate;
+}
+
+function insertBeforeClosingTag(xml: string, localName: string, addition: string): string {
+  const tag = `${xmlPrefix(xml, localName)}${localName}`;
+  const closingTag = `</${tag}>`;
+  if (!xml.includes(closingTag)) throw new Error(`模板格式不符：缺少 ${localName}`);
+  return xml.replace(closingTag, `${addition}${closingTag}`);
+}
+
+async function appendWorksheetClones(zip: JSZip, originalWorkbookXml: string, clones: WorksheetClone[]): Promise<void> {
+  if (clones.length === 0) return;
+  const relationshipsPath = "xl/_rels/workbook.xml.rels";
+  const contentTypesPath = "[Content_Types].xml";
+  const [originalRelationshipsXml, originalContentTypesXml] = await Promise.all([
+    zip.file(relationshipsPath)?.async("string"),
+    zip.file(contentTypesPath)?.async("string"),
+  ]);
+  if (!originalRelationshipsXml || !originalContentTypesXml) {
+    throw new Error("模板格式不符：缺少工作簿关系或内容类型");
+  }
+
+  const existingWorksheetNumbers = Object.keys(zip.files)
+    .map((path) => /^xl\/worksheets\/sheet(\d+)\.xml$/.exec(path)?.[1])
+    .filter((value): value is string => value != null)
+    .map(Number);
+  let nextWorksheetNumber = Math.max(0, ...existingWorksheetNumbers) + 1;
+  const existingSheetIds = [...originalWorkbookXml.matchAll(/\bsheetId="(\d+)"/g)].map((match) => Number(match[1]));
+  let nextSheetId = Math.max(0, ...existingSheetIds) + 1;
+  const existingRelationshipIds = new Set(
+    [...originalRelationshipsXml.matchAll(/\bId="([^"]+)"/g)].map((match) => match[1]),
+  );
+  let relationshipSequence = 1;
+  let workbookXml = originalWorkbookXml;
+  let relationshipsXml = originalRelationshipsXml;
+  let contentTypesXml = originalContentTypesXml;
+  const sheetTag = `${xmlPrefix(workbookXml, "sheet")}sheet`;
+  const relationshipTag = `${xmlPrefix(relationshipsXml, "Relationship")}Relationship`;
+  const overrideTag = `${xmlPrefix(contentTypesXml, "Override")}Override`;
+
+  for (const clone of clones) {
+    while (existingRelationshipIds.has(`rIdExport${relationshipSequence}`)) relationshipSequence += 1;
+    const relationshipId = `rIdExport${relationshipSequence}`;
+    relationshipSequence += 1;
+    existingRelationshipIds.add(relationshipId);
+    const worksheetPath = `xl/worksheets/sheet${nextWorksheetNumber}.xml`;
+    const relationshipTarget = `worksheets/sheet${nextWorksheetNumber}.xml`;
+    // 克隆页不能继续保持模板首页的“已选中”状态，否则 Excel 会把多页成组选择，
+    // 用户在一页输入签收内容时会同步改到所有选中页。该状态不影响样式或打印结构。
+    zip.file(worksheetPath, clone.xml.replace(/\s+tabSelected="1"/g, ""));
+    workbookXml = insertBeforeClosingTag(
+      workbookXml,
+      "sheets",
+      `<${sheetTag} name="${escapeXml(clone.name)}" sheetId="${nextSheetId}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="${relationshipId}"/>`,
+    );
+    relationshipsXml = insertBeforeClosingTag(
+      relationshipsXml,
+      "Relationships",
+      `<${relationshipTag} Id="${relationshipId}" Type="${WORKSHEET_RELATIONSHIP_TYPE}" Target="${relationshipTarget}"/>`,
+    );
+    contentTypesXml = insertBeforeClosingTag(
+      contentTypesXml,
+      "Types",
+      `<${overrideTag} PartName="/${worksheetPath}" ContentType="${WORKSHEET_CONTENT_TYPE}"/>`,
+    );
+    nextWorksheetNumber += 1;
+    nextSheetId += 1;
+  }
+
+  zip.file("xl/workbook.xml", workbookXml);
+  zip.file(relationshipsPath, relationshipsXml);
+  zip.file(contentTypesPath, contentTypesXml);
+
+  // 部分模板带扩展属性中的工作表数量/标题清单。克隆后同步元数据，避免包内仍宣称只有首页。
+  const appPropertiesPath = "docProps/app.xml";
+  const appPropertiesXml = await zip.file(appPropertiesPath)?.async("string");
+  if (appPropertiesXml) {
+    const sheetNames = [...workbookSheetNames(originalWorkbookXml), ...clones.map((clone) => clone.name)];
+    const vectorPrefix = xmlPrefix(appPropertiesXml, "vector");
+    const lpstrTag = `${xmlPrefix(appPropertiesXml, "lpstr")}lpstr`;
+    const headingTag = `${xmlPrefix(appPropertiesXml, "HeadingPairs")}HeadingPairs`;
+    const titlesTag = `${xmlPrefix(appPropertiesXml, "TitlesOfParts")}TitlesOfParts`;
+    const vectorTag = `${vectorPrefix}vector`;
+    const integerTag = `${xmlPrefix(appPropertiesXml, "i4")}i4`;
+    let patched = appPropertiesXml;
+    const headingPattern = new RegExp(`(<${escapeRegExp(headingTag)}\\b[^>]*>[\\s\\S]*?<${escapeRegExp(integerTag)}>)(?:-?\\d+)(<\\/${escapeRegExp(integerTag)}>[\\s\\S]*?<\\/${escapeRegExp(headingTag)}>)`);
+    patched = patched.replace(headingPattern, `$1${sheetNames.length}$2`);
+    const titlesPattern = new RegExp(`(<${escapeRegExp(titlesTag)}\\b[^>]*>\\s*<${escapeRegExp(vectorTag)}\\b)([^>]*)(>)[\\s\\S]*?(<\\/${escapeRegExp(vectorTag)}>\\s*<\\/${escapeRegExp(titlesTag)}>)`);
+    const titleItems = sheetNames.map((name) => `<${lpstrTag}>${escapeXml(name)}</${lpstrTag}>`).join("");
+    patched = patched.replace(titlesPattern, (_match, opening: string, attributes: string, close: string, ending: string) => {
+      const sizedAttributes = /\bsize="\d+"/.test(attributes)
+        ? attributes.replace(/\bsize="\d+"/, `size="${sheetNames.length}"`)
+        : `${attributes} size="${sheetNames.length}"`;
+      return `${opening}${sizedAttributes}${close}${titleItems}${ending}`;
+    });
+    zip.file(appPropertiesPath, patched);
+  }
+}
+
+/**
+ * 只替换原始 XLSX 压缩包内的业务值；超出单页容量时克隆完整工作表。
+ * styles.xml、合并范围、列宽、行高、页边距、打印设置和声明文案都使用用户原模板。
+ */
+export async function buildLastmileTemplateWorkbook(data: LastmileExportData, templateBytes: ArrayBuffer | Uint8Array): Promise<Uint8Array> {
+  const zip = await JSZip.loadAsync(templateBytes);
+  const sharedPath = "xl/sharedStrings.xml";
+  const workbookPath = "xl/workbook.xml";
+  const [sharedXml, originalWorkbookXml] = await Promise.all([
+    zip.file(sharedPath)?.async("string"),
+    zip.file(workbookPath)?.async("string"),
+  ]);
+  if (!sharedXml || !originalWorkbookXml) throw new Error("模板格式不符：缺少 sharedStrings.xml 或 workbook.xml");
+  const strings = new SharedStringsEditor(sharedXml);
+  const sheetNames = workbookSheetNames(originalWorkbookXml);
+  const existingSheetNames = new Set(sheetNames);
+  const lines = expandTemplateLines(data);
+  const clones: WorksheetClone[] = [];
+  if (data.scope === "container") {
+    const path = "xl/worksheets/sheet1.xml";
+    const xml = await zip.file(path)?.async("string");
+    if (!xml) throw new Error("整柜模板缺少主工作表");
+    const pages = paginate(lines, 25);
+    let sequenceStart = 0;
+    zip.file(path, patchInternalTemplate(xml, strings, data, pages[0], sequenceStart, lines));
+    sequenceStart += pages[0].length;
+    for (let pageIndex = 1; pageIndex < pages.length; pageIndex += 1) {
+      clones.push({
+        name: pageWorksheetName(sheetNames[0] || "整柜派送清单", pageIndex + 1, existingSheetNames),
+        xml: patchInternalTemplate(xml, strings, data, pages[pageIndex], sequenceStart, lines),
+      });
+      sequenceStart += pages[pageIndex].length;
+    }
+  } else {
+    const chinesePath = "xl/worksheets/sheet1.xml";
+    const thaiPath = "xl/worksheets/sheet2.xml";
+    const [chineseXml, thaiXml] = await Promise.all([zip.file(chinesePath)?.async("string"), zip.file(thaiPath)?.async("string")]);
+    if (!chineseXml || !thaiXml) throw new Error("客户模板缺少中文或泰文工作表");
+    const pages = paginateCustomerLines(lines, 10);
+    let sequenceStart = 0;
+    zip.file(chinesePath, patchCustomerChineseTemplate(chineseXml, strings, data, pages[0], sequenceStart));
+    zip.file(thaiPath, patchCustomerThaiTemplate(thaiXml, strings, data, pages[0], sequenceStart));
+    sequenceStart += pages[0].length;
+    for (let pageIndex = 1; pageIndex < pages.length; pageIndex += 1) {
+      clones.push(
+        {
+          name: pageWorksheetName(sheetNames[0] || "客户签收单-中文", pageIndex + 1, existingSheetNames),
+          xml: patchCustomerChineseTemplate(chineseXml, strings, data, pages[pageIndex], sequenceStart),
+        },
+        {
+          name: pageWorksheetName(sheetNames[1] || "客户签收单-泰文", pageIndex + 1, existingSheetNames),
+          xml: patchCustomerThaiTemplate(thaiXml, strings, data, pages[pageIndex], sequenceStart),
+        },
+      );
+      sequenceStart += pages[pageIndex].length;
+    }
+  }
+  await appendWorksheetClones(zip, originalWorkbookXml, clones);
+  zip.file(sharedPath, strings.finish());
+  return zip.generateAsync({ type: "uint8array", compression: "DEFLATE", compressionOptions: { level: 6 } });
+}
+
+function safeFilePart(value: string): string {
+  return value.replace(/[\\/:*?"<>|]/g, "_").trim() || "未命名";
+}
+
+function downloadBytes(bytes: Uint8Array, filename: string): void {
+  const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  const blob = new Blob([buffer], { type: XLSX_MIME });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function fetchTemplate(path: string): Promise<ArrayBuffer> {
+  const templateResponse = await fetch(path);
+  if (!templateResponse.ok) throw new Error(`导出模板加载失败：${templateResponse.status}`);
+  return templateResponse.arrayBuffer();
+}
+
+export async function downloadContainerDispatchWorkbook(containerId: string): Promise<void> {
+  const data = await fetchContainerExportData(containerId);
+  const bytes = await buildLastmileTemplateWorkbook(data, await fetchTemplate(TEMPLATE_PATHS.container));
+  downloadBytes(bytes, `${safeFilePart(data.containerNo)}_整柜拆柜派送清单.xlsx`);
+}
+
+export async function downloadLastmileCustomerWorkbook(deliveryNo: string, clientId: string): Promise<void> {
+  const data = await fetchLastmileCustomerExportData(deliveryNo, clientId);
+  const bytes = await buildLastmileTemplateWorkbook(data, await fetchTemplate(TEMPLATE_PATHS.customer));
+  downloadBytes(bytes, `${safeFilePart(deliveryNo)}_${safeFilePart(clientId)}_客户派送签收单.xlsx`);
+}

@@ -73,7 +73,7 @@ export const roleFunctionGroups: Record<AuthRole, MenuGroup[]> = {
       groupLabel: "财务",
       items: [
         { id: "admin-func-finance", label: "财务管理", href: "/admin/finance" },
-        { id: "admin-func-settlement", label: "财务结算与利润", href: "/admin/settlement" },
+        { id: "admin-func-settlement", label: "柜子收款", href: "/admin/settlement" },
         { id: "admin-func-wallet-recharges", label: "充值审核", href: "/admin#wallet-recharges" },
       ],
     },

@@ -14,6 +14,8 @@ import type { MinimalHttpApp } from "../../server";
 import { fail, ok, parseJsonArray, requireRole } from "../core/http-utils";
 import { loadProductImagesForOrders, MAX_ORDER_PRODUCT_IMAGES } from "./product-images";
 import { saveImageToDisk, deleteImageFile } from "./image-storage";
+import { sanitizeRemarkForClient } from "../core/client-privacy";
+import { loadOrderTotalMetrics } from "../shipments/total-metrics";
 
 /** 批量加载订单的产品行 */
 export async function loadOrderProducts(companyId: string, orderIds: string[]): Promise<Map<string, any[]>> {
@@ -925,6 +927,15 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       }),
     ]);
 
+    const totalMetricsByOrderId = await loadOrderTotalMetrics(
+      auth.companyId,
+      orders.map((order) => ({
+        orderId: order.id,
+        orderVolumeM3: order.volumeM3,
+        orderWeightKg: order.weightKg,
+      })),
+    );
+
     const filtered = orders
       .filter((o) => !itemName || o.itemName.includes(itemName))
       .filter((o) => !transportMode || o.transportMode === transportMode)
@@ -942,8 +953,9 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
     const items = filtered.map((o) => {
       // orderBy 已保证父单排在最前 + take:1，这里直接取即可
       const ship = o.shipments[0];
+      const totalMetrics = totalMetricsByOrderId.get(o.id);
       const logisticsRecords = (ship?.statusLogs ?? []).map((r) => ({
-        remark: r.remark ?? "",
+        remark: sanitizeRemarkForClient(r.remark ?? "", true),
         changedAt: r.changedAt.toISOString(),
         fromStatus: r.fromStatus,
         toStatus: r.toStatus,
@@ -974,6 +986,8 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
         packageUnit: o.packageUnit,
         weightKg: decToNumber(o.weightKg),
         volumeM3: decToNumber(o.volumeM3),
+        totalWeightKg: totalMetrics?.totalWeightKg,
+        totalVolumeM3: totalMetrics?.totalVolumeM3,
         receivableAmountCny: decToNumber(o.receivableAmountCny),
         receivableCurrency: o.receivableCurrency ?? "CNY",
         paymentStatus: o.paymentStatus ?? "unpaid",
@@ -982,7 +996,7 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
         shipDate: o.shipDate,
         cargoType: o.cargoType ?? "normal",
         latestRemark,
-        remark: ship?.remark ?? null,
+        remark: ship?.remark == null ? null : sanitizeRemarkForClient(ship.remark, true),
         logisticsRecords,
         createdAt: o.createdAt.toISOString(),
         updatedAt: o.updatedAt.toISOString(),

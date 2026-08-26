@@ -5,6 +5,7 @@ import RoleShell from "../../../modules/layout/RoleShell";
 import Toast from "../../../modules/layout/Toast";
 import { openShipmentTrack } from "../../../modules/shipment/ShipmentTrackModal";
 import { shipmentStatusZh } from "../../../modules/shipment/shipment-status";
+import { downloadContainerDispatchWorkbook } from "../../../modules/lastmile/exportDispatchWorkbooks";
 import {
   fetchLoadingManifests,
   createLoadingManifest,
@@ -137,6 +138,7 @@ export default function StaffContainerLoadingPage() {
   const [createForm, setCreateForm] = useState({ warehouse: "wh_yiwu_01", transportMode: "sea", voyage: "", vesselName: "", containerNo: "" });
   const [creating, setCreating] = useState(false);
   const [undoing, setUndoing] = useState(false);
+  const [exportingContainerId, setExportingContainerId] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [detail, setDetail] = useState<LoadingManifestDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
@@ -342,6 +344,19 @@ export default function StaffContainerLoadingPage() {
     }
   };
 
+  const handleExportContainer = async () => {
+    if (!detail || exportingContainerId) return;
+    setExportingContainerId(detail.id);
+    try {
+      await downloadContainerDispatchWorkbook(detail.id);
+      setToast(`柜子 ${detail.manifestNo} 的整柜拆柜派送清单已导出`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "整柜导出失败");
+    } finally {
+      setExportingContainerId("");
+    }
+  };
+
   const handleBulkAdd = async () => {
     const entries = Object.entries(selectedShipments);
     if (!selectedId || entries.length === 0) return;
@@ -538,6 +553,14 @@ export default function StaffContainerLoadingPage() {
                     </div>
                   </div>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    <button
+                      disabled={detail.bills.length === 0 || exportingContainerId === detail.id}
+                      onClick={() => void handleExportContainer()}
+                      title={detail.bills.length === 0 ? "空柜没有可导出的货物" : "按当前柜内货物生成给尾端拆柜仓的清单"}
+                      style={{ border: "1px solid var(--c-blue)", borderRadius: 6, padding: "8px 16px", background: "var(--white)", color: detail.bills.length === 0 ? "var(--t-faint)" : "var(--c-blue)", fontWeight: 600, fontSize: 13, cursor: detail.bills.length === 0 ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}
+                    >
+                      {exportingContainerId === detail.id ? "导出中…" : "导出整柜派送清单"}
+                    </button>
                     <input value={statusRemark} onChange={(e) => setStatusRemark(e.target.value)} placeholder="备注（选填）" style={{ ...inputStyle, minWidth: 200, flex: 1 }} />
                     {/* 下一站：选了目标状态就自动填上默认值，员工想改可以直接改（2026-08-06） */}
                     <input

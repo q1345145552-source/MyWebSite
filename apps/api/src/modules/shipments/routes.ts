@@ -7,6 +7,8 @@ import { fail, ok, parseJsonArray, requireRole } from "../core/http-utils";
 import { logger } from "../core/logger";
 import { loadProductImagesForOrders } from "../orders/product-images";
 import { STATUS_FLOW, STATUS_FLOW_LAND, EXCEPTION_STATUSES, DELAY_STATUSES, COMPLETED_STATUSES } from "./status-flow";
+import { allocateSplitMetric, reconcileFamilyMetric } from "./split-metrics";
+import { loadOrderTotalMetrics } from "./total-metrics";
 
 interface Kuaidi100QueryPayload {
   com?: string;
@@ -331,7 +333,15 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
       orderBy: { updatedAt: "desc" },
       include: {
         order: {
-          select: { id: true, clientId: true, itemName: true, transportMode: true, orderNo: true },
+          select: {
+            id: true,
+            clientId: true,
+            itemName: true,
+            transportMode: true,
+            orderNo: true,
+            volumeM3: true,
+            weightKg: true,
+          },
         },
       },
     });
@@ -351,6 +361,15 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
         productMap.set(p.orderId, list);
       }
     }
+
+    const totalMetricsByOrderId = await loadOrderTotalMetrics(
+      auth.companyId,
+      rows.map((row) => ({
+        orderId: row.orderId,
+        orderVolumeM3: row.order.volumeM3,
+        orderWeightKg: row.order.weightKg,
+      })),
+    );
 
     const items = rows
       .filter((r) => !trackingNo || r.trackingNo.includes(trackingNo))
@@ -376,6 +395,12 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
         updatedAt: r.updatedAt.toISOString(),
         weightKg: decToNumber(r.weightKg),
         volumeM3: decToNumber(r.volumeM3),
+        totalWeightKg: r.parentTrackingNo === null
+          ? totalMetricsByOrderId.get(r.orderId)?.totalWeightKg
+          : undefined,
+        totalVolumeM3: r.parentTrackingNo === null
+          ? totalMetricsByOrderId.get(r.orderId)?.totalVolumeM3
+          : undefined,
         packageCount: r.packageCount,
         packageUnit: r.packageUnit,
         domesticTrackingNo: r.domesticTrackingNo,
@@ -430,6 +455,15 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
       }),
     ]);
 
+    const totalMetricsByOrderId = await loadOrderTotalMetrics(
+      auth.companyId,
+      rows.map((row) => ({
+        orderId: row.orderId,
+        orderVolumeM3: row.order?.volumeM3,
+        orderWeightKg: row.order?.weightKg,
+      })),
+    );
+
     const items = rows.map((r) => ({
       id: r.id,
       orderId: r.order?.id ?? undefined,
@@ -446,6 +480,12 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
       productQuantity: r.order?.productQuantity ?? undefined,
       weightKg: decToNumber(r.weightKg) ?? undefined,
       volumeM3: decToNumber(r.volumeM3) ?? undefined,
+      totalWeightKg: r.parentTrackingNo === null
+        ? totalMetricsByOrderId.get(r.orderId)?.totalWeightKg
+        : undefined,
+      totalVolumeM3: r.parentTrackingNo === null
+        ? totalMetricsByOrderId.get(r.orderId)?.totalVolumeM3
+        : undefined,
       arrivedAt: r.order?.shipDate ?? undefined,
       currentStatus: r.currentStatus,
       currentLocation: r.currentLocation ?? undefined,
@@ -453,6 +493,8 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
       updatedAt: r.updatedAt.toISOString(),
       transportMode: r.order?.transportMode ?? undefined,
       shipDate: r.order?.shipDate ?? undefined,
+      receiverNameTh: r.order?.receiverNameTh ?? undefined,
+      receiverPhoneTh: r.order?.receiverPhoneTh ?? undefined,
       receiverAddressTh: r.order?.receiverAddressTh ?? undefined,
       receivableAmountCny: decToNumber(r.order?.receivableAmountCny ?? null) ?? undefined,
       receivableCurrency: r.order?.receivableCurrency ?? undefined,
@@ -558,6 +600,10 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
       fail(res, 400, "BAD_REQUEST", "每一条分柜运单号均为必填");
       return;
     }
+    if (splits.some((s) => !Number.isInteger(s.packageCount) || s.packageCount <= 0)) {
+      fail(res, 400, "BAD_REQUEST", "每一条分柜件数必须是大于 0 的整数");
+      return;
+    }
     // 检查分柜运单号是否重复
     const splitNos = splits.map((s) => s.trackingNo.trim());
     if (new Set(splitNos).size !== splitNos.length) {
@@ -599,25 +645,69 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
 
     const results: Array<{ trackingNo: string; shipmentId: string }> = [];
 
-    await prisma.$transaction(async (tx) => {
+    const runSplitTransaction = () => prisma.$transaction(async (tx) => {
       // 行级锁：防止并发分柜
       await tx.$queryRaw`SELECT id FROM shipments WHERE id = ${parentId} FOR UPDATE`;
 
       // 重新读取父单件数（加锁后最新值）
       const locked = await tx.shipment.findUnique({
         where: { id: parentId },
-        select: { packageCount: true, volumeM3: true },
+        select: {
+          packageCount: true,
+          volumeM3: true,
+          weightKg: true,
+          order: { select: { packageCount: true, volumeM3: true, weightKg: true } },
+        },
       });
       const currentPkg = locked?.packageCount ?? 0;
       if (totalSplitCount > currentPkg) {
         throw new Error(`split total (${totalSplitCount}) exceeds current package count (${currentPkg})`);
       }
 
-      // 更新父单：扣减件数
+      const existingChildren = await tx.shipment.findMany({
+        where: { parentTrackingNo: parent.trackingNo, companyId: auth.companyId },
+        select: { trackingNo: true, packageCount: true, volumeM3: true, weightKg: true },
+      });
+      // 有既有子单时按整个父子家族检查订单总量守恒：空子指标按件数补算，
+      // 父单被编辑回整票或其它原因导致不守恒时，由父单吸收差额后再执行本次拆分。
+      const familyBase = [{
+        key: parent.trackingNo,
+        pieceCount: currentPkg,
+        volumeM3: locked?.volumeM3,
+        weightKg: locked?.weightKg,
+        isParent: true,
+      }, ...existingChildren.map((child) => ({
+        key: child.trackingNo,
+        pieceCount: child.packageCount,
+        volumeM3: child.volumeM3,
+        weightKg: child.weightKg,
+        isParent: false,
+      }))];
+      const volumeFamily = reconcileFamilyMetric(
+        locked?.order.volumeM3,
+        locked?.order.packageCount,
+        familyBase.map((part) => ({ ...part, value: part.volumeM3 })),
+        3,
+      );
+      const weightFamily = reconcileFamilyMetric(
+        locked?.order.weightKg,
+        locked?.order.packageCount,
+        familyBase.map((part) => ({ ...part, value: part.weightKg })),
+        2,
+      );
+      const currentVolume = volumeFamily[parent.trackingNo] ?? locked?.volumeM3;
+      const currentWeight = weightFamily[parent.trackingNo] ?? locked?.weightKg;
+      const splitPieceCounts = splits.map((split) => split.packageCount);
+      const volumeAllocation = allocateSplitMetric(currentVolume, currentPkg, splitPieceCounts, 3);
+      const weightAllocation = allocateSplitMetric(currentWeight, currentPkg, splitPieceCounts, 2);
+
+      // 更新父单：件数、体积、重量一起扣减，三者始终保持同一个“当前剩余”口径。
       await tx.shipment.update({
         where: { id: parent.id },
         data: {
           packageCount: currentPkg - totalSplitCount,
+          volumeM3: volumeAllocation.remaining,
+          weightKg: weightAllocation.remaining,
         },
       });
 
@@ -640,6 +730,8 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
             currentStatus: parent.currentStatus,
             packageCount: split.packageCount,
             packageUnit: parent.packageUnit,
+            volumeM3: volumeAllocation.children[i],
+            weightKg: weightAllocation.children[i],
             transportMode: parent.transportMode,
             warehouseId: parent.warehouseId,
           },
@@ -690,6 +782,16 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
         }
       }
     });
+
+    try {
+      await runSplitTransaction();
+    } catch (error) {
+      if (error instanceof RangeError) {
+        fail(res, 400, "BAD_REQUEST", "分柜件数和体积重量对不上，请核对后重试");
+        return;
+      }
+      throw error;
+    }
 
     ok(res, { parentTrackingNo: parent.trackingNo, children: results });
   });

@@ -3,6 +3,7 @@ import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
 import { logger } from "../core/logger";
 import { verifyPassword } from "../auth/crypto-utils";
+import { lockPlanAliveById, lockPlanAliveByPrealert, PlanCancelledError, PlanMissingError } from "./plan-guard";
 import {
   computePendingRefunds,
   refundPendingOnDelete,
@@ -415,6 +416,7 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
       return;
     }
 
+
     // 构建更新数据（只改传了的单价）
     const updateData: Record<string, number> = {};
     const priceFields: Array<[string, number | undefined]> = [
@@ -439,6 +441,10 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
 
     // 改价 + 重算放同一个事务，避免只改了价没重算就崩了
     const result = await prisma.$transaction(async (tx) => {
+      // ⚠️ 整柜取消了就不该再改单价 —— 改一次会把柜里所有未付款的单重算一遍金额。
+      // 必须在事务里锁住计划行（2026-08-27 第二版）：第一版在事务外查，
+      // 读到「柜还活着」之后柜被取消了，金额照样被重算。
+      await lockPlanAliveById(tx, body.planId!);
       await tx.whrConsolidationPlanCustomer.update({
         where: { id: customer.id },
         data: updateData,
@@ -649,6 +655,13 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
     }
 
     const balanceAfter = await prisma.$transaction(async (tx) => {
+      /**
+       * ⚠️ 先锁子单，再退款（2026-08-27 补）。
+       * 全模块统一锁序是【计划 → 子单 → 钱包】。这里原来直接退款，
+       * 等于「先锁钱包、后锁子单」—— 跟付款那条路正好反着，
+       * 两边同时发生就是死锁（外部复审用真实 PostgreSQL 行锁复现过 40P01）。
+       */
+      await tx.$queryRaw`SELECT id FROM whr_consolidation_prealerts WHERE id = ${prealert.id} FOR UPDATE`;
       const after = await refundToConsolidation(tx as any, {
         companyId: auth.companyId,
         clientId: prealert.planCustomer.clientId,
@@ -737,6 +750,10 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
 
     if (body.action === "approve") {
       await prisma.$transaction(async (tx) => {
+        // ⚠️ 整柜取消了就不该再把单子改成「已付款」（2026-08-27 补）。
+        // 这条路第一版被我漏掉了 —— 外部复审实测：取消父柜之后
+        // approve 仍能把子单改成 paid，reject 仍能改单价并重算费用。
+        await lockPlanAliveByPrealert(tx, prealert.id);
         await tx.whrConsolidationPrealert.update({
           where: { id: prealert.id },
           data: {
@@ -794,6 +811,8 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
     }
 
     const rejectResult = await prisma.$transaction(async (tx) => {
+      // ⚠️ reject 会改单价并重算费用，同样要拦（2026-08-27 补）
+      await lockPlanAliveByPrealert(tx, prealert.id);
       // 改单价必须和状态回退在同一个事务里，之前写在事务外，事务失败时价格已经改掉了
       if (Object.keys(priceUpdate).length > 0) {
         await tx.whrConsolidationPlanCustomer.update({
@@ -914,6 +933,30 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
           cancelledAt: new Date(),
         },
       });
+
+      /**
+       * ⚠️ 已经收过钱的单，作废时必须**在同一个事务里把钱退回去**（2026-08-27 补）。
+       *
+       * 原来的洞（外部复审实测）：`paid` 状态是允许取消的，取消只把状态改掉、
+       * 费用清零，**余额和流水一动不动** —— 客户的钱就这么留在公司账上。
+       * 更麻烦的是取消之后状态变成 cancelled，「撤销付款」那条路会因为状态不对返回 400，
+       * **退款入口被彻底封死**，只能手工去数据库改。
+       *
+       * 退多少：把这张单的 pay(负) 和 refund(正) 加起来取反 —— 已经退过的不会重复退，
+       * 跟「删除单据时退款」用的是同一套算法。
+       */
+      const pending = await computePendingRefunds(tx as any, [{ refType: "whr", refId: prealert.id }]);
+      if (pending.length > 0) {
+        await refundPendingOnDelete(tx as any, {
+          companyId: auth.companyId,
+          refType: "whr",
+          refId: prealert.id,
+          refunds: pending,
+          remark: `作废预报单退款（${body.cancelReason!.trim()}）`,
+          operatorId: auth.userId,
+          operatorName: auth.name || auth.userId,
+        });
+      }
 
       await tx.whrConsolidationStatusLog.create({
         data: {
@@ -1068,6 +1111,8 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
     }
 
     const result = await prisma.$transaction(async (tx) => {
+      // ⚠️ 整柜取消了就不该再动这张单（2026-08-27 第二版：挪进事务并加锁）
+      await lockPlanAliveByPrealert(tx, item.prealert.id);
       await tx.whrConsolidationPrealertItem.delete({ where: { id: item.id } });
 
       await tx.whrConsolidationStatusLog.create({
@@ -1194,26 +1239,58 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
       }
     }
 
-    // 退款和删除必须在同一个事务里：不然会出现「钱退了单子还在」或者反过来
-    await prisma.$transaction(async (tx) => {
-      if (pendingRefunds.length > 0) {
+    /**
+     * 退款和删除必须在同一个事务里：不然会出现「钱退了单子还在」或者反过来。
+     *
+     * ⚠️⚠️ **退款金额必须在事务里重算**（2026-08-27 补）。
+     * 上面那次 computePendingRefunds 是在事务**外面**算的，只够给 dryRun 预览用。
+     * 外部复审实测：算完退款、还没进事务删除，这中间客户付了一笔款
+     *（余额 500→400、流水已写），删除照样按**旧金额**退 —— 那笔钱就漏退了，
+     * 单子还被级联删掉，客户来问都查不到。
+     *
+     * 现在的顺序：**先锁住计划行 → 事务内重算退款 → 退款 → 删除**。
+     * 付款那条路第一件事也是锁同一行（见 plan-guard.ts 的统一锁序），
+     * 所以并发的付款要么排在删除前面（重算时会被算进去），要么排在后面（计划已没了，付不成）。
+     */
+    const actualRefunds = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM whr_consolidation_plans WHERE id = ${planId} FOR UPDATE`;
+
+      /**
+       * ⚠️ 退款会锁钱包行，而下面的级联删除会锁子单行 —— 顺序就成了「钱包 → 子单」，
+       * 跟付款那条路的「子单 → 钱包」正好反着，两边撞上就是死锁（我上一版改出来的）。
+       * 所以退款之前**先把这个柜底下的子单全锁掉**，把顺序拉回统一的
+       * 【计划 → 子单 → 钱包】。
+       */
+      const paIds = allPrealerts.map((pa) => pa.id);
+      if (paIds.length > 0) {
+        await tx.$queryRaw`SELECT id FROM whr_consolidation_prealerts WHERE id = ANY(${paIds}) FOR UPDATE`;
+      }
+
+      const fresh = await computePendingRefunds(
+        tx as any,
+        allPrealerts.map((pa) => ({ refType: "whr", refId: pa.id })),
+      );
+      if (fresh.length > 0) {
         await refundPendingOnDelete(tx as any, {
           companyId: auth.companyId,
           refType: "whr",
           refId: plan.id,
-          refunds: pendingRefunds,
+          refunds: fresh,
           remark: `管理员删除集货计划 ${plan.planNo}，退回已付款项`,
           operatorId: auth.userId,
           operatorName: auth.name || auth.userId,
         });
       }
       await tx.whrConsolidationPlan.delete({ where: { id: planId } });
+      return fresh;
     });
 
     logger.warn("删除集货计划（仓库版）", {
       操作人: auth.userId, 计划号: plan.planNo, 计划状态: plan.status,
       连带删除: willDelete, 是否强删: blockers.length > 0,
-      退款客户数: pendingRefunds.length, 退款总额: refundTotal,
+      退款客户数: actualRefunds.length,
+      退款总额: actualRefunds.reduce((n, r) => n + r.amount, 0),
+      预览时算的: refundTotal,
     });
 
     ok(res, {
