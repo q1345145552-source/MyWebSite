@@ -112,6 +112,10 @@ interface ProductScope {
   keyword?: string;
   label: string;
 }
+/** 发给模型的知识库条数与每条字数上限 —— 上下文越长，每条消息付的 token 越多 */
+const LLM_KNOWLEDGE_MAX_ITEMS = 8;
+const LLM_KNOWLEDGE_MAX_CHARS = 500;
+
 /** 只用到品名的地方用这个最小形状（订单自己的 itemName + 全部货品行的品名） */
 type ProductNameSource = { itemName?: string; productNames?: string[] };
 interface ModelIntent {
@@ -173,7 +177,12 @@ export class ClientAiService implements AiService {
     const knowledgeItems = await this.deps.knowledgeStore.list(auth.companyId);
 
     const modelIntent = await this.parseIntentWithModel(question, orders, memory);
-    const trackingNo = this.extractTrackingNo(question) ?? modelIntent.trackingNo?.trim().toUpperCase();
+    // ⚠️ 模型返回的单号必须先验一遍，见 acceptModelTrackingNo 的说明。
+    // 原来是 `正则抓的 ?? 模型给的`，模型在 trackingNo 里随便填个非空值，
+    // 后面所有统计逻辑就被跳过了：客户问「我这个月发了多少货」，
+    // 拿到的却是「未找到运单号 XXXX」。
+    const trackingNo =
+      this.extractTrackingNo(question) ?? this.acceptModelTrackingNo(modelIntent.trackingNo, question);
     let answerDraft: string;
     let evidenceShipmentIds: string[] = [];
     let evidenceOrderIds: string[] = [];
@@ -249,6 +258,9 @@ export class ClientAiService implements AiService {
         statusLabel: this.statusScopeLabel(statusScope),
         productLabel: productScope.label,
         metric,
+        // 按状态筛过之后，「在途/已完成」的分项是拿筛剩下的再统计的，会自相矛盾，
+        // 所以只有「全部运单」才打那两行。详见 formatSummaryAnswer 的注释。
+        showStatusBreakdown: statusScope === "all",
         productNote:
           mixedProductOrders > 0
             ? `其中 ${mixedProductOrders} 单同时还有别的品名，重量体积按整票统计。`
@@ -281,28 +293,38 @@ export class ClientAiService implements AiService {
         statusLabel: "全部运单",
         productLabel: "全部品类",
         metric: "count",
+        showStatusBreakdown: true,
       });
       evidenceShipmentIds = shipments.map((item) => item.id);
       evidenceOrderIds = orders.map((item) => item.id);
       nextMemory = { intent: "summary", metric: "count" };
     }
 
-    const llmContext = JSON.stringify(
-      {
-        companyId: auth.companyId,
-        question,
-        answerDraft,
-        knowledgeItems: knowledgeItems.slice(0, 8).map((item) => ({
-          id: item.id,
-          title: item.title,
-          content: item.content,
-        })),
-        evidenceShipmentIds,
-        evidenceOrderIds,
-      },
-      null,
-      2,
-    );
+    /**
+     * 给模型的上下文只放它**用得上**的东西。
+     *
+     * ⚠️ 原来这里把 evidenceShipmentIds / evidenceOrderIds 两个**完整数组**塞了进去，
+     * 还用 `JSON.stringify(..., null, 2)` 缩进输出、每个 id 单独一行。
+     * 客户问「我一共多少单」时这就是他名下全部运单行的 id ——
+     * 按代码注释里的生产数据，一个客户 1862 行，光这一段就上万个字符。
+     * 模型的任务只是「把 answerDraft 换个说法」，一个 id 都用不上，纯烧 token，
+     * 而且每条消息要付两次（猜意图 + 润色）。
+     * 现在只给条数；完整的 id 照旧放在接口返回的 evidence 里，事后追溯不受影响。
+     *
+     * 知识库也从「整篇原文」改成截断，8 条各 500 字封顶 ——
+     * 原来一条几千字的规章能把上下文顶爆。
+     * companyId 也拿掉了：模型不需要，没必要把内部 id 发给第三方。
+     */
+    const llmContext = JSON.stringify({
+      question,
+      answerDraft,
+      knowledgeItems: knowledgeItems.slice(0, LLM_KNOWLEDGE_MAX_ITEMS).map((item) => ({
+        title: item.title,
+        content: this.truncate(item.content, LLM_KNOWLEDGE_MAX_CHARS),
+      })),
+      evidenceShipmentCount: evidenceShipmentIds.length,
+      evidenceOrderCount: evidenceOrderIds.length,
+    });
     const refinedAnswer = await this.refineAnswerWithModel(question, llmContext, answerDraft);
     if (!shouldCreateKnowledgeGap) {
       shouldCreateKnowledgeGap = this.shouldRecordKnowledgeGap({
@@ -457,6 +479,31 @@ export class ClientAiService implements AiService {
     return match?.[0]?.toUpperCase();
   }
 
+  /**
+   * 要不要采信模型给的运单号。
+   *
+   * 模型返回的这个值原来**一点校验都没有**，只要非空就直接走「查单号」分支，
+   * 把统计逻辑整个跳过。两道门：
+   * ① 长得像单号（两位以上字母 + 三位以上数字，允许 `-2` 这种子单后缀）；
+   * ② **必须真的在客户那句话里出现过** —— 忽略空格和横杠再比，
+   *    这样客户写「TH-CN 0001」时模型帮忙归一化成 THCN0001 仍然认，
+   *    但模型凭空编一个就一定过不了这关。
+   */
+  private acceptModelTrackingNo(raw: string | undefined, question: string): string | undefined {
+    const candidate = raw?.trim().toUpperCase();
+    if (!candidate) return undefined;
+    if (!/^[A-Z]{2,}\d{3,}(?:-\d+)?$/.test(candidate)) return undefined;
+    const compact = (text: string) => text.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (!compact(question).includes(compact(candidate))) return undefined;
+    return candidate;
+  }
+
+  /** 截断长文本，末尾加省略号，避免把模型上下文顶爆 */
+  private truncate(text: string, maxChars: number): string {
+    const value = text ?? "";
+    return value.length <= maxChars ? value : `${value.slice(0, maxChars)}…`;
+  }
+
   private isGreetingMessage(message: string): boolean {
     return message.length <= 20 && GREETING_RE.test(message);
   }
@@ -600,6 +647,27 @@ export class ClientAiService implements AiService {
     return undefined;
   }
 
+  /** 肯定不是品名的词，跟 resolveStatusScope / 时间词表一起维护 */
+  private static readonly BLOCKED_PRODUCT_KEYWORDS = new Set([
+    "我",
+    "我还",
+    "还有",
+    "多少",
+    "几个",
+    "几单",
+    "货",
+    "订单",
+    "运单",
+    "未完成",
+    "没完成",
+    "完成",
+    "在途",
+    "全部",
+    "所有",
+    "当前",
+    "数据",
+  ]);
+
   private normalizeProductKeyword(raw?: string): string | undefined {
     const keyword = raw?.trim().replace(/[？?。！!,.，]/g, "");
     if (!keyword) return undefined;
@@ -618,28 +686,30 @@ export class ClientAiService implements AiService {
       return undefined;
     }
     if (/\d+天/.test(keyword)) return undefined;
-    const blocked = new Set([
-      "我",
-      "我还",
-      "还有",
-      "多少",
-      "几个",
-      "几单",
-      "货",
-      "订单",
-      "运单",
-      "未完成",
-      "没完成",
-      "完成",
-      "在途",
-      "全部",
-      "所有",
-      "当前",
-      "数据",
-    ]);
-    if (blocked.has(keyword)) return undefined;
+    if (ClientAiService.BLOCKED_PRODUCT_KEYWORDS.has(keyword)) return undefined;
     if (keyword.length <= 2 && /(我还|还有)/.test(keyword)) return undefined;
-    return keyword;
+
+    /**
+     * 再剥掉「我 / 我的 / 一共 / 发了」这类跟品名无关的词。
+     *
+     * 抓品名的正则是 `(任意 1-20 字)(?:有多少|多少单)`，中文没有词边界，
+     * 前面那截会被整个抓进来：「我一共有多少单」→ 品名"我一共有"、
+     * 「我一共发了多少单」→ 品名"我一共发了"。
+     * 客户拿到的是「未查询到品名『我一共有』相关订单」，统计根本没跑。
+     *
+     * ⚠️ 只剥**开头的人称/副词**和**结尾的动词**，绝不做全局替换 ——
+     * 否则「共享单车」会被剥成「享单车」、「有机玻璃」会被剥掉「有」。
+     * 也不剥单个「共」字，同样是怕误伤「共享…」这类真品名。
+     * 剥完是空的，就说明这句话里压根没提品名，按「全部品类」处理。
+     */
+    const stripped = keyword
+      .replace(/^(?:我们|咱们|我|你们|你|咱)?(?:的)?/, "")
+      .replace(/^(?:一共|总共|统共|一起|大概|大约)?/, "")
+      .replace(/(?:发了|发的|寄了|寄的|发过|寄过|下了|有|是|的)$/, "")
+      .trim();
+    if (!stripped) return undefined;
+    if (ClientAiService.BLOCKED_PRODUCT_KEYWORDS.has(stripped)) return undefined;
+    return stripped;
   }
 
   private isLikelyGenericSummaryMessage(message: string): boolean {
@@ -1056,6 +1126,16 @@ export class ClientAiService implements AiService {
       statusLabel: string;
       productLabel: string;
       metric: SummaryMetric;
+      /**
+       * 要不要打「在途中 / 已完成」这两行分项。
+       *
+       * ⚠️ summary 是拿**已经按状态筛过**的结果统计的。客户问「我在途有多少单」，
+       * 明细里原来会打出「总单量：3 单 / 在途中：3 单 / 已完成：0 单」——
+       * 那个 0 不是他真的一单都没完成，只是被筛掉了。
+       * 这段文字还会原样交给模型润色，模型很容易顺口写成「您已完成 0 单」。
+       * 所以只有「全部运单」这一种范围才打分项，其他一律只报「符合条件多少单」。
+       */
+      showStatusBreakdown: boolean;
       /** 按品名查、且命中的单里夹着别的货时的一句说明；没有就不打这一行 */
       productNote?: string;
     },
@@ -1082,9 +1162,13 @@ export class ClientAiService implements AiService {
       "【统计明细】",
       `查询范围：${scope.timeLabel}，${scope.statusLabel}，${scope.productLabel}`,
       ...(scope.productNote ? [scope.productNote] : []),
-      `总单量：${summary.totalCount} 单`,
-      `在途中：${summary.inTransitCount} 单`,
-      `已完成：${summary.completedCount} 单`,
+      ...(scope.showStatusBreakdown
+        ? [
+            `总单量：${summary.totalCount} 单`,
+            `在途中：${summary.inTransitCount} 单`,
+            `已完成：${summary.completedCount} 单`,
+          ]
+        : [`符合条件：${summary.totalCount} 单`]),
       `总重量约：${summary.totalWeightKg.toFixed(2)} 千克`,
       `总体积约：${summary.totalVolumeM3.toFixed(3)} 立方米`,
     ].join("\n");

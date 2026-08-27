@@ -20,7 +20,8 @@
     "db:reset": "prisma migrate reset --schema=apps/api/prisma/schema.prisma",
     "test:batch-import": "tsx scripts/test-staff-batch-import.ts",
     "test:ai-numbers": "TZ=UTC tsx scripts/test-ai-answer-numbers.ts && TZ=Asia/Shanghai tsx scripts/test-ai-answer-numbers.ts",
-    "test:ai-limits": "tsx scripts/test-ai-chat-limits.ts"
+    "test:ai-limits": "tsx scripts/test-ai-chat-limits.ts",
+    "test:ai-timeout": "tsx scripts/test-deepseek-timeout.ts"
   },
   "devDependencies": {
     "@types/node": "^26.0.1",

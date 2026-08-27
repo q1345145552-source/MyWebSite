@@ -63,6 +63,12 @@ jobs:
       - name: Test AI chat limits
         run: npm run test:ai-limits
 
+      # DeepSeek 调用超时（2026-08-28 加）。
+      # 在本机起一个「只收不回」的假服务器冒充 DeepSeek，验证客户端会自己断开。
+      # 不连真的 DeepSeek、不花钱。
+      - name: Test DeepSeek timeout
+        run: npm run test:ai-timeout
+
       - name: Build frontend
         run: npm run build --prefix apps/web
         env:

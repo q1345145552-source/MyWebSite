@@ -97,6 +97,10 @@ function order(id: string): AiOrder {
 function buildService(input: {
   shipments: Shipment[];
   polish: (draft: string) => string;
+  /** 意图解析那次调用返回什么（默认返回空串，让它退回规则解析） */
+  intent?: string;
+  /** 记下每次发给模型的上下文，用来验证有没有塞没用的东西进去 */
+  contexts?: string[];
 }) {
   const memoryRows = new Map<string, AiSessionMemoryRecord>();
   const audits: AiQueryAuditLog[] = [];
@@ -130,7 +134,8 @@ function buildService(input: {
       },
       llmClient: {
         async summarizeWithContext({ question, context }) {
-          if (question.includes("意图解析器")) return "";
+          input.contexts?.push(context);
+          if (question.includes("意图解析器")) return input.intent ?? "";
           const parsed = JSON.parse(context) as { answerDraft?: string };
           return input.polish(parsed.answerDraft ?? "");
         },
@@ -179,21 +184,29 @@ async function ask(input: {
   shipments: Shipment[];
   message: string;
   polish?: (draft: string) => string;
+  intent?: string;
 }) {
+  const contexts: string[] = [];
   const { service, audits } = buildService({
     shipments: input.shipments,
     polish: input.polish ?? (() => ""),
+    intent: input.intent,
+    contexts,
   });
   const response = await service.chat({
     auth: AUTH,
     body: { message: input.message, sessionId: `sess_test_${Math.random()}` },
   });
-  return { answer: response.answer, audit: audits[0] };
+  return { answer: response.answer, audit: audits[0], contexts };
 }
 
+/**
+ * 「总单量」只在查询范围是「全部运单」时才打；
+ * 按状态筛过之后打的是「符合条件」——因为那时候「已完成：0 单」是筛出来的假象，不能打。
+ */
 function totalCountOf(answer: string): number {
-  const matched = answer.match(/总单量：(\d+) 单/);
-  assert.ok(matched, `答复里没有「总单量」这一行：\n${answer}`);
+  const matched = answer.match(/(?:总单量|符合条件)：(\d+) 单/);
+  assert.ok(matched, `答复里没有单量那一行：\n${answer}`);
   return Number(matched[1]);
 }
 
@@ -430,10 +443,94 @@ async function main() {
     assert.equal(totalCountOf(answer), 2);
   });
 
+  // ── 16~19. 这一轮收尾的四条 ───────────────────────────────────────────────
+  await check("16) 按状态筛之后不再打自相矛盾的「已完成：0 单」", async () => {
+    const shipments = [
+      shipment({ id: "r1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs }),
+      shipment({ id: "r2", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs }),
+    ];
+    const filtered = await ask({ shipments, message: "我在途有多少单" });
+    assert.ok(
+      !filtered.answer.includes("已完成：0 单"),
+      `还在打那个会让人误会的 0：\n${filtered.answer}`,
+    );
+    assert.equal(totalCountOf(filtered.answer), 2);
+    // 「全部运单」时分项是真实的，必须照旧打出来
+    const all = await ask({ shipments, message: "我一共有多少单" });
+    assert.ok(all.answer.includes("在途中："), `全部范围下的分项被误删了：\n${all.answer}`);
+    assert.ok(all.answer.includes("已完成："), `全部范围下的分项被误删了：\n${all.answer}`);
+  });
+
+  await check("17) 模型编一个单号，抢不走统计分支", async () => {
+    const shipments = [
+      shipment({ id: "s1", createdAtMs: beijingMonthStartMs() + 1000, updatedAtMs: nowMs }),
+    ];
+    const { answer } = await ask({
+      shipments,
+      message: "我这个月一共发了多少货？",
+      // 模型在 trackingNo 里瞎填一个问句里根本没有的单号
+      intent: JSON.stringify({ intent: "tracking", trackingNo: "THCN9999" }),
+    });
+    assert.ok(!answer.includes("未找到运单号"), `被模型编的单号带偏了：\n${answer}`);
+    assert.ok(answer.includes("查询范围："), `没走统计分支：\n${answer}`);
+    assert.equal(totalCountOf(answer), 1);
+  });
+
+  await check("18) 客户写「TH-CN 0001」时，模型归一化出来的单号仍然采信", async () => {
+    const target = shipment({ id: "t1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs });
+    const { answer } = await ask({
+      shipments: [{ ...target, trackingNo: "THCN0001" } as Shipment],
+      message: "我的单号 TH-CN 0001 到哪了",
+      intent: JSON.stringify({ intent: "tracking", trackingNo: "THCN0001" }),
+    });
+    assert.ok(answer.includes("THCN0001"), `没认出这个单号：\n${answer}`);
+    assert.ok(!answer.includes("未找到运单号"), `认成查无此单了：\n${answer}`);
+  });
+
+  await check("19) 发给模型的上下文里不再塞整份运单 id 列表", async () => {
+    const shipments = Array.from({ length: 50 }, (_, i) =>
+      shipment({ id: `u${i}`, createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs }),
+    );
+    const { contexts } = await ask({ shipments, message: "我一共有多少单" });
+    assert.ok(contexts.length >= 1, "没抓到发给模型的上下文");
+    for (const context of contexts) {
+      assert.ok(!context.includes("evidenceShipmentIds"), `上下文里还有整份运单 id：\n${context}`);
+      assert.ok(!context.includes("evidenceOrderIds"), `上下文里还有整份订单 id：\n${context}`);
+      assert.ok(!context.includes("s_u49"), "上下文里出现了具体的运单 id");
+    }
+    const longest = Math.max(...contexts.map((c) => c.length));
+    assert.ok(longest < 4000, `上下文还是太长了：${longest} 字符`);
+  });
+
+  await check("20) 「我一共有多少单」这类问法不会被当成品名", async () => {
+    // 抓品名的正则会把「我一共有」整个抓进去。中文没有词边界，
+    // 光靠黑名单堵不住，得把开头的人称/副词和结尾的动词剥掉。
+    orderNames.set("v1", { itemName: "共享单车配件", productNames: ["共享单车配件"] });
+    orderNames.set("v2", { itemName: "有机玻璃", productNames: ["有机玻璃"] });
+    const shipments = [
+      shipment({ id: "v1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs }),
+      shipment({ id: "v2", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs }),
+    ];
+    for (const message of ["我一共有多少单", "我一共发了多少单", "我总共有多少单"]) {
+      const { answer } = await ask({ shipments, message });
+      assert.ok(!answer.includes("未查询到品名"), `「${message}」被当成品名了：\n${answer}`);
+      assert.equal(totalCountOf(answer), 2, `「${message}」算错了：\n${answer}`);
+    }
+    // 反过来：剥词不能把真品名剥坏（"共享…"不能剥成"享…"，"有机玻璃"不能剥掉"有"）
+    for (const [message, expected] of [
+      ["共享单车配件有多少单", "品名：共享单车配件"],
+      ["有机玻璃有多少单", "品名：有机玻璃"],
+      ["我的有机玻璃有多少单", "品名：有机玻璃"],
+    ] as Array<[string, string]>) {
+      const { answer } = await ask({ shipments, message });
+      assert.ok(answer.includes(expected), `「${message}」认错品名：\n${answer}`);
+    }
+  });
+
   if (failures.length > 0) {
-    throw new Error(`${failures.length}/15 项不通过（TZ=${TZ_LABEL}）：${failures.join("；")}`);
+    throw new Error(`${failures.length}/20 项不通过（TZ=${TZ_LABEL}）：${failures.join("；")}`);
   }
-  console.log(`AI 答复数字校验：15 项全部通过（TZ=${TZ_LABEL}）`);
+  console.log(`AI 答复数字校验：20 项全部通过（TZ=${TZ_LABEL}）`);
 }
 
 main().catch((error) => {
