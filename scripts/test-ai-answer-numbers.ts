@@ -777,10 +777,32 @@ async function main() {
     }
   });
 
+  await check("32) 品名里含「运输」「完成」这类词时不会退回「全部品类」", async () => {
+    orderNames.set("hh1", { itemName: "运输箱", productNames: ["运输箱"] });
+    orderNames.set("hh2", { itemName: "别的货", productNames: ["别的货"] });
+    const shipments = ["hh1", "hh2"].map((id) =>
+      shipment({ id, createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs }),
+    );
+    const { answer } = await ask({
+      shipments,
+      message: "帮我看看这个品类",
+      intent: JSON.stringify({ intent: "summary", itemName: "运输箱" }),
+    });
+    assert.ok(answer.includes("品名：运输箱"), `真品名被词表拒掉了：\n${answer}`);
+    assert.equal(totalCountOf(answer), 1, `退回了全部品类：\n${answer}`);
+  });
+
+  await check("33) 但整句问话仍然拦得住（词表只是不再误伤真品名）", async () => {
+    orderNames.set("ii1", { itemName: "运输箱", productNames: ["运输箱"] });
+    const shipments = [shipment({ id: "ii1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs })];
+    const { answer } = await ask({ shipments, message: "我在途有多少单" });
+    assert.ok(answer.includes("全部品类"), `整句问话被当成品名了：\n${answer}`);
+  });
+
   if (failures.length > 0) {
-    throw new Error(`${failures.length}/31 项不通过（TZ=${TZ_LABEL}）：${failures.join("；")}`);
+    throw new Error(`${failures.length}/33 项不通过（TZ=${TZ_LABEL}）：${failures.join("；")}`);
   }
-  console.log(`AI 答复数字校验：31 项全部通过（TZ=${TZ_LABEL}）`);
+  console.log(`AI 答复数字校验：33 项全部通过（TZ=${TZ_LABEL}）`);
 }
 
 main().catch((error) => {

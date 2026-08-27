@@ -735,16 +735,20 @@ export class ClientAiService implements AiService {
     //   ·「今日发了多少单」        → 品名"今日发了"（原表只有「今天」没有「今日」）
     //   ·「最近 3 天异常件有多少？」→ 品名"天异常件"（原表有「完成/在途」，独独漏了「异常/退回/取消」）
     // 最后这句还是**系统自己摆在客户面前的推荐问题**，一点就回「未查询到品名『天异常件』相关订单」。
-    if (
+    /**
+     * ⚠️ 这道词表只对**从句子里抓出来的片段**做「包含即拒」。
+     * 真实品名（模型返回的、从数据库认出来的）只在**整个名字就等于**某个词时才拒 ——
+     * 否则品名叫「运输箱」「完成品」的客户，一问就会退回「全部品类」，
+     * 系统把他**全部**的单都报给他，数字大得离谱。
+     */
+    const looksLikeSentence =
       /(最近|今天|今日|昨天|昨日|本周|这周|本星期|这星期|这个星期|本月|这个月|这月|当月|在途|路上|运输|完成|未完成|异常|退回|取消|多少|几单|统计|汇总|有多少|还有|查询范围)/.test(
         keyword,
-      )
-    ) {
-      return undefined;
-    }
-    if (/\d+天/.test(keyword)) return undefined;
+      );
+    if (fromSentence && looksLikeSentence) return undefined;
+    if (fromSentence && /\d+天/.test(keyword)) return undefined;
     if (ClientAiService.BLOCKED_PRODUCT_KEYWORDS.has(keyword)) return undefined;
-    if (keyword.length <= 2 && /(我还|还有)/.test(keyword)) return undefined;
+    if (fromSentence && keyword.length <= 2 && /(我还|还有)/.test(keyword)) return undefined;
 
     if (!fromSentence) return keyword;
 
@@ -1139,7 +1143,8 @@ export class ClientAiService implements AiService {
   private extractNumberUnitPairs(text: string): Set<string> {
     const normalized = this.normalizeDigits(text);
     const pairs = new Set<string>();
-    const re = /(-?\d+(?:\.\d+)?)\s*(单|票|张|千克|公斤|kg|KG|Kg|立方米|立方米数|立方|方|m³|M³|件|箱)/g;
+    // 长的单位写在前面，否则「立方米」会先被「立方」吃掉半截
+    const re = /(-?\d+(?:\.\d+)?)\s*(千克|公斤|kg|KG|Kg|立方米|立方|方|m³|M³|单|票|张|件|箱)/g;
     let match: RegExpExecArray | null;
     while ((match = re.exec(normalized)) !== null) {
       const unitClass = this.unitClassOf(match[2]);
@@ -1152,7 +1157,7 @@ export class ClientAiService implements AiService {
   private unitClassOf(unit: string): string | undefined {
     if (/^(单|票|张)$/.test(unit)) return "count";
     if (/^(千克|公斤|kg|KG|Kg)$/.test(unit)) return "weight";
-    if (/^(立方米|立方米数|立方|方|m³|M³)$/.test(unit)) return "volume";
+    if (/^(立方米|立方|方|m³|M³)$/.test(unit)) return "volume";
     if (/^(件|箱)$/.test(unit)) return "piece";
     return undefined;
   }
