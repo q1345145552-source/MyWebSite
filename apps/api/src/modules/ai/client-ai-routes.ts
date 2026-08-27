@@ -17,8 +17,28 @@ import { ClientAiService } from "./ai-service";
 import { HttpDeepSeekClient } from "./deepseek-client";
 import type { AuthContext, QueryDataSource, QueryScope } from "./ai-types";
 import type { HttpRequest, HttpResponse, MinimalHttpApp } from "../../server";
+import { checkRateLimit, rateLimitKey } from "../core/rate-limit";
+import { logger } from "../core/logger";
 
-
+/**
+ * AI 聊天的三个上限（2026-08-28 加，数值经用户确认）。
+ *
+ * 🚨 `/client/ai/chat` 是全系统**唯一会直接花钱**的接口：
+ * 每收到一条客户消息，代码固定调两次 DeepSeek —— 一次猜意图（ai-service.ts 的
+ * parseIntentWithModel）、一次润色答复（refineAnswerWithModel），
+ * 客户只说一句「你好」也照样两次。
+ * 而在这之前它**一次限流都没有**，消息长度也不校验，请求体上限还是 20MB（server.ts）。
+ * 登录接口 2026-08 就有限流了（每 IP 每分钟 10 次），真正花钱的这个反而一直裸着 ——
+ * 任何一个客户账号写个循环，一晚上就能刷出巨额 DeepSeek 账单，没有任何东西拦得住。
+ *
+ * ⚠️ 限流按**账号**计数，不按 IP。这里的攻击者是已经登录进来的客户，
+ * 按 IP 计数换个代理就绕过去了（登录接口那条 IP 限流正吃这个亏，见待办 B1）。
+ * 改密码接口用的也是账号维度（auth/routes.ts 的 rateLimitKey(auth.userId, ...)）。
+ */
+const AI_CHAT_MAX_PER_MINUTE = 10;
+const AI_CHAT_MAX_MESSAGE_CHARS = 500;
+/** sessionId 是客户端自己传的，会被当成 key 写进会话记忆表，必须卡长度 */
+const AI_CHAT_MAX_SESSION_ID_CHARS = 100;
 
 class PrismaClientScopedDataSource implements QueryDataSource {
   async listOrders(scope: QueryScope): Promise<Order[]> {
@@ -127,10 +147,46 @@ export function registerClientAiRoutes(app: MinimalHttpApp): void {
         return;
       }
 
+      // 先限流再干别的：这一步之后的任何一条路都可能触发两次 DeepSeek 调用。
+      // ⚠️ 前端 apiRequest 遇到 429 会自动重试 2 次（core-api.ts），
+      // 重试也会走到这里 +1，但不会再往后走、不花钱，窗口也不会被延长。
+      if (checkRateLimit(rateLimitKey(auth.userId, "ai-chat"), AI_CHAT_MAX_PER_MINUTE, 60_000)) {
+        logger.warn("[ai] 聊天限流触发", { userId: auth.userId, companyId: auth.companyId });
+        res
+          .status(429)
+          .json(
+            jsonError(
+              "BAD_REQUEST",
+              `问得有点快，请稍等一会儿再问（每分钟最多 ${AI_CHAT_MAX_PER_MINUTE} 条）`,
+            ),
+          );
+        return;
+      }
+
+      // 只挑出接口真正要用的两个字段，不把整个 body 原样往下传
+      const rawBody = (req.body ?? {}) as Record<string, unknown>;
+      const message = typeof rawBody.message === "string" ? rawBody.message : "";
+      if (message.length > AI_CHAT_MAX_MESSAGE_CHARS) {
+        res
+          .status(400)
+          .json(
+            jsonError(
+              "BAD_REQUEST",
+              `一次最多问 ${AI_CHAT_MAX_MESSAGE_CHARS} 个字，请把问题说得短一些`,
+            ),
+          );
+        return;
+      }
+      const sessionId = typeof rawBody.sessionId === "string" ? rawBody.sessionId : undefined;
+      if (sessionId && sessionId.length > AI_CHAT_MAX_SESSION_ID_CHARS) {
+        res.status(400).json(jsonError("BAD_REQUEST", "会话标识不合法，请刷新页面后重试"));
+        return;
+      }
+
       // Company scope is enforced by service-level query filtering.
       const response = await service.chat({
         auth,
-        body: (req.body ?? {}) as AiChatRequest,
+        body: { message, sessionId } satisfies AiChatRequest,
       });
       res.status(200).json(jsonOk(response));
     } catch (error) {

@@ -221,6 +221,9 @@ export default function AiChatWidget() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder="例如：我的单号 THCN0001 到哪了？"
+                /* 后端同一个上限（client-ai-routes.ts 的 AI_CHAT_MAX_MESSAGE_CHARS = 500）。
+                   前端拦住是为了别让客户打完一大段才被告知太长；真正说了算的是后端那道。 */
+                maxLength={500}
                 style={{
                   width: "100%",
                   border: "1px solid var(--l-strong)",

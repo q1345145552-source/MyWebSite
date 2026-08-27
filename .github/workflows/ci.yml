@@ -57,6 +57,12 @@ jobs:
       - name: Test AI answer numbers
         run: npm run test:ai-numbers
 
+      # AI 聊天接口的限流与长度校验（2026-08-28 加）。
+      # 这个接口每条消息固定调两次 DeepSeek，是全系统唯一直接花钱的地方。
+      # 脚本只跑「被拦下」的路径，全程不连数据库、不调 DeepSeek。
+      - name: Test AI chat limits
+        run: npm run test:ai-limits
+
       - name: Build frontend
         run: npm run build --prefix apps/web
         env:
