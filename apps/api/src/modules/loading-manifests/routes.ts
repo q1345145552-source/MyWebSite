@@ -3,6 +3,7 @@ import { syncParentStatusFromChildren } from "../shipments/parent-status";
 import { metricByPieceShare, reconcileFamilyMetric } from "../shipments/split-metrics";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
+import { loadOrderProductDims } from "../orders/routes";
 // 柜子状态流程只在 containers/status-flow.ts 定义一处，本文件不再自己抄
 import {
   CONTAINER_STATUS_LABEL,
@@ -92,7 +93,7 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
     const containerNo = body.containerNo?.trim() || await issueManifestNo(new Date());
     // 查重
     const existed = await prisma.container.findUnique({ where: { containerNo }, select: { id: true } });
-    if (existed) { fail(res, 409, "CONFLICT", `柜号 ${containerNo} 已存在`); return; }
+    if (existed) { fail(res, 409, "VALIDATION_ERROR", `柜号 ${containerNo} 已存在`); return; }
     const container = await prisma.container.create({
       data: {
         id: `ctr_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -245,6 +246,8 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
                 currentStatus: true,
                 order: {
                   select: {
+                    // 取订单 id 是为了查它的产品行长宽高（2026-08-27 加）
+                    id: true,
                     clientId: true,
                     itemName: true,
                     packageCount: true,
@@ -282,6 +285,16 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
     });
     if (!container) { fail(res, 404, "NOT_FOUND", "装柜任务不存在"); return; }
     if (container.items.length === 0) { fail(res, 400, "VALIDATION_ERROR", "空柜没有可导出的货物"); return; }
+
+    /**
+     * 先把柜里这些货所属订单的长宽高一次性查出来（2026-08-27 加）。
+     * 长宽高记在「产品行」上，运单本身没有；导出要用，所以这里批量取，
+     * 不在循环里一条条查（那样有多少票货就查多少次）。
+     */
+    const dimsByOrderId = await loadOrderProductDims(
+      auth.companyId,
+      container.items.map((it) => it.shipment.order?.id).filter((v): v is string => Boolean(v)),
+    );
 
     const customerMap = new Map<string, {
       clientId: string;
@@ -369,6 +382,11 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
         // ⚠️ 同 admin-ops：没填就是没填，不要变成 0（2026-08-26 修）
         weightKg: loadedWeight ?? null,
         volumeM3: Number(item.loadedVolumeM3),
+        // 长宽高（2026-08-27 加）：来自订单的产品行；
+        // 同一票有多个不同尺寸时是 "60/50" 这样的字符串，没填就是 null
+        lengthCm: (order?.id ? dimsByOrderId.get(order.id)?.lengthCm : undefined) ?? null,
+        widthCm: (order?.id ? dimsByOrderId.get(order.id)?.widthCm : undefined) ?? null,
+        heightCm: (order?.id ? dimsByOrderId.get(order.id)?.heightCm : undefined) ?? null,
         remark: shipment.remark || "",
         status: shipment.currentStatus,
         containerNos: [container.containerNo],

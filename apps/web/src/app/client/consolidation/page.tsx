@@ -284,6 +284,10 @@ export default function ClientConsolidationPage() {
       await loadTasks();
     } catch (e: any) {
       setToast(e.message);
+      // 失败也要刷新（2026-08-27 补）：后端现在会说「刚刚被别人改过，请刷新后再看」，
+      // 页面不刷新的话用户看到的还是旧数字，容易照着旧数字再操作一次。
+      if (selectedTaskId) await loadDetail(selectedTaskId);
+      await loadTasks();
     }
   };
 
@@ -305,6 +309,11 @@ export default function ClientConsolidationPage() {
       await loadTasks();
     } catch (e: any) {
       setToast(e.message);
+      // 失败也要刷新（2026-08-27 补）：后端现在会说「刚刚被别人改过，请刷新后再看」，
+      // 页面不刷新的话用户看到的还是旧数字，容易照着旧数字再操作一次。
+      await loadBalance();
+      if (selectedTaskId) await loadDetail(selectedTaskId);
+      await loadTasks();
     } finally {
       setPayLoading(false);
     }
@@ -478,7 +487,9 @@ export default function ClientConsolidationPage() {
               {!showProgress && (
                 <div style={{ marginBottom: 20, padding: 16, background: "var(--c-blue-bg)", borderRadius: 10, border: "1px solid #E4E6EC" }}>
                   <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
-                    {taskDetail.containerNo && <div><span style={{ fontSize: 12, color: "var(--t-muted)" }}>柜号</span><div style={{ fontWeight: 600 }}>{taskDetail.containerNo}</div></div>}
+                    {/* 柜号对客户屏蔽（用户 2026-08-07 定的规矩，运单那边一直是这样，
+                        集货这页当初是照抄员工页面来的，把这条漏掉了）。
+                        管理员端和员工端照常显示，只有客户端不给看。 */}
                     {taskDetail.loadingDate && <div><span style={{ fontSize: 12, color: "var(--t-muted)" }}>装柜日期</span><div style={{ fontWeight: 600 }}>{taskDetail.loadingDate}</div></div>}
                     {taskDetail.loadingDate && <div><span style={{ fontSize: 12, color: "var(--t-muted)" }}>装柜时间</span><div style={{ fontWeight: 600 }}>{formatBeijingTime(taskDetail.loadingDate)}</div></div>}
                     <div><span style={{ fontSize: 12, color: "var(--t-muted)" }}>物流状态</span><div style={{ fontWeight: 600 }}>{STATUS_ZH[taskDetail.status]}</div></div>

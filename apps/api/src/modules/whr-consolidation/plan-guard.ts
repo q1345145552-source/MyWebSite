@@ -1,3 +1,5 @@
+import { BusinessError } from "../core/business-error";
+
 /* ==========================================================================
    整柜已取消时，不许再往里收钱（2026-08-27，第二版加锁）
    --------------------------------------------------------------------------
@@ -24,19 +26,17 @@
      不拦：撤销付款（退钱）、取消预报单 —— 柜取消了这些反而更该让它做完
    ========================================================================== */
 
-/** 整柜作废时抛这个，调用方转成 400 而不是 500 */
-export class PlanCancelledError extends Error {
+/** 整柜作废时抛这个。继承 BusinessError → 最外层自动转 400，路由不用自己接 */
+export class PlanCancelledError extends BusinessError {
   constructor(message = "这个柜已经取消了，不能再收款或计费。要退钱请走「撤销付款」。") {
-    super(message);
-    this.name = "PlanCancelledError";
+    super(message, 400, "BAD_REQUEST");
   }
 }
 
 /** 计划记录都找不到时抛这个 —— 不能当成「活着」放行 */
-export class PlanMissingError extends Error {
+export class PlanMissingError extends BusinessError {
   constructor(message = "找不到这个柜（可能已被删除），操作已取消。") {
-    super(message);
-    this.name = "PlanMissingError";
+    super(message, 404, "NOT_FOUND");
   }
 }
 
@@ -71,4 +71,55 @@ export async function lockPlanAliveByPrealert(tx: Tx, prealertId: string): Promi
   `;
   if (!rows || rows.length === 0) throw new PlanMissingError();
   if (rows[0].status === "cancelled") throw new PlanCancelledError();
+}
+
+/**
+ * 只锁住这张预报单所属的**计划行**，不判断计划死活（2026-08-27）。
+ *
+ * 用在「取消预报单」这种场合：柜子已经作废了，底下的单子照样要能取消，
+ * 所以不能用 lockPlanAliveByPrealert（那个会直接拒绝）。
+ *
+ * ⚠️ 但锁还是**必须**拿，而且必须第一个拿。全模块统一锁序是
+ * 【计划 → 子单 → 钱包】：取消这条路后面会调 syncPlanStatus 去改计划行，
+ * 如果不先锁计划、而是先锁子单，就跟「删除整柜」那条路（计划 → 子单）
+ * 正好反着，两个人同时操作就是死锁（外部复审用真实 PostgreSQL 复现过 40P01）。
+ */
+export async function lockPlanByPrealert(tx: Tx, prealertId: string): Promise<void> {
+  const rows = await tx.$queryRaw<Array<{ status: string }>>`
+    SELECT pl.status
+    FROM whr_consolidation_prealerts pa
+    JOIN whr_consolidation_plan_customers pc ON pc.id = pa.customer_id
+    JOIN whr_consolidation_plans pl ON pl.id = pc.plan_id
+    WHERE pa.id = ${prealertId}
+    FOR UPDATE OF pl
+  `;
+  if (!rows || rows.length === 0) throw new PlanMissingError();
+}
+
+/**
+ * 锁住一张预报单，并确认它**现在**还是预期的那个状态（2026-08-27）。
+ *
+ * 为什么要有这个函数：仓库版的每一步（装柜、发运、泰国签收…）原来都是
+ * 「事务外面判一下状态 → 开事务直接改」。两个员工同时点不同的按钮，
+ * 两边都是拿进门时那份旧状态去判断的，于是**两步都写进去了** ——
+ * 状态跳步、轨迹里多出重复或错序的记录，客户那边看得见。
+ *
+ * 锁住之后重新读一遍，第二个人会看到状态已经变了，直接被拦下。
+ * @param what 用在提示语里的动作名，比如「装柜」「发运」
+ */
+export async function lockPrealertExpecting(
+  tx: Tx,
+  prealertId: string,
+  expected: string,
+  what: string,
+): Promise<void> {
+  await tx.$queryRaw`SELECT id FROM whr_consolidation_prealerts WHERE id = ${prealertId} FOR UPDATE`;
+  const rows = await tx.$queryRaw<Array<{ status: string }>>`
+    SELECT status FROM whr_consolidation_prealerts WHERE id = ${prealertId}`;
+  if (!rows || rows.length === 0) {
+    throw new BusinessError("预报单不存在", 404, "NOT_FOUND");
+  }
+  if (rows[0].status !== expected) {
+    throw new BusinessError(`这张预报单刚刚被别人处理过了，${what}没有执行，请刷新后再看`);
+  }
 }

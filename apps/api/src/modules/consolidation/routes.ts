@@ -2,6 +2,7 @@ import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
 import { logger } from "../core/logger";
+import { BusinessError } from "../core/business-error";
 import { verifyPassword } from "../auth/crypto-utils";
 import {
   InsufficientBalanceError,
@@ -142,6 +143,27 @@ function formatTaskForList(task: any) {
   return formatted;
 }
 
+/**
+ * 发给**客户**的任务数据：在 formatTask 基础上摘掉柜号。
+ *
+ * 用户 2026-08-07 定的规矩：客户不能看到柜号。运单那边一直照做，
+ * 集货这块漏了 —— 客户端页面当初是照抄员工页面的，连柜号那行一起抄了过来，
+ * 后端 `...task` 又把整行原样吐出去（2026-08-27 补）。
+ * 光在前端不显示不够：抓包、看接口返回照样能拿到。
+ */
+function formatTaskForClient(task: any) {
+  const { containerNo: _hidden, ...rest } = formatTask(task) as any;
+  return rest;
+}
+
+/**
+ * 列表专用（客户端）：既摘凭证图，也摘柜号。
+ */
+function formatTaskForClientList(task: any) {
+  const { containerNo: _hidden, ...rest } = formatTaskForList(task) as any;
+  return rest;
+}
+
 function formatPrealert(pa: any) {
   return {
     ...pa,
@@ -205,7 +227,7 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       },
     });
 
-    ok(res, formatTask(task));
+    ok(res, formatTaskForClient(task));
   });
 
   // 2) 查询任务列表
@@ -231,7 +253,7 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
     const result = tasks.map((t) => {
       const volumePercent = calcVolumePercent(t);
       return {
-        ...formatTaskForList(t),
+        ...formatTaskForClientList(t),
         volumePercent,
         isNearFull: volumePercent >= 85,
         prealertCount: t.prealerts.length,
@@ -252,8 +274,9 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    const task = await prisma.consolidationTask.findUnique({
-      where: { id: taskId },
+    const task = await prisma.consolidationTask.findFirst({
+      // ⚠️ 必须带 companyId（2026-08-27 补）：原来只按 id 查，实测能跨公司拿到别家数据
+      where: { id: taskId , companyId: auth.companyId },
       include: {
         prealerts: {
           orderBy: { createdAt: "asc" },
@@ -271,7 +294,7 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
     }
 
     ok(res, {
-      ...formatTask(task),
+      ...formatTaskForClient(task),
       volumePercent: calcVolumePercent(task),
       isNearFull: calcVolumePercent(task) >= 85,
       prealerts: task.prealerts.map((pa) => ({
@@ -317,7 +340,7 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       data: { destinationTh: body.destinationTh.trim() },
     });
 
-    ok(res, formatTask(updated));
+    ok(res, formatTaskForClient(updated));
   });
 
   // 5) 创建预报单
@@ -499,8 +522,9 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    const pa = await prisma.consolidationPrealert.findUnique({
-      where: { id: body.prealertId },
+    const pa = await prisma.consolidationPrealert.findFirst({
+      // ⚠️ 必须带 companyId（2026-08-27 补）：原来只按 id 查，实测能跨公司拿到别家数据
+      where: { id: body.prealertId , companyId: auth.companyId },
       include: { task: true },
     });
     if (!pa || pa.clientId !== auth.userId) {
@@ -530,6 +554,21 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
 
     // 事务内：产品行按行增量同步，不再整批删除重建
     const updated = await prisma.$transaction(async (tx) => {
+      /**
+       * ⚠️ 锁住再复查（2026-08-27 补）。上面「已签收的不能改」在事务外面：
+       * 仓库正好在这一刻签收了，客户这边照样能改掉货物明细 ——
+       * 签收单上写的和系统里存的就对不上了。
+       */
+      await tx.$queryRaw`SELECT id FROM consolidation_prealerts WHERE id = ${pa.id} FOR UPDATE`;
+      const freshPa = await tx.consolidationPrealert.findUnique({
+        where: { id: pa.id },
+        select: { status: true },
+      });
+      if (!freshPa) throw new BusinessError("预报单不存在", 404, "NOT_FOUND");
+      if (freshPa.status !== "pending") {
+        throw new BusinessError("这张预报单刚刚被仓库签收了，修改没有保存，请刷新后再看");
+      }
+
       if (body.products) {
         const rows = body.products;
         const keepIds = rows
@@ -621,8 +660,9 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    const pa = await prisma.consolidationPrealert.findUnique({
-      where: { id: body.prealertId },
+    const pa = await prisma.consolidationPrealert.findFirst({
+      // ⚠️ 必须带 companyId（2026-08-27 补）：原来只按 id 查，实测能跨公司拿到别家数据
+      where: { id: body.prealertId , companyId: auth.companyId },
     });
     if (!pa || pa.clientId !== auth.userId) {
       fail(res, 403, "FORBIDDEN", "无权删除该预报单");
@@ -806,6 +846,21 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
     const now = new Date();
 
     await prisma.$transaction(async (tx) => {
+      /**
+       * ⚠️ 锁住再复查（2026-08-27 补）。上面那道「有没有待审核的付款」在事务外面：
+       * 一个人点「通过」一个人点「拒绝」，两边都能过，最后谁写完谁算数 ——
+       * 同一笔付款可能既写了「已通过」的记录又写了「已拒绝」的记录。
+       */
+      await tx.$queryRaw`SELECT id FROM consolidation_tasks WHERE id = ${task.id} FOR UPDATE`;
+      const fresh = await tx.consolidationTask.findUnique({
+        where: { id: task.id },
+        select: { paymentStatus: true },
+      });
+      if (!fresh) throw new BusinessError("集货任务不存在", 404, "NOT_FOUND");
+      if (fresh.paymentStatus !== "pending_review") {
+        throw new BusinessError("这笔付款刚刚已经被别人审核过了，请刷新后再看");
+      }
+
       await tx.consolidationTask.update({
         where: { id: body.taskId },
         data: {
@@ -867,6 +922,21 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
     }
 
     await prisma.$transaction(async (tx) => {
+      /**
+       * ⚠️ 锁住再复查（2026-08-27 补）。上面那道「有没有待审核的付款」在事务外面：
+       * 一个人点「通过」一个人点「拒绝」，两边都能过，最后谁写完谁算数 ——
+       * 同一笔付款可能既写了「已通过」的记录又写了「已拒绝」的记录。
+       */
+      await tx.$queryRaw`SELECT id FROM consolidation_tasks WHERE id = ${task.id} FOR UPDATE`;
+      const fresh = await tx.consolidationTask.findUnique({
+        where: { id: task.id },
+        select: { paymentStatus: true },
+      });
+      if (!fresh) throw new BusinessError("集货任务不存在", 404, "NOT_FOUND");
+      if (fresh.paymentStatus !== "pending_review") {
+        throw new BusinessError("这笔付款刚刚已经被别人审核过了，请刷新后再看");
+      }
+
       await tx.consolidationTask.update({
         where: { id: body.taskId },
         data: {
@@ -949,8 +1019,9 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    const task = await prisma.consolidationTask.findUnique({
-      where: { id: taskId },
+    const task = await prisma.consolidationTask.findFirst({
+      // ⚠️ 必须带 companyId（2026-08-27 补）：原来只按 id 查，实测能跨公司拿到别家数据
+      where: { id: taskId , companyId: auth.companyId },
       include: {
         client: { select: { id: true, name: true, phone: true } },
         prealerts: {
@@ -991,7 +1062,10 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    const pa = await prisma.consolidationPrealert.findUnique({ where: { id: body.prealertId } });
+    const pa = await prisma.consolidationPrealert.findFirst({
+      // ⚠️ 必须带 companyId（2026-08-27 补）：原来只按 id 查，可以跨公司操作别家的单
+      where: { id: body.prealertId, companyId: auth.companyId },
+    });
     if (!pa) {
       fail(res, 404, "NOT_FOUND", "预报单不存在");
       return;
@@ -1115,6 +1189,8 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
     const feeFields: Array<[string, unknown]> = [
       ["订舱费", body.bookingFee], ["清关费", body.customsFee], ["装柜费", body.loadingFee],
     ];
+    // 校验过程中顺手把每一项转成干净的数字，**下面写库要用这个**，不能再用原始值
+    const cleanFee: Record<string, number> = {};
     for (const [label, v] of feeFields) {
       // ⚠️ 不能直接 Number()：`Number("")`、`Number(" ")`、`Number(false)` 都等于 0，
       // 会被当成「报价 0 元」放过去，再在 Prisma 那边炸成 500（外部复审实测）。
@@ -1135,6 +1211,7 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
         fail(res, 400, "BAD_REQUEST", `${label}超出合理范围，请核对后重填`);
         return;
       }
+      cleanFee[label] = n;
     }
 
     const task = await prisma.consolidationTask.findFirst({
@@ -1153,16 +1230,37 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
     }
 
 
-    const totalFee = parseFloat((Number(body.bookingFee) + Number(body.customsFee) + Number(body.loadingFee)).toFixed(2));
+    const totalFee = parseFloat((cleanFee["订舱费"] + cleanFee["清关费"] + cleanFee["装柜费"]).toFixed(2));
     const isFirstQuote = task.status === "full_confirmed";
 
     await prisma.$transaction(async (tx) => {
+      /**
+       * ⚠️ 锁住再复查（2026-08-27 补）。上面那道状态检查在事务外面：
+       * 客户正好在这一瞬间付了款，员工这边照样能把已付款任务的金额从 100 改成 999，
+       * 而钱已经按 100 扣走了，账就对不上了。锁住之后第二个人会看到状态已经是 paid，直接被拦。
+       */
+      await tx.$queryRaw`SELECT id FROM consolidation_tasks WHERE id = ${task.id} FOR UPDATE`;
+      const fresh = await tx.consolidationTask.findUnique({
+        where: { id: task.id },
+        select: { status: true, paymentStatus: true },
+      });
+      if (!fresh) throw new BusinessError("任务不存在", 404, "NOT_FOUND");
+      if (fresh.paymentStatus !== "unpaid") {
+        throw new BusinessError("客户已经付款（或正在审核付款），不能再改价。要改请先撤销付款");
+      }
+      if (fresh.status !== "full_confirmed" && fresh.status !== "quoted") {
+        throw new BusinessError("这个任务的状态刚刚变了，报价没有保存，请刷新后再看");
+      }
+
       await tx.consolidationTask.update({
         where: { id: body.taskId },
         data: {
-          bookingFee: body.bookingFee,
-          customsFee: body.customsFee,
-          loadingFee: body.loadingFee,
+          // ⚠️ 必须写上面转好的数字，不能写 body 里的原始值（2026-08-27 补）：
+          // 前端传 " 1.25 "（带空格）时校验能过（Number 会忽略空格），
+          // 但直接丢给数据库会解析失败，用户看到的是「服务器错误」而不是提示。
+          bookingFee: cleanFee["订舱费"],
+          customsFee: cleanFee["清关费"],
+          loadingFee: cleanFee["装柜费"],
           totalFee,
           ...(isFirstQuote ? { status: "quoted" } : {}),
         },
@@ -1341,6 +1439,25 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
     }
 
     await prisma.$transaction(async (tx) => {
+      /**
+       * ⚠️ 锁住再复查（2026-08-27 补）。上面那道状态检查在事务外面：
+       * 客户正好在这一瞬间付了款，员工这边照样能把任务取消掉，而且**一分钱不退** ——
+       * 单子没了、钱还在公司账上，客户只能打电话来吵。
+       * 锁住之后第二个人会看到状态/付款状态已经变了，取消不会执行。
+       */
+      await tx.$queryRaw`SELECT id FROM consolidation_tasks WHERE id = ${task.id} FOR UPDATE`;
+      const fresh = await tx.consolidationTask.findUnique({
+        where: { id: task.id },
+        select: { status: true, paymentStatus: true },
+      });
+      if (!fresh) throw new BusinessError("任务不存在", 404, "NOT_FOUND");
+      if (fresh.paymentStatus !== "unpaid") {
+        throw new BusinessError("客户已经付款（或正在审核付款），不能直接取消。要取消请先「撤销付款」把钱退给客户");
+      }
+      if (!cancellable.includes(fresh.status)) {
+        throw new BusinessError("这个任务的状态刚刚变了，取消没有执行，请刷新后再看");
+      }
+
       // 删除产品行
       const prealerts = await tx.consolidationPrealert.findMany({
         where: { taskId: body.taskId },
@@ -1387,13 +1504,20 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    const task = await prisma.consolidationTask.findUnique({
-      where: { id: taskId },
+    const task = await prisma.consolidationTask.findFirst({
+      // ⚠️ 必须带 companyId（2026-08-27 补）：原来只按 id 查，实测能跨公司拿到别家数据
+      where: { id: taskId , companyId: auth.companyId },
       select: { taskNo: true },
     });
+    // 查不到必须当场停：以前漏了这一步，别家公司的任务号虽然查不到，
+    // 下面的预报单还是照拉不误，等于把人家的货物明细导出去了（2026-08-27 实测复现）
+    if (!task) {
+      fail(res, 404, "NOT_FOUND", "任务不存在");
+      return;
+    }
 
     const prealerts = await prisma.consolidationPrealert.findMany({
-      where: { taskId, status: "received" },
+      where: { taskId, companyId: auth.companyId, status: "received" },
       orderBy: { createdAt: "asc" },
       include: { products: { orderBy: { sortOrder: "asc" } } },
     });
@@ -1497,26 +1621,19 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
   });
 
   // 2) 管理员删除任务
-  app.delete("/admin/consolidation/tasks", async (req, res) => {
-    const auth = requireRole(req, res, ["admin"]);
-    if (!auth) return;
-
-    const taskId = (req.query as any)?.taskId as string | undefined;
-    if (!taskId?.trim()) {
-      fail(res, 400, "BAD_REQUEST", "taskId 为必填");
-      return;
-    }
-
-    const task = await prisma.consolidationTask.findUnique({ where: { id: taskId } });
-    if (!task) {
-      fail(res, 404, "NOT_FOUND", "任务不存在");
-      return;
-    }
-
-    await prisma.consolidationTask.delete({ where: { id: taskId } });
-
-    ok(res, { deleted: true, taskId });
-  });
+  /**
+   * ❌ 旧的 `DELETE /admin/consolidation/tasks` 已在 2026-08-27 删除。
+   *
+   * 它是最早期的写法：拿到 taskId 就 `delete`，**三道保护一道都不走** ——
+   *   · 不查有没有已收货的预报单（新版会拦，要强删得输管理员密码）
+   *   · 不给删除预览（新版会先告诉你要连带删掉多少预报单、货物、日志）
+   *   · **不退钱**（新版会把客户已付的款在同一个事务里退回集货余额）
+   * 误调一次就是「任务删了、客户的钱还在公司账上」，而且删了找不回来。
+   *
+   * 前端从来没调用过它（2026-08-27 全项目 grep 确认）。
+   * 要删任务请用 `POST /admin/consolidation/tasks/delete`，
+   * 它带 dryRun 预览、强删密码和退款。
+   */
 
   // 3) 管理员强制编辑预报单
   // ==========================================================================
@@ -1541,22 +1658,46 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       fail(res, 404, "NOT_FOUND", "集货任务不存在");
       return;
     }
+    // 这里只做「早点给个好看的提示」，真正说了算的判断在下面事务里重做一遍。
     if (task.paymentStatus !== "paid") {
       fail(res, 400, "BAD_REQUEST", "只有「已付款」的任务能撤销");
       return;
     }
 
-    const rows = await prisma.consolidationBalanceLedger.findMany({
-      where: { refType: "normal", refId: task.id },
-      select: { amount: true },
-    });
-    const refundable = -rows.reduce((sum, r) => sum + Number(r.amount), 0);
-    if (!(refundable > 0)) {
-      fail(res, 400, "BAD_REQUEST", "这个任务没有可退的金额（可能已经退过了）");
-      return;
-    }
+    const { balanceAfter, refundable } = await prisma.$transaction(async (tx) => {
+      /**
+       * ⚠️ 先锁任务，再复查状态和退款金额（2026-08-27 补）。跟仓库版那条一样的洞：
+       * 原来状态和「可退多少」都在事务外面读，两个管理员同时点「撤销付款」，
+       * 两边都读到「已付款 / 可退 400」，各退一次 —— 客户白拿一笔（已实测复现）。
+       * 顺带统一锁序【任务 → 钱包】，避免跟付款那条路互相等成死锁。
+       */
+      await tx.$queryRaw`SELECT id FROM consolidation_tasks WHERE id = ${task.id} FOR UPDATE`;
+      const fresh = await tx.consolidationTask.findUnique({
+        where: { id: task.id },
+        select: { paymentStatus: true, status: true },
+      });
+      if (!fresh) throw new BusinessError("集货任务不存在", 404, "NOT_FOUND");
+      if (fresh.paymentStatus !== "paid") {
+        throw new BusinessError("这个任务刚刚被别人改过付款状态了，撤销没有执行，请刷新后再看");
+      }
+      /**
+       * ⚠️ 已经开始装柜/发运的不能退（2026-08-27 补）。
+       * 流程是 collecting → full_confirmed → quoted → paid → loading → …
+       * 走到 loading 之后货已经在柜里了，这时候把钱退回去等于白送。
+       */
+      if (fresh.status !== "paid") {
+        throw new BusinessError("这个任务已经进入装柜流程，不能撤销付款");
+      }
 
-    const balanceAfter = await prisma.$transaction(async (tx) => {
+      const rows = await tx.consolidationBalanceLedger.findMany({
+        where: { refType: "normal", refId: task.id },
+        select: { amount: true },
+      });
+      const refundable = -rows.reduce((sum, r) => sum + Number(r.amount), 0);
+      if (!(refundable > 0)) {
+        throw new BusinessError("这个任务没有可退的金额（可能刚刚已经退过了）");
+      }
+
       const after = await refundToConsolidation(tx as any, {
         companyId: auth.companyId,
         clientId: task.clientId,
@@ -1570,7 +1711,19 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       });
       await tx.consolidationTask.update({
         where: { id: task.id },
-        data: { paymentStatus: "unpaid", paymentProofUploadedAt: null },
+        data: {
+          paymentStatus: "unpaid",
+          /**
+           * ⚠️ 流程状态也必须退回「已报价」（2026-08-27 补）。
+           *
+           * 之前只把 paymentStatus 改回 unpaid，status 还停在 paid，后果实测有两条：
+           *   ① 客户**再也付不了款** —— 付款那条路要求 status = quoted
+           *   ② 员工**照样能装柜** —— 装柜那条路要求 status = paid
+           * 合起来就是「已装柜但没付款」，钱退了货还发出去。
+           */
+          status: "quoted",
+          paymentProofUploadedAt: null,
+        },
       });
       await tx.consolidationStatusLog.create({
         data: {
@@ -1579,12 +1732,12 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
           operatorId: auth.userId,
           operatorRole: "admin",
           operatorName: auth.name || auth.userId,
-          fromStatus: task.status,
-          toStatus: task.status,
+          fromStatus: "paid",
+          toStatus: "quoted",
           remark: `管理员撤销付款，退回集货余额 ¥${refundable.toFixed(2)}${body.reason?.trim() ? `（${body.reason.trim()}）` : ""}`,
         },
       });
-      return after;
+      return { balanceAfter: after, refundable };
     });
 
     ok(res, {
@@ -1592,6 +1745,7 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       refunded: refundable,
       balanceAfter,
       paymentStatus: "unpaid",
+      status: "quoted",
       message: `已退回 ¥${refundable.toFixed(2)} 到客户集货余额，任务回到未付款`,
     });
   });
@@ -1627,8 +1781,9 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    const pa = await prisma.consolidationPrealert.findUnique({
-      where: { id: body.prealertId },
+    const pa = await prisma.consolidationPrealert.findFirst({
+      // ⚠️ 必须带 companyId（2026-08-27 补）：原来只按 id 查，实测能跨公司拿到别家数据
+      where: { id: body.prealertId , companyId: auth.companyId },
       include: { task: true },
     });
     if (!pa) {
@@ -1746,7 +1901,10 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    const pa = await prisma.consolidationPrealert.findUnique({ where: { id: body.prealertId } });
+    const pa = await prisma.consolidationPrealert.findFirst({
+      // ⚠️ 必须带 companyId（2026-08-27 补）：原来只按 id 查，可以跨公司操作别家的单
+      where: { id: body.prealertId, companyId: auth.companyId },
+    });
     if (!pa) {
       fail(res, 404, "NOT_FOUND", "预报单不存在");
       return;
@@ -1772,6 +1930,7 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       return;
     }
 
+    // 这张表没有公司字段，公司归属靠下面查父预报单时核对（见后面的 prealert 校验）
     const product = await prisma.consolidationPrealertProduct.findUnique({
       where: { id: body.productId },
       select: {
@@ -1884,12 +2043,9 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    if (blockers.length > 0) {
-      if (!body.confirmPassword?.trim()) {
-        fail(res, 409, "VALIDATION_ERROR",
-          `这个集货任务不能直接删除：${blockers.join("；")}。确实要删请输入管理员密码。`);
-        return;
-      }
+    // 密码只要填对了就记下来，事务里会再查一次「现在还有没有拦截条件」
+    let passwordVerified = false;
+    if (body.confirmPassword?.trim()) {
       const admin = await prisma.user.findUnique({
         where: { id: auth.userId },
         select: { passwordHash: true },
@@ -1898,33 +2054,75 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
         fail(res, 403, "FORBIDDEN", "管理员密码不对，没有删除");
         return;
       }
+      passwordVerified = true;
+    }
+    if (blockers.length > 0 && !passwordVerified) {
+      fail(res, 409, "VALIDATION_ERROR",
+        `这个集货任务不能直接删除：${blockers.join("；")}。确实要删请输入管理员密码。`);
+      return;
     }
 
     // 退款和删除必须在同一个事务里：不然会出现「钱退了单子还在」或者反过来
-    await prisma.$transaction(async (tx) => {
-      if (pendingRefunds.length > 0) {
+    const actualRefunds = await prisma.$transaction(async (tx) => {
+      /**
+       * ⚠️ 退款金额必须**锁住任务之后重新算一遍**（2026-08-27 补）。
+       *
+       * 上面那次 computePendingRefunds 是在事务外面跑的，只是拿来给「预览」和
+       * 提示用的。客户如果正好在管理员输密码那几秒里付了款，那笔钱不在旧快照里，
+       * 删除时就漏退 —— 单子删没了，钱留在公司账上，谁也查不出来。
+       * 锁住之后重算，付款那条路会被卡住等我们，算出来的一定是最新的。
+       */
+      await tx.$queryRaw`SELECT id FROM consolidation_tasks WHERE id = ${task.id} FOR UPDATE`;
+
+      /**
+       * ⚠️ 「能不能直接删」也要**锁完重查一遍**（2026-08-27 补）。
+       * 上面那份拦截清单是事务外面算的：管理员点删除的那一刻这单还是「收货中、没人收过货」，
+       * 于是不用输密码；等事务真跑起来时仓库已经收了货 —— 一张已经开始走流程的单
+       * 就这么被无密码删掉了。这里重查，情况变了就让他重来一次并输密码。
+       */
+      const nowTask = await tx.consolidationTask.findUnique({
+        where: { id: task.id },
+        select: { status: true, prealerts: { select: { status: true } } },
+      });
+      if (!nowTask) throw new BusinessError("集货任务不存在", 404, "NOT_FOUND");
+      const nowBlocked =
+        nowTask.prealerts.some((pa) => pa.status !== "pending") ||
+        !["collecting", "cancelled"].includes(nowTask.status);
+      if (nowBlocked && !passwordVerified) {
+        throw new BusinessError(
+          "这个任务刚刚有了新动静（收到货或状态变了），删除没有执行。请刷新后确认，确实要删请输入管理员密码。",
+          409,
+          "VALIDATION_ERROR",
+        );
+      }
+
+      const fresh = await computePendingRefunds(tx as any, [{ refType: "normal", refId: task.id }]);
+      if (fresh.length > 0) {
         await refundPendingOnDelete(tx as any, {
           companyId: auth.companyId,
           refType: "normal",
           refId: task.id,
-          refunds: pendingRefunds,
+          refunds: fresh,
           remark: `管理员删除集货任务 ${task.taskNo}，退回已付款项`,
           operatorId: auth.userId,
           operatorName: auth.name || auth.userId,
         });
       }
       await tx.consolidationTask.delete({ where: { id: taskId } });
+      return fresh;
     });
+    // 回给前端的必须是**真退了多少**，不是上面那个预览数字（2026-08-27 补）
+    const actualRefundTotal = actualRefunds.reduce((s, r) => s + r.amount, 0);
 
     logger.warn("删除集货任务", {
       操作人: auth.userId, 任务号: task.taskNo, 任务状态: task.status,
       连带删除: willDelete, 是否强删: blockers.length > 0,
-      退款客户数: pendingRefunds.length, 退款总额: refundTotal,
+      退款客户数: actualRefunds.length, 退款总额: actualRefundTotal,
     });
 
     ok(res, {
       deleted: true, taskNo: task.taskNo, willDelete, forced: blockers.length > 0,
-      refundTotal, refundCount: pendingRefunds.length,
+      refundTotal: actualRefundTotal, refundCount: actualRefunds.length,
     });
   });
 }

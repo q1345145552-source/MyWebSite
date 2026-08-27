@@ -459,6 +459,8 @@ model AdminCustomsCase {
   order    Order?    @relation(fields: [orderId], references: [id])
 
   @@index([status, updatedAt(sort: Desc)])
+  // 同上：列表页按公司筛 + 按时间倒序（2026-08-27 补）
+  @@index([companyId, updatedAt(sort: Desc)])
   @@map("admin_customs_cases")
 }
 
@@ -488,6 +490,8 @@ model AdminLastmileOrder {
   @@unique([deliveryNo, shipmentId])
   @@index([deliveryNo, updatedAt(sort: Desc)])
   @@index([shipmentId, updatedAt(sort: Desc)])
+  // 列表页就是「按公司筛 + 按时间倒序」，原来没有覆盖这个组合的索引（2026-08-27 补）
+  @@index([companyId, updatedAt(sort: Desc)])
   @@map("admin_lastmile_orders")
 }
 

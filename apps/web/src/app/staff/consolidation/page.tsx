@@ -161,6 +161,10 @@ export default function StaffConsolidationPage() {
       await loadTasks();
     } catch (e: any) {
       setToast(e.message);
+      // 失败也要刷新（2026-08-27 补）：后端现在会说「刚刚被别人改过，请刷新后再看」，
+      // 页面不刷新的话用户看到的还是旧数字，容易照着旧数字再操作一次。
+      await loadDetail(tid);
+      await loadTasks();
     }
   };
 
@@ -181,6 +185,10 @@ export default function StaffConsolidationPage() {
       await loadTasks();
     } catch (e: any) {
       setToast(e.message);
+      // 失败也要刷新（2026-08-27 补）：后端现在会说「刚刚被别人改过，请刷新后再看」，
+      // 页面不刷新的话用户看到的还是旧数字，容易照着旧数字再操作一次。
+      await loadDetail(tid);
+      await loadTasks();
     } finally { setQuoteSubmitting(false); }
   };
 
@@ -198,6 +206,9 @@ export default function StaffConsolidationPage() {
       await loadTasks();
     } catch (e: any) {
       setToast(e.message);
+      // 失败也要刷新（2026-08-27 补）：后端现在会说「刚刚被别人改过，请刷新后再看」，
+      // 页面不刷新的话用户看到的还是旧数字，容易照着旧数字再操作一次。
+      await loadTasks();
     } finally { setCancelSubmitting(false); }
   };
 
@@ -211,7 +222,13 @@ export default function StaffConsolidationPage() {
       setToast("付款审核通过");
       await loadDetail(tid);
       await loadTasks();
-    } catch (e: any) { setToast(e.message); }
+    } catch (e: any) {
+      setToast(e.message);
+      // 失败也要刷新（2026-08-27 补）：后端现在会说「刚刚被别人改过，请刷新后再看」，
+      // 页面不刷新的话用户看到的还是旧数字，容易照着旧数字再操作一次。
+      await loadDetail(tid);
+      await loadTasks();
+    }
     finally { setReviewSubmitting(false); }
   };
 
@@ -227,7 +244,13 @@ export default function StaffConsolidationPage() {
       setToast("已退回付款");
       await loadDetail(tid);
       await loadTasks();
-    } catch (e: any) { setToast(e.message); }
+    } catch (e: any) {
+      setToast(e.message);
+      // 失败也要刷新（2026-08-27 补）：后端现在会说「刚刚被别人改过，请刷新后再看」，
+      // 页面不刷新的话用户看到的还是旧数字，容易照着旧数字再操作一次。
+      await loadDetail(tid);
+      await loadTasks();
+    }
     finally { setReviewSubmitting(false); }
   };
 
@@ -243,6 +266,10 @@ export default function StaffConsolidationPage() {
       await loadTasks();
     } catch (e: any) {
       setToast(e.message);
+      // 失败也要刷新（2026-08-27 补）：后端现在会说「刚刚被别人改过，请刷新后再看」，
+      // 页面不刷新的话用户看到的还是旧数字，容易照着旧数字再操作一次。
+      await loadDetail(tid);
+      await loadTasks();
     } finally { setAdvancing(false); }
   };
 

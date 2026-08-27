@@ -2,7 +2,8 @@ import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
 import { saveImageToDisk, deleteImageFile } from "../orders/image-storage";
-import { lockPlanAliveByPrealert, PlanCancelledError, PlanMissingError } from "./plan-guard";
+import { BusinessError } from "../core/business-error";
+import { lockPrealertExpecting, lockPlanAliveByPrealert, PlanCancelledError, PlanMissingError } from "./plan-guard";
 import {
   buildFeeBreakdown,
   calcFeeFromItems,
@@ -285,7 +286,7 @@ export function registerWhrConsolidationStaffRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    const totalFee = calcFeeFromItems(prealert.items, prealert.planCustomer);
+    // 这个金额只是先算出来给下面的失败提示用；**真正入账的金额在事务里锁完重算**（见下）
     const now = new Date();
 
     // 多张图片先写盘，事务失败再删掉，避免事务里做文件 IO
@@ -309,12 +310,38 @@ export function registerWhrConsolidationStaffRoutes(app: MinimalHttpApp): void {
       return;
     }
 
+    let signedFee = 0;
     try {
-      await prisma.$transaction(async (tx) => {
+      signedFee = await prisma.$transaction(async (tx) => {
         // ⚠️ 整柜取消了就不该再签收计费（2026-08-27 第二版：挪进事务并加锁）。
         // 放在事务第一句 = 锁序【计划 → 预报单】的第一环；
         // 第一版放在事务外面，读到「柜还活着」之后柜被取消了，账单照样生成。
         await lockPlanAliveByPrealert(tx, prealert.id);
+
+        /**
+         * ⚠️ 单价和方数必须**锁完再读一遍，金额在事务里算**（2026-08-27 补）。
+         *
+         * 原来金额是在事务外面算好的：仓库点「签收」的同一刻管理员正好把单价
+         * 从 800 改成 1000，签收照样按 800 出账；而管理员那边的「重算」只动
+         * 未付款的单，这张刚签收的单谁也不会再碰 —— 差价就永远收不回来了。
+         * 现在锁住计划之后重新读单价和货品，算出来的一定是最新的。
+         */
+        const live = await tx.whrConsolidationPrealert.findUnique({
+          where: { id: prealert.id },
+          select: {
+            status: true,
+            planCustomer: {
+              select: { unitPriceNormal: true, unitPriceInspection: true, unitPriceSensitive: true },
+            },
+            items: { select: { cargoType: true, volumeM3: true } },
+          },
+        });
+        if (!live) throw new BusinessError("预报单不存在", 404, "NOT_FOUND");
+        if (live.status !== "pending") {
+          throw new BusinessError("这张预报单刚刚被别人处理过了，签收没有执行，请刷新后再看");
+        }
+        const totalFee = calcFeeFromItems(live.items, live.planCustomer);
+
         await tx.whrConsolidationPrealert.update({
           where: { id: prealert.id },
           data: {
@@ -339,7 +366,7 @@ export function registerWhrConsolidationStaffRoutes(app: MinimalHttpApp): void {
         });
         await recalcCustomerTotals(prealert.customerId, tx);
         await syncPlanStatus(body.planId!, tx);
-        return true;
+        return totalFee;
       });
     } catch (e) {
       for (const pf of receiptProofs) {
@@ -356,7 +383,7 @@ export function registerWhrConsolidationStaffRoutes(app: MinimalHttpApp): void {
     ok(res, {
       prealertId: prealert.id,
       status: "received_pending_payment",
-      totalFee,
+      totalFee: signedFee,
       volumeM3: round3(totalVolume),
       signedAt: now.toISOString(),
     });
@@ -397,6 +424,11 @@ export function registerWhrConsolidationStaffRoutes(app: MinimalHttpApp): void {
     }
 
     await prisma.$transaction(async (tx) => {
+      // 锁住再确认状态没变（2026-08-27 补，见 plan-guard.lockPrealertExpecting 里的说明）
+      // ⚠️ 必须**先锁计划、再锁子单**（2026-08-27 补）。这一步后面会调 syncPlanStatus
+      // 去改计划行；如果先锁子单，就跟「删除整柜」那条路（计划→子单）反着，会死锁。
+      await lockPlanAliveByPrealert(tx, prealert.id);
+      await lockPrealertExpecting(tx, prealert.id, "paid", "装柜");
       await tx.whrConsolidationPrealert.update({
         where: { id: prealert.id },
         data: { status: "loading" },
@@ -454,6 +486,11 @@ export function registerWhrConsolidationStaffRoutes(app: MinimalHttpApp): void {
     }
 
     await prisma.$transaction(async (tx) => {
+      // 锁住再确认状态没变（2026-08-27 补，见 plan-guard.lockPrealertExpecting 里的说明）
+      // ⚠️ 必须**先锁计划、再锁子单**（2026-08-27 补）。这一步后面会调 syncPlanStatus
+      // 去改计划行；如果先锁子单，就跟「删除整柜」那条路（计划→子单）反着，会死锁。
+      await lockPlanAliveByPrealert(tx, prealert.id);
+      await lockPrealertExpecting(tx, prealert.id, "loading", "发运");
       await tx.whrConsolidationPrealert.update({
         where: { id: prealert.id },
         data: { status: "shipped" },
@@ -546,6 +583,11 @@ export function registerWhrConsolidationStaffRoutes(app: MinimalHttpApp): void {
 
     try {
       await prisma.$transaction(async (tx) => {
+        // 锁住再确认状态没变（2026-08-27 补）
+        // ⚠️ 必须**先锁计划、再锁子单**（2026-08-27 补）。这一步后面会调 syncPlanStatus
+      // 去改计划行；如果先锁子单，就跟「删除整柜」那条路（计划→子单）反着，会死锁。
+      await lockPlanAliveByPrealert(tx, prealert.id);
+      await lockPrealertExpecting(tx, prealert.id, "shipped", "泰国签收");
         await tx.whrConsolidationPrealert.update({
           where: { id: prealert.id },
           data: {

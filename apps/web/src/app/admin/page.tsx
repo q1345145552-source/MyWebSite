@@ -199,6 +199,14 @@ export default function AdminHomePage() {
   }, []);
   const [staffList, setStaffList] = useState<AdminUserItem[]>([]);
   const [clientList, setClientList] = useState<AdminUserItem[]>([]);
+  /**
+   * 客户搜索（2026-08-27 加）。
+   * 分成两个状态是故意的：`clientSearchInput` 是输入框里正在打的字，
+   * `clientSearchQuery` 是**点了搜索按钮之后**才生效的词 ——
+   * 用户要的是「按钮搜索」，边打边筛会一直跳。
+   */
+  const [clientSearchInput, setClientSearchInput] = useState("");
+  const [clientSearchQuery, setClientSearchQuery] = useState("");
   const [orderList, setOrderList] = useState<AdminOrderItem[]>([]);
   const [sessionMemoryList, setSessionMemoryList] = useState<AdminAiSessionMemoryItem[]>([]);
   const [knowledgeGapList, setKnowledgeGapList] = useState<AdminAiKnowledgeGapItem[]>([]);
@@ -448,6 +456,20 @@ export default function AdminHomePage() {
     const list = await fetchAdminClients();
     setClientList(list);
   }, []);
+
+  /**
+   * 按搜索词筛客户。账号、客户名字、公司名字、电话、邮箱 —— 五样里命中任意一样就算。
+   * 不分大小写；两头的空格自动去掉（从别处复制过来常常带空格）。
+   * 在前端筛而不是重新请求接口：客户总共几十个，一次都取回来了，本地筛更快也不用等。
+   */
+  const filteredClientList = useMemo(() => {
+    const q = clientSearchQuery.trim().toLowerCase();
+    if (!q) return clientList;
+    return clientList.filter((u) =>
+      [u.id, u.name, u.companyName, u.phone, u.email]
+        .some((v) => (v ?? "").toLowerCase().includes(q)),
+    );
+  }, [clientList, clientSearchQuery]);
 
   const loadOrders = useCallback(async () => {
     const list = await fetchAdminOrders();
@@ -1000,6 +1022,8 @@ export default function AdminHomePage() {
       审批状态: o.approvalStatus === "pending" ? "待审核" : o.approvalStatus === "approved" ? "已审核" : o.approvalStatus === "shipped" ? "已发货" : o.approvalStatus,
       产品数量: o.productQuantity ?? "-", 包裹数量: o.packageCount ?? "-",
       重量: o.weightKg ?? "-", 体积: o.volumeM3 ?? "-",
+      // 长宽高来自产品行；一张单有多个不同尺寸时后端会拼成 "60/50"（2026-08-27 加）
+      长cm: o.lengthCm ?? "-", 宽cm: o.widthCm ?? "-", 高cm: o.heightCm ?? "-",
       到仓日期: o.shipDate ?? "-", 状态组: o.statusGroup ?? "-",
       创建时间: o.createdAt ?? "-", 更新时间: o.updatedAt ?? "-",
     }));
@@ -1426,7 +1450,7 @@ export default function AdminHomePage() {
             刷新
           </button>
         </div>
-        <div style={{ marginBottom: 12 }}>
+        <div style={{ marginBottom: 12, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <button
             type="button"
             onClick={() => { setShowClientModal(true); setEditingClientId(null); setClientForm({ id: "", name: "", companyName: "", phone: "", email: "", password: "" }); }}
@@ -1434,12 +1458,48 @@ export default function AdminHomePage() {
           >
             创建账号
           </button>
+
+          {/* 客户搜索（2026-08-27 加）：按回车等同于点「搜索」，两种习惯都照顾到 */}
+          <input
+            type="search"
+            value={clientSearchInput}
+            onChange={(e) => setClientSearchInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") setClientSearchQuery(clientSearchInput); }}
+            placeholder="搜账号 / 名字 / 公司 / 电话 / 邮箱"
+            style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 12px", width: 260, marginLeft: "auto" }}
+          />
+          <button
+            type="button"
+            onClick={() => setClientSearchQuery(clientSearchInput)}
+            style={{ border: "none", borderRadius: 8, padding: "8px 16px", background: "var(--c-blue)", color: "var(--white)", fontWeight: 600, cursor: "pointer" }}
+          >
+            搜索
+          </button>
+          {clientSearchQuery ? (
+            <button
+              type="button"
+              onClick={() => { setClientSearchInput(""); setClientSearchQuery(""); }}
+              style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 14px", background: "var(--white)", cursor: "pointer", color: "var(--t-strong)" }}
+            >
+              清空
+            </button>
+          ) : null}
         </div>
+
+        {/* 搜过之后告诉用户找到几个，找不到时也好判断是没有还是打错了 */}
+        {clientSearchQuery ? (
+          <div style={{ marginBottom: 12, fontSize: 13, color: "var(--t-muted)" }}>
+            搜「{clientSearchQuery}」找到 <strong style={{ color: "var(--t-strong)" }}>{filteredClientList.length}</strong> 个客户（共 {clientList.length} 个）
+          </div>
+        ) : null}
+
         {clientList.length === 0 ? (
           <EmptyStateCard title="暂无客户" description="请在上方添加客户。" />
+        ) : filteredClientList.length === 0 ? (
+          <EmptyStateCard title="没找到匹配的客户" description={`「${clientSearchQuery}」没有匹配到任何客户，换个词试试，或者点「清空」看全部。`} />
         ) : (
           <div style={{ display: "grid", gap: 8 }}>
-            {clientList.map((u) => (
+            {filteredClientList.map((u) => (
               <div key={u.id} style={{ marginBottom: 8 }}>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8, ...cardStyle }}>
                   <span><strong>账号</strong> {u.id}</span>

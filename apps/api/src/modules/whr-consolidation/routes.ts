@@ -2,8 +2,9 @@ import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
 import { logger } from "../core/logger";
+import { BusinessError } from "../core/business-error";
 import { verifyPassword } from "../auth/crypto-utils";
-import { lockPlanAliveById, lockPlanAliveByPrealert, PlanCancelledError, PlanMissingError } from "./plan-guard";
+import { lockPlanAliveById, lockPlanAliveByPrealert, lockPlanByPrealert, PlanCancelledError, PlanMissingError } from "./plan-guard";
 import {
   computePendingRefunds,
   refundPendingOnDelete,
@@ -638,23 +639,13 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
       fail(res, 404, "NOT_FOUND", "预报单不存在");
       return;
     }
+    // 这里只做「早点给个好看的提示」，真正说了算的判断在下面事务里重做一遍。
     if (prealert.status !== "paid") {
       fail(res, 400, "BAD_REQUEST", "只有「已付款」的预报单能撤销；已装柜或已发运的不能退");
       return;
     }
 
-    // 实际净扣金额 = 流水里这单的 pay（负数）和 refund（正数）相加后取反
-    const rows = await prisma.consolidationBalanceLedger.findMany({
-      where: { refType: "whr", refId: prealert.id },
-      select: { amount: true },
-    });
-    const refundable = -rows.reduce((sum, r) => sum + Number(r.amount), 0);
-    if (!(refundable > 0)) {
-      fail(res, 400, "BAD_REQUEST", "这张预报单没有可退的金额（可能已经退过了）");
-      return;
-    }
-
-    const balanceAfter = await prisma.$transaction(async (tx) => {
+    const { balanceAfter, refundable } = await prisma.$transaction(async (tx) => {
       /**
        * ⚠️ 先锁子单，再退款（2026-08-27 补）。
        * 全模块统一锁序是【计划 → 子单 → 钱包】。这里原来直接退款，
@@ -662,6 +653,33 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
        * 两边同时发生就是死锁（外部复审用真实 PostgreSQL 行锁复现过 40P01）。
        */
       await tx.$queryRaw`SELECT id FROM whr_consolidation_prealerts WHERE id = ${prealert.id} FOR UPDATE`;
+
+      /**
+       * ⚠️ 状态和退款金额必须锁完再算（2026-08-27 补）。
+       * 原来这两样都在事务外面读：两个管理员同时点「撤销」，两边都读到
+       * 「已付款 / 可退 400」，行锁只是让他们排队，第二个照样拿着旧数字
+       * 再退一次 —— 客户白拿 400。现在锁住之后重新读一遍，第二个会看到
+       * 状态已经变了、可退金额是 0，直接被拦下。
+       */
+      const nowRow = await tx.whrConsolidationPrealert.findUnique({
+        where: { id: prealert.id },
+        select: { status: true },
+      });
+      if (!nowRow) throw new BusinessError("预报单不存在", 404, "NOT_FOUND");
+      if (nowRow.status !== "paid") {
+        throw new BusinessError("这张预报单刚刚被别人改过状态了，撤销没有执行，请刷新后再看");
+      }
+
+      // 实际净扣金额 = 流水里这单的 pay（负数）和 refund（正数）相加后取反
+      const rows = await tx.consolidationBalanceLedger.findMany({
+        where: { refType: "whr", refId: prealert.id },
+        select: { amount: true },
+      });
+      const refundable = -rows.reduce((sum, r) => sum + Number(r.amount), 0);
+      if (!(refundable > 0)) {
+        throw new BusinessError("这张预报单没有可退的金额（可能刚刚已经退过了）");
+      }
+
       const after = await refundToConsolidation(tx as any, {
         companyId: auth.companyId,
         clientId: prealert.planCustomer.clientId,
@@ -689,7 +707,7 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
           remark: `管理员撤销付款，退回集货余额 ¥${refundable.toFixed(2)}${body.reason?.trim() ? `（${body.reason.trim()}）` : ""}`,
         },
       });
-      return after;
+      return { balanceAfter: after, refundable };
     });
 
     ok(res, {
@@ -754,6 +772,21 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
         // 这条路第一版被我漏掉了 —— 外部复审实测：取消父柜之后
         // approve 仍能把子单改成 paid，reject 仍能改单价并重算费用。
         await lockPlanAliveByPrealert(tx, prealert.id);
+
+        /**
+         * ⚠️ 上面的锁只管住了**父柜**，这张单自己的状态还是事务外面读的（2026-08-27 补）。
+         * 后果：单子在这几毫秒里被人取消了，审核照样能把它改回去 ——
+         * 一张已取消的单突然又变成「已付款」，账目上凭空多一笔。
+         */
+        const freshA = await tx.whrConsolidationPrealert.findUnique({
+          where: { id: prealert.id },
+          select: { status: true },
+        });
+        if (!freshA) throw new BusinessError("预报单不存在", 404, "NOT_FOUND");
+        if (freshA.status !== "payment_submitted") {
+          throw new BusinessError("这张预报单刚刚被别人处理过了，审核没有执行，请刷新后再看");
+        }
+
         await tx.whrConsolidationPrealert.update({
           where: { id: prealert.id },
           data: {
@@ -813,6 +846,21 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
     const rejectResult = await prisma.$transaction(async (tx) => {
       // ⚠️ reject 会改单价并重算费用，同样要拦（2026-08-27 补）
       await lockPlanAliveByPrealert(tx, prealert.id);
+
+      /**
+       * ⚠️ 上面的锁只管住了**父柜**，这张单自己的状态还是事务外面读的（2026-08-27 补）。
+       * 后果：单子在这几毫秒里被人取消了，审核照样能把它改回去 ——
+       * 一张已取消的单突然又变成「已付款」，账目上凭空多一笔。
+       */
+      const freshB = await tx.whrConsolidationPrealert.findUnique({
+        where: { id: prealert.id },
+        select: { status: true },
+      });
+      if (!freshB) throw new BusinessError("预报单不存在", 404, "NOT_FOUND");
+      if (freshB.status !== "payment_submitted") {
+        throw new BusinessError("这张预报单刚刚被别人处理过了，审核没有执行，请刷新后再看");
+      }
+
       // 改单价必须和状态回退在同一个事务里，之前写在事务外，事务失败时价格已经改掉了
       if (Object.keys(priceUpdate).length > 0) {
         await tx.whrConsolidationPlanCustomer.update({
@@ -925,6 +973,31 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
     const previousStatus = prealert.status;
 
     const totals = await prisma.$transaction(async (tx) => {
+      /**
+       * ⚠️ 必须**先锁计划、再锁子单**（2026-08-27 补）。
+       * 取消这条路后面会调 syncPlanStatus 去改计划行；如果先锁子单，
+       * 就跟「删除整柜」那条路（计划 → 子单）正好反着，两个人同时操作就是死锁。
+       * 这里用的是「只锁不判死活」的版本：柜子已经作废了，底下的单子照样要能取消。
+       */
+      await lockPlanByPrealert(tx, prealert.id);
+
+      // 锁住再复查一遍状态（2026-08-27 补）：上面那次判断是在事务外面做的，
+      // 两个人同时点「取消」都能过。退款金额是在锁里算的所以钱不会退两次，
+      // 但会平白多出一条重复的取消记录和一次重复通知，所以这里把第二个人挡掉。
+      await tx.$queryRaw`SELECT id FROM whr_consolidation_prealerts WHERE id = ${prealert.id} FOR UPDATE`;
+      const fresh = await tx.whrConsolidationPrealert.findUnique({
+        where: { id: prealert.id },
+        select: { status: true },
+      });
+      if (!fresh) throw new BusinessError("预报单不存在", 404, "NOT_FOUND");
+      if (NON_CANCELLABLE_STATUSES.includes(fresh.status)) {
+        throw new BusinessError(
+          fresh.status === "cancelled"
+            ? "该预报单已取消，无需重复操作"
+            : "该预报单已装柜，不能再取消",
+        );
+      }
+
       await tx.whrConsolidationPrealert.update({
         where: { id: prealert.id },
         data: {
@@ -1113,6 +1186,25 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
     const result = await prisma.$transaction(async (tx) => {
       // ⚠️ 整柜取消了就不该再动这张单（2026-08-27 第二版：挪进事务并加锁）
       await lockPlanAliveByPrealert(tx, item.prealert.id);
+
+      /**
+       * ⚠️ 这张单自己的状态和剩余件数也要**锁完重查**（2026-08-27 补）。
+       * 上面那两道检查在事务外面：客户正好在这一刻付了款，货照样被删掉，
+       * 而金额是按删之前的货算的 —— 客户付了 5 件的钱只收到 4 件。
+       * 「最后一件」那道也一样，两个人同时删不同的货，能把单子删空。
+       */
+      const freshPa = await tx.whrConsolidationPrealert.findUnique({
+        where: { id: item.prealert.id },
+        select: { status: true, _count: { select: { items: true } } },
+      });
+      if (!freshPa) throw new BusinessError("预报单不存在", 404, "NOT_FOUND");
+      if (!ITEM_EDITABLE_STATUSES.includes(freshPa.status)) {
+        throw new BusinessError("该预报单客户已付款或已进入装柜流程，货物不能再删");
+      }
+      if (freshPa._count.items <= 1) {
+        throw new BusinessError("这是该预报单最后一件货物，不能删。整张不要了请用「取消预报单」");
+      }
+
       await tx.whrConsolidationPrealertItem.delete({ where: { id: item.id } });
 
       await tx.whrConsolidationStatusLog.create({
@@ -1223,12 +1315,9 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    if (blockers.length > 0) {
-      if (!body.confirmPassword?.trim()) {
-        fail(res, 409, "VALIDATION_ERROR",
-          `这个集货计划不能直接删除：${blockers.join("；")}。确实要删请输入管理员密码。`);
-        return;
-      }
+    // 密码只要填对了就记下来，事务里会再查一次「现在还有没有拦截条件」
+    let passwordVerified = false;
+    if (body.confirmPassword?.trim()) {
       const admin = await prisma.user.findUnique({
         where: { id: auth.userId },
         select: { passwordHash: true },
@@ -1237,6 +1326,12 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
         fail(res, 403, "FORBIDDEN", "管理员密码不对，没有删除");
         return;
       }
+      passwordVerified = true;
+    }
+    if (blockers.length > 0 && !passwordVerified) {
+      fail(res, 409, "VALIDATION_ERROR",
+        `这个集货计划不能直接删除：${blockers.join("；")}。确实要删请输入管理员密码。`);
+      return;
     }
 
     /**
@@ -1261,14 +1356,48 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
        * 所以退款之前**先把这个柜底下的子单全锁掉**，把顺序拉回统一的
        * 【计划 → 子单 → 钱包】。
        */
-      const paIds = allPrealerts.map((pa) => pa.id);
-      if (paIds.length > 0) {
-        await tx.$queryRaw`SELECT id FROM whr_consolidation_prealerts WHERE id = ANY(${paIds}) FOR UPDATE`;
+      /**
+       * ⚠️ 子单清单也得**锁住计划之后重新拉一遍**（2026-08-27 补）。
+       * 原来用的是事务外面那份 allPrealerts 快照：管理员点删除的那几秒里，
+       * 客户新报了一单还付了钱，这单不在旧清单里 —— 级联删除会把它删掉，
+       * 但退款算的是旧清单，这笔钱就漏退了。锁住计划之后再拉，才拉得全。
+       */
+      const liveIds = (
+        await tx.whrConsolidationPrealert.findMany({
+          where: { planCustomer: { planId } },
+          select: { id: true },
+        })
+      ).map((pa) => pa.id);
+      if (liveIds.length > 0) {
+        await tx.$queryRaw`SELECT id FROM whr_consolidation_prealerts WHERE id = ANY(${liveIds}) FOR UPDATE`;
+      }
+
+      /**
+       * ⚠️ 「能不能直接删」也要**锁完重查一遍**（2026-08-27 补）。
+       * 上面那份拦截清单是事务外面算的：点删除那一刻柜里还没人付款，于是不用输密码；
+       * 等事务真跑起来时客户已经付了 —— 一个已收钱的柜就这么被无密码删掉了。
+       */
+      const nowPlan = await tx.whrConsolidationPlan.findUnique({
+        where: { id: planId },
+        select: { status: true },
+      });
+      if (!nowPlan) throw new BusinessError("集货计划不存在", 404, "NOT_FOUND");
+      const startedNow = await tx.whrConsolidationPrealert.count({
+        where: { planCustomer: { planId }, status: { in: STARTED } },
+      });
+      const blockedNow =
+        startedNow > 0 || !["planning", "collecting", "cancelled"].includes(nowPlan.status);
+      if (blockedNow && !passwordVerified) {
+        throw new BusinessError(
+          "这个柜刚刚有了新动静（有人付款或状态变了），删除没有执行。请刷新后确认，确实要删请输入管理员密码。",
+          409,
+          "VALIDATION_ERROR",
+        );
       }
 
       const fresh = await computePendingRefunds(
         tx as any,
-        allPrealerts.map((pa) => ({ refType: "whr", refId: pa.id })),
+        liveIds.map((id) => ({ refType: "whr", refId: id })),
       );
       if (fresh.length > 0) {
         await refundPendingOnDelete(tx as any, {
@@ -1295,7 +1424,9 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
 
     ok(res, {
       deleted: true, planNo: plan.planNo, willDelete, forced: blockers.length > 0,
-      refundTotal, refundCount: pendingRefunds.length,
+      // 回给前端的必须是**真退了多少**，不是上面预览时算的那个数（2026-08-27 补）
+      refundTotal: actualRefunds.reduce((n, r) => n + r.amount, 0),
+      refundCount: actualRefunds.length,
     });
   });
 }

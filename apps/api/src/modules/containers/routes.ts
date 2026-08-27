@@ -18,6 +18,7 @@ import { fail, ok, requireRole } from "../core/http-utils";
 import { sanitizeRemarkForClient } from "../core/client-privacy";
 import { logger } from "../core/logger";
 import { canTransitLoose } from "../shipments/routes";
+import { BusinessError } from "../core/business-error";
 // 柜子状态流程的唯一定义处，别在本文件里再抄一份
 import {
   CONTAINER_STATUS_FLOW,
@@ -200,6 +201,7 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
       departureDate?: string;
       eta?: string;
       remark?: string;
+      transportMode?: string;
     };
     const containerNo = body.containerNo?.trim();
     const containerType = body.containerType?.trim();
@@ -213,7 +215,20 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
       select: { id: true },
     });
     if (existed) {
-      fail(res, 409, "CONFLICT", "containerNo already exists");
+      fail(res, 409, "VALIDATION_ERROR", "柜号已存在，请换一个");
+      return;
+    }
+
+    /**
+     * ⚠️ 运输方式必填（2026-08-27 补）。
+     * 这个字段可以为空，而 flowOf(null) 会**默认按海运**走 ——
+     * 于是从这个接口建出来的陆运柜，推「过境越南」会被拒（说不属于海运流程），
+     * 「下一站」也会被填成海运的默认值。装柜页那个正式入口一直是强制选的，
+     * 只有这条老路漏了（前端目前没人调它，但接口开着就可能被用到）。
+     */
+    const transportMode = body.transportMode?.trim();
+    if (transportMode !== "sea" && transportMode !== "land") {
+      fail(res, 400, "BAD_REQUEST", "请选择运输方式：海运或陆运");
       return;
     }
 
@@ -227,6 +242,7 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
         departureDate: body.departureDate ? new Date(body.departureDate) : null,
         eta: body.eta ? new Date(body.eta) : null,
         currentStatus: "LOADING",
+        transportMode,
         remark: body.remark?.trim() || null,
       },
     });
@@ -401,6 +417,23 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
      */
     await prisma.$transaction(
       async (tx) => {
+        /**
+         * ⚠️ 锁住柜子再复查一遍当前状态（2026-08-27 补）。
+         * 上面 canContainerTransit 那道检查是在事务外面做的：两个员工同时推进同一个柜，
+         * 两边都是从同一个旧状态出发算「能不能推」，结果**两批轨迹都写进去了**，
+         * 状态还可能跳过中间那一步 —— 客户轨迹里就会多出重复或错序的记录。
+         */
+        await tx.$queryRaw`SELECT id FROM containers WHERE id = ${container.id} FOR UPDATE`;
+        const nowStatus = (
+          await tx.container.findUnique({ where: { id: container.id }, select: { currentStatus: true } })
+        )?.currentStatus;
+        if (nowStatus == null) throw new BusinessError("柜子不存在", 404, "NOT_FOUND");
+        if (nowStatus !== container.currentStatus) {
+          throw new BusinessError(
+            `这个柜刚刚被别人推到了「${CONTAINER_STATUS_LABEL[nowStatus] ?? nowStatus}」，本次推进没有执行，请刷新后再看`,
+          );
+        }
+
         for (const run of ops) await run(tx);
         // ⚠️ 排序后再逐个锁父单：两个柜子同时推进、又正好涉及同几张父单时，
         // 加锁顺序相反会被 PostgreSQL 判定死锁掐掉一个。固定顺序就不会打架。
@@ -569,6 +602,23 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
     const changedAt: Date | null = currentTs ? new Date(currentTs) : null;
 
     const result = await prisma.$transaction(async (tx) => {
+      /**
+       * ⚠️ 锁住再复查一遍状态（2026-08-27 补）。
+       * 上面「上一步是哪个状态、要删哪批轨迹」全是按事务外面读到的那个 currentStatus 算的。
+       * 两个人同时点「撤销」，两边都从同一个状态往回退，就会连退两格并删掉两批轨迹；
+       * 一个人撤销、一个人推进撞上，删的还可能是别人刚写的那批。
+       */
+      await tx.$queryRaw`SELECT id FROM containers WHERE id = ${container.id} FOR UPDATE`;
+      const nowStatus = (
+        await tx.container.findUnique({ where: { id: container.id }, select: { currentStatus: true } })
+      )?.currentStatus;
+      if (nowStatus == null) throw new BusinessError("柜子不存在", 404, "NOT_FOUND");
+      if (nowStatus !== container.currentStatus) {
+        throw new BusinessError(
+          `这个柜刚刚被别人改成了「${CONTAINER_STATUS_LABEL[nowStatus] ?? nowStatus}」，撤销没有执行，请刷新后再看`,
+        );
+      }
+
       let deletedLogs = 0;
       let affectedShipments = 0;
 
@@ -730,22 +780,59 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
     }
 
     const now = new Date();
-    // 非 LOADING 状态的柜子，装柜时同步运单状态
-    const syncStatus = container.currentStatus !== "LOADING"
-      ? (CONTAINER_TO_SHIPMENT_STATUS[container.currentStatus] ?? null)
-      : null;
+    // 「该把运单同步成什么状态」改到事务里算了（见下面 syncStatusNow），
+    // 这里不再提前算 —— 提前算出来的可能是柜子上一秒的状态。
 
     try {
       const item = await prisma.$transaction(async (tx) => {
+        /**
+         * ⚠️ 锁住运单，再复查「体积会不会装超」和「柜子现在什么状态」（2026-08-27 补）。
+         *
+         * 上面两样都是事务外面读的：
+         *   ① 同一张运单被两个人同时装进两个柜，两边都拿装之前那个「已装体积」去算，
+         *      两边都觉得没超 —— 实际加起来超了运单总方数。
+         *   ② 柜子状态也是外面读的，用它算出来的 syncStatus 可能已经过时，
+         *      会把运单同步成一个柜子已经离开的状态。
+         */
+        await tx.$queryRaw`SELECT id FROM shipments WHERE id = ${shipmentId} FOR UPDATE`;
+        const freshShipment = await tx.shipment.findUnique({
+          where: { id: shipmentId },
+          select: { currentStatus: true, volumeM3: true, containerItems: { select: { loadedVolumeM3: true } } },
+        });
+        if (!freshShipment) throw new BusinessError("运单不存在", 404, "NOT_FOUND");
+        if (completedOrException.has(freshShipment.currentStatus)) {
+          throw new BusinessError("这张运单刚刚变成了「" + freshShipment.currentStatus + "」，不能再装柜了，请刷新后再看");
+        }
+        if (freshShipment.volumeM3 !== null) {
+          const loadedNow = freshShipment.containerItems.reduce(
+            (sum, it) => sum + decToNumber(it.loadedVolumeM3),
+            0,
+          );
+          const total = decToNumber(freshShipment.volumeM3);
+          if (total > 0 && loadedNow + volume > total + 0.01) {
+            throw new BusinessError(
+              `装不下了：这张运单一共 ${total.toFixed(3)} 方，已经装了 ${loadedNow.toFixed(3)} 方，再装 ${volume.toFixed(3)} 方会超`,
+            );
+          }
+        }
+        // 柜子状态也用事务里读到的，别用外面那份可能过时的
+        const freshContainerStatus = (
+          await tx.container.findUnique({ where: { id: containerId }, select: { currentStatus: true } })
+        )?.currentStatus;
+        if (freshContainerStatus == null) throw new BusinessError("柜子不存在", 404, "NOT_FOUND");
+        const syncStatusNow = freshContainerStatus !== "LOADING"
+          ? (CONTAINER_TO_SHIPMENT_STATUS[freshContainerStatus] ?? null)
+          : null;
+
         const created = await tx.shipmentContainerItem.create({
           data: { shipmentId, containerId, loadedVolumeM3: volume, loadedPieceCount: pieces },
         });
 
         // 同步运单状态 + 写日志（事务内读取当前状态，防 TOCTOU）
-        if (syncStatus) {
+        if (syncStatusNow) {
           const current = await tx.shipment.findUnique({ where: { id: shipmentId }, select: { currentStatus: true } });
-          if (current && current.currentStatus !== syncStatus) {
-            await tx.shipment.update({ where: { id: shipmentId }, data: { currentStatus: syncStatus, updatedAt: now } });
+          if (current && current.currentStatus !== syncStatusNow) {
+            await tx.shipment.update({ where: { id: shipmentId }, data: { currentStatus: syncStatusNow, updatedAt: now } });
             await tx.statusLog.create({
               data: {
                 id: `sl_load_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -755,7 +842,7 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
                 operatorRole: auth.role,
                 operatorName: auth.name,
                 fromStatus: current.currentStatus,
-                toStatus: syncStatus,
+                toStatus: syncStatusNow,
                 remark: `装入柜子 ${container.containerNo}`,
                 changedAt: now,
               },
@@ -775,7 +862,7 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("Unique constraint")) {
-        fail(res, 409, "CONFLICT", "this shipment is already loaded in this container");
+        fail(res, 409, "VALIDATION_ERROR", "这张运单已经装进这个柜了，不用重复装");
         return;
       }
       throw err;
@@ -830,6 +917,22 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
     }
 
     await prisma.$transaction(async (tx) => {
+      /**
+       * ⚠️ 锁住再复查一遍状态（2026-08-27 补）。上面那道「只能删装柜中的柜」在事务外面：
+       * 另一个人正好在这一刻把柜封了/发运了，这边照样把整个柜连同装柜记录删掉 ——
+       * 已经在路上的柜凭空消失，运单也从柜里掉出来了。
+       */
+      await tx.$queryRaw`SELECT id FROM containers WHERE id = ${id} FOR UPDATE`;
+      const nowStatus = (
+        await tx.container.findUnique({ where: { id }, select: { currentStatus: true } })
+      )?.currentStatus;
+      if (nowStatus == null) throw new BusinessError("柜子不存在", 404, "NOT_FOUND");
+      if (nowStatus !== "LOADING") {
+        throw new BusinessError(
+          `这个柜刚刚被推到了「${CONTAINER_STATUS_LABEL[nowStatus] ?? nowStatus}」，已经不能删了，请刷新后再看`,
+        );
+      }
+
       await tx.shipmentContainerItem.deleteMany({ where: { containerId: id } });
       await tx.container.delete({ where: { id } });
     });

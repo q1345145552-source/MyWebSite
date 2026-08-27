@@ -1,7 +1,7 @@
 import type { ApiResponse } from "../../../../../packages/shared-types/common-response";
 import type { HttpRequest, HttpResponse } from "../../server";
 
-type ErrorCode = Exclude<ApiResponse<unknown>["code"], "OK">;
+export type ErrorCode = Exclude<ApiResponse<unknown>["code"], "OK">;
 
 export function ok<T>(res: HttpResponse, data: T): void {
   res.status(200).json({

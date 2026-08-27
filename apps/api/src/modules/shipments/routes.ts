@@ -615,7 +615,7 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
       select: { trackingNo: true },
     });
     if (existingNos.length > 0) {
-      fail(res, 409, "CONFLICT", `运单号 ${existingNos.map((s) => s.trackingNo).join(", ")} 已存在`);
+      fail(res, 409, "VALIDATION_ERROR", `运单号 ${existingNos.map((s) => s.trackingNo).join(", ")} 已存在`);
       return;
     }
 

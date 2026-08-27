@@ -12,6 +12,16 @@ export type LastmileExportShipment = {
   weightKg: number | null;
   /** null = 没填体积，同上 */
   volumeM3: number | null;
+  /**
+   * 这一票货的长/宽/高（2026-08-27 加）。
+   * 装柜导出返回的 products 一直是空数组（柜里放的是分柜后的子运单，
+   * 产品行属于原订单，展开会把件数重复算回整票），
+   * 结果就是清单上那三列**从来没填过东西**。现在后端在运单这一层直接给尺寸。
+   * 一票货有多个不同尺寸时后端会给 "60/50" 这样的字符串，那种情况留空（打印表格的格子放不下）。
+   */
+  lengthCm?: number | string | null;
+  widthCm?: number | string | null;
+  heightCm?: number | string | null;
   remark: string;
   status: string;
   containerNos: string[];
@@ -248,12 +258,23 @@ function expandTemplateLines(data: LastmileExportData): TemplateLine[] {
   const lines: TemplateLine[] = [];
   for (const customer of data.customers) {
     for (const shipment of customer.shipments) {
+      // 只认数字：后端遇到「一票多个不同尺寸」会给 "60/50" 这种字符串，
+      // 打印表格那三个格子是数字格，塞字符串会坏，所以那种情况仍然留空。
+      const numOrNull = (v: number | string | null | undefined): number | null =>
+        typeof v === "number" ? v : null;
+      /**
+       * ⚠️ 这个标记很重要：下面算方数时，「有长宽高就按尺寸重算」这条路
+       * **只能给真实产品行走**。装柜这一票的方数是后端按**实际装柜体积**给的，
+       * 才是客户单上该出现的数；用尺寸重算出来的是另一个数，两边会对不上。
+       * 所以补尺寸只是为了「让那三列有内容」，绝不能顺带把方数也改了。
+       */
+      const usingFallback = shipment.products.length === 0;
       const products = shipment.products.length > 0 ? shipment.products : [{
         itemName: shipment.itemName,
         packageCount: shipment.packageCount,
-        lengthCm: null,
-        widthCm: null,
-        heightCm: null,
+        lengthCm: numOrNull(shipment.lengthCm),
+        widthCm: numOrNull(shipment.widthCm),
+        heightCm: numOrNull(shipment.heightCm),
         // 运单 weightKg 是整票总重；只有真实产品的 weightKg 才是单箱重。
         weightKg: null,
       }];
@@ -262,7 +283,7 @@ function expandTemplateLines(data: LastmileExportData): TemplateLine[] {
         const share = Number(product.packageCount || 0) / packageTotal;
         // ⚠️ shipment.volumeM3 可能是 null（这票货没填）。`null * share` 在 JS 里等于 0，
         // 直接算就会把「没填」变成「0 方」，所以必须先判空。重量同理。
-        const volume = product.lengthCm && product.widthCm && product.heightCm
+        const volume = !usingFallback && product.lengthCm && product.widthCm && product.heightCm
           ? Number(product.packageCount || 0) * product.lengthCm * product.widthCm * product.heightCm / 1_000_000
           : (shipment.volumeM3 == null ? null : Number(shipment.volumeM3) * share);
         const weight = product.weightKg == null

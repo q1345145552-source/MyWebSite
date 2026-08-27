@@ -66,6 +66,7 @@ import StaffLastmile from "../../components/staff/StaffLastmile";
 import type { LastmileOrderItem, LastmileShipmentOption } from "../../modules/lastmile/types";
 import FclInquiryPanel from "../../components/client/FclInquiryPanel";
 import { SHIPMENT_STATUS_FILTER_OPTIONS } from "../../modules/shipment/shipment-status";
+import { parseStaffBatchRows, type StaffBatchOrder } from "../../modules/staff/batchOrderImport";
 import {
   shipmentStatusZh,
   warehouseLabelFromId,
@@ -97,6 +98,30 @@ const SHIPMENT_TABLE_MIN_WIDTH = SHIPMENT_COL_WIDTHS.reduce((a, b) => a + b, 0);
 /** 弹性列＝「备注」（表头第 15 个）。备注是长文字，宽一点正好少截断几个字。
  *  ⚠️ 调整列顺序时这个下标要跟着改。 */
 const SHIPMENT_FLEX_COL_INDEX = 14;
+
+/**
+ * 从运单的产品行里取长/宽/高，拼成能放进 Excel 一个格子的值（2026-08-27 加）。
+ *
+ * 为什么要拼：长宽高是记在「产品行」上的，一张运单可能有好几个产品、尺寸各不相同，
+ * 而导出是一行一张运单。实测 97% 的运单只有一个产品，所以：
+ *   · 只有一个尺寸  → 直接出数字（Excel 里能求和、能排序）
+ *   · 有好几个不同的 → 用「/」并排，例如 60/50，一个都不丢
+ *   · 一个都没填    → 出「-」，跟这张表其它列的空值写法一致
+ */
+/** 批量导入的上限：整个文件要读进浏览器内存解析，太大会把页面卡死（2026-08-27 加） */
+const BATCH_MAX_FILE_MB = 5;
+const BATCH_MAX_FILE_BYTES = BATCH_MAX_FILE_MB * 1024 * 1024;
+const BATCH_MAX_ROWS = 2000;
+
+function productDim(
+  products: Array<{ lengthCm?: number | null; widthCm?: number | null; heightCm?: number | null }> | undefined,
+  key: "lengthCm" | "widthCm" | "heightCm",
+): number | string {
+  const vals = (products ?? []).map((p) => p[key]).filter((v): v is number => v != null);
+  if (vals.length === 0) return "-";
+  const uniq = Array.from(new Set(vals));
+  return uniq.length === 1 ? uniq[0] : uniq.join("/");
+}
 
 export default function StaffHomePage() {
   const [staffClients, setStaffClients] = useState<Array<{ id: string; name: string }>>([]);
@@ -162,7 +187,16 @@ export default function StaffHomePage() {
   });
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showBatchImport, setShowBatchImport] = useState(false);
-  const [batchRows, setBatchRows] = useState<Array<{clientId: string; trackingNo?: string; warehouseId: string; itemName: string; packageCount: number; packageUnit: "bag" | "box"; weightKg?: number; volumeM3?: number; arrivedAt: string; transportMode: "sea" | "land"; domesticTrackingNo?: string; batchNo?: string; productQuantity?: number; receiverNameTh?: string; receiverPhoneTh?: string; receiverAddressTh?: string}>>([]);
+  const [batchRows, setBatchRows] = useState<StaffBatchOrder[]>([]);
+  const [batchSourceRowCount, setBatchSourceRowCount] = useState(0);
+  /**
+   * 已经建成功的运单号（2026-08-27 加）。
+   * 批量创建是一票一票发的，不是一个整体事务 —— 100 票在第 60 票失败时，
+   * 前 59 票**已经存进数据库了**。以前用户只能把整份表重传，结果那 59 票
+   * 全部提示「运单号已存在」，看着像出了大问题。
+   * 记下来之后，再点一次只补剩下的，不会重复创建。
+   */
+  const [batchDoneNos, setBatchDoneNos] = useState<Set<string>>(new Set());
   const [batchLoading, setBatchLoading] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ current: 0, success: 0, fail: 0 });
   const [batchErrors, setBatchErrors] = useState<string[]>([]);
@@ -856,75 +890,17 @@ export default function StaffHomePage() {
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "员工批量下单模板");
+    const instructions = XLSX.utils.aoa_to_sheet([
+      ["填写说明"],
+      ["1. Excel 每一行代表一种产品或一种尺寸；同一运单号的多行会自动合并成一张运单。"],
+      ["2. 同一运单的第二行起，运单号、唛头、仓库、到仓日期、运输方式和包装类型可以留空，系统会继承上一行。"],
+      ["3. 同一运单的唛头、仓库、到仓日期、运输方式和包装类型必须一致。"],
+      ["4. 长宽高按单箱填写；总体积按每行 长×宽×高×箱数 后求和。单箱重量也会乘箱数后求和。"],
+      ["5. 如果填写尺寸，同一运单的每条产品都需要填写完整的长、宽、高。"],
+    ]);
+    instructions["!cols"] = [{ wch: 110 }];
+    XLSX.utils.book_append_sheet(wb, instructions, "填写说明");
     XLSX.writeFile(wb, "员工批量下单模板.xlsx");
-  }
-
-  function normalizeStaffBatchRows(rows: Record<string, unknown>[]) {
-    // 按关键字模糊匹配列名（兼容有无括号格式说明）
-    function findCol(row: Record<string, unknown>, keywords: string[]): string {
-      const keys = Object.keys(row);
-      for (const kw of keywords) {
-        const found = keys.find((k) => k.includes(kw));
-        if (found) return String(row[found] ?? "").trim();
-      }
-      return "";
-    }
-    function cleanNum(v: unknown): number | undefined {
-      if (v === undefined || v === "") return undefined;
-      if (typeof v === "number" && Number.isFinite(v)) return v;
-      const cleaned = String(v).replace(/[^0-9.\-]/g, "");
-      if (!cleaned) return undefined;
-      const n = Number(cleaned);
-      return Number.isFinite(n) ? n : undefined;
-    }
-    function findNum(row: Record<string, unknown>, keywords: string[]): number | undefined {
-      const keys = Object.keys(row);
-      for (const kw of keywords) {
-        const found = keys.find((k) => k.includes(kw));
-        if (found) return cleanNum(row[found]);
-      }
-      return undefined;
-    }
-    return rows
-      .map((row) => {
-        const transportRaw = findCol(row, ["运输方式"]).toLowerCase().replace("海运", "sea").replace("陆运", "land");
-        const unitRaw = findCol(row, ["包装类型"]).toLowerCase().replace("箱", "box").replace("袋", "bag");
-        const warehouseNameMap: Record<string, string> = {
-          "义乌仓": "wh_yiwu_01", "广州仓": "wh_guangzhou_01", "东莞仓": "wh_dongguan_01", "深圳仓": "wh_shenzhen_01",
-        };
-        const rawWarehouse = findCol(row, ["仓库"]);
-        const warehouseId = warehouseNameMap[rawWarehouse] || rawWarehouse;
-        const packageCount = findNum(row, ["箱数"]) ?? 0;
-        const perBoxWeightKg = findNum(row, ["单箱重量"]);
-        const weightKg = perBoxWeightKg != null && packageCount > 0 ? perBoxWeightKg * packageCount : perBoxWeightKg;
-        const lengthCm = findNum(row, ["长cm", "长"]);
-        const widthCm = findNum(row, ["宽cm", "宽"]);
-        const heightCm = findNum(row, ["高cm", "高"]);
-        let volumeM3: number | undefined;
-        if (lengthCm && widthCm && heightCm && lengthCm > 0 && widthCm > 0 && heightCm > 0) {
-          volumeM3 = (lengthCm * widthCm * heightCm) / 1_000_000;
-        }
-        let arrivedAt = findCol(row, ["到仓日期"]);
-        if (/^\d{5}$/.test(arrivedAt)) {
-          const d = new Date((Number(arrivedAt) - 25569) * 86400000);
-          arrivedAt = d.toISOString().slice(0, 10);
-        }
-        return {
-          clientId: findCol(row, ["唛头"]),
-          trackingNo: findCol(row, ["运单号"]) || undefined,
-          warehouseId,
-          itemName: findCol(row, ["品名"]),
-          packageCount,
-          packageUnit: unitRaw.includes("bag") ? "bag" as const : "box" as const,
-          weightKg,
-          volumeM3,
-          arrivedAt,
-          transportMode: transportRaw.includes("land") ? "land" as const : "sea" as const,
-          domesticTrackingNo: findCol(row, ["国内单号"]) || undefined,
-          productQuantity: findNum(row, ["产品数量"]),
-        };
-      })
-      .filter((item) => item.clientId && item.warehouseId && item.itemName && item.arrivedAt && item.packageCount > 0);
   }
   async function submitStaffBatch() {
     setBatchLoading(true);
@@ -932,9 +908,13 @@ export default function StaffHomePage() {
     setBatchProgress({ current: 0, success: 0, fail: 0 });
     const errors: string[] = [];
     let success = 0;
-    for (let i = 0; i < batchRows.length; i++) {
+    const done = new Set(batchDoneNos);
+    // 已经建成功的直接跳过：重试时不会重复创建，也不会再报「运单号已存在」
+    const pending = batchRows.filter((row) => !done.has(row.trackingNo));
+    success = batchRows.length - pending.length;
+    for (let i = 0; i < pending.length; i++) {
       setBatchProgress({ current: i + 1, success, fail: errors.length });
-      const row = batchRows[i];
+      const row = pending[i];
       try {
         await createStaffOrder({
           clientId: row.clientId,
@@ -949,13 +929,15 @@ export default function StaffHomePage() {
           transportMode: row.transportMode,
           domesticTrackingNo: row.domesticTrackingNo,
           productQuantity: row.productQuantity,
-
+          products: row.products,
         });
         success++;
+        done.add(row.trackingNo);
+        setBatchDoneNos(new Set(done));
         setBatchProgress({ current: i + 1, success, fail: errors.length });
       } catch (err) {
         const text = err instanceof Error ? err.message : "提交失败";
-        errors.push(`第${i + 1}行(${row.itemName}): ${text}`);
+        errors.push(`Excel 第${row.sourceRows.join("、")}行（${row.trackingNo}）: ${text}`);
         setBatchErrors([...errors]);
         setBatchProgress({ current: i + 1, success, fail: errors.length });
       }
@@ -1255,6 +1237,9 @@ export default function StaffHomePage() {
       运输方式: transportModeLabel(item.transportMode),
       发货时间: item.shipDate ?? formatDateTime(item.arrivedAt, "-"),
       总件数: item.packageCount ?? "-", 总重量: item.weightKg ?? "-", 总体积: item.volumeM3 ?? "-",
+      长cm: productDim(item.products, "lengthCm"),
+      宽cm: productDim(item.products, "widthCm"),
+      高cm: productDim(item.products, "heightCm"),
       计费体积: item.volumeM3 != null && item.volumeM3 > 0 ? Math.max(item.volumeM3, item.transportMode === "sea" ? 0.5 : item.transportMode === "land" ? 0.2 : 0).toFixed(3) : "-",
       所属仓库: warehouseLabelFromId(item.warehouseId),
       收货地址: truncateText(item.receiverAddressTh, 40),
@@ -2586,11 +2571,11 @@ export default function StaffHomePage() {
           <div style={{ width: "100%", maxWidth: 900, maxHeight: "90vh", overflow: "auto", background: "var(--white)", borderRadius: 12, padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
             <h3 style={{ margin: "0 0 16px", fontSize: 18, fontWeight: 600 }}>批量创建订单</h3>
             <p style={{ fontSize: 13, color: "var(--t-strong)", margin: "0 0 12px" }}>
-              支持 Excel 批量导入订单。建议先下载模板，按字段填好后上传。
+              Excel 每行填写一种产品或尺寸；相同运单号会合并成一张运单。建议先下载模板查看填写说明。
             </p>
             {batchFileName && (
               <div style={{ marginBottom: 12, padding: "10px 14px", background: "var(--white)", border: "1px solid var(--l-soft)", borderRadius: 8, fontSize: 14, color: "var(--t-strong)" }}>
-                已上传: <strong>{batchFileName}</strong> — 有效数据 <strong>{batchRows.length}</strong> 条
+                已上传: <strong>{batchFileName}</strong> — 读取 <strong>{batchSourceRowCount}</strong> 行，合并为 <strong>{batchRows.length}</strong> 个运单
                 {batchRows.length === 0 && <span style={{ color: "var(--c-red-2)", marginLeft: 8 }}>无有效数据，请检查模板格式</span>}
               </div>
             )}
@@ -2598,33 +2583,66 @@ export default function StaffHomePage() {
               <button type="button" onClick={downloadStaffBatchTemplate} style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 12px", background: "var(--white)", color: "var(--t-strong)", cursor: "pointer" }}>下载模板</button>
               <label style={{ border: "1px solid var(--c-blue)", borderRadius: 8, padding: "8px 12px", background: "var(--c-blue-bg)", color: "#1e3a8a", cursor: "pointer" }}>
                 上传 Excel
-                <input type="file" accept=".xlsx,.xls" style={{ display: "none" }} onChange={(e) => {
+                <input type="file" accept=".xlsx,.xls" style={{ display: "none" }} onChange={async (e) => {
                   const file = e.target.files?.[0];
                   if (!file) return;
                   setBatchFileName(file.name);
                   setBatchConfirmed(false);
-                  file.arrayBuffer().then((buf) => {
+                  setBatchDoneNos(new Set());   // 换文件了，重新记
+                  /**
+                   * 先卡大小和行数（2026-08-27 加）。
+                   * 整个文件是读进浏览器内存里解析的，太大的表会让页面卡住甚至崩掉，
+                   * 而且用户完全看不出是怎么回事。宁可当场告诉他「分批传」。
+                   */
+                  if (file.size > BATCH_MAX_FILE_BYTES) {
+                    setBatchRows([]); setBatchSourceRowCount(0); setBatchProgress({ current: 0, success: 0, fail: 0 });
+                    setBatchErrors([`文件 ${(file.size / 1024 / 1024).toFixed(1)}MB，超过 ${BATCH_MAX_FILE_MB}MB 上限。请拆成几份分批上传。`]);
+                    e.target.value = "";
+                    return;
+                  }
+                  try {
+                    const buf = await file.arrayBuffer();
                     const wb = XLSX.read(buf, { type: "array" });
                     const ws = wb.Sheets[wb.SheetNames[0]];
                     const raw = XLSX.utils.sheet_to_json(ws, { defval: "" });
-                    const normalized = normalizeStaffBatchRows(raw as Record<string, unknown>[]);
-                    setBatchRows(normalized);
-                    setBatchErrors([]);
+                    if (raw.length > BATCH_MAX_ROWS) {
+                      setBatchRows([]); setBatchSourceRowCount(0); setBatchProgress({ current: 0, success: 0, fail: 0 });
+                      setBatchErrors([`这份表有 ${raw.length} 行，超过 ${BATCH_MAX_ROWS} 行上限。请拆成几份分批上传。`]);
+                      e.target.value = "";
+                      return;
+                    }
+                    const parsed = parseStaffBatchRows(raw as Record<string, unknown>[]);
+                    setBatchRows(parsed.orders);
+                    setBatchSourceRowCount(parsed.sourceRowCount);
+                    setBatchErrors(parsed.issues.map((issue) => {
+                      const location = issue.rowNumber ? `Excel 第${issue.rowNumber}行` : `运单 ${issue.trackingNo ?? "—"}`;
+                      return `${location}：${issue.message}`;
+                    }));
                     setBatchProgress({ current: 0, success: 0, fail: 0 });
-                  });
+                  } catch {
+                    setBatchRows([]);
+                    setBatchSourceRowCount(0);
+                    setBatchErrors(["Excel 解析失败，请使用系统模板并检查文件内容"]);
+                  }
                   e.target.value = "";
                 }} />
               </label>
-              {!batchConfirmed && batchRows.length > 0 && !batchLoading && batchProgress.current === 0 && (
+              {!batchConfirmed && batchRows.length > 0 && batchErrors.length === 0 && !batchLoading && batchProgress.current === 0 && (
                 <button type="button" onClick={() => { setBatchConfirmed(true); void submitStaffBatch(); }} style={{ border: "none", borderRadius: 8, padding: "8px 16px", background: "var(--c-blue)", color: "var(--white)", cursor: "pointer", fontWeight: 600, fontSize: 14 }}>
-                  确认上传 {batchRows.length} 条
+                  确认创建 {batchRows.length} 个运单
+                </button>
+              )}
+              {/* 中途失败后接着建剩下的（2026-08-27 加）：已经建成功的会跳过，不会重复创建 */}
+              {batchConfirmed && !batchLoading && batchDoneNos.size > 0 && batchDoneNos.size < batchRows.length && (
+                <button type="button" onClick={() => { void submitStaffBatch(); }} style={{ border: "none", borderRadius: 8, padding: "8px 16px", background: "var(--c-amber)", color: "#7c2d12", cursor: "pointer", fontWeight: 600, fontSize: 14 }}>
+                  继续创建剩下的 {batchRows.length - batchDoneNos.size} 个（已成功 {batchDoneNos.size} 个会跳过）
                 </button>
               )}
             </div>
             {/* 进度：只用文字报数，不放进度条动画 */}
             {batchLoading && (
               <div style={{ marginBottom: 12, display: "flex", justifyContent: "space-between", fontSize: 13, color: "var(--t-strong)" }}>
-                <span>正在提交第 {batchProgress.current}/{batchRows.length} 条…</span>
+                <span>正在创建第 {batchProgress.current}/{batchRows.length} 个运单…</span>
                 <span>
                   成功 {batchProgress.success} 条
                   {batchProgress.fail > 0 ? <span style={{ color: "var(--c-red-deep)" }}>　失败 {batchProgress.fail} 条</span> : null}
@@ -2633,7 +2651,7 @@ export default function StaffHomePage() {
             )}
             {batchErrors.length > 0 && !batchLoading && (
               <div style={{ marginBottom: 12, padding: 12, borderRadius: 8, background: "#fef2f2", border: "1px solid #fecaca" }}>
-                <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4, color: "var(--c-red-deep)" }}>失败明细：</div>
+                <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4, color: "var(--c-red-deep)" }}>需要修正：</div>
                 <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, color: "var(--c-red-deep)" }}>
                   {batchErrors.map((e, i) => <li key={i}>{e}</li>)}
                 </ul>
@@ -2641,17 +2659,18 @@ export default function StaffHomePage() {
             )}
             {!batchLoading && batchProgress.current > 0 && batchErrors.length === 0 && (
               <div style={{ marginBottom: 12, padding: 12, border: "1px solid var(--l-soft)", background: "var(--white)" }}>
-                <div style={{ fontWeight: 600, fontSize: 14, color: "var(--t-strong)" }}>全部提交成功：{batchProgress.success} 条</div>
+                <div style={{ fontWeight: 600, fontSize: 14, color: "var(--t-strong)" }}>全部提交成功：{batchProgress.success} 个运单</div>
               </div>
             )}
             {batchRows.length > 0 && (
               <div style={{ overflowX: "auto", marginBottom: 12 }}>
-                <div style={{ fontSize: 13, marginBottom: 4, color: "var(--t-strong)" }}>预览：有效行 {batchRows.length} 条</div>
+                <div style={{ fontSize: 13, marginBottom: 4, color: "var(--t-strong)" }}>预览：{batchRows.length} 个运单 / {batchSourceRowCount} 行产品明细</div>
                 <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                   <thead>
                     <tr style={{ borderBottom: "1px solid var(--l-cool)", background: "var(--s-cool)" }}>
                       <th style={{ textAlign: "left", padding: "6px 4px" }}>#</th>
                       <th style={{ textAlign: "left", padding: "6px 4px" }}>客户ID</th>
+                      <th style={{ textAlign: "left", padding: "6px 4px" }}>运单号</th>
                       <th style={{ textAlign: "left", padding: "6px 4px" }}>仓库</th>
                       <th style={{ textAlign: "left", padding: "6px 4px" }}>品名</th>
                       <th style={{ textAlign: "left", padding: "6px 4px" }}>箱数</th>
@@ -2661,12 +2680,12 @@ export default function StaffHomePage() {
                   </thead>
                   <tbody>
                     {batchRows.map((row, idx) => (
-                      <tr key={idx} style={{ borderBottom: "1px solid var(--s-cool-2)" }}>
+                      <tr key={row.trackingNo} style={{ borderBottom: "1px solid var(--s-cool-2)" }}>
                         <td style={{ padding: "6px 4px" }}>{idx + 1}</td>
                         <td style={{ padding: "6px 4px" }}>{allClientOptions.find((c) => c.id === row.clientId)?.name ?? row.clientId}</td>
-                        <td style={{ padding: "6px 4px" }}>{row.trackingNo ?? "—"}</td>
+                        <td style={{ padding: "6px 4px" }}>{row.trackingNo}</td>
                         <td style={{ padding: "6px 4px" }}>{{"wh_yiwu_01":"义乌仓","wh_guangzhou_01":"广州仓","wh_dongguan_01":"东莞仓","wh_shenzhen_01":"深圳仓"}[row.warehouseId] ?? row.warehouseId}</td>
-                        <td style={{ padding: "6px 4px" }}>{row.itemName}</td>
+                        <td style={{ padding: "6px 4px" }}>{row.itemName}（{row.products.length}行）</td>
                         <td style={{ padding: "6px 4px" }}>{row.packageCount} {row.packageUnit}</td>
                         <td style={{ padding: "6px 4px" }}>{row.arrivedAt}</td>
                         <td style={{ padding: "6px 4px" }}>{row.transportMode === "sea" ? "海运" : "陆运"}</td>
@@ -2677,7 +2696,7 @@ export default function StaffHomePage() {
               </div>
             )}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-              <button type="button" onClick={() => { setShowBatchImport(false); setBatchRows([]); setBatchErrors([]); setBatchProgress({ current: 0, success: 0, fail: 0 }); setBatchFileName(""); setBatchConfirmed(false); }} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: "var(--white)", cursor: "pointer", color: "var(--t-strong)" }}>关闭</button>
+              <button type="button" onClick={() => { setShowBatchImport(false); setBatchRows([]); setBatchSourceRowCount(0); setBatchErrors([]); setBatchProgress({ current: 0, success: 0, fail: 0 }); setBatchFileName(""); setBatchConfirmed(false); }} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: "var(--white)", cursor: "pointer", color: "var(--t-strong)" }}>关闭</button>
             </div>
           </div>
         </div>

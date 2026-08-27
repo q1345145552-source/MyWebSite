@@ -454,7 +454,15 @@ export default function StaffWhrConsolidationPage() {
       if (activeTab === "dispatch") loadDispatch();
       if (selectedPlanId) loadPlanDetail(selectedPlanId);
       loadPlans();
-    } catch (e: any) { setToast(e?.message ?? "签收失败"); }
+    } catch (e: any) {
+      setToast(e?.message ?? "签收失败");
+      // 失败也要刷新（2026-08-27 补）：后端现在会说「刚刚被别人改过，请刷新后再看」，
+      // 页面不刷新的话用户看到的还是旧数字，容易照着旧数字再操作一次。
+      loadOperations();
+      if (activeTab === "dispatch") loadDispatch();
+      if (selectedPlanId) loadPlanDetail(selectedPlanId);
+      loadPlans();
+    }
     finally { setSignSubmitting(false); }
   };
 
@@ -508,7 +516,15 @@ export default function StaffWhrConsolidationPage() {
       if (activeTab === "dispatch") loadDispatch();
       if (selectedPlanId) loadPlanDetail(selectedPlanId);
       loadPlans();
-    } catch (e: any) { setToast(e?.message ?? "审核失败"); }
+    } catch (e: any) {
+      setToast(e?.message ?? "审核失败");
+      // 失败也要刷新（2026-08-27 补）：后端现在会说「刚刚被别人改过，请刷新后再看」，
+      // 页面不刷新的话用户看到的还是旧数字，容易照着旧数字再操作一次。
+      loadOperations();
+      if (activeTab === "dispatch") loadDispatch();
+      if (selectedPlanId) loadPlanDetail(selectedPlanId);
+      loadPlans();
+    }
     finally { setReviewSubmitting(false); }
   };
 
@@ -535,7 +551,15 @@ export default function StaffWhrConsolidationPage() {
       if (activeTab === "dispatch") loadDispatch();
       if (selectedPlanId) loadPlanDetail(selectedPlanId);
       loadPlans();
-    } catch (e: any) { setToast(e?.message ?? "操作失败"); }
+    } catch (e: any) {
+      setToast(e?.message ?? "操作失败");
+      // 失败也要刷新（2026-08-27 补）：后端现在会说「刚刚被别人改过，请刷新后再看」，
+      // 页面不刷新的话用户看到的还是旧数字，容易照着旧数字再操作一次。
+      loadOperations();
+      if (activeTab === "dispatch") loadDispatch();
+      if (selectedPlanId) loadPlanDetail(selectedPlanId);
+      loadPlans();
+    }
     finally { setReviewSubmitting(false); }
   };
 
@@ -590,7 +614,12 @@ export default function StaffWhrConsolidationPage() {
       setToast("泰国签收成功");
       setThailandTarget(null); setThailandFiles([]);
       loadOperations(); loadDispatch();
-    } catch (e: any) { setToast(e?.message ?? "签收失败"); }
+    } catch (e: any) {
+      setToast(e?.message ?? "签收失败");
+      // 失败也要刷新（2026-08-27 补）：后端现在会说「刚刚被别人改过，请刷新后再看」，
+      // 页面不刷新的话用户看到的还是旧数字，容易照着旧数字再操作一次。
+      loadOperations(); loadDispatch();
+    }
     finally { setThailandSubmitting(false); }
   };
 
@@ -604,7 +633,7 @@ export default function StaffWhrConsolidationPage() {
       const wb = new ExcelJS.Workbook();
       const ws = wb.addWorksheet("尾端拆派");
 
-      const headers = ["计划编号", "仓库", "柜型", "目的地", "客户名", "预报单号", "唛头", "品名", "件数", "方数(m³)", "重量(kg)", "收货地址", "状态"];
+      const headers = ["计划编号", "仓库", "柜型", "目的地", "客户名", "预报单号", "唛头", "品名", "件数", "长cm", "宽cm", "高cm", "方数(m³)", "重量(kg)", "收货地址", "状态"];
       const colCount = headers.length;
 
       const headerRow = ws.addRow(headers);
@@ -642,7 +671,7 @@ export default function StaffWhrConsolidationPage() {
           let customerTotalVol = 0;
 
           if (prealerts.length === 0) {
-            ws.addRow([p.planNo, p.warehouse, p.containerType, p.destinationTh, c.clientName, "", "", "", "", "", "", c.deliveryAddress ?? "", c.status ? (PREALERT_ST_ZH[c.status] ?? c.status) : ""]);
+            ws.addRow([p.planNo, p.warehouse, p.containerType, p.destinationTh, c.clientName, "", "", "", "", "", "", "", "", "", c.deliveryAddress ?? "", c.status ? (PREALERT_ST_ZH[c.status] ?? c.status) : ""]);
             currentRow++;
           } else {
             for (const pa of prealerts) {
@@ -650,7 +679,7 @@ export default function StaffWhrConsolidationPage() {
               let isFirst = true;
 
               if (items.length === 0) {
-                ws.addRow([p.planNo, p.warehouse, p.containerType, p.destinationTh, c.clientName, pa.trackingNo, pa.mark, "", "", "", "", c.deliveryAddress ?? "", PREALERT_ST_ZH[pa.status] ?? pa.status]);
+                ws.addRow([p.planNo, p.warehouse, p.containerType, p.destinationTh, c.clientName, pa.trackingNo, pa.mark, "", "", "", "", "", "", "", c.deliveryAddress ?? "", PREALERT_ST_ZH[pa.status] ?? pa.status]);
                 currentRow++;
               } else {
                 for (const it of items) {
@@ -662,10 +691,14 @@ export default function StaffWhrConsolidationPage() {
                     p.planNo, p.warehouse, p.containerType, p.destinationTh, c.clientName,
                     isFirst ? pa.trackingNo : "",
                     isFirst ? pa.mark : "",
-                    it.productName, it.packageCount, vol, it.totalWeightKg ?? 0,
+                    it.productName, it.packageCount,
+                    // 长宽高（2026-08-27 加）。没量过尺寸的货留空，**不要写 0** ——
+                    // 写 0 会被当成「量过、是 0」，空着才表示「没这个数」。
+                    it.lengthCm ?? "", it.widthCm ?? "", it.heightCm ?? "",
+                    vol, it.totalWeightKg ?? 0,
                     c.deliveryAddress ?? "", PREALERT_ST_ZH[pa.status] ?? pa.status,
                   ]);
-                  dataRow.getCell(10).numFmt = "0.000";
+                  dataRow.getCell(13).numFmt = "0.000";
                   isFirst = false;
                   currentRow++;
                 }
@@ -674,14 +707,15 @@ export default function StaffWhrConsolidationPage() {
           }
 
           if (customerTotalVol > 0) {
-            // 单元格数量必须和表头一致（13 列），方数写数字而不是字符串，Excel 里才能求和
+            // 单元格数量必须和表头一致（16 列，2026-08-27 加了长宽高三列），
+            // 方数写数字而不是字符串，Excel 里才能求和
             const subRow = ws.addRow([
-              "", "", "", "", `${c.clientName} 小计`, "", "", "", "",
+              "", "", "", "", `${c.clientName} 小计`, "", "", "", "", "", "", "",
               Math.round(customerTotalVol * 1000) / 1000, "", "", "",
             ]);
-            subRow.getCell(10).numFmt = "0.000";
+            subRow.getCell(13).numFmt = "0.000";
             subRow.eachCell((cell, colIdx) => {
-              if (colIdx === 10) cell.font = subtotalStyle.font;
+              if (colIdx === 13) cell.font = subtotalStyle.font;
               cell.fill = subtotalStyle.fill;
             });
             currentRow++;
@@ -690,12 +724,12 @@ export default function StaffWhrConsolidationPage() {
 
         if (planTotalVol > 0) {
           const totalRow = ws.addRow([
-            "", "", "", "", `${p.planNo} 合计`, "", "", "", "",
+            "", "", "", "", `${p.planNo} 合计`, "", "", "", "", "", "", "",
             Math.round(planTotalVol * 1000) / 1000, "", "", "",
           ]);
-          totalRow.getCell(10).numFmt = "0.000";
+          totalRow.getCell(13).numFmt = "0.000";
           totalRow.eachCell((cell, colIdx) => {
-            if (colIdx === 10) cell.font = { bold: true, size: 12, color: { argb: "FF059669" } };
+            if (colIdx === 13) cell.font = { bold: true, size: 12, color: { argb: "FF059669" } };
             cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFECFDF5" } };
           });
           totalRow.height = 22;
@@ -703,7 +737,7 @@ export default function StaffWhrConsolidationPage() {
         }
 
       ws.columns = headers.map((_, i) => {
-        if (i === 0 || i === 4 || i === 5 || i === 11) return { width: 16 };
+        if (i === 0 || i === 4 || i === 5 || i === 14) return { width: 16 };
         if (i === 7) return { width: 18 };
         return { width: 12 };
       });

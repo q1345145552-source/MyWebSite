@@ -204,15 +204,40 @@
 
 请求：
 {
+  "clientId": "CLIENT_MARK",
+  "trackingNo": "YW0000001",
+  "warehouseId": "wh_yiwu_01",
+  "arrivedAt": "2026-08-27",
   "itemName": "手机壳",
   "packageCount": 2,
   "packageUnit": "box",
   "productQuantity": 200,
   "transportMode": "sea",
-  "receiverNameTh": "Somchai",
-  "receiverPhoneTh": "0812345678",
-  "receiverAddressTh": "Bangkok ..."
+  "products": [
+    {
+      "itemName": "手机壳-A款",
+      "packageCount": 1,
+      "lengthCm": 60,
+      "widthCm": 40,
+      "heightCm": 30,
+      "productQuantity": 100,
+      "weightKg": 12
+    },
+    {
+      "itemName": "手机壳-B款",
+      "packageCount": 1,
+      "lengthCm": 50,
+      "widthCm": 35,
+      "heightCm": 25,
+      "productQuantity": 100,
+      "weightKg": 10
+    }
+  ]
 }
+
+`products[]` 中的 `weightKg` 是单箱重量。传入产品明细时，后端以明细为事实源重新汇总
+`packageCount`、`productQuantity`、`weightKg` 和 `volumeM3`；批量导入会先按 `trackingNo`
+把 Excel 多行合并成一次请求。
 
 响应 data：
 {
@@ -430,3 +455,61 @@
 
 后端配置：
 - `EXCHANGE_RATE_API_URL`（可选，默认 `https://open.er-api.com/v6/latest/CNY`）
+
+## 15. 尾端派送导出数据接口
+
+> 两个接口都返回第 2 节定义的 JSON 成功包装，由 Web 端把 `data` 填入已确认的 XLSX 模板；接口本身不直接返回 Excel 文件。
+
+### 15.1 GET /staff/loading-manifests/export-data
+
+用途：从「装柜管理」按整个柜子取尾端拆柜仓清单数据。不生成 WD，也不依赖司机或车辆。
+
+权限：
+- Bearer 鉴权必填。
+- `staff` 和 `admin` 可访问；`client` 禁止访问。
+- 只能读取当前登录用户 `companyId` 下的柜子；柜子不存在或跨公司均返回 `NOT_FOUND`。
+
+查询参数：
+- `id`（必填）：装柜管理中的 `Container.id`，不是柜号文本。
+
+返回要点：
+- `scope` 固定为 `"container"`，包含 `containerId`、`containerNo`、`containerType` 和客户/运单明细。
+- 每条实际装柜记录对应一条运单明细；件数与方数使用该柜实际装入值。
+- 数据用于内部拆柜仓模板，因此允许包含柜号。
+- ⚠️ **`weightKg` 可能为 `null`**（这票货和它所属订单都没填重量）。
+  **消费方必须判空，不要当成 0** —— 导出的是给客户签字的单据，印「0 kg」等于说这箱货没有重量。
+- `volumeM3` **始终是数字**：它取自 `shipment_container_items.loaded_volume_m3`，
+  该列在数据库里是非空的（schema + 初始迁移 + 实际数据均已确认）。
+
+错误：
+- 缺少 `id`：`BAD_REQUEST`。
+- 空柜：`VALIDATION_ERROR`。
+- 柜子不存在或不属于当前公司：`NOT_FOUND`。
+
+### 15.2 GET /admin/lastmile/customer-export-data
+
+用途：WD 派送单创建后，只取其中一个客户的派送/签收单数据。一张 WD 可包含多客户、多地址和多运单。
+
+权限：
+- Bearer 鉴权必填。
+- 尽管路径位于 `/admin`，`staff` 和 `admin` 都可访问；`client` 禁止访问。
+- 先按当前用户 `companyId + deliveryNo` 限定 WD，再用 `clientId` 精确限定客户。
+
+查询参数：
+- `deliveryNo`（必填）：WD 开头的派送单号。
+- `clientId`（必填）：该 WD 中要导出的客户唛头，必须精确匹配。
+
+返回与隐私契约：
+- `scope` 固定为 `"customer"`，`customerCount` 固定为 `1`，`customers` 只能包含所选 `clientId`。
+- 不得查询或返回实际柜号。为兼容共用数据结构，`containerId`、`containerNo`、`containerType` 必须为空字符串，顶层和运单明细内的 `containerNos` 必须为空数组。
+- 不得返回同一 WD 中其它客户的姓名、电话、地址或运单。
+- ⚠️ **`weightKg` 和 `volumeM3` 都可能为 `null`**（这票货和它所属订单都没填）。
+  **消费方必须判空，不要 `?? 0`。**
+  2026-08-26 修过一次：接口原来写 `weightKg ?? 0`，把「没填」抹成了 0，
+  客户签收单上就印成「0 m³ / 0 kg」。生成器本来就会把 `null` 写成空格子，
+  问题一直卡在接口这一层。
+
+错误：
+- 缺少 `deliveryNo` 或 `clientId`：`BAD_REQUEST`。
+- WD 不存在或不属于当前公司：`NOT_FOUND`。
+- 所选客户不在该 WD 内：`NOT_FOUND`。

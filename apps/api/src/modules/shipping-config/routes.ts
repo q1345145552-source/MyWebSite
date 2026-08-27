@@ -118,6 +118,19 @@ export function registerShippingConfigRoutes(app: MinimalHttpApp): void {
       fail(res, 400, "BAD_REQUEST", "transportMode, cargoType, unitPriceCny required");
       return;
     }
+    /**
+     * ⚠️ 光判 `typeof === "number"` 不够（2026-08-27 补）：
+     * `NaN` 和 `Infinity` 也是 number，会一路走到数据库那里才炸，
+     * 用户看到的是「服务器错误」而不是「单价填得不对」；负数则会存进一个负价格。
+     */
+    if (!Number.isFinite(body.unitPriceCny) || body.unitPriceCny < 0) {
+      fail(res, 400, "BAD_REQUEST", "单价必须是 0 或正数");
+      return;
+    }
+    if (body.unitPriceCny > 10_000_000) {
+      fail(res, 400, "BAD_REQUEST", "单价超出合理范围，请核对后重填");
+      return;
+    }
     if (!["sea", "land"].includes(tm)) { fail(res, 400, "BAD_REQUEST", "invalid transportMode"); return; }
     if (!["normal", "inspection", "sensitive"].includes(ct)) { fail(res, 400, "BAD_REQUEST", "invalid cargoType"); return; }
 

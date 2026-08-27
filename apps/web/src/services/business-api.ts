@@ -25,6 +25,8 @@ export interface StaffCreateOrderPayload {
     widthCm?: number;
     heightCm?: number;
     productQuantity?: number;
+    /** 单箱重量；后端按 packageCount 汇总整票重量 */
+    weightKg?: number;
     cargoType?: string;
     domesticTrackingNo?: string;
   }>;
@@ -342,6 +344,10 @@ export interface AdminOrderItem {
   packageCount: number;
   packageUnit: string;
   weightKg: number | null;
+  /** 长/宽/高来自「产品行」；一张单有多个不同尺寸时是 "60/50" 这样的字符串（2026-08-27 加） */
+  lengthCm?: number | string;
+  widthCm?: number | string;
+  heightCm?: number | string;
   volumeM3: number | null;
   totalWeightKg?: number | null;
   totalVolumeM3?: number | null;

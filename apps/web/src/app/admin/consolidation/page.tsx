@@ -181,6 +181,9 @@ export default function AdminConsolidationPage() {
       await loadTasks();
     } catch (e: any) {
       setDeleteError(e?.message ?? "删除失败");
+      // 失败也要刷新（2026-08-27 补）：后端现在会说「刚刚被别人改过，请刷新后再看」，
+      // 页面不刷新的话用户看到的还是旧数字，容易照着旧数字再操作一次。
+      await loadTasks();
     } finally { setDeleteTaskSubmitting(false); }
   };
 
@@ -201,7 +204,13 @@ export default function AdminConsolidationPage() {
       setToast(r?.message ?? "已撤销并退款");
       await loadDetail(selectedTaskId);
       await loadTasks();
-    } catch (e: any) { setToast(e?.message ?? "撤销失败"); }
+    } catch (e: any) {
+      setToast(e?.message ?? "撤销失败");
+      // 失败也要刷新（2026-08-27 补）：后端现在会说「刚刚被别人改过，请刷新后再看」，
+      // 页面不刷新的话用户看到的还是旧数字，容易照着旧数字再操作一次。
+      await loadDetail(selectedTaskId);
+      await loadTasks();
+    }
     finally { setRevoking(false); }
   };
 
@@ -214,7 +223,13 @@ export default function AdminConsolidationPage() {
       setToast("付款审核通过");
       if (selectedTaskId) await loadDetail(selectedTaskId);
       await loadTasks();
-    } catch (e: any) { setToast(e.message); }
+    } catch (e: any) {
+      setToast(e.message);
+      // 失败也要刷新（2026-08-27 补）：后端现在会说「刚刚被别人改过，请刷新后再看」，
+      // 页面不刷新的话用户看到的还是旧数字，容易照着旧数字再操作一次。
+      if (selectedTaskId) await loadDetail(selectedTaskId);
+      await loadTasks();
+    }
     finally { setReviewSubmitting(false); }
   };
 
@@ -230,7 +245,13 @@ export default function AdminConsolidationPage() {
       setToast("已退回付款");
       if (selectedTaskId) await loadDetail(selectedTaskId);
       await loadTasks();
-    } catch (e: any) { setToast(e.message); }
+    } catch (e: any) {
+      setToast(e.message);
+      // 失败也要刷新（2026-08-27 补）：后端现在会说「刚刚被别人改过，请刷新后再看」，
+      // 页面不刷新的话用户看到的还是旧数字，容易照着旧数字再操作一次。
+      if (selectedTaskId) await loadDetail(selectedTaskId);
+      await loadTasks();
+    }
     finally { setReviewSubmitting(false); }
   };
 
@@ -307,7 +328,13 @@ export default function AdminConsolidationPage() {
       setToast("预报单已删除");
       if (selectedTaskId) await loadDetail(selectedTaskId);
       await loadTasks();
-    } catch (e: any) { setToast(e.message); } finally { setDeletePrealertSubmitting(false); }
+    } catch (e: any) {
+      setToast(e.message);
+      // 失败也要刷新（2026-08-27 补）：后端现在会说「刚刚被别人改过，请刷新后再看」，
+      // 页面不刷新的话用户看到的还是旧数字，容易照着旧数字再操作一次。
+      if (selectedTaskId) await loadDetail(selectedTaskId);
+      await loadTasks();
+    } finally { setDeletePrealertSubmitting(false); }
   };
 
   // ======== 管理员删单件货物（2026-08-15）========
@@ -327,7 +354,13 @@ export default function AdminConsolidationPage() {
       setToast("货物已删除，请自行核对任务总价");
       if (selectedTaskId) await loadDetail(selectedTaskId);
       await loadTasks();
-    } catch (e: any) { setToast(e.message); } finally { setDeleteProductSubmitting(false); }
+    } catch (e: any) {
+      setToast(e.message);
+      // 失败也要刷新（2026-08-27 补）：后端现在会说「刚刚被别人改过，请刷新后再看」，
+      // 页面不刷新的话用户看到的还是旧数字，容易照着旧数字再操作一次。
+      if (selectedTaskId) await loadDetail(selectedTaskId);
+      await loadTasks();
+    } finally { setDeleteProductSubmitting(false); }
   };
 
   const pendingPrealerts = useMemo(() => taskDetail?.prealerts?.filter((p) => p.status === "pending") ?? [], [taskDetail]);

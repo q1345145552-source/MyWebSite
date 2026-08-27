@@ -312,6 +312,10 @@ export default function StaffContainerLoadingPage() {
       await loadDetail(selectedId);
     } catch (e) {
       setError(e instanceof Error ? e.message : "撤销失败");
+      // 失败也要刷新（2026-08-27 补）：后端现在会说「刚刚被别人改过，请刷新后再看」，
+      // 页面不刷新的话用户看到的还是旧数字，容易照着旧数字再操作一次。
+      await loadList();
+      await loadDetail(selectedId);
     } finally {
       setUndoing(false);
     }
@@ -341,6 +345,10 @@ export default function StaffContainerLoadingPage() {
       await loadShipmentList();
     } catch (e) {
       setError(e instanceof Error ? e.message : "删除失败");
+      // 失败也要刷新（2026-08-27 补）：后端现在会说「刚刚被别人改过，请刷新后再看」，
+      // 页面不刷新的话用户看到的还是旧数字，容易照着旧数字再操作一次。
+      await loadList();
+      await loadShipmentList();
     }
   };
 

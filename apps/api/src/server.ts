@@ -3,6 +3,7 @@ import { URL } from "node:url";
 import { describeTokenFailure, verifyAuthToken } from "./modules/auth/token";
 import { isSessionStillValid } from "./modules/auth/session-guard";
 import { logger } from "./modules/core/logger";
+import { isBusinessError } from "./modules/core/business-error";
 
 export interface HttpRequest {
   method: string;
@@ -199,6 +200,18 @@ export function createApp(): MinimalHttpApp {
         try {
           await handler(req, res);
         } catch (error) {
+          /**
+           * ⚠️ 业务错误统一在这里转成 400，别让它变成 500（2026-08-27 新增）。
+           *
+           * 「整柜已取消不许收钱」那几道闸门是抛异常实现的。原来靠每个路由自己
+           * try/catch，结果四个管理员接口全忘了接 —— 员工看到「服务器繁忙」，
+           * 完全不知道是柜被取消了。放在最外层就忘不了，以后再加闸门也自动生效。
+           */
+          if (isBusinessError(error)) {
+            logger.warn("业务规则拦截", { path, 原因: error.message });
+            res.status(error.httpStatus).json({ code: error.code, message: error.message });
+            return;
+          }
           logger.error("unhandled error", { error: error instanceof Error ? error.message : String(error) });
           const isProduction = process.env.NODE_ENV === "production";
           const message = isProduction

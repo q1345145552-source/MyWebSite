@@ -13,6 +13,8 @@ import { IN_TRANSIT_STATUSES } from "../../../../../packages/shared-types/shipme
 import { CONTAINER_STATUS_LABEL } from "../containers/status-flow";
 import { checkPasswordStrength } from "../auth/password-policy";
 import { loadOrderTotalMetrics } from "../shipments/total-metrics";
+import { BusinessError } from "../core/business-error";
+import { loadOrderProductDims } from "../orders/routes";
 
 /** Decimal | null → number | null */
 function decToNumber(value: Prisma.Decimal | null | undefined): number | null {
@@ -457,9 +459,21 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
       })),
     );
 
+    /**
+     * 顺带把每张单的「长宽高」带上（2026-08-27 加）。
+     * 长宽高记在产品行上，运单本身没有这三个字段，而管理员端的导出要用。
+     * 这里只取三个尺寸、不带整条产品行（产品名、单号那些列表里用不到），
+     * 一张单大概多几十字节；而且这个接口本来就是分页的，一次只查当前这页。
+     */
+    const dimsByOrderId = await loadOrderProductDims(
+      auth.companyId,
+      rows.map((r) => r.orderId).filter((v): v is string => Boolean(v)),
+    );
+
     const items = rows.map((r) => ({
       id: r.id,
       orderId: r.order?.id ?? undefined,
+      ...(dimsByOrderId.get(r.orderId) ?? {}),
       orderNo: r.order?.orderNo ?? undefined,
       trackingNo: r.trackingNo,
       batchNo: r.batchNo,
@@ -572,8 +586,11 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
     });
     if (!exists) {
       // 尝试通过运单ID查找
-      const shipment = await prisma.shipment.findUnique({
-        where: { id: rawId },
+      // ⚠️ 这条「退一步按运单 ID 找」的路也必须带公司（2026-08-27 补）。
+      // 上面那次查订单是带了 companyId 的，唯独这条退路没带 ——
+      // 拿别家公司的运单 ID 进来就能绕过去，改到别家的订单。
+      const shipment = await prisma.shipment.findFirst({
+        where: { id: rawId, companyId: auth.companyId },
         select: { orderId: true, order: { select: { id: true, warehouseId: true, batchNo: true, domesticTrackingNo: true, receiverAddressTh: true, paymentStatus: true } } },
       });
       if (shipment?.order) {
@@ -1239,6 +1256,22 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
     }
 
     await prisma.$transaction(async (tx) => {
+      /**
+       * ⚠️ 锁住再复查一遍状态（2026-08-27 补）。
+       * 上面那道「已处理过就拦」是在事务外面做的：两个管理员同时点「通过」，
+       * 两边都读到 PENDING，各自给客户加一次钱 —— **客户余额凭空多一倍**，
+       * 流水也多一行。跟「重复退款」是同一类洞，只是这条是往里加钱。
+       */
+      await tx.$queryRaw`SELECT id FROM wallet_recharges WHERE id = ${id} FOR UPDATE`;
+      const fresh = await tx.walletRecharge.findUnique({
+        where: { id },
+        select: { status: true },
+      });
+      if (!fresh) throw new BusinessError("充值记录不存在", 404, "NOT_FOUND");
+      if (fresh.status !== "PENDING") {
+        throw new BusinessError("这笔充值刚刚已经被处理过了，没有重复入账，请刷新后再看");
+      }
+
       // 更新充值状态
       await tx.walletRecharge.update({
         where: { id },
@@ -1304,10 +1337,21 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    await prisma.walletRecharge.update({
-      where: { id },
+    /**
+     * ⚠️ 必须「只有还是待处理才改得动」（2026-08-27 补）。
+     * 原来是无条件改成 REJECTED：另一个管理员正好同时点了「通过」，
+     * 钱已经加进客户账户了，这边再把记录改成「已拒绝」——
+     * 账面上是拒了，钱却实实在在进去了，对不上账还查不出来。
+     * 把 status 写进 where，数据库自己保证只有一个人能改成功。
+     */
+    const rejected = await prisma.walletRecharge.updateMany({
+      where: { id, companyId: auth.companyId, status: "PENDING" },
       data: { status: "REJECTED", reviewRemark, reviewedBy: auth.userId },
     });
+    if (rejected.count === 0) {
+      fail(res, 400, "BAD_REQUEST", "这笔充值刚刚已经被处理过了，请刷新后再看");
+      return;
+    }
 
     ok(res, { rejected: true, id });
   });

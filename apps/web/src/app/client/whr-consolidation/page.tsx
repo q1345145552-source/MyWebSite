@@ -425,7 +425,13 @@ export default function ClientWhrConsolidationPage() {
       setShowPay(false); setCurrentPayPrealertId(null);
       loadBalance();
       loadDetail(selectedPlanId); loadPlans();
-    } catch (e: any) { setToast(e?.message ?? "付款失败"); }
+    } catch (e: any) {
+      setToast(e?.message ?? "付款失败");
+      // 失败也要刷新（2026-08-27 补）：后端现在会说「刚刚被别人改过，请刷新后再看」，
+      // 页面不刷新的话用户看到的还是旧数字，容易照着旧数字再操作一次。
+      loadBalance();
+      loadDetail(selectedPlanId); loadPlans();
+    }
     finally { setPaySubmitting(false); }
   };
 

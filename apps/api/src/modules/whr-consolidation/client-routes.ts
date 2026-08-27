@@ -2,8 +2,9 @@ import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
 import { InsufficientBalanceError, PaymentConflictError, chargeForConsolidation } from "../wallet/consolidation-balance";
-import { lockPlanAliveByPrealert, PlanCancelledError, PlanMissingError } from "./plan-guard";
+import { lockPlanAliveById, lockPlanAliveByPrealert, PlanCancelledError, PlanMissingError } from "./plan-guard";
 import { saveImageToDisk, deleteImageFile } from "../orders/image-storage";
+import { BusinessError } from "../core/business-error";
 import {
   ACTIVE_PREALERT_WHERE,
   EDITABLE_PREALERT_STATUS,
@@ -123,6 +124,22 @@ export function registerWhrConsolidationClientRoutes(app: MinimalHttpApp): void 
     }
 
     const prealert = await prisma.$transaction(async (tx) => {
+      /**
+       * ⚠️ 先锁住这个柜，确认它还活着（2026-08-27 补）。
+       * 上面「计划已结束就拦」在事务外面：管理员正好在这一刻取消/结束了这个柜，
+       * 客户这张新单还是会建进去 —— 建进一个已经作废的柜里，
+       * 之后既收不了钱也发不了货，还会被管理员删柜时连带清掉。
+       * 锁序照旧【计划 → 预报单 → 钱包】，所以这句必须排在最前面。
+       */
+      await lockPlanAliveById(tx, customer.planId);
+      const planNow = await tx.whrConsolidationPlan.findUnique({
+        where: { id: customer.planId },
+        select: { status: true },
+      });
+      if (planNow?.status === "completed") {
+        throw new BusinessError("该拼柜计划已结束，无法创建预报单");
+      }
+
       // 咨询锁 + 插入必须在同一个事务里，锁才真正护住「取最大值 → 插入」这段
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(83011)`;
       // 按数值取最大，避免字符串排序在位数变化后算错（"WHRP10000" < "WHRP9999"）

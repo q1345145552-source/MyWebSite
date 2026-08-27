@@ -385,6 +385,9 @@ export default function AdminWhrConsolidationPage() {
       await loadPlans();
     } catch (e: any) {
       setDeletePlanError(e?.message ?? "删除失败");
+      // 失败也要刷新（2026-08-27 补）：后端现在会说「刚刚被别人改过，请刷新后再看」，
+      // 页面不刷新的话用户看到的还是旧数字，容易照着旧数字再操作一次。
+      await loadPlans();
     } finally { setDeletePlanSubmitting(false); }
   };
 
@@ -469,7 +472,13 @@ export default function AdminWhrConsolidationPage() {
       setReviewTarget(null);
       if (selectedPlanId) loadDetail(selectedPlanId);
       loadPlans();
-    } catch (e: any) { setToast(e?.message ?? "审核失败"); }
+    } catch (e: any) {
+      setToast(e?.message ?? "审核失败");
+      // 失败也要刷新（2026-08-27 补）：后端现在会说「刚刚被别人改过，请刷新后再看」，
+      // 页面不刷新的话用户看到的还是旧数字，容易照着旧数字再操作一次。
+      if (selectedPlanId) loadDetail(selectedPlanId);
+      loadPlans();
+    }
     finally { setReviewSubmitting(false); }
   };
 
@@ -497,7 +506,13 @@ export default function AdminWhrConsolidationPage() {
       setShowReject(false); setReviewTarget(null); setRejectReason(""); setRejectPriceNormal(""); setRejectPriceInspection(""); setRejectPriceSensitive("");
       if (selectedPlanId) loadDetail(selectedPlanId);
       loadPlans();
-    } catch (e: any) { setToast(e?.message ?? "操作失败"); }
+    } catch (e: any) {
+      setToast(e?.message ?? "操作失败");
+      // 失败也要刷新（2026-08-27 补）：后端现在会说「刚刚被别人改过，请刷新后再看」，
+      // 页面不刷新的话用户看到的还是旧数字，容易照着旧数字再操作一次。
+      if (selectedPlanId) loadDetail(selectedPlanId);
+      loadPlans();
+    }
     finally { setReviewSubmitting(false); }
   };
 
@@ -517,7 +532,13 @@ export default function AdminWhrConsolidationPage() {
       setCancelTarget(null); setCancelReason("");
       if (selectedPlanId) loadDetail(selectedPlanId);
       loadPlans();
-    } catch (e: any) { setToast(e?.message ?? "取消失败"); }
+    } catch (e: any) {
+      setToast(e?.message ?? "取消失败");
+      // 失败也要刷新（2026-08-27 补）：后端现在会说「刚刚被别人改过，请刷新后再看」，
+      // 页面不刷新的话用户看到的还是旧数字，容易照着旧数字再操作一次。
+      if (selectedPlanId) loadDetail(selectedPlanId);
+      loadPlans();
+    }
     finally { setCancelSubmitting(false); }
   };
 
@@ -550,7 +571,13 @@ export default function AdminWhrConsolidationPage() {
       setDeleteItemTarget(null);
       if (selectedPlanId) loadDetail(selectedPlanId);
       loadPlans();
-    } catch (e: any) { setToast(e?.message ?? "删除失败"); }
+    } catch (e: any) {
+      setToast(e?.message ?? "删除失败");
+      // 失败也要刷新（2026-08-27 补）：后端现在会说「刚刚被别人改过，请刷新后再看」，
+      // 页面不刷新的话用户看到的还是旧数字，容易照着旧数字再操作一次。
+      if (selectedPlanId) loadDetail(selectedPlanId);
+      loadPlans();
+    }
     finally { setDeleteItemSubmitting(false); }
   };
 
@@ -596,7 +623,12 @@ export default function AdminWhrConsolidationPage() {
       });
       setToast(r?.message ?? "已撤销并退款");
       loadDetail(selectedPlanId);
-    } catch (e: any) { setToast(e?.message ?? "撤销失败"); }
+    } catch (e: any) {
+      setToast(e?.message ?? "撤销失败");
+      // 失败也要刷新（2026-08-27 补）：后端现在会说「刚刚被别人改过，请刷新后再看」，
+      // 页面不刷新的话用户看到的还是旧数字，容易照着旧数字再操作一次。
+      loadDetail(selectedPlanId);
+    }
     finally { setRevokingId(""); }
   };
 

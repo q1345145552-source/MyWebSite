@@ -41,6 +41,7 @@ export async function loadOrderProducts(companyId: string, orderIds: string[]): 
 }
 
 import { COMPLETED_STATUSES as COMPLETED } from "../shipments/status-flow";
+import { BusinessError } from "../core/business-error";
 
 /** Prisma 的 Decimal | null 转 number | null（用于返回前端）。 */
 function decToNumber(value: Prisma.Decimal | null | undefined): number | null {
@@ -171,6 +172,7 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
         widthCm?: number;
         heightCm?: number;
         productQuantity?: number;
+        weightKg?: number;
         cargoType?: string;
         domesticTrackingNo?: string;
       }>;
@@ -441,6 +443,26 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       return;
     }
     await prisma.$transaction(async (tx) => {
+      /**
+       * ⚠️ 锁住订单再复查一遍（2026-08-27 补）。上面那三道闸全在事务外面：
+       * 仓库正好在这一刻确认收货、或者财务标记了已付款，这边照样把整张订单
+       * **硬删**掉 —— 运单、轨迹、装柜明细、派送单、入库照片、结算分录一起没，
+       * 而且删了就找不回来。锁住之后重查一遍，情况变了就不删。
+       */
+      await tx.$queryRaw`SELECT id FROM orders WHERE id = ${orderId} FOR UPDATE`;
+      const fresh = await tx.order.findUnique({
+        where: { id: orderId },
+        select: { approvalStatus: true, paymentStatus: true },
+      });
+      if (!fresh) throw new BusinessError("订单不存在", 404, "NOT_FOUND");
+      if (fresh.approvalStatus === "received") {
+        throw new BusinessError("这张单刚刚被确认收货了，删除没有执行，请刷新后再看");
+      }
+      if (fresh.paymentStatus === "paid" || fresh.approvalStatus === "shipped") {
+        const why = fresh.paymentStatus === "paid" ? "刚刚被标记为已付款" : "刚刚已发货";
+        throw new BusinessError(`这张单${why}，删除没有执行。需要取消请联系客服。`);
+      }
+
       // 先获取订单下所有运单，用于级联清理
       const orderShipments = await tx.shipment.findMany({
         where: { orderId },
@@ -702,6 +724,7 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
         widthCm?: number;
         heightCm?: number;
         productQuantity?: number;
+        weightKg?: number;
         cargoType?: string;
         domesticTrackingNo?: string;
       }>;
@@ -715,7 +738,18 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
           widthCm: p.widthCm ?? null,
           heightCm: p.heightCm ?? null,
           productQuantity: p.productQuantity ?? null, cargoType: p.cargoType?.trim() || "normal", domesticTrackingNo: p.domesticTrackingNo?.trim() || "货拉拉", weightKg: p.weightKg ?? null, sortOrder: i }))
-      : body.itemName ? [{ itemName: body.itemName.trim(), packageCount: Number(body.packageCount ?? 0), lengthCm: null, widthCm: null, heightCm: null, productQuantity: null, sortOrder: 0 }] : [];
+      : body.itemName ? [{
+          itemName: body.itemName.trim(),
+          packageCount: Number(body.packageCount ?? 0),
+          lengthCm: null,
+          widthCm: null,
+          heightCm: null,
+          productQuantity: null,
+          cargoType: body.cargoType?.trim() || "normal",
+          domesticTrackingNo: body.domesticTrackingNo?.trim() || "货拉拉",
+          weightKg: null,
+          sortOrder: 0,
+        }] : [];
 
     const prName = staffProducts[0]?.itemName ?? body.itemName ?? "";
     const prPkg = staffProducts.reduce((s, p) => s + p.packageCount, 0) || Number(body.packageCount ?? 0);
@@ -762,7 +796,7 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
         select: { id: true },
       });
       if (clash) {
-        fail(res, 409, "CONFLICT", `运单号 ${manualTrackingNo} 已存在`);
+        fail(res, 409, "VALIDATION_ERROR", `运单号 ${manualTrackingNo} 已存在`);
         return;
       }
     }
@@ -774,7 +808,12 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
     const weightKg = body.weightKg === undefined || body.weightKg === null ? null : Number(body.weightKg);
     const volumeM3 = body.volumeM3 === undefined || body.volumeM3 === null ? null : Number(body.volumeM3);
     const batchNo = body.batchNo?.trim() || null;
-    const packageCountNum = Number(body.packageCount ?? 0);
+    // 产品行是批量导入和手工多产品订单的明细事实源；整票件数/产品数必须从明细汇总，
+    // 避免调用方传入的合计与 products[] 不一致。
+    const packageCountNum = staffProducts.length > 0 ? prPkg : Number(body.packageCount ?? 0);
+    const productQuantityNum = staffProducts.length > 0
+      ? staffProducts.reduce((sum, product) => sum + (product.productQuantity ?? 0), 0)
+      : Number(body.productQuantity ?? 0);
     const packageUnit = body.packageUnit ?? "box";
 
     // 事务前计算应收金额（按产品行分别计价求和）
@@ -790,7 +829,7 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
           orderNo: null,
           approvalStatus: "approved",
           itemName: body.itemName?.trim() || prName,
-          productQuantity: Number(body.productQuantity ?? 0),
+          productQuantity: productQuantityNum,
           packageCount: packageCountNum,
           packageUnit,
           weightKg: prWeight > 0 ? (prWeight as unknown as Prisma.Decimal) : (weightKg as unknown as Prisma.Decimal | null),
@@ -1555,4 +1594,52 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
 
     ok(res, { items: users });
   });
+}
+
+/**
+ * 批量取每张订单的长/宽/高，拼成能直接放进 Excel 一个格子的值（2026-08-27）。
+ *
+ * 为什么要拼：长宽高记在「产品行」上，一张订单可能有好几个产品、尺寸各不相同，
+ * 而导出是一行一张运单。实测 97% 的订单只有一个产品，所以：
+ *   · 只有一个尺寸   → 出数字，Excel 里能求和能排序
+ *   · 好几个不一样的 → 用「/」并排，比如 60/50，一个都不丢
+ *   · 一个都没填     → 这三个字段干脆不出现，前端按「没有」处理
+ */
+export async function loadOrderProductDims(
+  companyId: string,
+  orderIds: string[],
+): Promise<Map<string, { lengthCm?: number | string; widthCm?: number | string; heightCm?: number | string }>> {
+  const out = new Map<string, { lengthCm?: number | string; widthCm?: number | string; heightCm?: number | string }>();
+  const ids = Array.from(new Set(orderIds.filter(Boolean)));
+  if (ids.length === 0) return out;
+
+  const rows = await prisma.orderProduct.findMany({
+    where: { orderId: { in: ids }, companyId },
+    select: { orderId: true, lengthCm: true, widthCm: true, heightCm: true },
+  });
+
+  const pick = (vals: Array<number | null>): number | string | undefined => {
+    const nums = vals.filter((v): v is number => v != null);
+    if (nums.length === 0) return undefined;
+    const uniq = Array.from(new Set(nums));
+    return uniq.length === 1 ? uniq[0] : uniq.join("/");
+  };
+
+  const grouped = new Map<string, typeof rows>();
+  for (const r of rows) {
+    const arr = grouped.get(r.orderId) ?? [];
+    arr.push(r);
+    grouped.set(r.orderId, arr);
+  }
+  for (const [orderId, list] of grouped) {
+    const entry: { lengthCm?: number | string; widthCm?: number | string; heightCm?: number | string } = {};
+    const l = pick(list.map((x) => (x.lengthCm == null ? null : Number(x.lengthCm))));
+    const w = pick(list.map((x) => (x.widthCm == null ? null : Number(x.widthCm))));
+    const h = pick(list.map((x) => (x.heightCm == null ? null : Number(x.heightCm))));
+    if (l !== undefined) entry.lengthCm = l;
+    if (w !== undefined) entry.widthCm = w;
+    if (h !== undefined) entry.heightCm = h;
+    if (Object.keys(entry).length > 0) out.set(orderId, entry);
+  }
+  return out;
 }
