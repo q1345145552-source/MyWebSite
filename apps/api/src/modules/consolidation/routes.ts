@@ -13,7 +13,6 @@ import {
   refundToConsolidation,
 } from "../wallet/consolidation-balance";
 import { saveImageToDisk, readImageAsBase64 } from "../orders/image-storage";
-import * as XLSX from "xlsx";
 
 // ============================================================================
 // 辅助函数
