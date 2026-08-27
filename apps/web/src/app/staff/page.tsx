@@ -2632,10 +2632,15 @@ export default function StaffHomePage() {
                   确认创建 {batchRows.length} 个运单
                 </button>
               )}
-              {/* 中途失败后接着建剩下的（2026-08-27 加）：已经建成功的会跳过，不会重复创建 */}
-              {batchConfirmed && !batchLoading && batchDoneNos.size > 0 && batchDoneNos.size < batchRows.length && (
+              {/* 中途失败后接着建剩下的。
+                  ⚠️ 条件不能带 batchDoneNos.size > 0（2026-08-28 改）：
+                  第一票就失败时「已成功」是 0，那样这个按钮和「确认创建」都不显示，
+                  用户只能关掉重新上传整份表。 */}
+              {batchConfirmed && !batchLoading && batchRows.length > 0 && batchDoneNos.size < batchRows.length && (
                 <button type="button" onClick={() => { void submitStaffBatch(); }} style={{ border: "none", borderRadius: 8, padding: "8px 16px", background: "var(--c-amber)", color: "#7c2d12", cursor: "pointer", fontWeight: 600, fontSize: 14 }}>
-                  继续创建剩下的 {batchRows.length - batchDoneNos.size} 个（已成功 {batchDoneNos.size} 个会跳过）
+                  {batchDoneNos.size > 0
+                    ? `继续创建剩下的 ${batchRows.length - batchDoneNos.size} 个（已成功 ${batchDoneNos.size} 个会跳过）`
+                    : `重试这 ${batchRows.length} 个运单`}
                 </button>
               )}
             </div>

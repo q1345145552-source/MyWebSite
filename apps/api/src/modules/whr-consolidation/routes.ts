@@ -1038,7 +1038,9 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
           operatorId: auth.userId,
           operatorRole: auth.role,
           operatorName: auth.name || auth.userId,
-          fromStatus: previousStatus,
+          // 用锁内重查到的状态（2026-08-28 改）：previousStatus 是事务外读的那份，
+          // 加了锁后复查之后，真正说了算的是 fresh.status
+          fromStatus: fresh.status,
           toStatus: "cancelled",
           remark: body.cancelReason!.trim(),
         },

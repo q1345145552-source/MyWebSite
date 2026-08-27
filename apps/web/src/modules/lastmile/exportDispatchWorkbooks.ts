@@ -396,9 +396,14 @@ function patchInternalTemplate(
   });
   xml = setFormulaCell(xml, "E35", "SUM(E10:E34)", lineTotal(lines, "volumeM3"));
   xml = setFormulaCell(xml, "F35", "SUM(F10:F34)", lineTotal(lines, "weightKg"));
-  xml = setFormulaCell(xml, "G35", "SUM(G10:G34)", lineTotal(lines, "lengthCm"));
-  xml = setFormulaCell(xml, "H35", "SUM(H10:H34)", lineTotal(lines, "widthCm"));
-  return setFormulaCell(xml, "I35", "SUM(I10:I34)", lineTotal(lines, "heightCm"));
+  /**
+   * ⚠️ 长/宽/高**不做合计**（2026-08-28 改）。
+   * 把各行的长加起来（60+50+20=130cm）是个没有意义的数，
+   * 会被当成「这一柜的总长」误读 —— 件数、方数、重量才该有合计。
+   * 以前这三格也在求和，只是长宽高一直是空的、合计恒为 0 所以没人注意；
+   * 2026-08-27 把尺寸接通之后数就显示出来了，所以一并去掉。
+   */
+  return xml;
 }
 
 function patchCustomerChineseTemplate(

@@ -43,6 +43,12 @@ jobs:
       - name: TypeScript check (frontend)
         run: npx -p typescript tsc --noEmit --project apps/web/tsconfig.json
 
+      # 批量下单解析的自测（2026-08-28 接进 CI）。
+      # 这个脚本会跑 100 张单 / 300 行明细，覆盖多产品合并、公共字段继承、
+      # 方数与重量汇总、以及十几种填错的拦截。以前只能手动跑，容易忘。
+      - name: Test batch order parser
+        run: npm run test:batch-import
+
       - name: Build frontend
         run: npm run build --prefix apps/web
         env:
