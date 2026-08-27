@@ -52,6 +52,12 @@ services:
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
       DEEPSEEK_API_BASE_URL: ${DEEPSEEK_API_BASE_URL:-https://api.deepseek.com/chat/completions}
+      # ⚠️ 2026-08-28：AI 的四个上限必须在这里透传，否则改 .env 不会进容器，
+      # 只会一直用代码里的默认值（改了没反应，还很难查）。默认值见 env.example。
+      DEEPSEEK_TIMEOUT_MS: ${DEEPSEEK_TIMEOUT_MS:-}
+      AI_CHAT_MAX_PER_MINUTE: ${AI_CHAT_MAX_PER_MINUTE:-}
+      AI_CHAT_MAX_PER_DAY: ${AI_CHAT_MAX_PER_DAY:-}
+      AI_CHAT_MAX_MESSAGE_CHARS: ${AI_CHAT_MAX_MESSAGE_CHARS:-}
       IMAGES_DIR: /images
       PORT: "3001"
       DATABASE_URL: postgresql://${POSTGRES_USER:-xiangtai}:${POSTGRES_PASSWORD:-xiangtai_dev}@postgres:5432/${POSTGRES_DB:-xiangtai}?schema=public

@@ -1,0 +1,22 @@
+{
+  // scripts/ 下的自测脚本以前不在任何 tsconfig 里，等于**从来没做过类型检查**。
+  // 2026-08-28 复核发现 test-ai-answer-numbers.ts 里有个 `Order` 类型早就不存在了，
+  // 运行时因为类型会被擦除所以照跑不误，一直没人发现。
+  // 只查 `scripts/test-*.ts`（自测脚本）。scripts/ 下另外那些一次性的运维脚本
+  // 本来就带着一堆历史类型错误，不在这轮范围内，别顺手去改。
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    "noEmit": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "allowJs": false
+  },
+  "include": ["scripts/test-*.ts"],
+  "exclude": ["node_modules"]
+}

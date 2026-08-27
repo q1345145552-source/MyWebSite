@@ -174,6 +174,8 @@ export class ClientAiService implements AiService {
      * 客户可能拿子单号（如 SZ260801388-2）来查，合并后就查不到了。
      */
     const tickets = this.collapseToTickets(shipments);
+    // 重量/体积一律走这个映射，别再对父子单直接求和（历史分柜数据会重复计算）
+    const orderTotals = this.buildOrderTotals(orders, shipments);
     const knowledgeItems = await this.deps.knowledgeStore.list(auth.companyId);
 
     const modelIntent = await this.parseIntentWithModel(question, orders, memory);
@@ -189,8 +191,20 @@ export class ClientAiService implements AiService {
     let nextMemory: Partial<SessionMemory> | null = null;
     let shouldCreateKnowledgeGap = false;
 
-    if (trackingNo) {
-      const shipment = shipments.find((item) => item.trackingNo === trackingNo);
+    /**
+     * 抓到的单号在这个客户名下**找不到**、而这句话又明显是统计问题时，
+     * 不要霸占分支。带字母数字的产品型号（"ABC1234"）会被正则误认成运单号，
+     * 客户问「我这个月 ABC1234 发了多少单」原来只会得到「未找到运单号」。
+     * 单号找得到、或者这句话本来就是查单号（"到哪了"），照旧走查单分支。
+     */
+    const matchedShipment = trackingNo
+      ? shipments.find((item) => item.trackingNo === trackingNo)
+      : undefined;
+    const useTrackingBranch =
+      Boolean(trackingNo) && (Boolean(matchedShipment) || !this.isSummaryIntent(question));
+
+    if (useTrackingBranch && trackingNo) {
+      const shipment = matchedShipment;
       if (!shipment) {
         answerDraft = this.formatNotFoundAnswer(trackingNo);
       } else {
@@ -209,14 +223,23 @@ export class ClientAiService implements AiService {
     } else if (this.shouldAskClarification(question, modelIntent)) {
       answerDraft = this.formatClarificationAnswer();
     } else if (this.isSummaryIntent(question) || modelIntent.intent === "summary" || modelIntent.intent === "unknown") {
-      let timeHint = modelIntent.timeHint?.trim() || undefined;
-      if (!timeHint && isFollowUp) {
-        timeHint = memory?.timeHint;
+      /**
+       * ⚠️ 时间和状态都是**问句里说了就听问句的**，模型只补客户没说的那部分。
+       * 2026-08-28 复核实测：原来模型返回的 timeHint / statusScope 排在前面，
+       * 客户问「这个月在途多少单」而模型返回「今天、已完成」时，
+       * 系统真的回答了「今天已完成 1 单」—— 问的和答的根本不是一回事。
+       */
+      const askedNow = new Date();
+      const ruleTimeWindow = this.resolveTimeWindow(question, askedNow);
+      let timeWindow = ruleTimeWindow;
+      if (ruleTimeWindow.label === "当前公司账号数据") {
+        const hint = modelIntent.timeHint?.trim() || (isFollowUp ? memory?.timeHint : undefined);
+        if (hint) timeWindow = this.resolveTimeWindow(hint, askedNow);
       }
-      const timeWindow = this.resolveTimeWindow(timeHint || question, new Date());
-      let statusScope = modelIntent.statusScope ?? this.resolveStatusScope(question);
-      if (statusScope === "all" && isFollowUp && memory?.statusScope) {
-        statusScope = memory.statusScope;
+      let statusScope = this.resolveStatusScope(question);
+      if (statusScope === "all") {
+        statusScope =
+          modelIntent.statusScope ?? (isFollowUp ? memory?.statusScope : undefined) ?? "all";
       }
       const productScope = this.resolveProductScope(
         question,
@@ -244,7 +267,7 @@ export class ClientAiService implements AiService {
       evidenceOrderIds = orders
         .filter((item) => evidenceOrderIdSet.has(item.id))
         .map((item) => item.id);
-      const summary = this.buildCompanySummary(filteredShipments);
+      const summary = this.buildCompanySummary(filteredShipments, orderTotals);
       // 按品名查时，命中的单里可能还夹着别的货。重量体积是**整票**统计的，
       // 不拆到单个品名（拆就得自己发明一套算法，而方数是要印给客户看的）。
       // 有这种单就明说一句，免得客户拿「耳机 3 单 500 公斤」来质疑数字。
@@ -287,7 +310,7 @@ export class ClientAiService implements AiService {
         metric,
       };
     } else {
-      const summary = this.buildCompanySummary(tickets);
+      const summary = this.buildCompanySummary(tickets, orderTotals);
       answerDraft = this.formatSummaryAnswer(summary, {
         timeLabel: "当前公司账号数据",
         statusLabel: "全部运单",
@@ -473,9 +496,17 @@ export class ClientAiService implements AiService {
     }
   }
 
+  /**
+   * 从问句里抓运单号。
+   *
+   * ⚠️ 末尾那个 `(?:-\d+)?` 是 2026-08-28 复核补的：分柜出来的子单号长这样
+   * `SZ260801388-2`，原来的正则只抓到 `SZ260801388` —— 客户查子单，
+   * 系统拿父单号去找，回给他的是**父单的状态和时间**。
+   * 只读核对过：真实子单 16/16 全被截成父单，其中 2 单状态不同、9 单更新时间不同。
+   */
   private extractTrackingNo(message: string): string | undefined {
     if (!message) return undefined;
-    const match = message.match(/[A-Za-z]{2,}\d{3,}/);
+    const match = message.match(/[A-Za-z]{2,}\d{3,}(?:-\d+)?/);
     return match?.[0]?.toUpperCase();
   }
 
@@ -592,11 +623,12 @@ export class ClientAiService implements AiService {
       return { label: "全部品类" };
     }
 
-    const modelKeyword = this.normalizeProductKeyword(modelItemName);
-    if (modelKeyword) {
-      return { keyword: modelKeyword, label: `品名：${modelKeyword}` };
-    }
-
+    /**
+     * ⚠️ 顺序很重要：**客户在问句里明确说的排在最前，模型返回的排在最后**。
+     * 2026-08-28 复核实测：原来模型返回的品名排第一，
+     * 客户问「耳机有多少单」而模型返回「手机壳」时，系统真的去查了手机壳并报了它的数。
+     * 模型只该补客户**没说清楚**的那部分（比如追问「那本月呢」时把品名带过来）。
+     */
     const explicitFromQuestion = this.extractProductKeyword(message);
     if (explicitFromQuestion) {
       return { keyword: explicitFromQuestion, label: `品名：${explicitFromQuestion}` };
@@ -606,7 +638,7 @@ export class ClientAiService implements AiService {
       message.match(/(?:多少个|多少|几个|几单|统计|汇总)?\s*([\u4e00-\u9fa5A-Za-z0-9_-]{1,20})\s*(?:订单|运单)/) ??
       message.match(/品名[:：]?\s*([\u4e00-\u9fa5A-Za-z0-9_-]{1,20})/) ??
       message.match(/([\u4e00-\u9fa5A-Za-z0-9_-]{1,20})\s*(?:有多少|多少单)/);
-    const candidate = this.normalizeProductKeyword(byPattern?.[1]);
+    const candidate = this.normalizeProductKeyword(byPattern?.[1], true); // 句子片段
     if (candidate) {
       return { keyword: candidate, label: `品名：${candidate}` };
     }
@@ -614,6 +646,11 @@ export class ClientAiService implements AiService {
     const matched = this.matchKnownItemFromMessage(message, orders);
     if (matched) {
       return { keyword: matched, label: `品名：${matched}` };
+    }
+    // 问句里实在认不出来，才轮到模型给的（模型给的是已知品名，不做剥词）
+    const modelKeyword = this.normalizeProductKeyword(modelItemName);
+    if (modelKeyword) {
+      return { keyword: modelKeyword, label: `品名：${modelKeyword}` };
     }
     if (memoryItemName) {
       return { keyword: memoryItemName, label: `品名：${memoryItemName}` };
@@ -641,6 +678,7 @@ export class ClientAiService implements AiService {
         .replace(/^(我有|请问|帮我查|查询|统计|看看)/, "")
         .replace(/(的|订单|运单)$/g, "")
         .trim(),
+        true, // 这是从问句里抓出来的片段
       );
       if (candidate && candidate.length <= 20) return candidate;
     }
@@ -668,7 +706,14 @@ export class ClientAiService implements AiService {
     "数据",
   ]);
 
-  private normalizeProductKeyword(raw?: string): string | undefined {
+  /**
+   * @param fromSentence 这个词是不是**从客户那句话里正则抓出来的片段**。
+   *   只有片段才做「剥掉人称/副词/动词」那一步。
+   *   ⚠️ 2026-08-28 复核指出：模型返回的品名、和从数据库品名里认出来的名字，
+   *   都是**已知的真实品名**，绝不能剥 —— 否则品名「我的美妆」会被剥成「美妆」、
+   *   「壳的」会被剥成「壳」，统计范围直接错掉。
+   */
+  private normalizeProductKeyword(raw?: string, fromSentence = false): string | undefined {
     const keyword = raw?.trim().replace(/[？?。！!,.，]/g, "");
     if (!keyword) return undefined;
     if (!/^[\u4e00-\u9fa5A-Za-z0-9_-]{1,20}$/.test(keyword)) return undefined;
@@ -688,6 +733,8 @@ export class ClientAiService implements AiService {
     if (/\d+天/.test(keyword)) return undefined;
     if (ClientAiService.BLOCKED_PRODUCT_KEYWORDS.has(keyword)) return undefined;
     if (keyword.length <= 2 && /(我还|还有)/.test(keyword)) return undefined;
+
+    if (!fromSentence) return keyword;
 
     /**
      * 再剥掉「我 / 我的 / 一共 / 发了」这类跟品名无关的词。
@@ -883,10 +930,19 @@ export class ClientAiService implements AiService {
       const sum = (pick: (r: Shipment) => number | undefined) =>
         rows.reduce((acc, r) => acc + (Number(pick(r) ?? 0) || 0), 0);
 
+      // ⚠️ 一票货的「下单时间」取家族里**最早**的那个。
+      // 正常有父单时父单就是最早的；但历史上有父单行缺失的家族，
+      // 这里 base 会退成 rows[0]（数据按 updatedAt desc 排），
+      // 取到的可能是**分柜时间**，会把老订单算进分柜那个月。
+      const earliestCreatedAt = rows
+        .map((r) => r.createdAt)
+        .filter((value): value is string => Boolean(value))
+        .sort()[0];
       tickets.push({
         ...base,
         trackingNo: key,
         parentTrackingNo: undefined,
+        createdAt: earliestCreatedAt ?? base.createdAt,
         currentStatus: status,
         weightKg: sum((r) => r.weightKg),
         volumeM3: sum((r) => r.volumeM3),
@@ -897,35 +953,96 @@ export class ClientAiService implements AiService {
     return tickets;
   }
 
-  private buildCompanySummary(shipments: Shipment[]): {
+  /**
+   * 一票货的重量/体积取值，跟运单列表**同一个口径**
+   * （`shipments/total-metrics.ts` 的 `resolveOrderTotalMetric`）：
+   * **订单合计优先，缺失时才合计这张订单的父子运单家族，整组都没有就是「不知道」。**
+   *
+   * ⚠️ 原来 AI 是无条件把父单和子单的重量体积**相加**。现在分柜时父单会被扣减
+   * （`shipments/routes.ts` 那段 `volumeAllocation.remaining`），所以新数据相加是对的；
+   * 但**历史上分柜的父单还挂着整票的量**，相加就会重复计算。
+   * 2026-08-28 复核只读核对测试库：8 个家族里重量虚增 746.87 kg、体积虚增 0.583 m³，
+   * 24 个有运单的客户里已经有 3 个会被报大。
+   * 改用订单合计打头之后，历史数据也不会算错。
+   *
+   * ⚠️ **整组都没填时返回 undefined，绝不合计成 0** —— 老板的规矩：空值不显示 0。
+   */
+  private buildOrderTotals(
+    orders: Array<{ id: string; weightKg?: number; volumeM3?: number }>,
+    shipments: Shipment[],
+  ): Map<string, { weightKg?: number; volumeM3?: number }> {
+    const family = new Map<string, { weights: number[]; volumes: number[] }>();
+    for (const row of shipments) {
+      if (!row.orderId) continue;
+      const bucket = family.get(row.orderId) ?? { weights: [], volumes: [] };
+      if (typeof row.weightKg === "number") bucket.weights.push(row.weightKg);
+      if (typeof row.volumeM3 === "number") bucket.volumes.push(row.volumeM3);
+      family.set(row.orderId, bucket);
+    }
+    const sumPresent = (values: number[]): number | undefined =>
+      values.length === 0 ? undefined : values.reduce((acc, value) => acc + value, 0);
+
+    const totals = new Map<string, { weightKg?: number; volumeM3?: number }>();
+    for (const order of orders) {
+      const bucket = family.get(order.id);
+      totals.set(order.id, {
+        weightKg: order.weightKg ?? sumPresent(bucket?.weights ?? []),
+        volumeM3: order.volumeM3 ?? sumPresent(bucket?.volumes ?? []),
+      });
+    }
+    return totals;
+  }
+
+  private buildCompanySummary(
+    tickets: Shipment[],
+    orderTotals: Map<string, { weightKg?: number; volumeM3?: number }>,
+  ): {
     totalCount: number;
     inTransitCount: number;
     completedCount: number;
-    totalWeightKg: number;
-    totalVolumeM3: number;
+    /** 整组都没填时是 undefined，不是 0 */
+    totalWeightKg?: number;
+    totalVolumeM3?: number;
+    /** 没填重量/体积、因而没计入合计的票数，要如实告诉客户 */
+    weightUnknownCount: number;
+    volumeUnknownCount: number;
   } {
-    return shipments.reduce(
-      (acc, item) => {
-        acc.totalCount += 1;
-        if (IN_TRANSIT_STATUSES.includes(item.currentStatus)) {
-          acc.inTransitCount += 1;
-        }
-        if (COMPLETED_STATUSES.includes(item.currentStatus)) {
-          acc.completedCount += 1;
-        }
-        acc.totalWeightKg += Number(item.weightKg ?? 0) || 0;
-        acc.totalVolumeM3 += Number(item.volumeM3 ?? 0) || 0;
-        return acc;
-      },
-      {
-        totalCount: 0,
-        inTransitCount: 0,
-        completedCount: 0,
-        totalWeightKg: 0,
-        totalVolumeM3: 0,
-      },
-    );
+    let totalCount = 0;
+    let inTransitCount = 0;
+    let completedCount = 0;
+    let weightSum: number | undefined;
+    let volumeSum: number | undefined;
+    let weightUnknownCount = 0;
+    let volumeUnknownCount = 0;
+    // 同一张订单只计一次量（正常一张订单一票货，这里防的是异常数据）
+    const countedOrderIds = new Set<string>();
+
+    for (const ticket of tickets) {
+      totalCount += 1;
+      if (IN_TRANSIT_STATUSES.includes(ticket.currentStatus)) inTransitCount += 1;
+      if (COMPLETED_STATUSES.includes(ticket.currentStatus)) completedCount += 1;
+
+      const orderId = ticket.orderId;
+      if (!orderId || countedOrderIds.has(orderId)) continue;
+      countedOrderIds.add(orderId);
+      const total = orderTotals.get(orderId);
+      if (typeof total?.weightKg === "number") weightSum = (weightSum ?? 0) + total.weightKg;
+      else weightUnknownCount += 1;
+      if (typeof total?.volumeM3 === "number") volumeSum = (volumeSum ?? 0) + total.volumeM3;
+      else volumeUnknownCount += 1;
+    }
+
+    return {
+      totalCount,
+      inTransitCount,
+      completedCount,
+      totalWeightKg: weightSum,
+      totalVolumeM3: volumeSum,
+      weightUnknownCount,
+      volumeUnknownCount,
+    };
   }
+
 
   private async refineAnswerWithModel(
     question: string,
@@ -968,16 +1085,64 @@ export class ClientAiService implements AiService {
    */
   private enforceDraftNumbers(polished: string, draft: string, question: string): string {
     if (polished === draft) return draft;
+
+    // 第一关：不许出现草稿里没有的数字
     const draftNumbers = this.extractNumbers(draft);
     const invented = Array.from(this.extractNumbers(polished)).filter(
       (value) => !draftNumbers.has(value),
     );
-    if (invented.length === 0) return polished;
-    logger.warn("[ai] 模型润色时动了数字，已丢弃润色稿、改发原始答案", {
-      question: question.slice(0, 100),
-      invented: invented.slice(0, 10),
-    });
-    return draft;
+    if (invented.length > 0) {
+      logger.warn("[ai] 模型润色时动了数字，已丢弃润色稿、改发原始答案", {
+        question: question.slice(0, 100),
+        invented: invented.slice(0, 10),
+      });
+      return draft;
+    }
+
+    // 第二关：数字必须还挂在**原来那个单位**上
+    const draftPairs = this.extractNumberUnitPairs(draft);
+    const swapped = Array.from(this.extractNumberUnitPairs(polished)).filter(
+      (pair) => !draftPairs.has(pair),
+    );
+    if (swapped.length > 0) {
+      logger.warn("[ai] 模型把数字挪到了别的单位上，已丢弃润色稿、改发原始答案", {
+        question: question.slice(0, 100),
+        swapped: swapped.slice(0, 10),
+      });
+      return draft;
+    }
+    return polished;
+  }
+
+  /**
+   * 抽出「数字 + 单位」的组合，比如 `3|count`、`746.87|weight`。
+   *
+   * ⚠️ 只比「数字集合」是不够的（2026-08-28 复核实测抓到的）：
+   *   · 10 单 / 3 千克 被模型写成 **3 单 / 10 千克** —— 集合一模一样，照样放行；
+   *   · 重量的数字被安到体积上 —— 同样放行；
+   *   · `3` 写成 `-3` —— 也被当成同一个数字。
+   * 把数字和单位绑在一起比就都能抓住。
+   * 同类单位（千克/公斤/kg）归一成一类，允许模型换个说法；跨类（重量↔体积）一律拦。
+   */
+  private extractNumberUnitPairs(text: string): Set<string> {
+    const normalized = this.normalizeDigits(text);
+    const pairs = new Set<string>();
+    const re = /(-?\d+(?:\.\d+)?)\s*(单|票|张|千克|公斤|kg|KG|Kg|立方米|立方米数|立方|方|m³|M³|件|箱)/g;
+    let match: RegExpExecArray | null;
+    while ((match = re.exec(normalized)) !== null) {
+      const unitClass = this.unitClassOf(match[2]);
+      if (!unitClass) continue;
+      pairs.add(`${Number(match[1])}|${unitClass}`);
+    }
+    return pairs;
+  }
+
+  private unitClassOf(unit: string): string | undefined {
+    if (/^(单|票|张)$/.test(unit)) return "count";
+    if (/^(千克|公斤|kg|KG|Kg)$/.test(unit)) return "weight";
+    if (/^(立方米|立方米数|立方|方|m³|M³)$/.test(unit)) return "volume";
+    if (/^(件|箱)$/.test(unit)) return "piece";
+    return undefined;
   }
 
   /**
@@ -991,6 +1156,12 @@ export class ClientAiService implements AiService {
    * 提示词里已经要求逐字照抄，真出现再补中文数字的还原。
    */
   private extractNumbers(text: string): Set<string> {
+    const found = this.normalizeDigits(text).match(/\d+(?:\.\d+)?/g) ?? [];
+    return new Set(found.map((raw) => String(Number(raw))));
+  }
+
+  /** 全角数字转半角、去掉千位分隔符，好让两边用同一个写法比对 */
+  private normalizeDigits(text: string): string {
     let normalized = text
       .replace(/[０-９]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0))
       .replace(/．/g, ".");
@@ -999,8 +1170,7 @@ export class ClientAiService implements AiService {
       previous = normalized;
       normalized = normalized.replace(/(\d)[,，](\d{3})(?!\d)/g, "$1$2");
     }
-    const found = normalized.match(/\d+(?:\.\d+)?/g) ?? [];
-    return new Set(found.map((raw) => String(Number(raw))));
+    return normalized;
   }
 
   private normalizeModelAnswer(rawAnswer: string, fallbackAnswer: string): string {
@@ -1118,8 +1288,11 @@ export class ClientAiService implements AiService {
       totalCount: number;
       inTransitCount: number;
       completedCount: number;
-      totalWeightKg: number;
-      totalVolumeM3: number;
+      /** 整组都没填时是 undefined —— 这时候一个字都不写，绝不打成 0（老板的规矩） */
+      totalWeightKg?: number;
+      totalVolumeM3?: number;
+      weightUnknownCount: number;
+      volumeUnknownCount: number;
     },
     scope: {
       timeLabel: string;
@@ -1148,13 +1321,31 @@ export class ClientAiService implements AiService {
           : scope.statusLabel === "已完成运单"
             ? `你当前已完成的有 ${summary.completedCount} 单。`
             : `你当前一共查到 ${summary.totalCount} 单。`;
+    /**
+     * ⚠️ 重量/体积**没填就不写**，不能打成 0 —— 打成 0 客户会以为货没重量。
+     * 有一部分没填时，如实说清楚有几单没计入。
+     */
+    const weightText =
+      typeof summary.totalWeightKg === "number"
+        ? `${summary.totalWeightKg.toFixed(2)} 千克`
+        : undefined;
+    const volumeText =
+      typeof summary.totalVolumeM3 === "number"
+        ? `${summary.totalVolumeM3.toFixed(3)} 立方米`
+        : undefined;
     const metricHint =
       scope.metric === "volume"
-        ? `体积合计大约 ${summary.totalVolumeM3.toFixed(3)} 立方米。`
+        ? volumeText
+          ? `体积合计大约 ${volumeText}。`
+          : "这些单还没有体积数据。"
         : scope.metric === "weight"
-          ? `重量合计大约 ${summary.totalWeightKg.toFixed(2)} 千克。`
+          ? weightText
+            ? `重量合计大约 ${weightText}。`
+            : "这些单还没有重量数据。"
           : "";
     const focusHint = metricHint ? `${focusHintBase}${metricHint}` : focusHintBase;
+    const missingNote = (unknownCount: number) =>
+      unknownCount > 0 ? `（另有 ${unknownCount} 单没有数据，未计入）` : "";
     return [
       "【查询结果】",
       focusHint,
@@ -1169,8 +1360,8 @@ export class ClientAiService implements AiService {
             `已完成：${summary.completedCount} 单`,
           ]
         : [`符合条件：${summary.totalCount} 单`]),
-      `总重量约：${summary.totalWeightKg.toFixed(2)} 千克`,
-      `总体积约：${summary.totalVolumeM3.toFixed(3)} 立方米`,
+      ...(weightText ? [`总重量约：${weightText}${missingNote(summary.weightUnknownCount)}`] : []),
+      ...(volumeText ? [`总体积约：${volumeText}${missingNote(summary.volumeUnknownCount)}`] : []),
     ].join("\n");
   }
 

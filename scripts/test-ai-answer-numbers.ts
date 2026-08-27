@@ -32,6 +32,30 @@ const TZ_LABEL = process.env.TZ ?? "(系统默认)";
 
 const AUTH: AuthContext = { userId: "u_client_1", companyId: "c_1", role: "client" };
 
+/**
+ * ⚠️ 模型桩必须**真的改到草稿**，否则测试就是假绿。
+ *
+ * 2026-08-28 复核抓到的教训：第 1、4 项原来写死替换「总单量：N 单」，
+ * 后来「在途」范围的答复改成打「符合条件：N 单」，正则不再匹配 →
+ * 桩返回的就是原文 → `enforceDraftNumbers` 第一行 `polished === draft` 直接返回 →
+ * 两项测试一路绿灯，**其实一次都没验到数字校验**。
+ * 现在只要正则没匹配上就当场断言失败，答复格式再变也瞒不过去。
+ */
+function rewriteDraft(...edits: Array<[RegExp, string]>) {
+  return (draft: string): string => {
+    let next = draft;
+    for (const [pattern, replacement] of edits) {
+      const applied = next.replace(pattern, replacement);
+      assert.notEqual(applied, next, `测试桩没改到草稿（${pattern} 没匹配上）：\n${draft}`);
+      next = applied;
+    }
+    return next;
+  };
+}
+
+/** 单量那一行：「全部运单」打「总单量」，按状态筛过打「符合条件」 */
+const COUNT_LINE = /(总单量|符合条件)：\d+ 单/;
+
 /** 北京当天零点对应的真实时刻（UTC 毫秒） */
 function beijingMidnightMs(dayDelta = 0): number {
   const beijing = new Date(Date.now() + CHINA_OFFSET_MS);
@@ -51,16 +75,22 @@ function shipment(input: {
   createdAtMs: number;
   updatedAtMs: number;
   status?: ShipmentStatus;
+  /** 不传 = 这一单**没填**重量/体积（不是 0）—— 空值不能显示成 0 */
   weightKg?: number;
+  volumeM3?: number;
+  orderId?: string;
+  trackingNo?: string;
+  parentTrackingNo?: string;
 }): Shipment {
   return {
     id: input.id,
     companyId: AUTH.companyId,
-    orderId: `o_${input.id}`,
-    trackingNo: `TH${input.id.toUpperCase()}`,
+    orderId: input.orderId ?? `o_${input.id}`,
+    trackingNo: input.trackingNo ?? `TH${input.id.toUpperCase()}`,
+    ...(input.parentTrackingNo ? { parentTrackingNo: input.parentTrackingNo } : {}),
     currentStatus: input.status ?? "loaded",
-    weightKg: input.weightKg ?? 0,
-    volumeM3: 0,
+    ...(input.weightKg === undefined ? {} : { weightKg: input.weightKg }),
+    ...(input.volumeM3 === undefined ? {} : { volumeM3: input.volumeM3 }),
     packageCount: 1,
     transportMode: "sea",
     createdAt: new Date(input.createdAtMs).toISOString(),
@@ -74,11 +104,16 @@ function shipment(input: {
  * 这两者不一致正是「耳机排第二个查不到」那个 bug 的现场。
  */
 const orderNames = new Map<string, { itemName: string; productNames: string[] }>();
+/** 订单级的整票重量/体积；设了它就以它为准（跟运单列表同口径） */
+const orderTotals = new Map<string, { weightKg?: number; volumeM3?: number }>();
 
 function order(id: string): AiOrder {
   const named = orderNames.get(id);
+  const totals = orderTotals.get(id);
   return {
     id: `o_${id}`,
+    ...(totals?.weightKg === undefined ? {} : { weightKg: totals.weightKg }),
+    ...(totals?.volumeM3 === undefined ? {} : { volumeM3: totals.volumeM3 }),
     companyId: AUTH.companyId,
     clientId: AUTH.userId,
     pickupAddressCn: "",
@@ -108,8 +143,17 @@ function buildService(input: {
     audits,
     service: new ClientAiService({
       dataSource: {
-        async listOrders(_scope: QueryScope): Promise<Order[]> {
-          return input.shipments.map((s) => order(s.id));
+        async listOrders(_scope: QueryScope): Promise<AiOrder[]> {
+          // 一张订单可能挂着父单 + 多个子单，这里按 orderId 去重
+          const seen = new Set<string>();
+          const result: AiOrder[] = [];
+          for (const item of input.shipments) {
+            const key = item.orderId.replace(/^o_/, "");
+            if (seen.has(key)) continue;
+            seen.add(key);
+            result.push(order(key));
+          }
+          return result;
         },
         async listShipments(_scope: QueryScope): Promise<Shipment[]> {
           return input.shipments;
@@ -237,7 +281,7 @@ async function main() {
       shipments,
       message: "我在途有多少单",
       // 复刻生产事故：真实 367，模型答 726
-      polish: (draft) => draft.replace(/总单量：\d+ 单/, "总单量：726 单"),
+      polish: rewriteDraft([COUNT_LINE, "$1：726 单"]),
     });
     assert.equal(totalCountOf(answer), 3, "模型改过的数字被发给客户了");
     assert.ok(!answer.includes("726"), "模型编的 726 出现在最终答复里");
@@ -263,7 +307,7 @@ async function main() {
     const { answer } = await ask({
       shipments,
       message: "我在途有多少单",
-      polish: (draft) => draft.replace("1234.56", "1,234.56"),
+      polish: rewriteDraft([/1234\.56/, "1,234.56"]),
     });
     assert.ok(answer.includes("1,234.56"), "只是加了千位分隔符，不该判成改数字");
   });
@@ -274,7 +318,7 @@ async function main() {
     const { answer, audit } = await ask({
       shipments,
       message: "我在途有多少单",
-      polish: (draft) => draft.replace(/总单量：\d+ 单/, "总单量：999 单"),
+      polish: rewriteDraft([COUNT_LINE, "$1：999 单"]),
     });
     assert.ok(!audit.answerSummary.includes("999"), "审计日志里存了模型编的数字");
     assert.ok(answer.startsWith(audit.answerSummary.slice(0, 20)));
@@ -527,10 +571,193 @@ async function main() {
     }
   });
 
+  // ── 21~27. 2026-08-28 复核（Codex）报出来、我核实属实的几条 ────────────────
+  await check("21) 数字调包：10 单 / 3 千克 被换成 3 单 / 10 千克 要拦住", async () => {
+    // 只比「数字集合」的话这里两边一模一样 {10,3}，会放行 —— 必须连单位一起比
+    const shipments = Array.from({ length: 10 }, (_, i) =>
+      shipment({ id: `w${i}`, createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, weightKg: 0.3 }),
+    );
+    const { answer } = await ask({
+      shipments,
+      message: "我一共有多少单",
+      polish: rewriteDraft([/总单量：10 单/, "总单量：3 单"], [/3\.00 千克/, "10.00 千克"]),
+    });
+    assert.ok(answer.includes("总单量：10 单"), `数字被调包了还发出去：\n${answer}`);
+    assert.ok(answer.includes("3.00 千克"), `重量被调包了还发出去：\n${answer}`);
+  });
+
+  await check("22) 单位调包：重量的数字挪到体积上要拦住", async () => {
+    const shipments = [
+      shipment({
+        id: "x1",
+        createdAtMs: nowMs - 86400_000,
+        updatedAtMs: nowMs,
+        weightKg: 5,
+        volumeM3: 2,
+      }),
+    ];
+    const { answer } = await ask({
+      shipments,
+      message: "我一共有多少单",
+      polish: rewriteDraft([/5\.00 千克/, "5.00 立方米"]),
+    });
+    assert.ok(answer.includes("5.00 千克"), `重量被说成体积了还发出去：\n${answer}`);
+  });
+
+  await check("23) 正负号：3 单被写成 -3 单要拦住", async () => {
+    const shipments = Array.from({ length: 3 }, (_, i) =>
+      shipment({ id: `y${i}`, createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs }),
+    );
+    const { answer } = await ask({
+      shipments,
+      message: "我一共有多少单",
+      polish: rewriteDraft([/总单量：3 单/, "总单量：-3 单"]),
+    });
+    assert.ok(!answer.includes("-3 单"), `负号被放行了：\n${answer}`);
+  });
+
+  await check("24) 分柜子单号不再被截成父单号", async () => {
+    const parent = shipment({
+      id: "z_p",
+      createdAtMs: nowMs - 86400_000,
+      updatedAtMs: nowMs,
+      trackingNo: "SZ260801388",
+      status: "loaded",
+    });
+    const child = shipment({
+      id: "z_c",
+      createdAtMs: nowMs - 3600_000,
+      updatedAtMs: nowMs,
+      orderId: parent.orderId,
+      trackingNo: "SZ260801388-2",
+      parentTrackingNo: "SZ260801388",
+      status: "arrivedPort",
+    });
+    const { answer } = await ask({
+      shipments: [parent, child],
+      message: "我的单号 SZ260801388-2 到哪了",
+    });
+    assert.ok(answer.includes("SZ260801388-2"), `子单号被截成父单号了：\n${answer}`);
+    assert.ok(answer.includes("arrivedPort"), `回的是父单的状态：\n${answer}`);
+  });
+
+  await check("25) 模型返回的时间/状态盖不过问句里明确说的", async () => {
+    const shipments = [
+      shipment({
+        id: "aa1",
+        createdAtMs: beijingMonthStartMs() + 1000,
+        updatedAtMs: nowMs,
+        status: "loaded",
+      }),
+    ];
+    const { answer } = await ask({
+      shipments,
+      message: "我这个月在途有多少单",
+      // 模型胡说成「今天、已完成」
+      intent: JSON.stringify({ intent: "summary", timeHint: "今天", statusScope: "completed" }),
+    });
+    assert.ok(answer.includes("查询范围：本月，在途运单"), `被模型带偏了：\n${answer}`);
+  });
+
+  await check("26) 模型返回的品名盖不过问句里明确说的", async () => {
+    orderNames.set("bb1", { itemName: "耳机", productNames: ["耳机"] });
+    orderNames.set("bb2", { itemName: "手机壳", productNames: ["手机壳"] });
+    const shipments = [
+      shipment({ id: "bb1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs }),
+      shipment({ id: "bb2", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs }),
+    ];
+    const { answer } = await ask({
+      shipments,
+      message: "耳机订单有多少单？",
+      intent: JSON.stringify({ intent: "summary", itemName: "手机壳" }),
+    });
+    assert.ok(answer.includes("品名：耳机"), `被模型换成手机壳了：\n${answer}`);
+    assert.equal(totalCountOf(answer), 1);
+  });
+
+  await check("27) 剥词不碰模型返回的真实品名", async () => {
+    // 品名真的就叫「我的美妆」，剥词会把它剥成「美妆」→ 统计范围就错了
+    orderNames.set("cc1", { itemName: "我的美妆", productNames: ["我的美妆"] });
+    orderNames.set("cc2", { itemName: "美妆刷", productNames: ["美妆刷"] });
+    const shipments = [
+      shipment({ id: "cc1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs }),
+      shipment({ id: "cc2", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs }),
+    ];
+    const { answer } = await ask({
+      shipments,
+      message: "帮我看看这个品类",
+      intent: JSON.stringify({ intent: "summary", itemName: "我的美妆" }),
+    });
+    assert.ok(answer.includes("品名：我的美妆"), `品名被剥坏了：\n${answer}`);
+    assert.equal(totalCountOf(answer), 1, `剥成「美妆」后把美妆刷也算进来了：\n${answer}`);
+  });
+
+  await check("28) 历史分柜父单挂着整票量时不重复统计", async () => {
+    // 老数据：父单没被扣减，父子加起来是整票的两倍。订单合计才是真的。
+    orderTotals.set("dd", { weightKg: 100, volumeM3: 1 });
+    const parent = shipment({
+      id: "dd_p",
+      createdAtMs: nowMs - 86400_000,
+      updatedAtMs: nowMs,
+      orderId: "o_dd",
+      trackingNo: "THDD",
+      weightKg: 100,
+      volumeM3: 1,
+    });
+    const child = shipment({
+      id: "dd_c",
+      createdAtMs: nowMs - 3600_000,
+      updatedAtMs: nowMs,
+      orderId: "o_dd",
+      trackingNo: "THDD-2",
+      parentTrackingNo: "THDD",
+      weightKg: 100,
+      volumeM3: 1,
+    });
+    const { answer } = await ask({ shipments: [parent, child], message: "我一共有多少单" });
+    assert.ok(answer.includes("100.00 千克"), `重量被重复统计了：\n${answer}`);
+    assert.ok(!answer.includes("200.00"), `重量被重复统计了：\n${answer}`);
+  });
+
+  await check("29) 没填重量体积时不显示 0.00，而是压根不打这一行", async () => {
+    const shipments = [
+      shipment({ id: "ee1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs }),
+    ];
+    const { answer } = await ask({ shipments, message: "我一共有多少单" });
+    assert.ok(!answer.includes("0.00 千克"), `空值被显示成 0 了：\n${answer}`);
+    assert.ok(!answer.includes("0.000 立方米"), `空值被显示成 0 了：\n${answer}`);
+    assert.ok(!answer.includes("总重量约"), `没数据还打了重量行：\n${answer}`);
+  });
+
+  await check("30) 缺父单的家族取最早的下单时间，不取分柜时间", async () => {
+    // 只有子单、没有父单行的历史家族：不能拿分柜时间当下单时间
+    const oldCreated = nowMs - 200 * 86400_000;
+    const rows = [
+      shipment({
+        id: "ff_new",
+        createdAtMs: beijingMonthStartMs() + 1000,
+        updatedAtMs: nowMs,
+        orderId: "o_ff",
+        trackingNo: "THFF-2",
+        parentTrackingNo: "THFF",
+      }),
+      shipment({
+        id: "ff_old",
+        createdAtMs: oldCreated,
+        updatedAtMs: nowMs,
+        orderId: "o_ff",
+        trackingNo: "THFF-1",
+        parentTrackingNo: "THFF",
+      }),
+    ];
+    const { answer } = await ask({ shipments: rows, message: "我这个月一共发了多少货？" });
+    assert.equal(totalCountOf(answer), 0, `半年前的老单被算进本月了：\n${answer}`);
+  });
+
   if (failures.length > 0) {
-    throw new Error(`${failures.length}/20 项不通过（TZ=${TZ_LABEL}）：${failures.join("；")}`);
+    throw new Error(`${failures.length}/30 项不通过（TZ=${TZ_LABEL}）：${failures.join("；")}`);
   }
-  console.log(`AI 答复数字校验：20 项全部通过（TZ=${TZ_LABEL}）`);
+  console.log(`AI 答复数字校验：30 项全部通过（TZ=${TZ_LABEL}）`);
 }
 
 main().catch((error) => {

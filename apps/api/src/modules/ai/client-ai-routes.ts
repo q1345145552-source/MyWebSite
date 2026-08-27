@@ -4,7 +4,7 @@ import type {
   AiSuggestionResponse,
 } from "../../../../../packages/shared-types/common-response";
 import type { ApiResponse } from "../../../../../packages/shared-types/common-response";
-import type { Order, Shipment, StatusLabelConfig } from "../../../../../packages/shared-types/entities";
+import type { Shipment, StatusLabelConfig } from "../../../../../packages/shared-types/entities";
 import { prisma } from "../../db/prisma";
 import {
   PrismaAiAuditStore,
@@ -79,7 +79,15 @@ class PrismaClientScopedDataSource implements QueryDataSource {
       orderBy: { createdAt: "desc" },
       // 品名统计要看**全部**货品行，不能只看 order.itemName（那只是第一个货品）。
       // 只取 itemName 一列，不会把整张货品行拉回来。
-      include: { products: { select: { itemName: true }, orderBy: { sortOrder: "asc" } } },
+      // ⚠️ 嵌套查询也要带 companyId：order_products 的索引是
+      // (company_id, order_id, sort_order)，只按 order_id 走用不上前导列。
+      include: {
+        products: {
+          where: { companyId: scope.companyId },
+          select: { itemName: true },
+          orderBy: { sortOrder: "asc" },
+        },
+      },
     });
 
     return rows.map((r) => ({

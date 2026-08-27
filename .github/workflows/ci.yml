@@ -43,6 +43,13 @@ jobs:
       - name: TypeScript check (frontend)
         run: npx -p typescript tsc --noEmit --project apps/web/tsconfig.json
 
+      # 自测脚本的类型检查（2026-08-28 加）。
+      # 以前 scripts/ 不在任何 tsconfig 里，等于从来没查过 ——
+      # test-ai-answer-numbers.ts 里有个早就不存在的 Order 类型，
+      # 因为类型会被擦除所以脚本照跑不误，一直没人发现（复核时才抓到）。
+      - name: TypeScript check (test scripts)
+        run: npx -p typescript tsc --noEmit --project tsconfig.scripts.json
+
       # 批量下单解析的自测（2026-08-28 接进 CI）。
       # 这个脚本会跑 100 张单 / 300 行明细，覆盖多产品合并、公共字段继承、
       # 方数与重量汇总、以及十几种填错的拦截。以前只能手动跑，容易忘。
