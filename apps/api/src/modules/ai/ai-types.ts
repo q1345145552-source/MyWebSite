@@ -28,8 +28,18 @@ export interface QueryScope {
   clientId: string;
 }
 
+/**
+ * AI 模块自己用的订单视图：在 Order 之上带一份**这张单全部货品的品名**。
+ *
+ * ⚠️ `Order.itemName` 存的只是**第一个**货品（下单接口里的 primaryName，
+ * orders/routes.ts:222）。只看它的话，「耳机」排在第二个货品的订单一张都查不到，
+ * 客户问「耳机有多少单」会得到「未查询到品名『耳机』相关订单」——
+ * 而他明明发了耳机。所以品名统计必须看全部货品行。
+ */
+export type AiOrder = Order & { productNames: string[] };
+
 export interface QueryDataSource {
-  listOrders(scope: QueryScope): Promise<Order[]>;
+  listOrders(scope: QueryScope): Promise<AiOrder[]>;
   listShipments(scope: QueryScope): Promise<Shipment[]>;
 }
 

@@ -112,6 +112,8 @@ interface ProductScope {
   keyword?: string;
   label: string;
 }
+/** 只用到品名的地方用这个最小形状（订单自己的 itemName + 全部货品行的品名） */
+type ProductNameSource = { itemName?: string; productNames?: string[] };
 interface ModelIntent {
   intent?: "greeting" | "tracking" | "summary" | "unknown";
   trackingNo?: string;
@@ -234,11 +236,23 @@ export class ClientAiService implements AiService {
         .filter((item) => evidenceOrderIdSet.has(item.id))
         .map((item) => item.id);
       const summary = this.buildCompanySummary(filteredShipments);
+      // 按品名查时，命中的单里可能还夹着别的货。重量体积是**整票**统计的，
+      // 不拆到单个品名（拆就得自己发明一套算法，而方数是要印给客户看的）。
+      // 有这种单就明说一句，免得客户拿「耳机 3 单 500 公斤」来质疑数字。
+      const mixedProductOrders = productScope.keyword
+        ? orders.filter(
+            (item) => evidenceOrderIdSet.has(item.id) && this.orderItemNames(item).length > 1,
+          ).length
+        : 0;
       answerDraft = this.formatSummaryAnswer(summary, {
         timeLabel: timeWindow.label,
         statusLabel: this.statusScopeLabel(statusScope),
         productLabel: productScope.label,
         metric,
+        productNote:
+          mixedProductOrders > 0
+            ? `其中 ${mixedProductOrders} 单同时还有别的品名，重量体积按整票统计。`
+            : undefined,
       });
       if (summary.totalCount === 0 && productScope.keyword) {
         const productOrderCount = this.countOrdersByProduct(productScope.keyword, orders);
@@ -344,17 +358,15 @@ export class ClientAiService implements AiService {
 
   private async parseIntentWithModel(
     question: string,
-    orders: Array<{ itemName: string }>,
+    orders: ProductNameSource[],
     memory?: SessionMemory,
   ): Promise<ModelIntent> {
     // If key is unavailable or model parsing fails, fallback to rule-based parsing.
-    const itemNames = Array.from(
-      new Set(
-        orders
-          .map((item) => item.itemName?.trim())
-          .filter((name): name is string => Boolean(name))
-          .slice(0, 40),
-      ),
+    // ⚠️ 先去重再截断。原来是先 slice(0,40) 再去重，重复品名会占掉名额，
+    // 实际给模型的候选可能只剩个位数 —— 模型认不出品名，就更依赖它自己瞎猜。
+    const itemNames = Array.from(new Set(orders.flatMap((item) => this.orderItemNames(item)))).slice(
+      0,
+      40,
     );
     const parseContext = JSON.stringify(
       {
@@ -522,7 +534,7 @@ export class ClientAiService implements AiService {
 
   private resolveProductScope(
     message: string,
-    orders: Array<{ itemName: string }>,
+    orders: ProductNameSource[],
     modelItemName?: string,
     memoryItemName?: string,
   ): ProductScope {
@@ -648,32 +660,70 @@ export class ClientAiService implements AiService {
     return modelMetric ?? memoryMetric ?? "count";
   }
 
-  private matchKnownItemFromMessage(message: string, orders: Array<{ itemName: string }>): string | undefined {
+  /**
+   * 一张订单的**全部**品名（第一个货品 + 所有货品行），去空去重。
+   *
+   * ⚠️ 只看 `order.itemName` 是不够的：那存的是第一个货品（orders/routes.ts 的 primaryName）。
+   * 客户问「耳机有多少单」，耳机排在第二个货品的订单原来一张都查不到，
+   * 还会回一句「未查询到品名『耳机』相关订单」—— 而他明明发了耳机。
+   */
+  private orderItemNames(order: ProductNameSource): string[] {
+    const names = [order.itemName, ...(order.productNames ?? [])]
+      .map((name) => name?.trim())
+      .filter((name): name is string => Boolean(name));
+    return Array.from(new Set(names));
+  }
+
+  /**
+   * 这张订单算不算「关键词」这个品名。
+   *
+   * ⚠️ 原来的判断是 `name.includes(keyword) || keyword.includes(name)`，三个坑：
+   *   ① 品名是空字符串时 `keyword.includes("")` **恒为真** ——
+   *      那张单会被算进**任何**品名的统计（下单接口只 trim 不校验非空，空品名进得来）；
+   *   ② 反向包含让品名「壳」的订单被算进「手机壳」的查询，数字凭空变大；
+   *   ③ 只比对第一个货品，见 orderItemNames 的说明。
+   *
+   * 现在只用**正向包含**：货品名里含有客户说的那个词才算。
+   * 反向包含（客户说「苹果手机壳」、库里存的是「手机壳」）不再计入统计 ——
+   * 那种情况会走「查不到」分支，由 suggestItemNames 提示相近品名，
+   * 让客户自己确认，而不是替他把数字算宽。**宁可提示查不到，也不能报错的数。**
+   */
+  private matchesProductKeyword(order: ProductNameSource, keyword: string): boolean {
+    const needle = keyword.trim().toLowerCase();
+    if (!needle) return false;
+    return this.orderItemNames(order).some((name) => name.toLowerCase().includes(needle));
+  }
+
+  /**
+   * 从客户这句话里认出一个**库里真实存在**的品名。
+   *
+   * 两条规则都是为了别乱认（这次把匹配范围扩到全部货品行之后，风险变大了）：
+   * ① **一个字的品名不算**。真有客户把品名写成「货」「单」「件」的，
+   *    那样几乎每一句话都会被当成品名查询，统计范围直接错掉。
+   * ② **认最长的那个**。客户同时有「壳」和「手机壳」两个品名、问的是「手机壳」时，
+   *    按数组顺序先撞上「壳」就会把两种货一起算进去。按长度从长到短找，先中「手机壳」。
+   */
+  private matchKnownItemFromMessage(message: string, orders: ProductNameSource[]): string | undefined {
     const lowerMessage = message.toLowerCase();
-    return orders
-      .map((item) => item.itemName?.trim())
-      .filter((name): name is string => Boolean(name))
+    return Array.from(new Set(orders.flatMap((item) => this.orderItemNames(item))))
+      .filter((name) => name.length >= 2)
+      .sort((a, b) => b.length - a.length)
       .find((name) => lowerMessage.includes(name.toLowerCase()));
   }
 
   private filterShipmentsByScope(
     shipments: Shipment[],
-    orders: Array<{ id: string; itemName: string }>,
+    orders: Array<ProductNameSource & { id: string }>,
     timeWindow: TimeWindow,
     statusScope: StatusScope,
     productScope: ProductScope,
   ): Shipment[] {
+    const keyword = productScope.keyword;
     const matchedOrderIds =
-      productScope.keyword === undefined
+      keyword === undefined
         ? null
         : new Set(
-            orders
-              .filter((item) => {
-                const name = item.itemName ?? "";
-                const keyword = productScope.keyword as string;
-                return name.includes(keyword) || keyword.includes(name);
-              })
-              .map((item) => item.id),
+            orders.filter((item) => this.matchesProductKeyword(item, keyword)).map((item) => item.id),
           );
     return shipments
       .filter((item) => (matchedOrderIds ? matchedOrderIds.has(item.orderId) : true))
@@ -1001,7 +1051,14 @@ export class ClientAiService implements AiService {
       totalWeightKg: number;
       totalVolumeM3: number;
     },
-    scope: { timeLabel: string; statusLabel: string; productLabel: string; metric: SummaryMetric },
+    scope: {
+      timeLabel: string;
+      statusLabel: string;
+      productLabel: string;
+      metric: SummaryMetric;
+      /** 按品名查、且命中的单里夹着别的货时的一句说明；没有就不打这一行 */
+      productNote?: string;
+    },
   ): string {
     const focusHintBase =
       scope.statusLabel === "未完成运单"
@@ -1024,6 +1081,7 @@ export class ClientAiService implements AiService {
       "",
       "【统计明细】",
       `查询范围：${scope.timeLabel}，${scope.statusLabel}，${scope.productLabel}`,
+      ...(scope.productNote ? [scope.productNote] : []),
       `总单量：${summary.totalCount} 单`,
       `在途中：${summary.inTransitCount} 单`,
       `已完成：${summary.completedCount} 单`,
@@ -1240,16 +1298,19 @@ export class ClientAiService implements AiService {
     return `${auth.companyId}:${auth.userId}:${sessionId}`;
   }
 
-  private suggestItemNames(keyword: string, orders: Array<{ itemName: string }>): string[] {
-    const names = Array.from(
-      new Set(
-        orders
-          .map((item) => item.itemName?.trim())
-          .filter((name): name is string => Boolean(name)),
-      ),
-    );
+  /**
+   * 「查不到」时提示相近品名。
+   * 这里**故意保留双向包含**（含空品名过滤）：它只是给客户几个候选让他自己确认，
+   * 不参与任何数字统计，宽一点更有用。
+   */
+  private suggestItemNames(keyword: string, orders: ProductNameSource[]): string[] {
+    const needle = keyword.trim().toLowerCase();
+    const names = Array.from(new Set(orders.flatMap((item) => this.orderItemNames(item))));
     return names
-      .filter((name) => name.includes(keyword) || keyword.includes(name))
+      .filter((name) => {
+        const lower = name.toLowerCase();
+        return lower.includes(needle) || needle.includes(lower);
+      })
       .slice(0, 5);
   }
 
@@ -1282,7 +1343,8 @@ export class ClientAiService implements AiService {
     ].join("\n");
   }
 
-  private countOrdersByProduct(keyword: string, orders: Array<{ itemName: string }>): number {
-    return orders.filter((item) => item.itemName.includes(keyword) || keyword.includes(item.itemName)).length;
+  /** 用来区分「这个品名一张单都没有」和「有，但不在当前时间/状态范围里」，口径跟统计一致 */
+  private countOrdersByProduct(keyword: string, orders: ProductNameSource[]): number {
+    return orders.filter((item) => this.matchesProductKeyword(item, keyword)).length;
   }
 }

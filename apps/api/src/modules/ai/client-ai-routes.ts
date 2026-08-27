@@ -15,7 +15,7 @@ import {
 } from "./ai-prisma-store";
 import { ClientAiService, CHINA_OFFSET_MS } from "./ai-service";
 import { HttpDeepSeekClient } from "./deepseek-client";
-import type { AuthContext, QueryDataSource, QueryScope } from "./ai-types";
+import type { AiOrder, AuthContext, QueryDataSource, QueryScope } from "./ai-types";
 import type { HttpRequest, HttpResponse, MinimalHttpApp } from "../../server";
 import { checkRateLimit, rateLimitKey } from "../core/rate-limit";
 import { logger } from "../core/logger";
@@ -73,10 +73,13 @@ function beijingDayKey(): string {
 }
 
 class PrismaClientScopedDataSource implements QueryDataSource {
-  async listOrders(scope: QueryScope): Promise<Order[]> {
+  async listOrders(scope: QueryScope): Promise<AiOrder[]> {
     const rows = await prisma.order.findMany({
       where: { companyId: scope.companyId, clientId: scope.clientId },
       orderBy: { createdAt: "desc" },
+      // 品名统计要看**全部**货品行，不能只看 order.itemName（那只是第一个货品）。
+      // 只取 itemName 一列，不会把整张货品行拉回来。
+      include: { products: { select: { itemName: true }, orderBy: { sortOrder: "asc" } } },
     });
 
     return rows.map((r) => ({
@@ -105,6 +108,7 @@ class PrismaClientScopedDataSource implements QueryDataSource {
       statusGroup: (r.statusGroup as "unfinished" | "completed" | null) ?? undefined,
       createdAt: r.createdAt.toISOString(),
       updatedAt: r.updatedAt.toISOString(),
+      productNames: r.products.map((p) => p.itemName),
     }));
   }
 

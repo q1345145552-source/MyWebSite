@@ -14,6 +14,7 @@ import assert from "node:assert/strict";
 import { ClientAiService } from "../apps/api/src/modules/ai/ai-service";
 import type {
   AiKnowledgeGapRecord,
+  AiOrder,
   AiSessionMemoryRecord,
   AuthContext,
   QueryScope,
@@ -21,7 +22,6 @@ import type {
 import type {
   AiKnowledgeItem,
   AiQueryAuditLog,
-  Order,
   Shipment,
   StatusLabelConfig,
 } from "../packages/shared-types/entities";
@@ -68,7 +68,15 @@ function shipment(input: {
   } as Shipment;
 }
 
-function order(id: string): Order {
+/**
+ * 品名可以按运单 id 单独指定。
+ * `itemName` 是订单上那个「第一个货品」，`productNames` 是全部货品行 ——
+ * 这两者不一致正是「耳机排第二个查不到」那个 bug 的现场。
+ */
+const orderNames = new Map<string, { itemName: string; productNames: string[] }>();
+
+function order(id: string): AiOrder {
+  const named = orderNames.get(id);
   return {
     id: `o_${id}`,
     companyId: AUTH.companyId,
@@ -78,10 +86,11 @@ function order(id: string): Order {
     receiverName: "",
     receiverPhone: "",
     serviceType: "standard",
-    itemName: "测试品名",
+    itemName: named?.itemName ?? "测试品名",
+    productNames: named?.productNames ?? [named?.itemName ?? "测试品名"],
     productQuantity: 1,
     packageCount: 1,
-  } as Order;
+  } as AiOrder;
 }
 
 /** 模型桩：意图解析那次一律返回空（走规则解析），润色那次交给测试自己决定 */
@@ -349,10 +358,82 @@ async function main() {
     }
   });
 
+  // ── 10. 品名统计：多品名订单、空品名、反向包含 ────────────────────────────
+  await check("10) 品名排在第二个的货也能查到", async () => {
+    orderNames.set("j1", { itemName: "手机壳", productNames: ["手机壳", "耳机"] });
+    orderNames.set("j2", { itemName: "数据线", productNames: ["数据线"] });
+    const shipments = [
+      shipment({ id: "j1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs }),
+      shipment({ id: "j2", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs }),
+    ];
+    const { answer } = await ask({ shipments, message: "耳机订单有多少单？" });
+    assert.ok(!answer.includes("未查询到品名"), `耳机那张单没查到：\n${answer}`);
+    assert.equal(totalCountOf(answer), 1);
+    assert.ok(
+      answer.includes("其中 1 单同时还有别的品名"),
+      `没有说明这单还夹着别的货：\n${answer}`,
+    );
+  });
+
+  await check("11) 空品名的订单不会被算进任何品名的统计", async () => {
+    // 下单接口对品名只做 trim、不校验非空，所以空品名进得来。
+    // 旧写法 keyword.includes("") 恒为真 → 这张单会被算进每一个品名的查询。
+    orderNames.set("k1", { itemName: "", productNames: [""] });
+    orderNames.set("k2", { itemName: "耳机", productNames: ["耳机"] });
+    const shipments = [
+      shipment({ id: "k1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs }),
+      shipment({ id: "k2", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs }),
+    ];
+    const { answer } = await ask({ shipments, message: "耳机订单有多少单？" });
+    assert.equal(totalCountOf(answer), 1, `空品名那张单被算进来了：\n${answer}`);
+  });
+
+  await check("12) 品名「壳」的单不会被算进「手机壳」的查询", async () => {
+    orderNames.set("m1", { itemName: "壳", productNames: ["壳"] });
+    const shipments = [shipment({ id: "m1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs })];
+    const { answer } = await ask({ shipments, message: "手机壳订单有多少单？" });
+    assert.ok(
+      answer.includes("未查询到品名") || totalCountOf(answer) === 0,
+      `「壳」被算进「手机壳」了：\n${answer}`,
+    );
+  });
+
+  await check("13) 查不到时仍然提示相近品名（宽松匹配只用在提示上）", async () => {
+    orderNames.set("n1", { itemName: "壳", productNames: ["壳"] });
+    const shipments = [shipment({ id: "n1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs })];
+    const { answer } = await ask({ shipments, message: "手机壳订单有多少单？" });
+    assert.ok(answer.includes("壳"), `没给出相近品名提示：\n${answer}`);
+  });
+
+  await check("14) 认品名时认最长的那个，一个字的品名不认", async () => {
+    // 客户同时有「壳」和「手机壳」：问「手机壳」不能先撞上「壳」把两种货一起算进去。
+    orderNames.set("p1", { itemName: "壳", productNames: ["壳"] });
+    orderNames.set("p2", { itemName: "手机壳", productNames: ["手机壳"] });
+    const shipments = [
+      shipment({ id: "p1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs }),
+      shipment({ id: "p2", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs }),
+    ];
+    const { answer } = await ask({ shipments, message: "我的手机壳还有多少货没完成？" });
+    assert.ok(answer.includes("品名：手机壳"), `没认成手机壳：\n${answer}`);
+    assert.equal(totalCountOf(answer), 1, `把「壳」那张单也算进来了：\n${answer}`);
+  });
+
+  await check("15) 品名叫「货」的客户，问「这个月发了多少货」不会被当成品名查询", async () => {
+    orderNames.set("q1", { itemName: "货", productNames: ["货"] });
+    orderNames.set("q2", { itemName: "耳机", productNames: ["耳机"] });
+    const shipments = [
+      shipment({ id: "q1", createdAtMs: beijingMonthStartMs() + 1000, updatedAtMs: nowMs }),
+      shipment({ id: "q2", createdAtMs: beijingMonthStartMs() + 1000, updatedAtMs: nowMs }),
+    ];
+    const { answer } = await ask({ shipments, message: "我这个月一共发了多少货？" });
+    assert.ok(answer.includes("全部品类"), `被当成品名「货」查询了：\n${answer}`);
+    assert.equal(totalCountOf(answer), 2);
+  });
+
   if (failures.length > 0) {
-    throw new Error(`${failures.length}/9 项不通过（TZ=${TZ_LABEL}）：${failures.join("；")}`);
+    throw new Error(`${failures.length}/15 项不通过（TZ=${TZ_LABEL}）：${failures.join("；")}`);
   }
-  console.log(`AI 答复数字校验：9 项全部通过（TZ=${TZ_LABEL}）`);
+  console.log(`AI 答复数字校验：15 项全部通过（TZ=${TZ_LABEL}）`);
 }
 
 main().catch((error) => {
