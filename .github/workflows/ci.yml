@@ -49,6 +49,14 @@ jobs:
       - name: Test batch order parser
         run: npm run test:batch-import
 
+      # AI 答复的数字校验（2026-08-28 加）。
+      # 覆盖三件事：模型润色时改了数字要被拦下、「今天/本月」按北京时间算、
+      # 时间窗按下单时间而不是最后更新时间。
+      # ⚠️ 故意跑两个时区：生产容器是 UTC、开发机在中国是 UTC+8，
+      # 时区那条 bug 只在 UTC 下暴露 —— 这就是它反复"本地测没问题、线上还是错"的原因。
+      - name: Test AI answer numbers
+        run: npm run test:ai-numbers
+
       - name: Build frontend
         run: npm run build --prefix apps/web
         env:

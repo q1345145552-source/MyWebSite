@@ -6,6 +6,7 @@ import type {
 import type { AiKnowledgeItem, AiQueryAuditLog, Shipment } from "../../../../../packages/shared-types/entities";
 import { IN_TRANSIT_STATUSES, type ShipmentStatus } from "../../../../../packages/shared-types/shipment-status";
 import { pickSlowestStatus } from "../shipments/parent-status";
+import { logger } from "../core/logger";
 import type {
   AiSessionMemoryStore,
   AiKnowledgeGapStore,
@@ -72,6 +73,28 @@ const EXCEPTION_STATUSES: ShipmentStatus[] = ["exception", "returned", "cancelle
 // 以后往流程里加环节这里会自己跟上。**别再在这里写死清单。**
 /** 合并后的「一票货」：父单 + 它全部子单算作一条，memberIds 留着原始行 id */
 type Ticket = Shipment & { memberIds: string[] };
+
+/**
+ * 中国时区固定 +8（不实行夏令时）。
+ * ⚠️ 生产容器没设 TZ（docker-compose.yml 里没有），Node 的本地时区就是 UTC，
+ * 所有 `setHours` / `getFullYear` 之类的本地时区方法都会得到 UTC 的日期。
+ * 本文件涉及日期的地方一律用这个偏移量手动换算，不依赖服务器时区，
+ * 这样开发机（UTC+8）和线上容器（UTC）跑出来是同一个结果。
+ * 与管理员看板（admin/routes.ts）同一口径。
+ */
+const CHINA_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+/**
+ * 时间词的同义写法。
+ * ⚠️ 2026-08-28 实测：推荐问题列表里那句「我这个月一共发了多少货？」原来**一个时间筛选都没走** ——
+ * 代码只认「本月」，不认「这个月」，于是客户问的是本月、系统给的是开户至今的总数。
+ * （模型解析出 timeHint 时能兜住，但模型没返回或调用失败时就直接报全量，客户看到的数字大得离谱。）
+ * 往下加同义词时注意：只加**同一个时间窗**的不同说法，不要在这里发明新窗口。
+ */
+const TODAY_RE = /(今天|今日)/;
+const YESTERDAY_RE = /(昨天|昨日)/;
+const THIS_WEEK_RE = /(本周|这周|本星期|这星期|这个星期)/;
+const THIS_MONTH_RE = /(本月|这个月|这月|当月)/;
 
 const GREETING_RE = /(你好|您好|hi|hello|哈喽|在吗|你在吗)/i;
 const SERVICE_QA_RE =
@@ -427,7 +450,7 @@ export class ClientAiService implements AiService {
   }
 
   private isSummaryIntent(message: string): boolean {
-    return /(统计|汇总|总量|多少|几单|数量|重量|体积|在途|完成|异常|近\d+天|最近\d+天|今天|昨日|本周|本月)/.test(
+    return /(统计|汇总|总量|多少|几单|数量|重量|体积|在途|完成|异常|近\d+天|最近\d+天|今天|今日|昨天|昨日|本周|这周|本星期|这星期|本月|这个月|这月|当月)/.test(
       message,
     );
   }
@@ -444,41 +467,54 @@ export class ClientAiService implements AiService {
     return "all";
   }
 
+  /**
+   * 「今天 / 昨天 / 本周 / 本月」一律按**北京时间**算（口径已由用户确认，2026-08-28）。
+   *
+   * ⚠️ 原来用的是 `setHours(0,0,0,0)`，取的是**服务器本地时区**的零点。
+   * 生产容器没设 TZ，本地时区就是 UTC —— UTC 零点 = 北京早上 8 点，于是：
+   *   · 北京时间 0 点到 8 点之间下的单，会被算进「昨天」；
+   *   · 每月 1 号早 8 点前下的单，会被算进「上个月」。
+   * 而开发机在中国（UTC+8），本地跑起来又是对的 ——
+   * 这就是「本地测没问题、线上数字对不上」的根因。
+   *
+   * 下面全部走 `getUTC*` / `setUTC*`，一个本地时区方法都不用，
+   * 所以服务器时区是 UTC 还是 UTC+8，算出来都是同一个北京日历日。
+   * 与管理员看板（admin/routes.ts）同一口径，保证同一天两边报的数一致。
+   */
   private resolveTimeWindow(message: string, now: Date): TimeWindow {
+    // 把真实时刻挪成「北京墙上时间」：它的 UTC 字段就是北京的年月日时分秒
+    const beijingNow = new Date(now.getTime() + CHINA_OFFSET_MS);
+    // 北京某天的零点，再挪回真实时刻（用于和数据库里的 UTC 时间戳比较）
+    const beijingMidnight = (dayDelta: number): Date => {
+      const d = new Date(beijingNow.getTime());
+      d.setUTCHours(0, 0, 0, 0);
+      d.setUTCDate(d.getUTCDate() + dayDelta);
+      return new Date(d.getTime() - CHINA_OFFSET_MS);
+    };
+
     const dayMatch = message.match(/(?:最近|近)\s*(\d{1,3})\s*天/);
     if (dayMatch) {
       const days = Number(dayMatch[1]);
       if (!Number.isNaN(days) && days > 0) {
-        const start = new Date(now);
-        start.setHours(0, 0, 0, 0);
-        start.setDate(start.getDate() - (days - 1));
-        return { start, label: `最近${days}天` };
+        return { start: beijingMidnight(-(days - 1)), label: `最近${days}天` };
       }
     }
-    if (message.includes("今天")) {
-      const start = new Date(now);
-      start.setHours(0, 0, 0, 0);
-      const end = new Date(start);
-      end.setDate(end.getDate() + 1);
-      return { start, end, label: "今天" };
+    if (TODAY_RE.test(message)) {
+      return { start: beijingMidnight(0), end: beijingMidnight(1), label: "今天" };
     }
-    if (message.includes("昨日") || message.includes("昨天")) {
-      const end = new Date(now);
-      end.setHours(0, 0, 0, 0);
-      const start = new Date(end);
-      start.setDate(start.getDate() - 1);
-      return { start, end, label: "昨天" };
+    if (YESTERDAY_RE.test(message)) {
+      return { start: beijingMidnight(-1), end: beijingMidnight(0), label: "昨天" };
     }
-    if (message.includes("本周")) {
-      const start = new Date(now);
-      const day = start.getDay();
+    if (THIS_WEEK_RE.test(message)) {
+      // 周一算一周第一天；在 beijingNow 上取 getUTCDay 得到的就是「北京的星期几」
+      const day = beijingNow.getUTCDay();
       const offset = day === 0 ? 6 : day - 1;
-      start.setDate(start.getDate() - offset);
-      start.setHours(0, 0, 0, 0);
-      return { start, label: "本周" };
+      return { start: beijingMidnight(-offset), label: "本周" };
     }
-    if (message.includes("本月")) {
-      const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    if (THIS_MONTH_RE.test(message)) {
+      const start = new Date(
+        Date.UTC(beijingNow.getUTCFullYear(), beijingNow.getUTCMonth(), 1) - CHINA_OFFSET_MS,
+      );
       return { start, label: "本月" };
     }
     return { label: "当前公司账号数据" };
@@ -556,7 +592,17 @@ export class ClientAiService implements AiService {
     const keyword = raw?.trim().replace(/[？?。！!,.，]/g, "");
     if (!keyword) return undefined;
     if (!/^[\u4e00-\u9fa5A-Za-z0-9_-]{1,20}$/.test(keyword)) return undefined;
-    if (/(最近|今天|昨天|本周|本月|在途|路上|运输|完成|未完成|多少|几单|统计|汇总|有多少|还有|查询范围)/.test(keyword)) {
+    // ⚠️ 这份「不是品名」的词表必须跟上面的时间词、和 resolveStatusScope 的状态词同步，
+    // 漏一个词就会把整句问话当成品名。2026-08-28 实测漏掉的三种：
+    //   ·「我这个月一共发了多少单」→ 品名"我这个月一共发了"（原表只有「本月」没有「这个月」）
+    //   ·「今日发了多少单」        → 品名"今日发了"（原表只有「今天」没有「今日」）
+    //   ·「最近 3 天异常件有多少？」→ 品名"天异常件"（原表有「完成/在途」，独独漏了「异常/退回/取消」）
+    // 最后这句还是**系统自己摆在客户面前的推荐问题**，一点就回「未查询到品名『天异常件』相关订单」。
+    if (
+      /(最近|今天|今日|昨天|昨日|本周|这周|本星期|这星期|这个星期|本月|这个月|这月|当月|在途|路上|运输|完成|未完成|异常|退回|取消|多少|几单|统计|汇总|有多少|还有|查询范围)/.test(
+        keyword,
+      )
+    ) {
       return undefined;
     }
     if (/\d+天/.test(keyword)) return undefined;
@@ -635,9 +681,21 @@ export class ClientAiService implements AiService {
       .filter((item) => this.matchStatusScope(item, statusScope));
   }
 
+  /**
+   * 时间窗按**下单时间**（createdAt）筛，不是最后更新时间。
+   *
+   * ⚠️ 原来取的是 `updatedAt`：半年前发的货只要这个月有过一次状态推进
+   * （到港、清关、派送都会改 updatedAt），就会被算进「本月发货」。
+   * 推荐问题里就摆着「我这个月一共发了多少货？」，货越多、在途越久的客户偏得越离谱。
+   *
+   * 口径已由用户确认（2026-08-28）：「这个月发了多少货」= 这个月**下的单**。
+   * 预报单创建时在同一段逻辑里就建了运单行（orders/routes.ts:290），
+   * 所以运单的 createdAt 就是下单时间；分柜出来的子单 createdAt 是分柜时间，
+   * 但汇总走的是 collapseToTickets 合并后的父单行，取到的仍是原始下单时间。
+   */
   private inTimeWindow(shipment: Shipment, timeWindow: TimeWindow): boolean {
     if (!timeWindow.start && !timeWindow.end) return true;
-    const ts = Date.parse(shipment.updatedAt || shipment.createdAt);
+    const ts = Date.parse(shipment.createdAt || shipment.updatedAt);
     if (Number.isNaN(ts)) return false;
     if (timeWindow.start && ts < timeWindow.start.getTime()) return false;
     if (timeWindow.end && ts >= timeWindow.end.getTime()) return false;
@@ -756,15 +814,73 @@ export class ClientAiService implements AiService {
   ): Promise<string> {
     try {
       const refined = await this.deps.llmClient.summarizeWithContext({
-        question: `请严格使用"业务客服模板"风格输出，保持字段齐全。仅输出最终中文答复正文，不要返回JSON、不要返回代码块、不要解释过程。\n用户问题：${question}`,
+        question: [
+          '请严格使用"业务客服模板"风格输出，保持字段齐全。仅输出最终中文答复正文，不要返回JSON、不要返回代码块、不要解释过程。',
+          // 提示词只是第一道防线，模型不听话是常态 —— 真正兜底的是下面的 enforceDraftNumbers
+          "⚠️ answerDraft 里的数字是系统算准的：必须逐字照抄，不许改动、不许四舍五入、不许换算单位，",
+          "也不许补充任何 answerDraft 里没有出现过的数字。你只能改措辞。",
+          `用户问题：${question}`,
+        ].join("\n"),
         context: llmContext,
       });
       if (!refined?.trim()) return fallbackAnswer;
-      return this.normalizeModelAnswer(refined, fallbackAnswer);
+      const polished = this.normalizeModelAnswer(refined, fallbackAnswer);
+      return this.enforceDraftNumbers(polished, fallbackAnswer, question);
     } catch {
       // Model failure should not block core business answer.
       return fallbackAnswer;
     }
+  }
+
+  /**
+   * 🚨 模型润色完必须过这一关：**答复里不许出现草稿里没有的数字**。
+   *
+   * 票数、重量、体积都是代码自己算准的（answerDraft），但最后一步会把它交给
+   * DeepSeek「按客服模板改写」，模型返回什么原来就直接发给客户 ——
+   * 只要它抄错一个数，上面为「在途 726 其实是 367」做的那套父子单合并逻辑就白修了；
+   * 更麻烦的是审计日志（chat() 末尾）存的也是改写后的版本，事后根本查不出来是模型改的。
+   * 这就是「每次都说修好了、下次数字还是不对」的最后一环。
+   *
+   * 规则：把草稿和润色稿里的数字各抽成一个集合，
+   * 润色稿里只要出现一个草稿里没有的数字 —— 改了、编了、四舍五入了 —— 整段作废，
+   * 直接发原始草稿（草稿本身就是完整的人话，发出去没有任何问题）。
+   * 反过来，模型少说了某个数字是允许的：那只是说得简略，不会让客户看到错的数。
+   */
+  private enforceDraftNumbers(polished: string, draft: string, question: string): string {
+    if (polished === draft) return draft;
+    const draftNumbers = this.extractNumbers(draft);
+    const invented = Array.from(this.extractNumbers(polished)).filter(
+      (value) => !draftNumbers.has(value),
+    );
+    if (invented.length === 0) return polished;
+    logger.warn("[ai] 模型润色时动了数字，已丢弃润色稿、改发原始答案", {
+      question: question.slice(0, 100),
+      invented: invented.slice(0, 10),
+    });
+    return draft;
+  }
+
+  /**
+   * 抽出文本里的数字，做成可比对的集合。归一化的每一条都是为了**别误判**：
+   * - 全角数字（１２３）转半角，否则模型换个写法就绕过校验；
+   * - 千位分隔符（1,234 / 1，234）去掉，那和 1234 是同一个数；
+   * - 按数值归一（"08" → "8"、"0.500" → "0.5"），
+   *   这样模型把 "2026-08-28" 改写成 "2026年8月28日" 不会被当成改了数字。
+   *
+   * ⚠️ 已知盲区：模型把数字写成中文（"三百六十七单"）时这里抓不到。
+   * 提示词里已经要求逐字照抄，真出现再补中文数字的还原。
+   */
+  private extractNumbers(text: string): Set<string> {
+    let normalized = text
+      .replace(/[０-９]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0))
+      .replace(/．/g, ".");
+    let previous = "";
+    while (previous !== normalized) {
+      previous = normalized;
+      normalized = normalized.replace(/(\d)[,，](\d{3})(?!\d)/g, "$1$2");
+    }
+    const found = normalized.match(/\d+(?:\.\d+)?/g) ?? [];
+    return new Set(found.map((raw) => String(Number(raw))));
   }
 
   private normalizeModelAnswer(rawAnswer: string, fallbackAnswer: string): string {
@@ -838,13 +954,32 @@ export class ClientAiService implements AiService {
       `运单号：${shipment.trackingNo}`,
       `当前状态：${statusLabel}（${shipment.currentStatus}）`,
       `最近位置：${shipment.currentLocation ?? "暂无定位信息"}`,
-      `最近更新时间：${shipment.updatedAt}`,
+      `最近更新时间：${this.formatBeijingTime(shipment.updatedAt)}`,
       "",
       "【建议操作】",
       shipment.currentStatus === "delivered"
         ? "该运单已签收，建议核对收货数量并归档。"
         : "该运单仍在运输流程中，建议稍后再次查询最新节点。",
     ].join("\n");
+  }
+
+  /**
+   * ISO 时间戳（UTC）显示成北京时间的「YYYY-MM-DD HH:mm」。
+   * 原来把 `2026-08-28T03:28:00.000Z` 原样发给客户：那是 UTC，
+   * 客户按北京时间看会觉得少了 8 小时，而且这串格式本身也没人看得懂。而且模型润色时多半会把它改写成「8月28日 11:28」，
+   * 那个 11 草稿里没有，会被 enforceDraftNumbers 判成改了数字、整段退回草稿。
+   * 在草稿这一步就换成北京时间，两个问题一起解决。
+   */
+  private formatBeijingTime(iso?: string): string {
+    if (!iso) return "暂无";
+    const ts = Date.parse(iso);
+    if (Number.isNaN(ts)) return iso;
+    const beijing = new Date(ts + CHINA_OFFSET_MS);
+    const pad = (value: number) => String(value).padStart(2, "0");
+    return [
+      `${beijing.getUTCFullYear()}-${pad(beijing.getUTCMonth() + 1)}-${pad(beijing.getUTCDate())}`,
+      `${pad(beijing.getUTCHours())}:${pad(beijing.getUTCMinutes())}`,
+    ].join(" ");
   }
 
   private formatGreetingAnswer(): string {
