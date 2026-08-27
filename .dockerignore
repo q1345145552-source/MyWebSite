@@ -1,4 +1,12 @@
 node_modules
+# ⚠️ 上面那条**只挡根目录**（Docker 的忽略规则按相对上下文根的完整路径匹配），
+# apps/web/node_modules 挡不住 —— 跟下面 .env 踩过的是同一个坑。
+#
+# 后果实测（2026-08-28）：服务器 /root/MyWebSite/apps/web/node_modules 里躺着
+# 6 月 3 号装的 550MB 依赖，含 next@16.1.6。构建时 Dockerfile.web 先 `npm ci`
+# 装好干净依赖，紧接着 `COPY apps/web .` 又把这份旧的整个盖上去 ——
+# 等于锁文件白写，镜像里跑的是六月那份，任何依赖升级都不会生效。
+**/node_modules
 apps/web/.next
 .git
 **/.DS_Store
