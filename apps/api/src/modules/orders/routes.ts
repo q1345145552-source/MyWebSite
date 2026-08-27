@@ -826,12 +826,23 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
     const weightKg = body.weightKg === undefined || body.weightKg === null ? null : Number(body.weightKg);
     const volumeM3 = body.volumeM3 === undefined || body.volumeM3 === null ? null : Number(body.volumeM3);
     const batchNo = body.batchNo?.trim() || null;
-    // 产品行是批量导入和手工多产品订单的明细事实源；整票件数/产品数必须从明细汇总，
-    // 避免调用方传入的合计与 products[] 不一致。
+    // 件数：产品行是明细事实源，整票件数按明细汇总，避免调用方传的合计对不上。
     const packageCountNum = staffProducts.length > 0 ? prPkg : Number(body.packageCount ?? 0);
-    const productQuantityNum = staffProducts.length > 0
-      ? staffProducts.reduce((sum, product) => sum + (product.productQuantity ?? 0), 0)
-      : Number(body.productQuantity ?? 0);
+
+    /**
+     * ⚠️ 产品数量**不能**照着件数那样按产品行求和（2026-08-28 修）。
+     *
+     * 同一个字段名 productQuantity 在两个层级上是两个意思：
+     *   · 订单级（前端 staff/page.tsx:1413，提示语「产品数量 *」）= 员工填的**总数**
+     *   · 产品行级（同文件 1375 / 2472 行，提示语「**单箱数量**」）= 每箱多少个
+     * 之前改成 `sum(产品行.productQuantity)`，等于把「单箱数量」当成总数直接相加，
+     * 少乘了箱数 —— 2 个产品各 3 箱、每箱 10 个，真实总数 60，会被写成 20；
+     * 而且产品行这个字段允许留空，全空时直接写成 0，把员工填的总数覆盖掉。
+     *
+     * 批量导入那条路不受影响：解析器本来就会把订单级的合计算好一起传上来
+     * （见 batchOrderImport.ts 里的 productQuantity 汇总），走的是同一个分支。
+     */
+    const productQuantityNum = Number(body.productQuantity ?? 0);
     const packageUnit = body.packageUnit ?? "box";
 
     // 事务前计算应收金额（按产品行分别计价求和）

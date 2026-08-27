@@ -192,6 +192,24 @@ function formatStatusLog(log: any) {
   };
 }
 
+/**
+ * 发给**客户**的状态记录：把备注里的柜号抹掉（2026-08-28 补）。
+ *
+ * 上一轮只把 task.containerNo 这个字段对客户屏蔽了，但装柜那一步会把柜号
+ * 写进状态日志的备注（`柜号: XXXU1234567`），而客户端详情接口是带 statusLogs 的、
+ * 页面也把备注显示出来 —— 等于从另一条路又漏出去了。
+ * 员工端和管理员端不受影响，照常看得到完整备注。
+ */
+function formatStatusLogForClient(log: any) {
+  const base = formatStatusLog(log);
+  const remark: unknown = base?.remark;
+  if (typeof remark === "string" && /柜号\s*[:：]/.test(remark)) {
+    // 整条备注就是柜号 → 换成不含柜号的说法；备注里夹着柜号 → 只抹掉柜号那段
+    return { ...base, remark: remark.replace(/柜号\s*[:：]\s*\S+/g, "柜号（不对外显示）") };
+  }
+  return base;
+}
+
 // ============================================================================
 // 路由注册
 // ============================================================================
@@ -300,7 +318,7 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
         ...formatPrealert(pa),
         products: pa.products.map(formatProduct),
       })),
-      statusLogs: task.statusLogs.map(formatStatusLog),
+      statusLogs: task.statusLogs.map(formatStatusLogForClient),
     });
   });
 
@@ -1083,8 +1101,16 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
     // 处理签收照片（必填）
     const proofPath = saveImageToDisk(`consolidation_receive_${Date.now()}`, body.proofMime || "image/png", body.proofBase64!);
 
-    await prisma.consolidationPrealert.update({
-      where: { id: body.prealertId },
+    /**
+     * ⚠️ 把「还没签收」写进 where（2026-08-28 补）。
+     * 上面那道 `pa.status !== "pending"` 是在这之前单独查出来判断的，
+     * 两个仓管同时点「签收」都能通过，各写一次签收时间和凭证 ——
+     * 后一次会把前一次的凭证覆盖掉。
+     * 用 updateMany 把状态写进条件，数据库自己保证只有一个人改得动，
+     * 不用为这一处专门开事务。
+     */
+    const received = await prisma.consolidationPrealert.updateMany({
+      where: { id: body.prealertId, companyId: auth.companyId, status: "pending" },
       data: {
         status: "received",
         signedAt: now,
@@ -1093,6 +1119,10 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
         receivedProofBase64: proofPath,
       },
     });
+    if (received.count === 0) {
+      fail(res, 400, "BAD_REQUEST", "这张预报单刚刚已经被签收了，请刷新后再看");
+      return;
+    }
 
     await recalcTaskTotals(pa.taskId);
 
@@ -1126,6 +1156,18 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
     }
 
     await prisma.$transaction(async (tx) => {
+      // 锁住再复查一遍状态（2026-08-28 补）：上面那道检查是在事务外面做的，
+      // 两个人同时操作会都通过，最后谁写完算谁的，还会各写一条流转记录。
+      await tx.$queryRaw`SELECT id FROM consolidation_tasks WHERE id = ${task.id} FOR UPDATE`;
+      const fresh = await tx.consolidationTask.findUnique({
+        where: { id: task.id },
+        select: { status: true },
+      });
+      if (!fresh) throw new BusinessError("集货任务不存在", 404, "NOT_FOUND");
+      if (fresh.status !== "collecting") {
+        throw new BusinessError("这个任务的状态刚刚变了，确认满柜没有执行，请刷新后再看");
+      }
+
       await tx.consolidationTask.update({
         where: { id: body.taskId },
         data: { status: "full_confirmed" },
@@ -1329,6 +1371,18 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
     }
 
     await prisma.$transaction(async (tx) => {
+      // 锁住再复查一遍状态（2026-08-28 补）：上面那道检查是在事务外面做的，
+      // 两个人同时操作会都通过，最后谁写完算谁的，还会各写一条流转记录。
+      await tx.$queryRaw`SELECT id FROM consolidation_tasks WHERE id = ${task.id} FOR UPDATE`;
+      const fresh = await tx.consolidationTask.findUnique({
+        where: { id: task.id },
+        select: { status: true },
+      });
+      if (!fresh) throw new BusinessError("集货任务不存在", 404, "NOT_FOUND");
+      if (fresh.status !== task.status) {
+        throw new BusinessError("这个任务的状态刚刚变了，推进没有执行，请刷新后再看");
+      }
+
       await tx.consolidationTask.update({
         where: { id: body.taskId },
         data: { status: body.toStatus },
@@ -1381,6 +1435,18 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
     }
 
     await prisma.$transaction(async (tx) => {
+      // 锁住再复查一遍状态（2026-08-28 补）：上面那道检查是在事务外面做的，
+      // 两个人同时操作会都通过，最后谁写完算谁的，还会各写一条流转记录。
+      await tx.$queryRaw`SELECT id FROM consolidation_tasks WHERE id = ${task.id} FOR UPDATE`;
+      const fresh = await tx.consolidationTask.findUnique({
+        where: { id: task.id },
+        select: { status: true },
+      });
+      if (!fresh) throw new BusinessError("集货任务不存在", 404, "NOT_FOUND");
+      if (fresh.status !== "paid") {
+        throw new BusinessError("这个任务的状态刚刚变了，装柜没有执行，请刷新后再看");
+      }
+
       await tx.consolidationTask.update({
         where: { id: body.taskId },
         data: {
