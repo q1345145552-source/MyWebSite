@@ -54,7 +54,9 @@ export class HttpDeepSeekClient implements DeepSeekClient {
       body: JSON.stringify(payload),
     });
 
-    const data = (await response.json()) as DeepSeekResponse & { error?: { message?: string } };
+    // 出错时 DeepSeek 有两种回法：{error:{message}} 或者顶层直接一个 message，
+    // 两种都要认（2026-08-27 把顶层 message 补进类型，之前 tsc 一直报错）
+    const data = (await response.json()) as DeepSeekResponse & { error?: { message?: string }; message?: string };
     if (!response.ok) {
       const msg = data?.error?.message ?? data?.message ?? `HTTP ${response.status}`;
       if (response.status === 401) throw new Error("DeepSeek API Key 无效或已过期，请检查 .env 中的 DEEPSEEK_API_KEY。");

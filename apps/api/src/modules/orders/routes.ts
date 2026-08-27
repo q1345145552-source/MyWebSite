@@ -192,7 +192,25 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
           widthCm: p.widthCm ?? null,
           heightCm: p.heightCm ?? null,
           productQuantity: p.productQuantity ?? null, cargoType: p.cargoType?.trim() || "normal", domesticTrackingNo: p.domesticTrackingNo?.trim() || "货拉拉", weightKg: p.weightKg ?? null, sortOrder: i }))
-      : [{ itemName: body.itemName!.trim(), packageCount: Number(body.packageCount ?? 0), lengthCm: null, widthCm: null, heightCm: null, productQuantity: null, sortOrder: 0 }];
+      // 兜底分支的字段要和上面那支**完全一致**，否则联合类型里少了几个字段，
+      // 下面 reduce 读 weightKg / cargoType 时会报错（2026-08-27 补齐）
+      : [{
+          itemName: body.itemName!.trim(),
+          packageCount: Number(body.packageCount ?? 0),
+          lengthCm: null,
+          widthCm: null,
+          heightCm: null,
+          productQuantity: null,
+          // ⚠️ 这两个值必须和**数据库默认值**一模一样。
+          // 原来这里根本没写这两个字段，createMany 传 undefined 时数据库会填默认值
+          // （cargo_type='normal'、domestic_tracking_no='货拉拉'）。
+          // 现在为了让类型对齐显式写出来，但**不能顺手改成别的值** ——
+          // 那就不是「修类型」而是偷偷改了存进去的数据。
+          cargoType: "normal",
+          domesticTrackingNo: "货拉拉",
+          weightKg: null,
+          sortOrder: 0,
+        }];
 
     // PackageCount: 0 silently coerced to 1
     const totalPkg = products.reduce((s, p) => s + Math.max(1, p.packageCount || 1), 0);

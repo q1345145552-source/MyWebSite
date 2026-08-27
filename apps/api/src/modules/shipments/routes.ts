@@ -44,8 +44,12 @@ interface Kuaidi100WebQueryResponse {
 export function canTransit(fromStatus: string, toStatus: string): boolean {
   if (fromStatus === toStatus) return true;
   if (EXCEPTION_STATUSES.has(toStatus)) return true;
-  const fromIndex = STATUS_FLOW.indexOf(fromStatus);
-  const toIndex = STATUS_FLOW.indexOf(toStatus);
+  // STATUS_FLOW 是字面量元组，indexOf 只收流程内的那几个字面量；
+  // 这里传进来的是运行时的任意字符串（可能是脏数据），当成普通字符串数组查就行，
+  // 查不到返回 -1，下面本来就按 -1 处理（2026-08-27 修 tsc 报错）
+  const flow = STATUS_FLOW as readonly string[];
+  const fromIndex = flow.indexOf(fromStatus);
+  const toIndex = flow.indexOf(toStatus);
   // 允许从异常状态恢复到任意正常状态（如取消→重新装柜）
   if (fromIndex < 0 && EXCEPTION_STATUSES.has(fromStatus) && toIndex >= 0) return true;
   if (fromIndex < 0 || toIndex < 0) return false;

@@ -109,8 +109,13 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
       where: { companyId: auth.companyId },
       orderBy: { updatedAt: "desc" },
     });
-    const shipmentIds = [...new Set(rows.map((r) => r.shipmentId).filter(Boolean))];
-    const shipments = await prisma.shipment.findMany({ where: { id: { in: shipmentIds } }, select: { id: true, trackingNo: true } });
+    const shipmentIds = [...new Set(rows.map((r) => r.shipmentId).filter((v): v is string => Boolean(v)))];
+    const shipments = await prisma.shipment.findMany({
+      // 顺带带上公司（2026-08-27）：这些 id 本来就是从本公司的案件里取的，
+      // 现在是安全的，但明着写一道，免得以后谁改了上游就漏了
+      where: { id: { in: shipmentIds }, companyId: auth.companyId },
+      select: { id: true, trackingNo: true },
+    });
     const tnMap = new Map(shipments.map((s) => [s.id, s.trackingNo]));
     ok(res, {
       items: rows.map((item) => ({
@@ -1136,7 +1141,7 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
       .filter((item): item is NonNullable<typeof item> => Boolean(item))
       .slice(0, 10);
 
-    const customsShipmentIds = [...new Set(customsRows.map((r) => r.shipmentId).filter(Boolean))];
+    const customsShipmentIds = [...new Set(customsRows.map((r) => r.shipmentId).filter((v): v is string => Boolean(v)))];
     const customsOrders = await prisma.shipment.findMany({ where: { id: { in: customsShipmentIds }, companyId: auth.companyId }, select: { id: true, trackingNo: true, orderId: true } });
     const trackingNoByShipmentId = new Map(customsOrders.map((s) => [s.id, s.trackingNo]));
 

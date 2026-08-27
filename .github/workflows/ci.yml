@@ -23,6 +23,18 @@ jobs:
           npm ci --ignore-scripts
           npm install --prefix apps/web
 
+      # 后端类型检查要用 Prisma 生成出来的类型。
+      # CI 装依赖用的是 `npm ci --ignore-scripts`，不会自动生成，必须显式跑一次，
+      # 否则后端检查会报一堆「@prisma/client 没有导出 PrismaClient」（实测过）。
+      - name: Generate Prisma client
+        run: npm run db:generate
+
+      # 后端类型检查（2026-08-27 加）。
+      # 以前 CI 只查前端，后端一路带着十几个报错也能合并、也能部署 ——
+      # 真出问题时全被淹在噪音里。2026-08-27 把后端清到 0 个错，从此不许再退回去。
+      - name: TypeScript check (backend)
+        run: npx -p typescript tsc --noEmit --project apps/api/tsconfig.json
+
       - name: TypeScript check (frontend)
         run: npx -p typescript tsc --noEmit --project apps/web/tsconfig.json
 
