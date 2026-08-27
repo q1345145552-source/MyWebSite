@@ -716,7 +716,19 @@ export class ClientAiService implements AiService {
   private normalizeProductKeyword(raw?: string, fromSentence = false): string | undefined {
     const keyword = raw?.trim().replace(/[？?。！!,.，]/g, "");
     if (!keyword) return undefined;
-    if (!/^[\u4e00-\u9fa5A-Za-z0-9_-]{1,20}$/.test(keyword)) return undefined;
+    if (fromSentence) {
+      // 从句子里抓的片段才用严格字符集：这里宁可放弃，也别把半句话当成品名
+      if (!/^[\u4e00-\u9fa5A-Za-z0-9_-]{1,20}$/.test(keyword)) return undefined;
+    } else {
+      /**
+       * 模型返回的、或从数据库认出来的，是**真实品名**，只做基本的长度和控制字符检查。
+       * ⚠️ 原来这里对所有来源都套那个严格字符集，品名带空格（"ABC DEF"）
+       * 或全角字符（"ＡＢＣ１２３"）会被整个丢掉 → 品名范围退回「全部品类」→
+       * 客户问一个品名，系统把他**全部**的单都报给他，数字大得离谱。
+       */
+      if (keyword.length > 40) return undefined;
+      if (/[\r\n\t]/.test(keyword)) return undefined;
+    }
     // ⚠️ 这份「不是品名」的词表必须跟上面的时间词、和 resolveStatusScope 的状态词同步，
     // 漏一个词就会把整句问话当成品名。2026-08-28 实测漏掉的三种：
     //   ·「我这个月一共发了多少单」→ 品名"我这个月一共发了"（原表只有「本月」没有「这个月」）

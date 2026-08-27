@@ -754,10 +754,33 @@ async function main() {
     assert.equal(totalCountOf(answer), 0, `半年前的老单被算进本月了：\n${answer}`);
   });
 
+  await check("31) 品名带空格或全角字符时不会退回「全部品类」", async () => {
+    // 退回全部品类 = 客户问一个品名，系统把他全部的单都报给他
+    for (const [id, name] of [
+      ["gg1", "ABC DEF"],
+      ["gg2", "ＡＢＣ１２３"],
+    ] as Array<[string, string]>) {
+      orderNames.set(id, { itemName: name, productNames: [name] });
+    }
+    orderNames.set("gg3", { itemName: "别的货", productNames: ["别的货"] });
+    const shipments = ["gg1", "gg2", "gg3"].map((id) =>
+      shipment({ id, createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs }),
+    );
+    for (const name of ["ABC DEF", "ＡＢＣ１２３"]) {
+      const { answer } = await ask({
+        shipments,
+        message: "帮我看看这个品类",
+        intent: JSON.stringify({ intent: "summary", itemName: name }),
+      });
+      assert.ok(answer.includes(`品名：${name}`), `品名「${name}」被丢掉了：\n${answer}`);
+      assert.equal(totalCountOf(answer), 1, `品名「${name}」退回了全部品类：\n${answer}`);
+    }
+  });
+
   if (failures.length > 0) {
-    throw new Error(`${failures.length}/30 项不通过（TZ=${TZ_LABEL}）：${failures.join("；")}`);
+    throw new Error(`${failures.length}/31 项不通过（TZ=${TZ_LABEL}）：${failures.join("；")}`);
   }
-  console.log(`AI 答复数字校验：30 项全部通过（TZ=${TZ_LABEL}）`);
+  console.log(`AI 答复数字校验：31 项全部通过（TZ=${TZ_LABEL}）`);
 }
 
 main().catch((error) => {
