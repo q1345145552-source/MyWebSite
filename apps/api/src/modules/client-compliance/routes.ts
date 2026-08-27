@@ -61,6 +61,27 @@ export function registerClientComplianceRoutes(app: MinimalHttpApp): void {
       fail(res, 400, "BAD_REQUEST", "请上传付款凭证");
       return;
     }
+    /**
+     * ⚠️ 必须校验格式（2026-08-28 补）。
+     *
+     * 这个字段是客户自己填的，原来只 trim 一下就存库。而管理员审核页会把它
+     * 直接拼进 HTML 显示 —— 客户填一段带 onerror 的字符串，管理员一点开，
+     * 脚本就在**管理员的浏览器里**跑，能读走 localStorage 里的登录令牌，
+     * 等于客户拿到管理员账号。
+     *
+     * 前端那处也已改成用 DOM 接口设 src（不再拼字符串），这里是第二道闸：
+     * 只放行「图片 data URL」和「站内 /images/ 路径」，别的一律拒绝。
+     */
+    const isDataImage = /^data:image\/(png|jpe?g|gif|webp|bmp);base64,[A-Za-z0-9+/=\s]+$/.test(proofImage);
+    const isLocalPath = /^\/images\/[A-Za-z0-9._-]+$/.test(proofImage);
+    if (!isDataImage && !isLocalPath) {
+      fail(res, 400, "BAD_REQUEST", "付款凭证格式不对，请重新上传图片");
+      return;
+    }
+    if (proofImage.length > 8 * 1024 * 1024) {
+      fail(res, 400, "BAD_REQUEST", "付款凭证图片过大，请压缩后再上传");
+      return;
+    }
     const recharge = await prisma.walletRecharge.create({
       data: {
         id: `rcg_${Date.now()}`,

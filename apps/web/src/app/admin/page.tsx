@@ -2051,7 +2051,15 @@ export default function AdminHomePage() {
                           alt="付款凭证"
                           onClick={() => {
                             const w = window.open("", "_blank");
-                            if (w) { w.document.write(`<img src="${r.proofImage}" style="max-width:100%" />`); }
+                            // ⚠️ 不能用 document.write 拼字符串（2026-08-28 改）。
+                            // 凭证是客户自己填的，拼进 HTML 等于让客户在管理员浏览器里执行脚本
+                            // （能读走登录令牌）。改用 DOM 接口设 src，内容只会被当成网址。
+                            if (!w) return;
+                            const img = w.document.createElement("img");
+                            img.src = r.proofImage;
+                            img.alt = "付款凭证";
+                            img.style.maxWidth = "100%";
+                            w.document.body.appendChild(img);
                           }}
                           style={{ width: 60, height: 60, objectFit: "cover", borderRadius: 6, border: "1px solid var(--l-soft)", cursor: "pointer" }}
                         />
