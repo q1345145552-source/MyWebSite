@@ -41,6 +41,40 @@ const AUTH: AuthContext = { userId: "u_client_1", companyId: "c_1", role: "clien
  * 两项测试一路绿灯，**其实一次都没验到数字校验**。
  * 现在只要正则没匹配上就当场断言失败，答复格式再变也瞒不过去。
  */
+/**
+ * 把草稿里第 a、b 个「数据记号」对调。
+ *
+ * ⚠️ 这个辅助要能同时对付两种草稿：改造前桩收到的是**真数字**（`10 单`），
+ * 改造后收到的是**占位符**（`⟦N1⟧`）。写死其中一种，另一种会因为匹配不到而
+ * 「测试假失败」——看起来像 bug，其实是桩没写对。
+ */
+const TOKEN_RE = /⟦N\d+⟧|-?\d+(?:\.\d+)?\s*(?:千克|公斤|kg|立方米|立方|方|m³|单|票|张|件|箱)|\d{1,2}:\d{2}/g;
+function swapTokens(a: number, b: number) {
+  return (draft: string): string => {
+    const hits = draft.match(TOKEN_RE) ?? [];
+    assert.ok(hits.length > Math.max(a, b), `草稿里数据记号不够（只有 ${hits.length} 个）：\n${draft}`);
+    let i = -1;
+    return draft.replace(TOKEN_RE, (m) => {
+      i += 1;
+      if (i === a) return hits[b]!;
+      if (i === b) return hits[a]!;
+      return m;
+    });
+  };
+}
+/** 把第 n 个数据记号替换成 replacement（真数字/占位符两种草稿都适用） */
+function replaceToken(n: number, replacement: string) {
+  return (draft: string): string => {
+    const hits = draft.match(TOKEN_RE) ?? [];
+    assert.ok(hits.length > n, `草稿里数据记号不够（只有 ${hits.length} 个）：\n${draft}`);
+    let i = -1;
+    return draft.replace(TOKEN_RE, (m) => {
+      i += 1;
+      return i === n ? replacement : m;
+    });
+  };
+}
+
 function rewriteDraft(...edits: Array<[RegExp, string]>) {
   return (draft: string): string => {
     let next = draft;
@@ -300,16 +334,24 @@ async function main() {
   });
 
   // ── 3. 千位分隔符不算「改了数字」（1,234.56 和 1234.56 是同一个数）────────
-  await check("3) 千位分隔符不算改数字", async () => {
+  await check("3) 模型想给数字换个写法（加千位分隔符）→ 客户看到的仍是系统的原样", async () => {
+    /**
+     * ⚠️ 这一项的预期在 2026-08-28 变了，不是放宽而是收紧。
+     * 旧契约：模型能看到 `1234.56`，把它写成 `1,234.56` 属于「没改数值」，放行。
+     * 新契约（占位符方案）：模型看到的是 ⟦N⟧，**根本碰不到数字**。
+     * 它若在占位符之外自己写出 `1,234.56`，那就是凭空造数 —— 必须退回原始草稿。
+     * 客户最终看到的永远是系统格式化的那个数。
+     */
     const shipments = [
       shipment({ id: "c1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, weightKg: 1234.56 }),
     ];
     const { answer } = await ask({
       shipments,
       message: "我在途有多少单",
-      polish: rewriteDraft([/1234\.56/, "1,234.56"]),
+      polish: (draft) => `${draft}\n（合计约 1,234.56 千克）`,
     });
-    assert.ok(answer.includes("1,234.56"), "只是加了千位分隔符，不该判成改数字");
+    assert.ok(!answer.includes("1,234.56"), `模型自己写的数字发给了客户：\n${answer}`);
+    assert.ok(answer.includes("1234.56"), `系统算好的数字丢了：\n${answer}`);
   });
 
   // ── 4. 审计日志存的必须是最终发出去的那句（校验后的）──────────────────────
@@ -799,10 +841,87 @@ async function main() {
     assert.ok(answer.includes("全部品类"), `整句问话被当成品名了：\n${answer}`);
   });
 
+  // ══ P1-1 复核抓到的绕过（2026-08-28）══════════════════════════════════
+  // 旧闸用「数字集合」比较，看不出顺序和归属，下面这些全被放行过。
+  // 正确做法是让模型从头到尾看不到真实数字（占位符方案）。
+
+  await check("34) 同单位两个数字互换 → 必须拦住", async () => {
+    // ⚠️ 三个数必须**互不相同**，否则互换等于没换，测试会假绿
+    const shipments = [
+      shipment({ id: "p1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs }),
+      shipment({ id: "p2", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs }),
+      shipment({ id: "p3", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "delivered" }),
+    ];
+    // ⚠️ 记号 0 是开头「查到 N 单」那句，1 才是「总单量」——
+    // 换 0/1 时两处都是同一个数，等于没换，测试会假绿（第一版就踩了这个）
+    const { answer } = await ask({ shipments, message: "我一共有多少单", polish: swapTokens(1, 2) });
+    assert.equal(totalCountOf(answer), 3, `数字被互换后仍发给了客户：\n${answer}`);
+  });
+
+  await check("35) 数字换成中文（三单）→ 必须拦住", async () => {
+    const shipments = [shipment({ id: "q1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs })];
+    const { answer } = await ask({ shipments, message: "我一共有多少单", polish: replaceToken(1, "三单") });
+    assert.ok(!answer.includes("三单"), `模型写的中文数字发给了客户：\n${answer}`);
+    assert.equal(totalCountOf(answer), 1);
+  });
+
+  await check("36) Unicode 负号（−3 单）→ 必须拦住", async () => {
+    const shipments = [shipment({ id: "r1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs })];
+    const { answer } = await ask({ shipments, message: "我一共有多少单", polish: replaceToken(1, "\u22123 单") });
+    assert.ok(!answer.includes("\u2212"), `Unicode 负号发给了客户：\n${answer}`);
+    assert.equal(totalCountOf(answer), 1);
+  });
+
+  await check("37) 去掉单位后再交换 → 必须拦住", async () => {
+    // 两个数字都是草稿里本来就有的，只是位置对调、单位去掉 ——
+    // 旧闸「数字集合」和「数字单位对」两关都查不出来
+    const shipments = [
+      shipment({ id: "s1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs }),
+      shipment({ id: "s2", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs }),
+      shipment({ id: "s3", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "delivered" }),
+    ];
+    const { answer } = await ask({
+      shipments,
+      message: "我一共有多少单",
+      polish: (draft) => {
+        const hits = draft.match(TOKEN_RE) ?? [];
+        assert.ok(hits.length >= 2, `草稿里数据记号不够：\n${draft}`);
+        const bare = (t: string) => t.replace(/\s*(?:单|票|张|件|箱|千克|公斤|kg|立方米|立方|方|m³)$/, "");
+        let i = -1;
+        return draft.replace(TOKEN_RE, (m) => {
+          i += 1;
+          if (i === 1) return bare(hits[2]!);
+          if (i === 2) return bare(hits[1]!);
+          return m;
+        });
+      },
+    });
+    assert.equal(totalCountOf(answer), 3, `去掉单位的交换被放行了：\n${answer}`);
+  });
+
+  await check("38) 模型吞掉一处数据 → 必须拦住", async () => {
+    const shipments = [shipment({ id: "t1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs })];
+    const { answer } = await ask({ shipments, message: "我一共有多少单", polish: replaceToken(1, "若干") });
+    assert.ok(!answer.includes("若干"), `模型把数据吞成「若干」还发出去了：\n${answer}`);
+    assert.equal(totalCountOf(answer), 1);
+  });
+
+  await check("39) 正常措辞的润色仍然要放行（别误杀）", async () => {
+    const shipments = [shipment({ id: "u1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs })];
+    const { answer } = await ask({
+      shipments,
+      message: "我一共有多少单",
+      // 「一共」「十分」里带中文数字字样，但不是数量词，不能被拦
+      polish: (draft) => `亲，一共帮你查好了，十分感谢等待。\n${draft}`,
+    });
+    assert.ok(answer.includes("十分感谢等待"), `正常润色被误杀了：\n${answer}`);
+    assert.equal(totalCountOf(answer), 1);
+  });
+
   if (failures.length > 0) {
-    throw new Error(`${failures.length}/33 项不通过（TZ=${TZ_LABEL}）：${failures.join("；")}`);
+    throw new Error(`${failures.length}/39 项不通过（TZ=${TZ_LABEL}）：${failures.join("；")}`);
   }
-  console.log(`AI 答复数字校验：33 项全部通过（TZ=${TZ_LABEL}）`);
+  console.log(`AI 答复数字校验：39 项全部通过（TZ=${TZ_LABEL}）`);
 }
 
 main().catch((error) => {

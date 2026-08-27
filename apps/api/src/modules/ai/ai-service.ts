@@ -338,9 +338,16 @@ export class ClientAiService implements AiService {
      * 原来一条几千字的规章能把上下文顶爆。
      * companyId 也拿掉了：模型不需要，没必要把内部 id 发给第三方。
      */
+    /**
+     * 🚨 遮罩在这里做一次，**提示词和上下文共用同一份**（2026-08-28 复核后重做）。
+     * 只遮提示词是不够的：上下文 JSON 里的 answerDraft 还是真数字，模型照样看得见；
+     * 而且它一旦照着上下文回真数字，回填校验会把每一次润色都判成
+     * 「自己写了数字」而退回 —— 等于润色永远不生效。
+     */
+    const maskedDraft = this.maskNumbers(answerDraft);
     const llmContext = JSON.stringify({
       question,
-      answerDraft,
+      answerDraft: maskedDraft.text,
       knowledgeItems: knowledgeItems.slice(0, LLM_KNOWLEDGE_MAX_ITEMS).map((item) => ({
         title: item.title,
         content: this.truncate(item.content, LLM_KNOWLEDGE_MAX_CHARS),
@@ -348,7 +355,7 @@ export class ClientAiService implements AiService {
       evidenceShipmentCount: evidenceShipmentIds.length,
       evidenceOrderCount: evidenceOrderIds.length,
     });
-    const refinedAnswer = await this.refineAnswerWithModel(question, llmContext, answerDraft);
+    const refinedAnswer = await this.refineAnswerWithModel(question, llmContext, answerDraft, maskedDraft);
     if (!shouldCreateKnowledgeGap) {
       shouldCreateKnowledgeGap = this.shouldRecordKnowledgeGap({
         question,
@@ -1064,21 +1071,22 @@ export class ClientAiService implements AiService {
     question: string,
     llmContext: string,
     fallbackAnswer: string,
+    masked: { text: string; values: string[]; sample: string },
   ): Promise<string> {
     try {
       const refined = await this.deps.llmClient.summarizeWithContext({
         question: [
           '请严格使用"业务客服模板"风格输出，保持字段齐全。仅输出最终中文答复正文，不要返回JSON、不要返回代码块、不要解释过程。',
-          // 提示词只是第一道防线，模型不听话是常态 —— 真正兜底的是下面的 enforceDraftNumbers
-          "⚠️ answerDraft 里的数字是系统算准的：必须逐字照抄，不许改动、不许四舍五入、不许换算单位，",
-          "也不许补充任何 answerDraft 里没有出现过的数字。你只能改措辞。",
+          `⚠️ 文中形如 ${masked.sample} 的记号是占位符，代表系统算好的数据。`,
+          "必须原样保留每一个占位符：一个不能少、不能多、不能重复、不能改写、**顺序也不能变**。",
+          "你只能调整占位符之间的措辞，**不许自己写出任何数字**（阿拉伯数字和中文数字都不行）。",
           `用户问题：${question}`,
         ].join("\n"),
         context: llmContext,
       });
       if (!refined?.trim()) return fallbackAnswer;
-      const polished = this.normalizeModelAnswer(refined, fallbackAnswer);
-      return this.enforceDraftNumbers(polished, fallbackAnswer, question);
+      const polishedMasked = this.normalizeModelAnswer(refined, masked.text);
+      return this.unmaskNumbers(polishedMasked, masked, fallbackAnswer, question);
     } catch {
       // Model failure should not block core business answer.
       return fallbackAnswer;
@@ -1086,95 +1094,83 @@ export class ClientAiService implements AiService {
   }
 
   /**
-   * 🚨 模型润色完必须过这一关：**答复里不许出现草稿里没有的数字**。
+   * 把草稿里每一处「数字（含单位）」换成占位符 ⟦N1⟧ ⟦N2⟧…，让模型**从头到尾看不到真实数字**。
    *
-   * 票数、重量、体积都是代码自己算准的（answerDraft），但最后一步会把它交给
-   * DeepSeek「按客服模板改写」，模型返回什么原来就直接发给客户 ——
-   * 只要它抄错一个数，上面为「在途 726 其实是 367」做的那套父子单合并逻辑就白修了；
-   * 更麻烦的是审计日志（chat() 末尾）存的也是改写后的版本，事后根本查不出来是模型改的。
-   * 这就是「每次都说修好了、下次数字还是不对」的最后一环。
+   * 为什么不再用「比对数字」的思路（2026-08-28 复核后重做）：
+   * 旧的 enforceDraftNumbers 拿数字集合比，天生看不出**顺序和归属**，实测这些全被放行 ——
+   *   · 总量 3 单 ↔ 在途 2 单 互换（集合一模一样）
+   *   · 已完成 7 改成别处出现过的 3
+   *   · 3 单 写成「三单」、写成 −3 单（Unicode 负号）
+   *   · 去掉单位之后再交换
+   * 只要模型还能碰到数字，就永远有下一种绕法。占位符方案从根上断掉这条路。
    *
-   * 规则：把草稿和润色稿里的数字各抽成一个集合，
-   * 润色稿里只要出现一个草稿里没有的数字 —— 改了、编了、四舍五入了 —— 整段作废，
-   * 直接发原始草稿（草稿本身就是完整的人话，发出去没有任何问题）。
-   * 反过来，模型少说了某个数字是允许的：那只是说得简略，不会让客户看到错的数。
+   * 连单位一起吃掉是有意的：`746.87 千克` 整体变一个占位符，模型没法把数字和单位拆开重组。
+   * 时间 `11:28` 一并覆盖。
    */
-  private enforceDraftNumbers(polished: string, draft: string, question: string): string {
-    if (polished === draft) return draft;
-
-    // 第一关：不许出现草稿里没有的数字
-    const draftNumbers = this.extractNumbers(draft);
-    const invented = Array.from(this.extractNumbers(polished)).filter(
-      (value) => !draftNumbers.has(value),
-    );
-    if (invented.length > 0) {
-      logger.warn("[ai] 模型润色时动了数字，已丢弃润色稿、改发原始答案", {
-        question: question.slice(0, 100),
-        invented: invented.slice(0, 10),
-      });
-      return draft;
-    }
-
-    // 第二关：数字必须还挂在**原来那个单位**上
-    const draftPairs = this.extractNumberUnitPairs(draft);
-    const swapped = Array.from(this.extractNumberUnitPairs(polished)).filter(
-      (pair) => !draftPairs.has(pair),
-    );
-    if (swapped.length > 0) {
-      logger.warn("[ai] 模型把数字挪到了别的单位上，已丢弃润色稿、改发原始答案", {
-        question: question.slice(0, 100),
-        swapped: swapped.slice(0, 10),
-      });
-      return draft;
-    }
-    return polished;
+  private maskNumbers(draft: string): { text: string; values: string[]; sample: string } {
+    const values: string[] = [];
+    // 顺序要紧：先吃「数字+单位」，再吃时间，最后才是裸数字
+    const re = /(-?\d+(?:\.\d+)?\s*(?:千克|公斤|kg|KG|Kg|立方米|立方|方|m³|M³|单|票|张|件|箱|%)|\d{1,2}:\d{2}(?::\d{2})?|-?\d+(?:\.\d+)?)/g;
+    const text = draft.replace(re, (whole) => {
+      values.push(whole);
+      return `⟦N${values.length}⟧`;
+    });
+    return { text, values, sample: values.length > 0 ? "⟦N1⟧" : "⟦N⟧" };
   }
 
   /**
-   * 抽出「数字 + 单位」的组合，比如 `3|count`、`746.87|weight`。
-   *
-   * ⚠️ 只比「数字集合」是不够的（2026-08-28 复核实测抓到的）：
-   *   · 10 单 / 3 千克 被模型写成 **3 单 / 10 千克** —— 集合一模一样，照样放行；
-   *   · 重量的数字被安到体积上 —— 同样放行；
-   *   · `3` 写成 `-3` —— 也被当成同一个数字。
-   * 把数字和单位绑在一起比就都能抓住。
-   * 同类单位（千克/公斤/kg）归一成一类，允许模型换个说法；跨类（重量↔体积）一律拦。
+   * 把占位符换回真实数字。任何一点对不上就整段作废、发原始草稿。
    */
-  private extractNumberUnitPairs(text: string): Set<string> {
-    const normalized = this.normalizeDigits(text);
-    const pairs = new Set<string>();
-    // 长的单位写在前面，否则「立方米」会先被「立方」吃掉半截
-    const re = /(-?\d+(?:\.\d+)?)\s*(千克|公斤|kg|KG|Kg|立方米|立方|方|m³|M³|单|票|张|件|箱)/g;
-    let match: RegExpExecArray | null;
-    while ((match = re.exec(normalized)) !== null) {
-      const unitClass = this.unitClassOf(match[2]);
-      if (!unitClass) continue;
-      pairs.add(`${Number(match[1])}|${unitClass}`);
+  private unmaskNumbers(
+    polishedMasked: string,
+    masked: { text: string; values: string[] },
+    draft: string,
+    question: string,
+  ): string {
+    const bail = (why: string) => {
+      logger.warn("[ai] 润色稿动了数据占位符，已丢弃、改发原始答案", {
+        question: question.slice(0, 100),
+        原因: why,
+      });
+      return draft;
+    };
+
+    for (let i = 1; i <= masked.values.length; i += 1) {
+      const hits = polishedMasked.split(`⟦N${i}⟧`).length - 1;
+      if (hits !== 1) return bail(`占位符 ⟦N${i}⟧ 出现了 ${hits} 次，应该正好 1 次`);
     }
-    return pairs;
-  }
+    const order = Array.from(polishedMasked.matchAll(/⟦N(\d+)⟧/g)).map((m) => Number(m[1]));
+    const unknown = order.filter((n) => n < 1 || n > masked.values.length);
+    if (unknown.length > 0) return bail(`出现了不存在的占位符编号：${unknown.join(",")}`);
 
-  private unitClassOf(unit: string): string | undefined {
-    if (/^(单|票|张)$/.test(unit)) return "count";
-    if (/^(千克|公斤|kg|KG|Kg)$/.test(unit)) return "weight";
-    if (/^(立方米|立方|方|m³|M³)$/.test(unit)) return "volume";
-    if (/^(件|箱)$/.test(unit)) return "piece";
-    return undefined;
-  }
+    /**
+     * ⚠️ 顺序也必须一致。只查「各出现一次」不够：把 ⟦N1⟧ 和 ⟦N2⟧ 对调，
+     * 两边计数都还是 1，但回填之后「总单量」就拿到了「在途中」的数 ——
+     * 正是旧版被互换绕过的那个坑，换成占位符之后不查顺序照样绕得过。
+     */
+    const expected = masked.values.map((_v, i) => i + 1).join(",");
+    if (order.join(",") !== expected) {
+      return bail(`占位符顺序被改了（期望 ${expected}，实际 ${order.join(",")}）`);
+    }
 
-  /**
-   * 抽出文本里的数字，做成可比对的集合。归一化的每一条都是为了**别误判**：
-   * - 全角数字（１２３）转半角，否则模型换个写法就绕过校验；
-   * - 千位分隔符（1,234 / 1，234）去掉，那和 1234 是同一个数；
-   * - 按数值归一（"08" → "8"、"0.500" → "0.5"），
-   *   这样模型把 "2026-08-28" 改写成 "2026年8月28日" 不会被当成改了数字。
-   *
-   * ⚠️ 已知盲区：模型把数字写成中文（"三百六十七单"）时这里抓不到。
-   * 提示词里已经要求逐字照抄，真出现再补中文数字的还原。
-   */
-  private extractNumbers(text: string): Set<string> {
-    const found = this.normalizeDigits(text).match(/\d+(?:\.\d+)?/g) ?? [];
-    return new Set(found.map((raw) => String(Number(raw))));
+    const withoutPlaceholders = polishedMasked.replace(/⟦N\d+⟧/g, "");
+    if (/\d/.test(this.normalizeDigits(withoutPlaceholders))) {
+      return bail("模型在占位符之外自己写了数字");
+    }
+    /**
+     * 中文数字也要拦，但**只拦「像个数量」的写法** —— 后面跟着单位（三单、五千克），
+     * 或者前面有「共 / 计 / 约」。不能见「一」「十」就拦：
+     * 「一共」「十分」这些正常措辞里全是它们，一刀切会让润色几乎每次被退回，等于白做。
+     */
+    const CN = "[〇零一二两三四五六七八九十百千万]";
+    const cnQuantity = new RegExp(
+      `(?:${CN}+\\s*(?:单|票|张|件|箱|千克|公斤|立方米|立方|方)|(?:共|计|约)\\s*${CN}+)`,
+    );
+    if (cnQuantity.test(withoutPlaceholders)) {
+      return bail("模型在占位符之外写了中文数量词");
+    }
+
+    return polishedMasked.replace(/⟦N(\d+)⟧/g, (_m, n) => masked.values[Number(n) - 1] ?? "");
   }
 
   /** 全角数字转半角、去掉千位分隔符，好让两边用同一个写法比对 */
