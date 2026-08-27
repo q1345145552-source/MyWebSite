@@ -13,7 +13,7 @@ import {
   PrismaAiSessionMemoryStore,
   PrismaStatusLabelStore,
 } from "./ai-prisma-store";
-import { ClientAiService } from "./ai-service";
+import { ClientAiService, CHINA_OFFSET_MS } from "./ai-service";
 import { HttpDeepSeekClient } from "./deepseek-client";
 import type { AuthContext, QueryDataSource, QueryScope } from "./ai-types";
 import type { HttpRequest, HttpResponse, MinimalHttpApp } from "../../server";
@@ -21,7 +21,8 @@ import { checkRateLimit, rateLimitKey } from "../core/rate-limit";
 import { logger } from "../core/logger";
 
 /**
- * AI 聊天的三个上限（2026-08-28 加，数值经用户确认）。
+ * AI 聊天的四道闸（2026-08-28 加，数值经用户确认）：
+ * 每分钟 10 条 → 每天 200 条 → 单条 500 字 → sessionId 100 字。
  *
  * 🚨 `/client/ai/chat` 是全系统**唯一会直接花钱**的接口：
  * 每收到一条客户消息，代码固定调两次 DeepSeek —— 一次猜意图（ai-service.ts 的
@@ -35,10 +36,41 @@ import { logger } from "../core/logger";
  * 按 IP 计数换个代理就绕过去了（登录接口那条 IP 限流正吃这个亏，见待办 B1）。
  * 改密码接口用的也是账号维度（auth/routes.ts 的 rateLimitKey(auth.userId, ...)）。
  */
-const AI_CHAT_MAX_PER_MINUTE = 10;
-const AI_CHAT_MAX_MESSAGE_CHARS = 500;
+
+/**
+ * 数值都能用环境变量临时改，不用改代码重新发版；
+ * 填了不合法的值（负数、写错字）就退回默认值并打一条日志，不会把闸门关死或敞开。
+ */
+function readLimit(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value <= 0) {
+    logger.warn(`[ai] 环境变量 ${name} 不是正整数，改用默认值`, { raw, fallback });
+    return fallback;
+  }
+  return value;
+}
+
+const AI_CHAT_MAX_PER_MINUTE = readLimit("AI_CHAT_MAX_PER_MINUTE", 10);
+/**
+ * 每分钟 10 条挡得住「一秒刷一万次」，挡不住**慢慢刷**（一天 14400 条 × 2 次调用）。
+ * 所以再加一条日上限。正常客户一天问不到 20 句，200 已经很宽。
+ * 按**北京日历日**分桶（跟 AI 统计口径一致），到北京 0 点自动换新桶。
+ *
+ * ⚠️ 计数存在内存里（core/rate-limit.ts）：**API 一重启就清零**，
+ * 多进程部署时也是各算各的。现在是单进程，够用；哪天上多实例要换成 Redis。
+ */
+const AI_CHAT_MAX_PER_DAY = readLimit("AI_CHAT_MAX_PER_DAY", 200);
+/** ⚠️ 改这个值要同步改前端输入框的 maxLength（AiChatWidget.tsx），那边是写死的 500 */
+const AI_CHAT_MAX_MESSAGE_CHARS = readLimit("AI_CHAT_MAX_MESSAGE_CHARS", 500);
 /** sessionId 是客户端自己传的，会被当成 key 写进会话记忆表，必须卡长度 */
 const AI_CHAT_MAX_SESSION_ID_CHARS = 100;
+
+/** 北京日历日，形如 2026-08-28 —— 用来给日上限分桶 */
+function beijingDayKey(): string {
+  return new Date(Date.now() + CHINA_OFFSET_MS).toISOString().slice(0, 10);
+}
 
 class PrismaClientScopedDataSource implements QueryDataSource {
   async listOrders(scope: QueryScope): Promise<Order[]> {
@@ -158,6 +190,24 @@ export function registerClientAiRoutes(app: MinimalHttpApp): void {
             jsonError(
               "BAD_REQUEST",
               `问得有点快，请稍等一会儿再问（每分钟最多 ${AI_CHAT_MAX_PER_MINUTE} 条）`,
+            ),
+          );
+        return;
+      }
+      if (
+        checkRateLimit(
+          rateLimitKey(auth.userId, `ai-chat-day-${beijingDayKey()}`),
+          AI_CHAT_MAX_PER_DAY,
+          24 * 60 * 60_000,
+        )
+      ) {
+        logger.warn("[ai] 聊天日上限触发", { userId: auth.userId, companyId: auth.companyId });
+        res
+          .status(429)
+          .json(
+            jsonError(
+              "BAD_REQUEST",
+              `今天问得比较多了（每天最多 ${AI_CHAT_MAX_PER_DAY} 条），明天再来，或者直接联系客服。`,
             ),
           );
         return;

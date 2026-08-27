@@ -82,7 +82,7 @@ type Ticket = Shipment & { memberIds: string[] };
  * 这样开发机（UTC+8）和线上容器（UTC）跑出来是同一个结果。
  * 与管理员看板（admin/routes.ts）同一口径。
  */
-const CHINA_OFFSET_MS = 8 * 60 * 60 * 1000;
+export const CHINA_OFFSET_MS = 8 * 60 * 60 * 1000;
 
 /**
  * 时间词的同义写法。
