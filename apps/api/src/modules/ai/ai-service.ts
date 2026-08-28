@@ -196,12 +196,22 @@ export class ClientAiService implements AiService {
      * 不要霸占分支。带字母数字的产品型号（"ABC1234"）会被正则误认成运单号，
      * 客户问「我这个月 ABC1234 发了多少单」原来只会得到「未找到运单号」。
      * 单号找得到、或者这句话本来就是查单号（"到哪了"），照旧走查单分支。
+     *
+     * ⚠️ 但客户**明说了「单号」**的时候，查不到就得明说查不到。
+     * 2026-08-28 复核实测：他有 3 单（已完成 2 / 在途 1），
+     * 问「单号 THCN9999 完成了吗」时，因为这句话带「完成」被当成统计问题，
+     * 系统让开了查单分支，转头回他「已完成的有 2 单」——
+     * 他问的是某一票货，拿到的是一个跟他问题无关的数字。
+     * 「单号 THCN9999 这个月发了多少单」同理，回的是本月 3 单。
      */
     const matchedShipment = trackingNo
       ? shipments.find((item) => item.trackingNo === trackingNo)
       : undefined;
     const useTrackingBranch =
-      Boolean(trackingNo) && (Boolean(matchedShipment) || !this.isSummaryIntent(question));
+      Boolean(trackingNo) &&
+      (Boolean(matchedShipment) ||
+        this.mentionsTrackingNoExplicitly(question) ||
+        !this.isSummaryIntent(question));
 
     if (useTrackingBranch && trackingNo) {
       const shipment = matchedShipment;
@@ -556,6 +566,15 @@ export class ClientAiService implements AiService {
   private truncate(text: string, maxChars: number): string {
     const value = text ?? "";
     return value.length <= maxChars ? value : `${value.slice(0, maxChars)}…`;
+  }
+
+  /**
+   * 客户是不是**明说**了「单号」。
+   * 明说了就得给他单号的答复 —— 哪怕查不到，也要明说「未找到运单号 XXX」，
+   * 不能让开分支去统计他别的单。「运单号」「快递单号」「提单号」都含「单号」两个字。
+   */
+  private mentionsTrackingNoExplicitly(message: string): boolean {
+    return /(单号|追踪号|快递号)/.test(message);
   }
 
   private isGreetingMessage(message: string): boolean {

@@ -1173,10 +1173,47 @@ async function main() {
     assert.equal(totalCountOf(fullWidth.answer), 1, `全角品名单量不对：\n${fullWidth.answer}`);
   });
 
+  // ══ P1-4：客户明说了「单号」，查不到就得明说查不到（2026-08-28）═════════
+  // 原来只要这句话像统计问题，查不到的单号就被让开，转头去统计他别的单 ——
+  // 客户问的是某一票货，拿到的却是一个跟他问题无关的数字。
+
+  await check("53) 客户明说「单号」但查不到 → 必须报查无此单", async () => {
+    // 3 单：已完成 2 / 在途 1，单号 THCN0001~0003 —— 数字互不相同
+    const shipments = [
+      { ...shipment({ id: "ww1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "delivered" }), trackingNo: "THCN0001" },
+      { ...shipment({ id: "ww2", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "delivered" }), trackingNo: "THCN0002" },
+      { ...shipment({ id: "ww3", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "loaded" }), trackingNo: "THCN0003" },
+    ] as Shipment[];
+    for (const message of ["单号 THCN9999 完成了吗", "单号 THCN9999 这个月发了多少单"]) {
+      const { answer } = await ask({ shipments, message });
+      assert.ok(answer.includes("未找到运单号"), `没报查无此单：\n${answer}`);
+      assert.ok(answer.includes("THCN9999"), `没把客户问的单号回显出来：\n${answer}`);
+      assert.ok(!answer.includes("总单量"), `转头去统计他别的单了：\n${answer}`);
+      assert.ok(!answer.includes("符合条件"), `转头去统计他别的单了：\n${answer}`);
+    }
+  });
+
+  await check("54) 但没说「单号」的产品型号，照旧走统计", async () => {
+    // 「ABC1234」这种产品型号会被正则误认成运单号 —— 客户没说「单号」就不能霸占分支
+    const shipments = [
+      { ...shipment({ id: "xx1", createdAtMs: beijingMonthStartMs() + 1000, updatedAtMs: nowMs, status: "delivered" }), trackingNo: "THCN0001" },
+      { ...shipment({ id: "xx2", createdAtMs: beijingMonthStartMs() + 2000, updatedAtMs: nowMs, status: "delivered" }), trackingNo: "THCN0002" },
+      { ...shipment({ id: "xx3", createdAtMs: beijingMonthStartMs() + 3000, updatedAtMs: nowMs, status: "loaded" }), trackingNo: "THCN0003" },
+    ] as Shipment[];
+    const { answer } = await ask({ shipments, message: "我这个月 ABC1234 发了多少单" });
+    assert.ok(!answer.includes("未找到运单号"), `产品型号被当成单号霸占了分支：\n${answer}`);
+    assert.equal(totalCountOf(answer), 3, `本月单量不对：\n${answer}`);
+
+    // 真存在的单号照旧查得到
+    const real = await ask({ shipments, message: "单号 THCN0001 完成了吗" });
+    assert.ok(real.answer.includes("THCN0001"), `真单号查不到了：\n${real.answer}`);
+    assert.ok(!real.answer.includes("未找到运单号"), `真单号被判成查无此单：\n${real.answer}`);
+  });
+
   if (failures.length > 0) {
-    throw new Error(`${failures.length}/52 项不通过（TZ=${TZ_LABEL}）：${failures.join("；")}`);
+    throw new Error(`${failures.length}/54 项不通过（TZ=${TZ_LABEL}）：${failures.join("；")}`);
   }
-  console.log(`AI 答复数字校验：52 项全部通过（TZ=${TZ_LABEL}）`);
+  console.log(`AI 答复数字校验：54 项全部通过（TZ=${TZ_LABEL}）`);
 }
 
 main().catch((error) => {
