@@ -130,8 +130,7 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** 导出给自测脚本用（scripts/test-lastmile-export.ts），生产代码里只在本文件内部用 */
-export class SharedStringsEditor {
+class SharedStringsEditor {
   private readonly additions: string[] = [];
   private readonly originalCount: number;
   private readonly originalUniqueCount: number;
@@ -393,11 +392,7 @@ function lineTotal(lines: TemplateLine[], key: "packageCount" | "volumeM3" | "we
   );
 }
 
-/**
- * 导出给自测脚本用：只有测到**最终 XML** 才能证明「数字进数字格、字符串进文本格」，
- * 光验中间对象（expandTemplateLines）是验不到落点的。
- */
-export function patchInternalTemplate(
+function patchInternalTemplate(
   sheetXml: string,
   strings: SharedStringsEditor,
   data: LastmileExportData,
@@ -441,12 +436,19 @@ export function patchInternalTemplate(
   xml = setFormulaCell(xml, "E35", "SUM(E10:E34)", lineTotal(lines, "volumeM3"));
   xml = setFormulaCell(xml, "F35", "SUM(F10:F34)", lineTotal(lines, "weightKg"));
   /**
-   * ⚠️ 长/宽/高**不做合计**（2026-08-28 改）。
+   * ⚠️ 长/宽/高**不做合计** —— 而且必须**动手把模板里那三个 SUM 清掉**（2026-08-28 修）。
+   *
    * 把各行的长加起来（60+50+20=130cm）是个没有意义的数，
    * 会被当成「这一柜的总长」误读 —— 件数、方数、重量才该有合计。
-   * 以前这三格也在求和，只是长宽高一直是空的、合计恒为 0 所以没人注意；
-   * 2026-08-27 把尺寸接通之后数就显示出来了，所以一并去掉。
+   *
+   * ⚠️ 上一版这里只写了这段注释、**代码一行没动**，模板自带的
+   * `G35=SUM(G10:G34)` / `H35` / `I35` 原样留在导出文件里。
+   * 复核用真模板生成、LibreOffice 打开，那三格显示的是 **0** ——
+   * 多尺寸时长宽高是文本（"60/50"），SUM 对文本求和就是 0，
+   * 等于在客户签收单上印了三个假数。「宁可留空，也不能报错的数」。
+   * 现在显式清空这三格（clearRange 会把公式和值一起去掉）。
    */
+  xml = clearRange(xml, 35, 35, 7, 9, strings); // G..I 第 35 行
   return xml;
 }
 
