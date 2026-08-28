@@ -4,6 +4,7 @@ import { describeTokenFailure, verifyAuthToken } from "./modules/auth/token";
 import { isSessionStillValid } from "./modules/auth/session-guard";
 import { logger } from "./modules/core/logger";
 import { isBusinessError } from "./modules/core/business-error";
+import { fail } from "./modules/core/http-utils";
 
 export interface HttpRequest {
   method: string;
@@ -22,6 +23,13 @@ export interface HttpRequest {
 export interface HttpResponse {
   status(code: number): HttpResponse;
   json(payload: unknown): void;
+  /**
+   * 这一次请求的编号（`req_xxx`），由请求管线在最外层塞进来。
+   * `ok()` / `fail()` 会把它放进响应体 —— 契约（docs/api-contract.md 第 2、3 节）
+   * 要求成功和失败都带 requestId，之前一直是空的。
+   * 客户截图报错时，靠它就能在日志里定位到那一次请求。
+   */
+  requestId?: string;
 }
 
 type Handler = (req: HttpRequest, res: HttpResponse) => Promise<void> | void;
@@ -72,9 +80,20 @@ async function parseAuth(headers: IncomingMessage["headers"], path?: string): Pr
   };
 }
 
+/**
+ * 每次请求一个编号。契约（docs/api-contract.md）要求成功和失败都带 `requestId`，
+ * 之前一直没生成过。同时写进 `X-Request-Id` 响应头 ——
+ * 客户截图报错时，从截图或浏览器控制台就能拿到它，直接去日志里定位那一次请求。
+ */
+function newRequestId(): string {
+  return `req_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+}
+
 function createJsonResponse(rawRes: ServerResponse): HttpResponse {
   let statusCode = 200;
+  const requestId = newRequestId();
   return {
+    requestId,
     status(code: number) {
       statusCode = code;
       return this;
@@ -82,6 +101,7 @@ function createJsonResponse(rawRes: ServerResponse): HttpResponse {
     json(payload: unknown) {
       rawRes.statusCode = statusCode;
       rawRes.setHeader("Content-Type", "application/json; charset=utf-8");
+      rawRes.setHeader("X-Request-Id", requestId);
       rawRes.end(JSON.stringify(payload));
     },
   };
@@ -181,10 +201,8 @@ export function createApp(): MinimalHttpApp {
         const handler = routeTable[path];
         const res = createJsonResponse(rawRes);
         if (!handler) {
-          res.status(404).json({
-            code: "NOT_FOUND",
-            message: `Route not found: ${method} ${path}`,
-          });
+          // 这条以前也是自己拼的，同样少了 errors / requestId / timestamp
+          fail(res, 404, "NOT_FOUND", `Route not found: ${method} ${path}`);
           return;
         }
 
@@ -207,20 +225,27 @@ export function createApp(): MinimalHttpApp {
            * try/catch，结果四个管理员接口全忘了接 —— 员工看到「服务器繁忙」，
            * 完全不知道是柜被取消了。放在最外层就忘不了，以后再加闸门也自动生效。
            */
+          /**
+           * ⚠️ 一律走 `fail()`，不要自己拼响应体（2026-08-28 改）。
+           * 原来这两处直接 `res.json({ code, message })`，少了契约要求的
+           * `errors` / `requestId` / `timestamp` —— 同一个系统里两种错误格式，
+           * 前端要写两套解析，客户报错时也没有编号可查。
+           */
           if (isBusinessError(error)) {
-            logger.warn("业务规则拦截", { path, 原因: error.message });
-            res.status(error.httpStatus).json({ code: error.code, message: error.message });
+            logger.warn("业务规则拦截", { path, requestId: res.requestId, 原因: error.message });
+            fail(res, error.httpStatus, error.code, error.message);
             return;
           }
-          logger.error("unhandled error", { error: error instanceof Error ? error.message : String(error) });
+          logger.error("unhandled error", {
+            path,
+            requestId: res.requestId,
+            error: error instanceof Error ? error.message : String(error),
+          });
           const isProduction = process.env.NODE_ENV === "production";
           const message = isProduction
             ? "Internal server error"
             : error instanceof Error ? error.message : "internal error";
-          res.status(500).json({
-            code: "INTERNAL_ERROR",
-            message,
-          });
+          fail(res, 500, "INTERNAL_ERROR", message);
         }
       };
 

@@ -3,11 +3,19 @@ import type { HttpRequest, HttpResponse } from "../../server";
 
 export type ErrorCode = Exclude<ApiResponse<unknown>["code"], "OK">;
 
+/**
+ * ⚠️ 成功和失败的响应体**只在这两个函数里拼**（2026-08-28 定死）。
+ * 别的地方自己 `res.json({ code, message })` 就会漏字段 ——
+ * server.ts 的全局异常处理、404 分支原来都是自己拼的，
+ * 少了契约（docs/api-contract.md 第 2、3 节）要求的 errors / requestId / timestamp，
+ * 同一个系统里两种错误格式，前端要写两套解析、客户报错也没编号可查。
+ */
 export function ok<T>(res: HttpResponse, data: T): void {
   res.status(200).json({
     code: "OK",
     message: "success",
     data,
+    requestId: res.requestId,
     timestamp: new Date().toISOString(),
   });
 }
@@ -17,6 +25,7 @@ export function fail(res: HttpResponse, status: number, code: ErrorCode, message
     code,
     message,
     errors: [{ reason: message }],
+    requestId: res.requestId,
     timestamp: new Date().toISOString(),
   });
 }
