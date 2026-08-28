@@ -337,73 +337,33 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
     let parentNosToSync: string[] = [];
 
     /**
-     * ⚠️ 这里存的是「拿到事务后再执行」的函数，不是已经发出去的 PrismaPromise（2026-08-25 改）。
+     * ⚠️ 事务外这一段**只做校验、不再组装写操作**（2026-08-28 改）。
      *
-     * 原来是 `prisma.xxx()` 直接塞数组，最后 `prisma.$transaction(ops)` —— 那是**批量事务**，
-     * 中途没法读一次数据再决定写什么，所以父单重算只能另开一个事务放在后面。
-     * 两个事务之间断一下，就会留下「柜子和子单都推进了、父单还停在旧状态」的半截数据。
-     * 说「重跑一次就好」也不成立：同一个状态再推一遍会**再写一批轨迹**，客户轨迹里多出重复的一行。
-     *
-     * 换成函数之后，下面用交互式事务把「柜子 + 子单 + 轨迹 + 父单」一次做完，
-     * 要么全成，要么全不写。
+     * 历史：2026-08-25 曾把写操作攒成一个 `ops` 函数数组、拿到事务后再逐个执行，
+     * 为的是把「柜子 + 子单 + 轨迹 + 父单」合进一个事务（分两个事务会留下
+     * 「柜子和子单推进了、父单没推」的半截数据，重跑还会多写一批轨迹）。
+     * 那个目的仍然成立，但攒 ops 的时机不对 —— 攒的时候还没拿到柜锁，
+     * 用的是可能已经过时的装柜清单。现在直接在事务里写，不再攒。
+     * 真正写什么、推哪几票货，全部在下面的事务里、拿到柜锁之后重新查过再决定 ——
+     * 否则用的是事务外那份可能已经过时的装柜清单。
      */
-    const ops: Array<(tx: any) => Promise<unknown>> = [
-      (tx) => tx.container.update({ where: { id: container.id }, data: updateData }),
-    ];
-
     const shipmentNextStatus: string | null = CONTAINER_TO_SHIPMENT_STATUS[toStatus] ?? null;
+    let affectedShipmentCount = 0;
 
     if (shipmentNextStatus && shipmentIds.length > 0) {
-      // 查询各运单当前状态
+      // 早点给个好看的提示：真正说了算的那次判断在事务里（见下面 badNow）
       const shipments = await prisma.shipment.findMany({
         where: { id: { in: shipmentIds }, companyId: auth.companyId },
-        select: { id: true, currentStatus: true, parentTrackingNo: true },
+        select: { id: true, currentStatus: true },
       });
-      const statusMap = new Map(shipments.map((s) => [s.id, s.currentStatus]));
-
-      // 校验每个运单的状态流转是否合法
       const invalidShipments = shipments.filter(
-        (s) => !canTransitLoose(s.currentStatus, shipmentNextStatus!)
+        (s) => !canTransitLoose(s.currentStatus, shipmentNextStatus!),
       );
       if (invalidShipments.length > 0) {
         const ids = invalidShipments.map((s) => `${s.id}(${s.currentStatus})`).join(", ");
         fail(res, 400, "VALIDATION_ERROR", `以下运单不允许从当前状态流转到 ${shipmentNextStatus}：${ids}`);
         return;
       }
-
-      ops.push((tx) =>
-        tx.shipment.updateMany({
-          where: { id: { in: shipmentIds }, companyId: auth.companyId },
-          data: { currentStatus: shipmentNextStatus, updatedAt: now },
-        }),
-      );
-
-      // 同步父运单状态 —— 收集父单号，下面那个事务里统一重算。
-      //
-      // ⚠️ 原来这里是把父单直接 updateMany 成 shipmentNextStatus，等于
-      //    「这批子单推到哪，父单就跟到哪」，完全没看其他子单走到哪了。
-      //    分柜后另一个子单还在更早的环节时，父单就被推快了。
-      //    改成推完之后按全部子单重新推算（2026-08-22）。
-      parentNosToSync = [...new Set(shipments.filter(s => s.parentTrackingNo).map(s => s.parentTrackingNo!))];
-
-      // 轨迹一次性写进去，不要一条一条发 —— 一个柜子里几十票货就是几十次往返，
-      // 交互式事务默认 5 秒超时，逐条写很容易撞上。id 前缀必须保持 sl_ctn_，
-      // 撤销柜子状态就是靠这个前缀认出「哪些轨迹是柜子推进写的」（红线 2.10）。
-      const stamp = Date.now();
-      const logRows = shipmentIds.map((sid, i) => ({
-        id: `sl_ctn_${stamp}_${i}_${Math.random().toString(36).slice(2, 6)}`,
-        companyId: auth.companyId,
-        shipmentId: sid,
-        operatorId: auth.userId,
-        operatorRole: auth.role,
-        operatorName: auth.name,
-        fromStatus: statusMap.get(sid) ?? "loaded",
-        toStatus: shipmentNextStatus,
-        remark: body.remark?.trim() || `${CONTAINER_STATUS_LABEL[toStatus] ?? toStatus}`,
-        nextStop,
-        changedAt: now,
-      }));
-      ops.push((tx) => tx.statusLog.createMany({ data: logRows }));
     }
 
     /**
@@ -434,7 +394,83 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
           );
         }
 
-        for (const run of ops) await run(tx);
+        /**
+         * ⚠️⚠️ **锁住之后，柜里装了什么必须重新查一遍**（2026-08-28 补）。
+         *
+         * 上面那份 `shipmentIds` 和各运单状态都是**事务外**读的。
+         * 锁只保证「不同时」，不保证「数据没变」——
+         * 从那次读到拿到锁之间，员工完全可以往这个柜里再装一票货。
+         * 用旧清单推进的话，**新装进来的那票不会被推、也不会写轨迹**，
+         * 而推进这条路已经走完不会回头补，那票货就永远停在旧状态。
+         *
+         * 复核实测报的就是这条。现在锁后重查装柜清单和运单状态，
+         * 用重查的结果决定推谁、写哪些轨迹。
+         */
+        const freshItems = await tx.shipmentContainerItem.findMany({
+          where: { containerId: container.id },
+          select: { shipmentId: true },
+        });
+        const freshShipmentIds = [...new Set(freshItems.map((it: { shipmentId: string }) => it.shipmentId))];
+
+        await tx.container.update({ where: { id: container.id }, data: updateData });
+
+        if (shipmentNextStatus && freshShipmentIds.length > 0) {
+          const freshShipments = await tx.shipment.findMany({
+            where: { id: { in: freshShipmentIds }, companyId: auth.companyId },
+            select: { id: true, currentStatus: true, parentTrackingNo: true },
+          });
+          // 状态流转合法性也要用**锁后**的状态判断：事务外那次只是早点给个提示
+          const badNow = freshShipments.filter(
+            (sp: { currentStatus: string }) => !canTransitLoose(sp.currentStatus, shipmentNextStatus!),
+          );
+          if (badNow.length > 0) {
+            const ids = badNow
+              .map((sp: { id: string; currentStatus: string }) => `${sp.id}(${sp.currentStatus})`)
+              .join(", ");
+            throw new BusinessError(
+              `以下运单刚刚变了状态，本次推进没有执行，请刷新后再看：${ids}`,
+              400,
+              "VALIDATION_ERROR",
+            );
+          }
+          const freshStatusMap = new Map(
+            freshShipments.map((sp: { id: string; currentStatus: string }) => [sp.id, sp.currentStatus]),
+          );
+
+          await tx.shipment.updateMany({
+            where: { id: { in: freshShipmentIds }, companyId: auth.companyId },
+            data: { currentStatus: shipmentNextStatus, updatedAt: now },
+          });
+
+          // 轨迹按**锁后**的清单和**锁后**的起始状态写；
+          // id 前缀必须保持 sl_ctn_，撤销柜子状态靠它认出「哪些轨迹是柜子推进写的」（红线 2.10）
+          const stamp = Date.now();
+          await tx.statusLog.createMany({
+            data: freshShipmentIds.map((sid: string, i: number) => ({
+              id: `sl_ctn_${stamp}_${i}_${Math.random().toString(36).slice(2, 6)}`,
+              companyId: auth.companyId,
+              shipmentId: sid,
+              operatorId: auth.userId,
+              operatorRole: auth.role,
+              operatorName: auth.name,
+              fromStatus: freshStatusMap.get(sid) ?? "loaded",
+              toStatus: shipmentNextStatus,
+              remark: body.remark?.trim() || `${CONTAINER_STATUS_LABEL[toStatus] ?? toStatus}`,
+              nextStop,
+              changedAt: now,
+            })),
+          });
+
+          parentNosToSync = [
+            ...new Set(
+              freshShipments
+                .filter((sp: { parentTrackingNo: string | null }) => sp.parentTrackingNo)
+                .map((sp: { parentTrackingNo: string | null }) => sp.parentTrackingNo!),
+            ),
+          ];
+          affectedShipmentCount = freshShipmentIds.length;
+        }
+
         // ⚠️ 排序后再逐个锁父单：两个柜子同时推进、又正好涉及同几张父单时，
         // 加锁顺序相反会被 PostgreSQL 判定死锁掐掉一个。固定顺序就不会打架。
         for (const no of [...parentNosToSync].sort()) {
@@ -449,7 +485,8 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
       containerNo: container.containerNo,
       fromStatus: container.currentStatus,
       toStatus,
-      affectedShipmentCount: shipmentNextStatus ? shipmentIds.length : 0,
+      // 回给前端的是**真的推了多少票**，不是事务外那份可能过时的清单条数
+      affectedShipmentCount,
       updatedAt: now.toISOString(),
     });
   });

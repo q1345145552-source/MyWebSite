@@ -3,6 +3,7 @@ import { syncParentStatusFromChildren } from "../shipments/parent-status";
 import { metricByPieceShare, reconcileFamilyMetric } from "../shipments/split-metrics";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
+import { BusinessError } from "../core/business-error";
 import { loadOrderProductDims } from "../orders/routes";
 // 柜子状态流程只在 containers/status-flow.ts 定义一处，本文件不再自己抄
 import {
@@ -443,12 +444,26 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
     if (!id) { fail(res, 400, "BAD_REQUEST", "id is required"); return; }
     const container = await prisma.container.findFirst({ where: { id, companyId: auth.companyId } });
     if (!container) { fail(res, 404, "NOT_FOUND", "装柜任务不存在"); return; }
-    if (container.currentStatus === "SEALED" || container.currentStatus === "IN_TRANSIT" || container.currentStatus === "ARRIVED") {
-      fail(res, 400, "BAD_REQUEST", "该柜已封柜或已运输/到达"); return;
-    }
-    const updated = await prisma.container.update({
-      where: { id },
-      data: { currentStatus: "SEALED", sealedAt: new Date() },
+    /**
+     * ⚠️ 2026-08-28 补：封柜原来**没有事务、没有锁** ——
+     * 上面那道「已封柜/已运输/已到达就拦住」读的是事务外的快照，
+     * 另一个人正好在这一刻把柜推到「已开船」，这边照样把它改回 SEALED，
+     * 柜子状态直接倒退，而轨迹里已经写了开船。
+     * 现在跟推进柜子状态走同一把锁（containers 那一行），先锁再重查。
+     */
+    const updated = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM containers WHERE id = ${id} FOR UPDATE`;
+      const fresh = await tx.container.findUnique({ where: { id }, select: { currentStatus: true } });
+      if (!fresh) throw new BusinessError("装柜任务不存在", 404, "NOT_FOUND");
+      if (fresh.currentStatus === "SEALED" || fresh.currentStatus === "IN_TRANSIT" || fresh.currentStatus === "ARRIVED") {
+        throw new BusinessError(
+          `这个柜刚刚被推到「${CONTAINER_STATUS_LABEL[fresh.currentStatus] ?? fresh.currentStatus}」了，封柜没有执行，请刷新后再看`,
+        );
+      }
+      return tx.container.update({
+        where: { id },
+        data: { currentStatus: "SEALED", sealedAt: new Date() },
+      });
     });
     ok(res, { message: "封柜成功", manifest: { id: updated.id, status: updated.currentStatus } });
   });
@@ -464,17 +479,21 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
 
     try {
       const result = await prisma.$transaction(async (tx) => {
-      const container = await tx.container.findFirst({ where: { id: containerId, companyId: auth.companyId } });
-      if (!container) throw new Error("装柜任务不存在");
-
       /**
-       * ⚠️⚠️ **锁序必须是【柜 → 运单】**（2026-08-28 补）。
+       * ⚠️⚠️ **锁序必须是【柜 → 运单】，而且柜子要锁完再读**（2026-08-28 补）。
+       *
        * 「推进柜子状态」（containers/routes.ts ~426）是先锁柜再动运单；
-       * 这条路原来只锁运单、柜子只读不锁，两边方向相反会死锁，
-       * 而且柜子状态可能在读完之后被推进，这一票就按旧状态写进去、再也补不回来。
-       * 详见 containers/routes.ts 里同一处的长注释。
+       * 这条路原来只锁运单、柜子只读不锁，两边方向相反会死锁。
+       *
+       * 更要紧的是**读的时机**：柜子信息（当前状态、运输方式、statusDates）
+       * 下面要拿来给这票新货**补历史轨迹**。锁之前读的话，
+       * 「推进柜子状态」可以在读完之后提交 —— 这票货就按柜子的**旧状态**补轨迹、
+       * 补出来的历史还少一截，而推进那条已经走完不会回头补，**永远是错的**。
+       * 所以：先锁，再读，读到的才是被锁保护住的那份。
        */
       await tx.$queryRaw`SELECT id FROM containers WHERE id = ${containerId} FOR UPDATE`;
+      const container = await tx.container.findFirst({ where: { id: containerId, companyId: auth.companyId } });
+      if (!container) throw new Error("装柜任务不存在");
 
       // 先锁再读，防并发 TOCTOU
       const shipment = await tx.shipment.findFirst({
