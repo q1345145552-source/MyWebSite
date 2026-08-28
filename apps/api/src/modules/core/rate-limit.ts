@@ -46,6 +46,118 @@ export function checkRateLimit(
   return false;
 }
 
+
+/**
+ * ════════════════════════════════════════════════════════════════════
+ * 按「被敲的那个账号」计数的失败限流（2026-08-29 新增，老板拍板 30 分钟 20 次）
+ * ════════════════════════════════════════════════════════════════════
+ *
+ * 上面 checkRateLimit 是按 **IP** 算的：一个 IP 一分钟 10 次。
+ * 问题是换个 IP 计数就从 0 重新开始 —— 攻击者拿 100 台机器一起猜**同一个账号**，
+ * 每台各 10 次都不超限，一分钟 1000 次、一天 144 万次，
+ * 而系统全程没有任何地方记录「这个账号被猜了多少次」。
+ *
+ * 改密码接口（auth/routes.ts）早就是按账号算的，注释写着
+ *   「换 IP 就能继续猜旧密码的话，这道限流等于没有」
+ * —— 登录这边恰恰漏了同样一道。
+ *
+ * ⚠️ 只数**猜错的**：密码对了不计数，而且登录成功会把计数清零。正常人不受影响。
+ *
+ * ⚠️ 已知代价（跟老板说过）：知道某个员工唛头的人，可以故意连错 20 次
+ *    把他挡在外面最多半小时。这是账号锁定这类做法的通病，
+ *    换来的是把「一天 144 万次猜密码」压到「一天 960 次」。
+ *    本系统 69/75 个客户账号的密码就是唛头本身，挡批量试比防这个更要紧。
+ *
+ * ⚠️ 计数在**进程内存**里，API 一重启就清零，多实例也各算各的。
+ *    这是整个限流模块的共同前提（见文件开头），要根治得上 Redis。
+ */
+interface FailureEntry {
+  count: number;
+  /** 这个计数窗口什么时候归零 */
+  resetAt: number;
+}
+
+const failureStore = new Map<string, FailureEntry>();
+
+// 跟上面的 store 一样定期清理，免得内存里越攒越多
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of failureStore) {
+    if (now > entry.resetAt) failureStore.delete(key);
+  }
+}, 60_000).unref();
+
+/** 一个账号在一个窗口里最多能失败几次 */
+export const LOGIN_FAILURE_MAX = 20;
+/** 计数窗口：30 分钟 */
+export const LOGIN_FAILURE_WINDOW_MS = 30 * 60_000;
+
+/**
+ * 这个键现在是不是已经超限了。
+ * ⚠️ **只查不加**：加计数是 recordFailure 的事。
+ * 两件事必须分开，否则「登录成功」也会被算成一次尝试。
+ */
+export function isFailureBlocked(
+  key: string,
+  max: number = LOGIN_FAILURE_MAX,
+  now: number = Date.now(),
+): boolean {
+  const entry = failureStore.get(key);
+  if (!entry || now > entry.resetAt) return false;
+  return entry.count >= max;
+}
+
+/** 还要等多少毫秒才能再试（没被挡就是 0）—— 用来给人一句看得懂的提示 */
+export function failureRetryAfterMs(
+  key: string,
+  max: number = LOGIN_FAILURE_MAX,
+  now: number = Date.now(),
+): number {
+  const entry = failureStore.get(key);
+  if (!entry || now > entry.resetAt || entry.count < max) return 0;
+  return entry.resetAt - now;
+}
+
+/** 记一次失败。窗口过期就重新开一个新窗口。 */
+export function recordFailure(
+  key: string,
+  windowMs: number = LOGIN_FAILURE_WINDOW_MS,
+  now: number = Date.now(),
+): void {
+  const entry = failureStore.get(key);
+  if (!entry || now > entry.resetAt) {
+    failureStore.set(key, { count: 1, resetAt: now + windowMs });
+    return;
+  }
+  entry.count += 1;
+}
+
+/** 登录成功后把这个账号的失败计数清掉 —— 不清的话，白天陆续打错几次会累积到超限 */
+export function clearFailures(key: string): void {
+  failureStore.delete(key);
+}
+
+/**
+ * 登录失败计数用的键 —— **生产和测试必须共用这一个函数**。
+ *
+ * ⚠️ 2026-08-29：这个函数原来没有，键是在登录接口里现拼的，
+ * 测试脚本自己又照着抄了一遍。做变异时把生产那句改成
+ *   `rateLimitKey(`${ip}_${account}`, "login-account")`
+ * —— **10 项照样全绿**，因为测试比对的是它自己抄的那份。
+ * 「测试重写一遍被测逻辑」＝ 测了个寂寞，这个项目里已经栽过第三次了。
+ *
+ * ⚠️ 键里**不许出现 IP**：整道闸的意义就是「换 IP 也躲不掉」。
+ * ⚠️ 账号要统一小写：不然 "ABC" 和 "abc" 各算各的，换个大小写就绕过去了。
+ */
+export function loginFailureKey(account: string): string {
+  return rateLimitKey(account.trim().toLowerCase(), "login-account");
+}
+
+/** 测试用：把失败计数全清了（生产代码不要调） */
+export function __resetFailureStoreForTest(): void {
+  failureStore.clear();
+}
+
 /**
  * 根据 IP 和路径生成限流键。
  */

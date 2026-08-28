@@ -2,7 +2,15 @@ import type { MinimalHttpApp } from "../../server";
 import { prisma } from "../../db/prisma";
 import { fail, ok, requireAuth } from "../core/http-utils";
 import { logger } from "../core/logger";
-import { checkRateLimit, getClientIp, rateLimitKey } from "../core/rate-limit";
+import {
+  checkRateLimit,
+  clearFailures,
+  failureRetryAfterMs,
+  getClientIp,
+  loginFailureKey,
+  rateLimitKey,
+  recordFailure,
+} from "../core/rate-limit";
 import { signAuthToken } from "./token";
 import { hashPassword, verifyPassword } from "./crypto-utils";
 import { checkPasswordStrength } from "./password-policy";
@@ -37,6 +45,30 @@ export function registerAuthRoutes(app: MinimalHttpApp): void {
       return;
     }
 
+    /**
+     * ⚠️ 第二道限流：按**被敲的那个账号**算（2026-08-29 新增，老板拍板 30 分钟 20 次）。
+     *
+     * 上面那道是按 IP 算的，换个 IP 计数就从 0 开始 —— 攻击者拿 100 台机器
+     * 一起猜同一个账号，每台各 10 次都不超限，一天能试 144 万次，
+     * 而系统全程不知道这个账号正在被猜。加上这道之后一天封顶 960 次。
+     *
+     * ⚠️ 账号要**统一大小写**再当键：不然 "ABC" 和 "abc" 各算各的，
+     * 攻击者换个大小写就是一个新计数桶，这道闸等于白加。
+     * （查库那句 findUnique 是区分大小写的，所以计数比登录本身更宽 —— 宁可宽也不能漏。）
+     */
+    const failureKey = loginFailureKey(body.account);
+    const waitMs = failureRetryAfterMs(failureKey);
+    if (waitMs > 0) {
+      const waitMin = Math.max(1, Math.ceil(waitMs / 60_000));
+      fail(
+        res,
+        429,
+        "BAD_REQUEST",
+        `这个账号密码错太多次了，请 ${waitMin} 分钟后再试。着急的话联系管理员重置密码。`,
+      );
+      return;
+    }
+
     const user = await prisma.user.findUnique({
       where: { id: body.account },
       select: {
@@ -49,18 +81,30 @@ export function registerAuthRoutes(app: MinimalHttpApp): void {
       },
     });
 
+    /**
+     * ⚠️ **三个失败出口都要记一笔**，一个都不能漏。
+     * 只在「密码错」那一处记的话，攻击者拿不存在的账号刷、或者用错的 role 刷，
+     * 一次都不会被计数 —— 而那两条路照样能拿来试账号存不存在。
+     */
     if (!user || user.status !== "active") {
+      recordFailure(failureKey);
       fail(res, 401, "UNAUTHORIZED", "invalid credentials");
       return;
     }
     if (body.role && body.role !== user.role) {
+      recordFailure(failureKey);
       fail(res, 401, "UNAUTHORIZED", "invalid credentials");
       return;
     }
     if (!verifyPassword(body.password, user.passwordHash)) {
+      recordFailure(failureKey);
       fail(res, 401, "UNAUTHORIZED", "invalid credentials");
       return;
     }
+
+    // 登录成功 → 把这个账号的失败计数清零。
+    // 不清的话，白天陆续打错几次会一路累积到 20，最后把自己关在门外。
+    clearFailures(failureKey);
 
     const token = signAuthToken({
       userId: user.id,

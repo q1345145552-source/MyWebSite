@@ -50,6 +50,12 @@ jobs:
       - name: TypeScript check (test scripts)
         run: npx -p typescript tsc --noEmit --project tsconfig.scripts.json
 
+      # 登录限流（2026-08-29 加，老板拍板 30 分钟 20 次）。
+      # 登录本来就有限流，但按 IP 算 —— 换个 IP 计数就从 0 开始，
+      # 100 台机器猜同一个账号一天能试 144 万次。加这道按账号算的之后封顶 960 次。
+      - name: Test login throttle
+        run: npm run test:login-throttle
+
       # 产品行校验（2026-08-29 加）。
       # 复核真调接口测出来：每箱填 0/-3/1.5 全部 200 放行，
       # 而且前端三处 `Number(...) || 1` 会把「箱数没填」悄悄变成 1 箱 ——

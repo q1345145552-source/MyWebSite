@@ -18,6 +18,7 @@
     "db:studio": "prisma studio --schema=apps/api/prisma/schema.prisma",
     "db:seed": "tsx apps/api/prisma/seed.ts",
     "db:reset": "prisma migrate reset --schema=apps/api/prisma/schema.prisma",
+    "test:login-throttle": "tsx scripts/test-login-throttle.ts",
     "test:product-rows": "tsx scripts/test-product-rows.ts",
     "test:batch-import": "tsx scripts/test-staff-batch-import.ts",
     "test:lock-order": "tsx scripts/test-lock-order.ts",
