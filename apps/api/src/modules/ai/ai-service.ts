@@ -213,14 +213,14 @@ export class ClientAiService implements AiService {
         evidenceOrderIds = [shipment.orderId];
       }
       nextMemory = { intent: "tracking" };
-    } else if (this.isGreetingMessage(question) || modelIntent.intent === "greeting") {
+    } else if (this.isGreetingMessage(question) || this.acceptModelGreeting(question, modelIntent)) {
       answerDraft = this.formatGreetingAnswer();
     } else if (this.isServiceQaIntent(question)) {
       const relevantKnowledge = this.pickRelevantKnowledge(question, knowledgeItems);
       const hasRelevantKnowledge = relevantKnowledge.length > 0;
       answerDraft = this.formatServiceQaAnswer(question, knowledgeItems.length, relevantKnowledge);
       shouldCreateKnowledgeGap = !hasRelevantKnowledge;
-    } else if (this.shouldAskClarification(question, modelIntent)) {
+    } else if (this.shouldAskClarification(question, modelIntent, trackingNo)) {
       answerDraft = this.formatClarificationAnswer();
     } else if (this.isSummaryIntent(question) || modelIntent.intent === "summary" || modelIntent.intent === "unknown") {
       /**
@@ -236,11 +236,17 @@ export class ClientAiService implements AiService {
         const hint = modelIntent.timeHint?.trim() || (isFollowUp ? memory?.timeHint : undefined);
         if (hint) timeWindow = this.resolveTimeWindow(hint, askedNow);
       }
-      let statusScope = this.resolveStatusScope(question);
-      if (statusScope === "all") {
-        statusScope =
-          modelIntent.statusScope ?? (isFollowUp ? memory?.statusScope : undefined) ?? "all";
-      }
+      /**
+       * ⚠️ `undefined` 才表示「客户没提状态」，这时候模型才有资格补。
+       * 客户明确说了（含「一共/全部/所有」这类要全部的说法）就一锤定音。
+       * 优先级：**问句明确条件 → 模型补充 → 会话记忆 → 默认全部**。
+       */
+      const explicitStatusScope = this.resolveStatusScope(question);
+      const statusScope: StatusScope =
+        explicitStatusScope ??
+        modelIntent.statusScope ??
+        (isFollowUp ? memory?.statusScope : undefined) ??
+        "all";
       const productScope = this.resolveProductScope(
         question,
         orders,
@@ -546,6 +552,20 @@ export class ClientAiService implements AiService {
     return message.length <= 20 && GREETING_RE.test(message);
   }
 
+  /**
+   * 模型说「这句是打招呼」，要不要认。
+   *
+   * ⚠️ 只在**规则认不出这句话在问什么**的时候才认 —— 模型只能补空位。
+   * 2026-08-28 复核实测：客户问「我这个月发了多少单」、模型返回 greeting 时，
+   * 系统真的回了欢迎语，一个数字都没有。
+   */
+  private acceptModelGreeting(question: string, modelIntent: ModelIntent): boolean {
+    if (modelIntent.intent !== "greeting") return false;
+    if (this.isSummaryIntent(question)) return false;
+    if (this.isServiceQaIntent(question)) return false;
+    return true;
+  }
+
   private isSummaryIntent(message: string): boolean {
     return /(统计|汇总|总量|多少|几单|数量|重量|体积|在途|完成|异常|近\d+天|最近\d+天|今天|今日|昨天|昨日|本周|这周|本星期|这星期|本月|这个月|这月|当月)/.test(
       message,
@@ -556,12 +576,30 @@ export class ClientAiService implements AiService {
     return SERVICE_QA_RE.test(message);
   }
 
-  private resolveStatusScope(message: string): StatusScope {
+  /**
+   * 从问句里认状态。
+   *
+   * ⚠️ 返回 `undefined` 表示**客户压根没提状态**，跟「客户明确说要全部」（`"all"`）是两回事。
+   * 2026-08-28 复核实测：原来这两种情况都返回 `"all"`，调用处只好写成
+   * 「只要是 all 就让模型改」—— 于是客户问「我一共有多少单」、模型返回「已完成」时，
+   * 系统真的只报了已完成的那 1 单（一共 3 单）。
+   *
+   * ⚠️ 顺序：**具体状态词排在「要全部」的词前面**。
+   * 「这个月一共完成了多少单」既有「一共」又有「完成」，必须按已完成算。
+   * 这条顺序由第 46 项测试盯着 —— 之前 39 项里没有一句话同时带两种词，写反了也发现不了。
+   *
+   * ⚠️ 这里新增的「一共/总共/统共/总计/全部/所有/加起来」必须和
+   * `BLOCKED_PRODUCT_KEYWORDS`、`normalizeProductKeyword` 里的剥词表同步 ——
+   * 不同步的话这些词会被当成**品名**去查（实测「总计多少单」→「未查询到品名『总计』相关订单」）。
+   */
+  private resolveStatusScope(message: string): StatusScope | undefined {
     if (/(未完成|没完成|未签收|未结束)/.test(message)) return "unfinished";
     if (/(异常|退回|取消)/.test(message)) return "exception";
     if (/(完成|签收|已完成)/.test(message)) return "completed";
     if (/(在途|运输中|在路上|路上)/.test(message)) return "inTransit";
-    return "all";
+    // 客户明确说了「要全部」——到此为止，模型不许再改成某个状态
+    if (/(一共|总共|统共|总计|加起来|全部|所有)/.test(message)) return "all";
+    return undefined;
   }
 
   /**
@@ -654,8 +692,8 @@ export class ClientAiService implements AiService {
     if (matched) {
       return { keyword: matched, label: `品名：${matched}` };
     }
-    // 问句里实在认不出来，才轮到模型给的（模型给的是已知品名，不做剥词）
-    const modelKeyword = this.normalizeProductKeyword(modelItemName);
+    // 问句里实在认不出来，才轮到模型给的（而且必须对得上库里的真实品名，见下）
+    const modelKeyword = this.acceptModelItemName(modelItemName, orders);
     if (modelKeyword) {
       return { keyword: modelKeyword, label: `品名：${modelKeyword}` };
     }
@@ -664,6 +702,38 @@ export class ClientAiService implements AiService {
     }
 
     return { label: "全部品类" };
+  }
+
+  /**
+   * 要不要采信模型给的品名。跟 `acceptModelTrackingNo` 一个道理：**模型的话得能对上账**。
+   *
+   * ⚠️ 原来只做长度和控制字符检查，模型把**整句问话**当品名返回也照单全收。
+   * 2026-08-28 复核实测：问「统计一下」，模型返回品名「统计一下我这个月发了多少单」、
+   * `confidence` 只有 0.01，系统照样拿它去查 ——
+   * 客户得到的是「未查询到品名『统计一下我这个月发了多少单』相关订单」，统计根本没跑。
+   * `confidence` 是模型自己给自己打的分，拦不住任何东西，**这里不参与判断**。
+   *
+   * 现在的门槛：必须**等于**这个客户名下某个真实品名。
+   * 比较时把全角转半角、去掉空格和大小写差异（模型爱做这种「归一化」），
+   * 但**返回的是库里那个品名原文** —— 拿归一化后的串去查是查不到货的
+   * （`matchesProductKeyword` 只做小写包含，不折全角），客户看到的品名也会变形。
+   */
+  private acceptModelItemName(
+    raw: string | undefined,
+    orders: ProductNameSource[],
+  ): string | undefined {
+    const candidate = this.normalizeProductKeyword(raw);
+    if (!candidate) return undefined;
+    const fold = (text: string): string =>
+      text
+        .replace(/[！-～]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0))
+        .replace(/\s+/g, "")
+        .toLowerCase();
+    const target = fold(candidate);
+    if (!target) return undefined;
+    return Array.from(new Set(orders.flatMap((item) => this.orderItemNames(item)))).find(
+      (name) => fold(name) === target,
+    );
   }
 
   private extractProductKeyword(message: string): string | undefined {
@@ -709,6 +779,9 @@ export class ClientAiService implements AiService {
     "在途",
     "全部",
     "所有",
+    // 跟 resolveStatusScope 新增的「要全部」词表同步（2026-08-28）
+    "总计",
+    "加起来",
     "当前",
     "数据",
   ]);
@@ -774,7 +847,9 @@ export class ClientAiService implements AiService {
      */
     const stripped = keyword
       .replace(/^(?:我们|咱们|我|你们|你|咱)?(?:的)?/, "")
-      .replace(/^(?:一共|总共|统共|一起|大概|大约)?/, "")
+      // ⚠️ 这里是 `+` 不是 `?`：「加起来一共」剥掉「加起来」还剩「一共」，
+      // 只剥一次的话它照样会被当成品名（实测「加起来一共多少单」→ 品名「加起来一共」）。
+      .replace(/^(?:一共|总共|统共|总计|加起来|一起|大概|大约)+/, "")
       .replace(/(?:发了|发的|寄了|寄的|发过|寄过|下了|有|是|的)$/, "")
       .trim();
     if (!stripped) return undefined;
@@ -1378,12 +1453,25 @@ export class ClientAiService implements AiService {
     ].join("\n");
   }
 
-  private shouldAskClarification(question: string, modelIntent: ModelIntent): boolean {
+  private shouldAskClarification(
+    question: string,
+    modelIntent: ModelIntent,
+    trackingNo?: string,
+  ): boolean {
     if (this.isGreetingMessage(question)) return false;
+    if (trackingNo) return false;
     if (this.extractTrackingNo(question)) return false;
     if (this.isSummaryIntent(question)) return false;
     if (this.isServiceQaIntent(question)) return false;
-    if (modelIntent.intent === "summary" || modelIntent.intent === "tracking" || modelIntent.intent === "greeting") {
+    /**
+     * ⚠️ 模型的 intent 只能**补**规则认不出的那一档，不能凭空造出一条路。
+     * 原来 `"tracking"` 也在这个白名单里：模型嘴上说「客户在查单号」、`trackingNo` 却是空的，
+     * 系统于是既不反问、也进不了统计分支（统计分支只认 summary/unknown），
+     * 直接掉进最后那个兜底分支，把这个客户**名下全部运单**的总数报了出去 ——
+     * 2026-08-28 复核实测：问「我的货呢」，模型返回 tracking + 空单号，答复是「一共 3 单」。
+     * 单号真拿得到的话，上面那道 `trackingNo` 判断已经先返回 false 了。
+     */
+    if (modelIntent.intent === "summary" || modelIntent.intent === "greeting") {
       return false;
     }
     return question.length > 2;

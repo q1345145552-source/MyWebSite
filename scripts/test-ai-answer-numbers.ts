@@ -918,10 +918,133 @@ async function main() {
     assert.equal(totalCountOf(answer), 1);
   });
 
+  // ══ P1-5 复核抓到的「模型说了算」（2026-08-28）══════════════════════════
+  // 原来 "all" 同时表示「客户明确要全部」和「客户压根没提状态」，
+  // 调用处只好写成「是 all 就让模型改」——客户明说的也被模型盖掉了。
+  // 规矩：**问句里明确说了的，模型不许覆盖；模型只能补客户没说的。**
+
+  await check("40) 客户说「一共」时，模型返回的状态盖不过他", async () => {
+    // 数字互不相同：一共 3 单，其中在途 2 单、已完成 1 单
+    const shipments = [
+      shipment({ id: "jj1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "loaded" }),
+      shipment({ id: "jj2", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "loaded" }),
+      shipment({ id: "jj3", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "delivered" }),
+    ];
+    const { answer } = await ask({
+      shipments,
+      message: "我一共有多少单",
+      // 模型胡说成「已完成」——旧代码会照做，只报那 1 单
+      intent: JSON.stringify({ intent: "summary", statusScope: "completed", confidence: 0.9 }),
+    });
+    assert.ok(answer.includes("全部运单"), `客户说了「一共」，还是被模型改成别的状态了：\n${answer}`);
+    assert.equal(totalCountOf(answer), 3, `只报了已完成的那 1 单：\n${answer}`);
+  });
+
+  await check("41) 明确的统计问题，模型说「打招呼」也不许改", async () => {
+    // 本月 3 单（在途 2 / 已完成 1），另有 1 单是 40 天前的，不该算进本月
+    const shipments = [
+      shipment({ id: "kk1", createdAtMs: beijingMonthStartMs() + 1000, updatedAtMs: nowMs, status: "loaded" }),
+      shipment({ id: "kk2", createdAtMs: beijingMonthStartMs() + 2000, updatedAtMs: nowMs, status: "loaded" }),
+      shipment({ id: "kk3", createdAtMs: beijingMonthStartMs() + 3000, updatedAtMs: nowMs, status: "delivered" }),
+      shipment({ id: "kk4", createdAtMs: beijingMonthStartMs() - 40 * 86400_000, updatedAtMs: nowMs }),
+    ];
+    const { answer } = await ask({
+      shipments,
+      message: "我这个月发了多少单",
+      intent: JSON.stringify({ intent: "greeting", confidence: 0.9 }),
+    });
+    assert.ok(!answer.includes("我是湘泰物流AI客服助手"), `统计问题被模型变成欢迎语了：\n${answer}`);
+    assert.ok(answer.includes("查询范围：本月"), `没按本月统计：\n${answer}`);
+    assert.equal(totalCountOf(answer), 3, `本月单量不对：\n${answer}`);
+  });
+
+  await check("42) 模型把整句问话当品名（置信度 0.01）→ 必须忽略", async () => {
+    const shipments = [
+      shipment({ id: "ll1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "loaded" }),
+      shipment({ id: "ll2", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "loaded" }),
+      shipment({ id: "ll3", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "delivered" }),
+    ];
+    const { answer } = await ask({
+      shipments,
+      message: "统计一下",
+      // confidence 只有 0.01，旧代码照样采信 —— 那个字段一处都没用上
+      intent: JSON.stringify({
+        intent: "summary",
+        itemName: "统计一下我这个月发了多少单",
+        confidence: 0.01,
+      }),
+    });
+    assert.ok(!answer.includes("未查询到品名"), `模型编的品名被当真了：\n${answer}`);
+    assert.ok(answer.includes("全部品类"), `没退回全部品类：\n${answer}`);
+    assert.equal(totalCountOf(answer), 3, `单量不对：\n${answer}`);
+  });
+
+  await check("43) 模型说「在查单号」却给不出单号 → 必须反问，不能报全部", async () => {
+    const shipments = [
+      shipment({ id: "mm1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "loaded" }),
+      shipment({ id: "mm2", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "loaded" }),
+      shipment({ id: "mm3", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "delivered" }),
+    ];
+    const { answer } = await ask({
+      shipments,
+      message: "我的货呢",
+      intent: JSON.stringify({ intent: "tracking", trackingNo: "", confidence: 0.9 }),
+    });
+    assert.ok(answer.includes("还不太确定你想看哪一项"), `没反问，直接报数了：\n${answer}`);
+    assert.ok(!answer.includes("总单量"), `把他名下全部单都报出去了：\n${answer}`);
+  });
+
+  await check("44) 「总计 / 加起来」不再被当成品名", async () => {
+    const shipments = [
+      shipment({ id: "nn1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "loaded" }),
+      shipment({ id: "nn2", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "loaded" }),
+      shipment({ id: "nn3", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "delivered" }),
+    ];
+    // 「一共/总共」当年补过，「总计/加起来」漏了 → 客户拿到「未查询到品名『总计』相关订单」
+    for (const message of ["总计多少单", "我总计发了多少单", "加起来一共多少单"]) {
+      const { answer } = await ask({ shipments, message });
+      assert.ok(!answer.includes("未查询到品名"), `「${message}」被当成品名了：\n${answer}`);
+      assert.ok(answer.includes("全部品类"), `「${message}」没按全部品类统计：\n${answer}`);
+      assert.equal(totalCountOf(answer), 3, `「${message}」单量不对：\n${answer}`);
+    }
+  });
+
+  await check("45) 正向：客户没提状态时，模型仍然可以补", async () => {
+    // 别改过头 —— 「还没到的有多少」这类规则认不出的说法，得靠模型
+    const shipments = [
+      shipment({ id: "oo1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "loaded" }),
+      shipment({ id: "oo2", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "loaded" }),
+      shipment({ id: "oo3", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "delivered" }),
+    ];
+    const { answer } = await ask({
+      shipments,
+      message: "帮我看看",
+      intent: JSON.stringify({ intent: "summary", statusScope: "completed", confidence: 0.9 }),
+    });
+    assert.ok(answer.includes("已完成运单"), `模型补的状态没生效：\n${answer}`);
+    assert.equal(totalCountOf(answer), 1, `没按已完成筛：\n${answer}`);
+  });
+
+  await check("46) 「这个月一共完成了多少单」→ 仍按已完成算", async () => {
+    // 「一共」和「完成」同时出现时，具体状态词必须排在前面。
+    // ⚠️ 现有 39 项里没有一句话同时带这两种词 —— 顺序写反了也没人发现，所以补这一项。
+    const shipments = [
+      shipment({ id: "pp1", createdAtMs: beijingMonthStartMs() + 1000, updatedAtMs: nowMs, status: "loaded" }),
+      shipment({ id: "pp2", createdAtMs: beijingMonthStartMs() + 2000, updatedAtMs: nowMs, status: "loaded" }),
+      shipment({ id: "pp3", createdAtMs: beijingMonthStartMs() + 3000, updatedAtMs: nowMs, status: "delivered" }),
+    ];
+    const { answer } = await ask({ shipments, message: "这个月一共完成了多少单" });
+    assert.ok(
+      answer.includes("查询范围：本月，已完成运单"),
+      `「一共」抢在「完成」前面了：\n${answer}`,
+    );
+    assert.equal(totalCountOf(answer), 1, `没按已完成筛：\n${answer}`);
+  });
+
   if (failures.length > 0) {
-    throw new Error(`${failures.length}/39 项不通过（TZ=${TZ_LABEL}）：${failures.join("；")}`);
+    throw new Error(`${failures.length}/46 项不通过（TZ=${TZ_LABEL}）：${failures.join("；")}`);
   }
-  console.log(`AI 答复数字校验：39 项全部通过（TZ=${TZ_LABEL}）`);
+  console.log(`AI 答复数字校验：46 项全部通过（TZ=${TZ_LABEL}）`);
 }
 
 main().catch((error) => {
