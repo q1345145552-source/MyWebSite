@@ -786,6 +786,24 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
     try {
       const item = await prisma.$transaction(async (tx) => {
         /**
+         * ⚠️⚠️ **锁序必须是【柜 → 运单】**（2026-08-28 补）。
+         *
+         * 「推进柜子状态」那条路（本文件 ~426 行）是先锁柜、再动里面的运单；
+         * 装柜这条路原来是**先锁运单、再去读柜子**，两条方向正好相反 ——
+         * 一个人装柜、一个人推进同一个柜时，两边各握着对方要的锁，
+         * PostgreSQL 会判定死锁掐掉一个（这个分支之前在集货那边踩过同样的坑：
+         * 真实 PostgreSQL 实测 16 个事务死锁 7 个，统一锁序后 0 死锁）。
+         *
+         * 而且柜子状态原来是**只读不锁**的：读完之后、写 shipment_container_items 之前，
+         * 「推进柜子状态」完全可以提交 —— 于是这一票新装进来的货
+         * 被同步成柜子的**旧状态**、轨迹也按旧状态写，
+         * 而推进那条路已经走完了、不会再回头补这一票，**这条记录永远是错的**。
+         *
+         * 锁住柜子之后：装柜和推进必须排队，谁先谁后都能拿到对方提交后的真实状态。
+         */
+        await tx.$queryRaw`SELECT id FROM containers WHERE id = ${containerId} FOR UPDATE`;
+
+        /**
          * ⚠️ 锁住运单，再复查「体积会不会装超」和「柜子现在什么状态」（2026-08-27 补）。
          *
          * 上面两样都是事务外面读的：

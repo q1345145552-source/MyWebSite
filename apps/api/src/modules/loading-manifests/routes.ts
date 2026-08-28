@@ -467,6 +467,15 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
       const container = await tx.container.findFirst({ where: { id: containerId, companyId: auth.companyId } });
       if (!container) throw new Error("装柜任务不存在");
 
+      /**
+       * ⚠️⚠️ **锁序必须是【柜 → 运单】**（2026-08-28 补）。
+       * 「推进柜子状态」（containers/routes.ts ~426）是先锁柜再动运单；
+       * 这条路原来只锁运单、柜子只读不锁，两边方向相反会死锁，
+       * 而且柜子状态可能在读完之后被推进，这一票就按旧状态写进去、再也补不回来。
+       * 详见 containers/routes.ts 里同一处的长注释。
+       */
+      await tx.$queryRaw`SELECT id FROM containers WHERE id = ${containerId} FOR UPDATE`;
+
       // 先锁再读，防并发 TOCTOU
       const shipment = await tx.shipment.findFirst({
         where: { trackingNo: body.trackingNo!.trim(), companyId: auth.companyId },
