@@ -1041,10 +1041,93 @@ async function main() {
     assert.equal(totalCountOf(answer), 1, `没按已完成筛：\n${answer}`);
   });
 
+  // ══ P1-3：品名本身含状态词/时间词（2026-08-28）════════════════════════
+  // 真实品名叫「完成品」「在途箱」「本月货」的客户，一问就被自动加上筛选，
+  // 报出来的数字比真实少一大截。正确做法：**先认全真实品名，再从剩下的问句里解析时间和状态。**
+
+  await check("47) 品名叫「完成品」时不再被自动加「已完成」筛选", async () => {
+    // 完成品 3 单（已完成 1 / 在途 2），另有别的货 1 单 —— 数字互不相同
+    orderNames.set("qq1", { itemName: "完成品", productNames: ["完成品"] });
+    orderNames.set("qq2", { itemName: "完成品", productNames: ["完成品"] });
+    orderNames.set("qq3", { itemName: "完成品", productNames: ["完成品"] });
+    orderNames.set("qq4", { itemName: "别的货", productNames: ["别的货"] });
+    const shipments = [
+      shipment({ id: "qq1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "delivered" }),
+      shipment({ id: "qq2", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "loaded" }),
+      shipment({ id: "qq3", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "loaded" }),
+      shipment({ id: "qq4", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "loaded" }),
+    ];
+    const { answer } = await ask({ shipments, message: "完成品有多少单" });
+    assert.ok(answer.includes("品名：完成品"), `品名没认出来：\n${answer}`);
+    assert.ok(answer.includes("全部运单"), `品名里的「完成」被当成状态筛选了：\n${answer}`);
+    assert.equal(totalCountOf(answer), 3, `只报了已完成的那 1 单：\n${answer}`);
+  });
+
+  await check("48) 品名里的状态词盖不过客户真正说的状态", async () => {
+    orderNames.set("rr1", { itemName: "完成品", productNames: ["完成品"] });
+    orderNames.set("rr2", { itemName: "完成品", productNames: ["完成品"] });
+    orderNames.set("rr3", { itemName: "完成品", productNames: ["完成品"] });
+    const shipments = [
+      shipment({ id: "rr1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "delivered" }),
+      shipment({ id: "rr2", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "loaded" }),
+      shipment({ id: "rr3", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "loaded" }),
+    ];
+    // 客户明明问的是「在途」，旧代码被品名里的「完成」抢先，答的是已完成
+    const { answer } = await ask({ shipments, message: "我的完成品还有多少在途" });
+    assert.ok(answer.includes("在途运单"), `品名里的「完成」抢在客户说的「在途」前面了：\n${answer}`);
+    assert.equal(totalCountOf(answer), 2, `在途单量不对：\n${answer}`);
+  });
+
+  await check("49) 品名叫「本月货」时不再被自动加「本月」筛选", async () => {
+    // 本月货 4 单，其中只有 1 单是本月下的
+    for (const id of ["ss1", "ss2", "ss3", "ss4"]) {
+      orderNames.set(id, { itemName: "本月货", productNames: ["本月货"] });
+    }
+    const shipments = [
+      shipment({ id: "ss1", createdAtMs: beijingMonthStartMs() + 1000, updatedAtMs: nowMs }),
+      shipment({ id: "ss2", createdAtMs: beijingMonthStartMs() - 40 * 86400_000, updatedAtMs: nowMs }),
+      shipment({ id: "ss3", createdAtMs: beijingMonthStartMs() - 50 * 86400_000, updatedAtMs: nowMs }),
+      shipment({ id: "ss4", createdAtMs: beijingMonthStartMs() - 60 * 86400_000, updatedAtMs: nowMs }),
+    ];
+    const { answer } = await ask({ shipments, message: "本月货有多少单" });
+    assert.ok(answer.includes("品名：本月货"), `品名没认出来：\n${answer}`);
+    assert.ok(
+      answer.includes("查询范围：当前公司账号数据"),
+      `品名里的「本月」被当成时间筛选了：\n${answer}`,
+    );
+    assert.equal(totalCountOf(answer), 4, `只报了本月那 1 单：\n${answer}`);
+
+    // 护栏：客户**真的**又说了一次「本月」，那就该按本月筛
+    const second = await ask({ shipments, message: "本月货本月发了多少单" });
+    assert.ok(second.answer.includes("查询范围：本月"), `客户说了本月却没筛：\n${second.answer}`);
+    assert.equal(totalCountOf(second.answer), 1, `本月单量不对：\n${second.answer}`);
+  });
+
+  await check("50) 剥掉品名之后，剩下的状态词照样生效", async () => {
+    // 在途箱 2 单（已完成 1 / 在途 1），别的货 1 单
+    orderNames.set("tt1", { itemName: "在途箱", productNames: ["在途箱"] });
+    orderNames.set("tt2", { itemName: "在途箱", productNames: ["在途箱"] });
+    orderNames.set("tt3", { itemName: "别的货", productNames: ["别的货"] });
+    const shipments = [
+      shipment({ id: "tt1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "delivered" }),
+      shipment({ id: "tt2", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "loaded" }),
+      shipment({ id: "tt3", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "loaded" }),
+    ];
+    const { answer } = await ask({ shipments, message: "在途箱已完成多少单" });
+    assert.ok(answer.includes("品名：在途箱"), `品名没认出来：\n${answer}`);
+    assert.ok(answer.includes("已完成运单"), `剥掉品名后「已完成」也被剥没了：\n${answer}`);
+    assert.equal(totalCountOf(answer), 1, `已完成单量不对：\n${answer}`);
+
+    // 同一批数据，不带状态词时要报全部 2 单（证明上面那 1 单是筛出来的，不是漏了）
+    const all = await ask({ shipments, message: "在途箱有多少单" });
+    assert.ok(all.answer.includes("全部运单"), `品名里的「在途」被当成状态筛选了：\n${all.answer}`);
+    assert.equal(totalCountOf(all.answer), 2, `在途箱总单量不对：\n${all.answer}`);
+  });
+
   if (failures.length > 0) {
-    throw new Error(`${failures.length}/46 项不通过（TZ=${TZ_LABEL}）：${failures.join("；")}`);
+    throw new Error(`${failures.length}/50 项不通过（TZ=${TZ_LABEL}）：${failures.join("；")}`);
   }
-  console.log(`AI 答复数字校验：46 项全部通过（TZ=${TZ_LABEL}）`);
+  console.log(`AI 答复数字校验：50 项全部通过（TZ=${TZ_LABEL}）`);
 }
 
 main().catch((error) => {

@@ -230,7 +230,23 @@ export class ClientAiService implements AiService {
        * 系统真的回答了「今天已完成 1 单」—— 问的和答的根本不是一回事。
        */
       const askedNow = new Date();
-      const ruleTimeWindow = this.resolveTimeWindow(question, askedNow);
+      /**
+       * ⚠️ 顺序：**先认品名，再拿剩下的问句去解析时间和状态**。
+       *
+       * 2026-08-28 复核实测：品名真的叫「完成品」的客户问「完成品有多少单」，
+       * 品名里那个「完成」被当成状态词，系统自动加了「已完成」筛选 ——
+       * 他一共 3 单，答复只报了 1 单。更糟的是「我的完成品还有多少在途」：
+       * 品名里的「完成」抢在客户真正说的「在途」前面，答的是已完成。
+       * 品名叫「本月货」的同理，会被自动加上「本月」。
+       */
+      const productScope = this.resolveProductScope(
+        question,
+        orders,
+        modelIntent.itemName,
+        isFollowUp ? memory?.itemName : undefined,
+      );
+      const restQuestion = this.stripProductKeyword(question, productScope.keyword);
+      const ruleTimeWindow = this.resolveTimeWindow(restQuestion, askedNow);
       let timeWindow = ruleTimeWindow;
       if (ruleTimeWindow.label === "当前公司账号数据") {
         const hint = modelIntent.timeHint?.trim() || (isFollowUp ? memory?.timeHint : undefined);
@@ -241,20 +257,14 @@ export class ClientAiService implements AiService {
        * 客户明确说了（含「一共/全部/所有」这类要全部的说法）就一锤定音。
        * 优先级：**问句明确条件 → 模型补充 → 会话记忆 → 默认全部**。
        */
-      const explicitStatusScope = this.resolveStatusScope(question);
+      const explicitStatusScope = this.resolveStatusScope(restQuestion);
       const statusScope: StatusScope =
         explicitStatusScope ??
         modelIntent.statusScope ??
         (isFollowUp ? memory?.statusScope : undefined) ??
         "all";
-      const productScope = this.resolveProductScope(
-        question,
-        orders,
-        modelIntent.itemName,
-        isFollowUp ? memory?.itemName : undefined,
-      );
       const metric = this.resolveMetric(
-        question,
+        restQuestion,
         modelIntent.metric,
         isFollowUp ? memory?.metric : undefined,
       );
@@ -600,6 +610,26 @@ export class ClientAiService implements AiService {
     // 客户明确说了「要全部」——到此为止，模型不许再改成某个状态
     if (/(一共|总共|统共|总计|加起来|全部|所有)/.test(message)) return "all";
     return undefined;
+  }
+
+  /**
+   * 把已经认出来的品名从问句里拿掉，**剩下的**才拿去解析时间、状态和指标。
+   *
+   * ⚠️ 品名里带「完成」「在途」「本月」这类词的客户不是个别现象。
+   * 2026-08-28 复核实测（品名真的叫这些名字）：
+   *   ·「完成品有多少单」  → 品名里的「完成」被当成状态，一共 3 单只报了 1 单；
+   *   ·「我的完成品还有多少在途」→ 品名里的「完成」抢在客户说的「在途」前面，答的是已完成；
+   *   ·「本月货有多少单」  → 品名里的「本月」被当成时间，一共 4 单只报了 1 单。
+   *
+   * 品名是客户自己填的，什么字符都可能有（`A+B`、`(特价)`），所以要先转义再做正则；
+   * 换成空格而不是直接删掉，免得前后两截粘成一个新词。
+   * 整句话就是品名时剥成空串是**对的** —— 那本来就没提时间和状态，交给默认值。
+   */
+  private stripProductKeyword(question: string, keyword?: string): string {
+    const needle = keyword?.trim();
+    if (!needle) return question;
+    const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return question.replace(new RegExp(escaped, "gi"), " ");
   }
 
   /**
