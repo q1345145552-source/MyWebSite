@@ -706,7 +706,9 @@ export class ClientAiService implements AiService {
      */
     const explicitFromQuestion = this.extractProductKeyword(message);
     if (explicitFromQuestion) {
-      return { keyword: explicitFromQuestion, label: `品名：${explicitFromQuestion}` };
+      // 正则抓出来的片段可能被截短了（字符集里没有空格），先补回库里的完整品名
+      const keyword = this.expandToKnownItem(explicitFromQuestion, message, orders) ?? explicitFromQuestion;
+      return { keyword, label: `品名：${keyword}` };
     }
 
     const byPattern =
@@ -715,7 +717,9 @@ export class ClientAiService implements AiService {
       message.match(/([\u4e00-\u9fa5A-Za-z0-9_-]{1,20})\s*(?:有多少|多少单)/);
     const candidate = this.normalizeProductKeyword(byPattern?.[1], true); // 句子片段
     if (candidate) {
-      return { keyword: candidate, label: `品名：${candidate}` };
+      // 这条正则同样会把「我有多少ABC DEF的订单」截成「DEF」，一样要补回完整品名
+      const keyword = this.expandToKnownItem(candidate, message, orders) ?? candidate;
+      return { keyword, label: `品名：${keyword}` };
     }
 
     const matched = this.matchKnownItemFromMessage(message, orders);
@@ -764,6 +768,37 @@ export class ClientAiService implements AiService {
     return Array.from(new Set(orders.flatMap((item) => this.orderItemNames(item)))).find(
       (name) => fold(name) === target,
     );
+  }
+
+  /**
+   * 正则抓出来的品名片段，如果只是**某个真实品名被截短的一截**，就补回完整品名。
+   *
+   * ⚠️ 抓品名的正则字符集 `[一-龥A-Za-z0-9_-]` **不含空格**。
+   * 客户自己敲「ABC DEF订单有多少单」时只抓到「DEF」，而统计是「货品名里含这个词就算」——
+   * 2026-08-28 复核实测（他有 ABC DEF 2 单、XYZ DEF 1 单）：
+   *   ·「ABC DEF订单有多少单」→ 品名「DEF」→ 报 3 单，真实 2 单；
+   *   ·「XYZ DEF订单有多少单」→ 品名「DEF」→ 报 3 单，真实 1 单（报大 3 倍）。
+   * 第 31 项测试只测了「模型返回 ABC DEF」，客户直接输入这条一直没人测。
+   *
+   * 三道门，缺一个都会变成「替客户瞎猜」：
+   * ① 完整品名必须**比片段长**（没截短就别动）；
+   * ② 完整品名必须**含有**这个片段；
+   * ③ 完整品名必须**原样出现在客户那句话里** ——
+   *    客户只说了「DEF」而库里有「ABC DEF」时，绝不替他补成 ABC DEF。
+   * 多个都满足就取最长的（跟 matchKnownItemFromMessage 同一个道理）。
+   */
+  private expandToKnownItem(
+    fragment: string,
+    message: string,
+    orders: ProductNameSource[],
+  ): string | undefined {
+    const lowerMessage = message.toLowerCase();
+    const needle = fragment.toLowerCase();
+    return Array.from(new Set(orders.flatMap((item) => this.orderItemNames(item))))
+      .filter((name) => name.length > fragment.length)
+      .filter((name) => name.toLowerCase().includes(needle))
+      .filter((name) => lowerMessage.includes(name.toLowerCase()))
+      .sort((a, b) => b.length - a.length)[0];
   }
 
   private extractProductKeyword(message: string): string | undefined {

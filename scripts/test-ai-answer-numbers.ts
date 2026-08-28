@@ -1124,10 +1124,59 @@ async function main() {
     assert.equal(totalCountOf(all.answer), 2, `在途箱总单量不对：\n${all.answer}`);
   });
 
+  // ══ P1-2：客户**自己敲**带空格的品名（2026-08-28）═════════════════════
+  // 第 31 项只测了「模型返回 ABC DEF」，没测客户直接输入。
+  // 抓品名的正则字符集里没有空格，「ABC DEF订单有多少单」被截成「DEF」，
+  // 而匹配是「货品名里含这个词就算」—— 于是把 XYZ DEF 也算了进去，**数字报大**。
+
+  await check("51) 客户直接敲带空格的品名不再被截半、不再报大", async () => {
+    // ABC DEF 2 单 / XYZ DEF 1 单 / 别的货 1 单 —— 数字互不相同
+    orderNames.set("uu1", { itemName: "ABC DEF", productNames: ["ABC DEF"] });
+    orderNames.set("uu2", { itemName: "ABC DEF", productNames: ["ABC DEF"] });
+    orderNames.set("uu3", { itemName: "XYZ DEF", productNames: ["XYZ DEF"] });
+    orderNames.set("uu4", { itemName: "别的货", productNames: ["别的货"] });
+    const shipments = ["uu1", "uu2", "uu3", "uu4"].map((id) =>
+      shipment({ id, createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs }),
+    );
+    // 三种写法都得认成整个「ABC DEF」，都得报 2 单（旧代码全被截成「DEF」→ 报 3 单）
+    for (const message of ["ABC DEF订单有多少单", "ABC DEF 订单有多少单", "我有多少ABC DEF的订单"]) {
+      const { answer } = await ask({ shipments, message });
+      assert.ok(answer.includes("品名：ABC DEF"), `「${message}」品名被截半了：\n${answer}`);
+      assert.equal(totalCountOf(answer), 2, `「${message}」把 XYZ DEF 也算进来了：\n${answer}`);
+    }
+    // 另一个品名同样，报大得更离谱：真实 1 单，旧代码报 3 单
+    const other = await ask({ shipments, message: "XYZ DEF订单有多少单" });
+    assert.ok(other.answer.includes("品名：XYZ DEF"), `品名被截半了：\n${other.answer}`);
+    assert.equal(totalCountOf(other.answer), 1, `报大了：\n${other.answer}`);
+    // 「品名：」这种写法旧代码截成「ABC」，数字碰巧对，但回给客户的品名是错的
+    const labeled = await ask({ shipments, message: "品名：ABC DEF 有多少单" });
+    assert.ok(labeled.answer.includes("品名：ABC DEF"), `回给客户的品名不对：\n${labeled.answer}`);
+    assert.equal(totalCountOf(labeled.answer), 2, `单量不对：\n${labeled.answer}`);
+  });
+
+  await check("52) 但客户只说了半个词时，不许自作主张补全", async () => {
+    // 客户库里只有「ABC DEF」，他问的是「DEF」—— 问句里压根没有 ABC，不能替他补
+    orderNames.set("vv1", { itemName: "ABC DEF", productNames: ["ABC DEF"] });
+    orderNames.set("vv2", { itemName: "ABC DEF", productNames: ["ABC DEF"] });
+    orderNames.set("vv3", { itemName: "ＡＢＣ１２３", productNames: ["ＡＢＣ１２３"] });
+    orderNames.set("vv4", { itemName: "别的货", productNames: ["别的货"] });
+    const shipments = ["vv1", "vv2", "vv3", "vv4"].map((id) =>
+      shipment({ id, createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs }),
+    );
+    const { answer } = await ask({ shipments, message: "DEF订单有多少单" });
+    assert.ok(answer.includes("品名：DEF"), `替客户补成整个品名了：\n${answer}`);
+    assert.ok(!answer.includes("品名：ABC DEF"), `替客户补成整个品名了：\n${answer}`);
+    assert.equal(totalCountOf(answer), 2, `单量不对：\n${answer}`);
+    // 全角品名直接敲进来照旧要认得（这条本来就是绿的，防改坏）
+    const fullWidth = await ask({ shipments, message: "ＡＢＣ１２３订单有多少单" });
+    assert.ok(fullWidth.answer.includes("品名：ＡＢＣ１２３"), `全角品名认不出了：\n${fullWidth.answer}`);
+    assert.equal(totalCountOf(fullWidth.answer), 1, `全角品名单量不对：\n${fullWidth.answer}`);
+  });
+
   if (failures.length > 0) {
-    throw new Error(`${failures.length}/50 项不通过（TZ=${TZ_LABEL}）：${failures.join("；")}`);
+    throw new Error(`${failures.length}/52 项不通过（TZ=${TZ_LABEL}）：${failures.join("；")}`);
   }
-  console.log(`AI 答复数字校验：50 项全部通过（TZ=${TZ_LABEL}）`);
+  console.log(`AI 答复数字校验：52 项全部通过（TZ=${TZ_LABEL}）`);
 }
 
 main().catch((error) => {
