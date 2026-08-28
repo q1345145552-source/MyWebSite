@@ -748,10 +748,40 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       }>;
     };
 
+    /**
+     * ⚠️ 产品行的箱数**不许兜底成 1**（2026-08-28 修）。
+     * 原来是 `Math.max(1, p.packageCount || 1)` —— 没填或填 0 会被悄悄当成 1 箱，
+     * 而箱数是重量、方数、产品数量三个合计的乘数，一错全错，
+     * 客户拿到的是一个「看起来很正常」的错数。宁可拦住让他补，也不能猜。
+     * 批量导入那条路本来就是必填（batchOrderImport 的 required: true），这里跟它对齐。
+     *
+     * ⚠️ 前端三端都是 `Number(p.packageCount) || 1` 才发出来的，所以正常操作
+     * 一律 ≥1、行为不变；这道闸挡的是直接调接口的和真正非法的输入。
+     */
+    if (body.products?.length) {
+      for (let i = 0; i < body.products.length; i += 1) {
+        const pc = body.products[i].packageCount;
+        if (typeof pc !== "number" || !Number.isInteger(pc) || pc <= 0) {
+          fail(res, 400, "VALIDATION_ERROR", `产品行${i + 1}的箱数必须是正整数`);
+          return;
+        }
+      }
+      /**
+       * ⚠️ 「每箱几个」要么全填、要么全空 —— 跟批量导入同一个规矩。
+       * 只填几行的话，没填的按 0 参与合计，总数偏小而且没人知道。
+       */
+      const qtys = body.products.map((p) => p.productQuantity);
+      const filled = qtys.filter((q) => q !== undefined && q !== null).length;
+      if (filled > 0 && filled < qtys.length) {
+        fail(res, 400, "VALIDATION_ERROR", "同一张单的「每箱几个」需要全部填写或全部留空");
+        return;
+      }
+    }
+
     const staffProducts = body.products?.length
       ? body.products.map((p, i) => ({
           itemName: p.itemName.trim(),
-          packageCount: Math.max(1, p.packageCount || 1),
+          packageCount: p.packageCount,
           lengthCm: p.lengthCm ?? null,
           widthCm: p.widthCm ?? null,
           heightCm: p.heightCm ?? null,
@@ -856,10 +886,17 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       (s, p) => s + (p.productQuantity ?? 0) * p.packageCount,
       0,
     );
+    /**
+     * ⚠️ 有产品行时**以产品行为准**（2026-08-28 改），跟上面件数
+     * `staffProducts.length > 0 ? prPkg : body.packageCount` 同一个规矩。
+     * 原来是「前端传了就无条件用前端的」—— 前端算错、或者版本不一致时，
+     * 订单上的总数会跟明细对不上，而明细才是事实源。
+     * 没有产品行时才用前端传的那个订单级总数（那种单子本来就没有明细）。
+     */
     const productQuantityNum =
-      body.productQuantity === undefined || body.productQuantity === null
+      staffProducts.length > 0 && productQuantityFromRows > 0
         ? productQuantityFromRows
-        : Number(body.productQuantity);
+        : Number(body.productQuantity ?? 0);
     const packageUnit = body.packageUnit ?? "box";
 
     // 事务前计算应收金额（按产品行分别计价求和）
