@@ -2,7 +2,7 @@ import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
 import { InsufficientBalanceError, PaymentConflictError, chargeForConsolidation } from "../wallet/consolidation-balance";
-import { lockPlanAliveById, lockPlanAliveByPrealert, PlanCancelledError, PlanMissingError } from "./plan-guard";
+import { lockPlanAliveById, lockPlanAliveByPrealert, lockPrealertExpecting, PlanCancelledError, PlanMissingError } from "./plan-guard";
 import { saveImageToDisk, deleteImageFile } from "../orders/image-storage";
 import { BusinessError } from "../core/business-error";
 import {
@@ -434,6 +434,52 @@ export function registerWhrConsolidationClientRoutes(app: MinimalHttpApp): void 
     let result: { totalVolumeM3: number; totalPackages: number };
     try {
       result = await prisma.$transaction(async (tx) => {
+        /**
+         * ⚠️ 2026-08-28 补：这条路原来是仓库版里**唯一一条一把锁都没加**的写路径。
+         *
+         * 上面那几道检查（预报单还没签收 / 计划没结束 / 方数没超上限）全在事务
+         * **外面**、拿进门时那份快照做的，而事务里直接把货品**全删了重建**、
+         * 再调 recalcPrealertFee 覆写 totalFee —— 而那个函数是**无条件覆写**的
+         * （「已结清不改价」的保护在 recalcUnpaidPrealertFees 里，不在它里面）。
+         *
+         * 于是仓库正好在这一刻签收、把账单定死时，客户这边的提交照样能过：
+         * 货品被换掉，签收单上写的和系统里存的对不上，**账单还被改小甚至改成 0**。
+         * 方数上限那道同理：两个客户同时提交，各自都拿旧数字算，双双通过，柜子超装。
+         *
+         * 现在照同模块 routes.ts:1188 那套：
+         * 【锁计划 → 锁预报单】（跟取消整柜、删货物、签收走同一个锁序，不会死锁）
+         * → 重查状态 → 用重查的值判断 → 再动手。
+         */
+        await lockPlanAliveByPrealert(tx, prealert.id);
+        await lockPrealertExpecting(tx, prealert.id, EDITABLE_PREALERT_STATUS, "货品修改");
+
+        /**
+         * 方数上限也必须在锁里重算一遍：上面那次是拿事务外的快照算的。
+         * 只有本柜设了上限（planTotal > 0）才拦，跟事务外那道口径一致。
+         */
+        if (planTotal > 0) {
+          const freshOthers = await tx.whrConsolidationPrealert.findMany({
+            where: {
+              customerId: prealert.customerId,
+              id: { not: prealert.id },
+              ...ACTIVE_PREALERT_WHERE,
+            },
+            select: { items: { select: { volumeM3: true } } },
+          });
+          let freshMyOther = 0;
+          for (const pa of freshOthers) {
+            for (const it of pa.items) freshMyOther += toNum(it.volumeM3);
+          }
+          const freshOtherCustomers = await sumPlanUsedVolume(plan.id, tx, prealert.customerId);
+          const freshUsedAfter = round3(freshOtherCustomers + freshMyOther + myNewVolume);
+          if (freshUsedAfter > planTotal) {
+            throw new BusinessError(
+              `本柜已用 ${round3(freshOtherCustomers + freshMyOther)} 方，` +
+                `本次再报 ${myNewVolume} 方将达到 ${freshUsedAfter} 方，超过计划上限 ${planTotal} 方`,
+            );
+          }
+        }
+
         await tx.whrConsolidationPrealertItem.deleteMany({ where: { prealertId: prealert.id } });
         if (itemData.length > 0) {
           await tx.whrConsolidationPrealertItem.createMany({
