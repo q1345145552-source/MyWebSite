@@ -884,6 +884,65 @@ main {
 .sidebar-close-btn,
 .sidebar-overlay { display: none; }
 
+/* ── 电脑端：收起 / 展开侧边栏 ─────────────────────────────────────────────
+   运单列表那些表很宽，收起侧边栏能多出 296px（280 宽 + 16 间距）。
+   记住选择：localStorage 的 xt_sidebar_collapsed（RoleShell.tsx）。
+
+   ⚠️ 整段包在 min-width:901px 里，**绝不能拿到手机端去**：
+   手机端侧边栏是抽屉（position:fixed + translateX），靠 .open 推出来。
+   要是收起状态在那边也 display:none，用户在电脑上收过一次，
+   换手机打开时点汉堡就什么都不出来 —— 而且他不会知道是为什么。 */
+.dashboard-sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  /* 标题原来自带 0 0 12px 的下边距，现在整体挪到这一行上，
+     标题本身清零 —— 否则按钮会被标题的下边距顶得偏上。 */
+  margin: 0 0 12px 0;
+}
+.dashboard-sidebar-head .dashboard-sidebar-title {
+  margin: 0;
+}
+
+.sidebar-collapse-btn,
+.sidebar-expand-btn {
+  display: none;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-mute);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.sidebar-collapse-btn:hover,
+.sidebar-expand-btn:hover {
+  border-color: var(--brand);
+  color: var(--brand);
+}
+
+@media (min-width: 901px) {
+  .sidebar-collapse-btn {
+    display: inline-flex;
+  }
+  /* 收起来之后，侧边栏整个不占位。
+     .dashboard-layout 的 gap 只作用在「还在的」子元素之间，
+     所以这里不用另外去掉那 16px 间距。 */
+  .dashboard-layout.sidebar-collapsed .dashboard-sidebar {
+    display: none;
+  }
+  .dashboard-layout.sidebar-collapsed .sidebar-expand-btn {
+    display: inline-flex;
+  }
+}
+
 @media (max-width: 900px) {
   .home-layout {
     flex-direction: column;

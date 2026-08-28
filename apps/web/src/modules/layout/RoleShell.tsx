@@ -6,6 +6,7 @@ import { changeOwnPassword } from "../../services/auth-api";
 import { globalMenus, roleFunctionGroups, roleMenus } from "./menu-config";
 
 const EXPANDED_GROUPS_KEY = "xt_sidebar_expanded_groups";
+const COLLAPSED_KEY = "xt_sidebar_collapsed";
 
 /**
  * 记住哪些功能分区是展开的。
@@ -28,6 +29,26 @@ function saveExpandedGroups(groups: Set<string>): void {
     window.localStorage.setItem(EXPANDED_GROUPS_KEY, JSON.stringify([...groups]));
   } catch {
     /* 隐私模式 / 配额满：记不住就算了，不影响使用 */
+  }
+}
+
+/**
+ * 记住侧边栏是不是收起来的（只管电脑端；手机端一直是抽屉，见 globals.css 的 @media）。
+ * 跟上面两个函数一样包 try —— 记不住是小事，把整个工作台顶掉是大事。
+ */
+function readCollapsed(): boolean {
+  try {
+    return window.localStorage.getItem(COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function saveCollapsed(collapsed: boolean): void {
+  try {
+    window.localStorage.setItem(COLLAPSED_KEY, collapsed ? "1" : "0");
+  } catch {
+    /* 记不住就算了 */
   }
 }
 
@@ -54,6 +75,20 @@ export default function RoleShell(props: {
   const [currentHash, setCurrentHash] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(["运单管理", "我的运单"]));
+  /**
+   * 电脑端把侧边栏整个收起来，把宽度让给表格（运单列表那些表很宽）。
+   * ⚠️ 初值必须是 false、进浏览器后再从 localStorage 读 ——
+   * 服务端渲染读不到 localStorage，直接用它当初值两边对不上会报 hydration 错。
+   */
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  const toggleSidebarCollapsed = () => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      saveCollapsed(next);
+      return next;
+    });
+  };
 
   // 修改密码（三端共用，管理员/员工/客户都是改自己的）
   const [pwdOpen, setPwdOpen] = useState(false);
@@ -136,6 +171,8 @@ export default function RoleShell(props: {
       if (hit) restored.add(g.groupLabel);
     }
     setExpandedGroups(restored);
+    // 上次是不是把侧边栏收起来了。放在这里读：这个 effect 只在浏览器里跑
+    setSidebarCollapsed(readCollapsed());
     // allowedRoles 已是稳定数组，用 join 避免引用变化导致重复执行
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allowedRoles.join(",")]);
@@ -266,7 +303,11 @@ export default function RoleShell(props: {
   const closeSidebar = () => setSidebarOpen(false);
 
   return (
-    <main className={`dashboard-layout${variant === "a3" ? " a3-shell" : ""}`}>
+    <main
+      className={`dashboard-layout${variant === "a3" ? " a3-shell" : ""}${
+        sidebarCollapsed ? " sidebar-collapsed" : ""
+      }`}
+    >
       {/* 手机端遮罩 */}
       <div className={`sidebar-overlay ${sidebarOpen ? "open" : ""}`} onClick={closeSidebar} />
 
@@ -275,7 +316,20 @@ export default function RoleShell(props: {
         {/* 左上角这个位置是放品牌的，原来写「工作台导航」——
             左边一排链接，本来就看得出是导航，等于一句废话。
             换成公司名，三端每一页都带着（2026-08-11）。 */}
-        <h2 className="dashboard-sidebar-title">湘泰物流</h2>
+        <div className="dashboard-sidebar-head">
+          <h2 className="dashboard-sidebar-title">湘泰物流</h2>
+          {/* 电脑端专用：把侧边栏收起来，宽度让给表格。
+              手机端由 CSS 隐藏它（那边已经有汉堡 + 关闭按钮了）。 */}
+          <button
+            type="button"
+            className="sidebar-collapse-btn"
+            onClick={toggleSidebarCollapsed}
+            title="收起侧边栏"
+            aria-label="收起侧边栏"
+          >
+            ‹‹
+          </button>
+        </div>
         <div className="dashboard-sidebar-group">
           {roleMenus[session.role].map((item) => (
             <a
@@ -376,6 +430,18 @@ export default function RoleShell(props: {
             <span className="hamburger-line" />
             <span className="hamburger-line" />
             <span className="hamburger-line" />
+          </button>
+          {/* 侧边栏收起来之后，把它请回来的按钮。
+              ⚠️ 必须放在顶栏、不能放侧边栏里 —— 放里面的话收起来就再也点不到了。
+              只有收起状态才显示（见 globals.css 的 .sidebar-collapsed）。 */}
+          <button
+            type="button"
+            className="sidebar-expand-btn"
+            onClick={toggleSidebarCollapsed}
+            title="展开侧边栏"
+            aria-label="展开侧边栏"
+          >
+            ››
           </button>
           <span className="glass-topbar-title">{title}</span>
           <span className="glass-topbar-meta">{session.userId} · {session.role}</span>
