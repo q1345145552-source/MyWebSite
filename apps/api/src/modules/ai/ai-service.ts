@@ -1732,12 +1732,25 @@ export class ClientAiService implements AiService {
           updatedAt: Date.parse(prevRow.updatedAt) || Date.now(),
         }
       : undefined;
+    /**
+     * ⚠️ 判断依据是「这一轮**管不管**这个字段」，不是「这一轮的值是不是空」。
+     *
+     * 原来写的是 `新值 ?? 旧值`：这一轮已经不按品名查了（`itemName` 是空），
+     * 旧的「耳机」照样被留下来，客户再说一句「那本月呢」就又变回耳机。
+     * 2026-08-28 复核实测（耳机 2 单 / 别的货 3 单，本月共 3 单）：
+     *   轮1「耳机有多少单」→ 2 单；轮2「我一共有多少单」→ 5 单（品名已经清掉了）；
+     *   轮3「那本月呢」→ 却回「本月 耳机 1 单」。
+     *
+     * 用 `in` 判断键在不在：统计分支每轮都会把五个字段**全部**写进来（空也写），
+     * 于是「这轮没有品名」能真的把品名清掉；查单分支只写 `intent`，
+     * 其余字段不归它管，照旧保留。
+     */
     const next: SessionMemory = {
-      intent: patch.intent ?? prev?.intent,
-      itemName: patch.itemName ?? prev?.itemName,
-      statusScope: patch.statusScope ?? prev?.statusScope,
-      timeHint: patch.timeHint ?? prev?.timeHint,
-      metric: patch.metric ?? prev?.metric,
+      intent: "intent" in patch ? patch.intent : prev?.intent,
+      itemName: "itemName" in patch ? patch.itemName : prev?.itemName,
+      statusScope: "statusScope" in patch ? patch.statusScope : prev?.statusScope,
+      timeHint: "timeHint" in patch ? patch.timeHint : prev?.timeHint,
+      metric: "metric" in patch ? patch.metric : prev?.metric,
       updatedAt: Date.now(),
     };
     await this.deps.memoryStore.set({

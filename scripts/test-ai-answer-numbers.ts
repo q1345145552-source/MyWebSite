@@ -279,6 +279,22 @@ async function ask(input: {
 }
 
 /**
+ * 同一个会话里连着问几轮（追问记忆要靠它才测得到）。
+ * ⚠️ `ask` 每次都新建一个 service、新的 sessionId，跨轮记忆一律是空的 ——
+ * 用它测「上一轮记住了什么」永远是绿的（假绿）。这里共用同一个 service 和 sessionId。
+ */
+async function askSeries(input: { shipments: Shipment[]; messages: string[] }) {
+  const { service } = buildService({ shipments: input.shipments, polish: () => "" });
+  const sessionId = `sess_series_${Math.random()}`;
+  const answers: string[] = [];
+  for (const message of input.messages) {
+    const response = await service.chat({ auth: AUTH, body: { message, sessionId } });
+    answers.push(response.answer);
+  }
+  return answers;
+}
+
+/**
  * 「总单量」只在查询范围是「全部运单」时才打；
  * 按状态筛过之后打的是「符合条件」——因为那时候「已完成：0 单」是筛出来的假象，不能打。
  */
@@ -1210,10 +1226,59 @@ async function main() {
     assert.ok(!real.answer.includes("未找到运单号"), `真单号被判成查无此单：\n${real.answer}`);
   });
 
+  // ══ P1-6：追问记忆残留（2026-08-28）══════════════════════════════════
+  // 记忆是「新值 ?? 旧值」合并的，第二轮已经不按品名查了，旧的「耳机」还留着，
+  // 第三轮「那本月呢」又把它捡回来 —— 客户看到的数字莫名其妙变小。
+
+  await check("55) 已经清掉的品名，追问时不许自己回来", async () => {
+    // 耳机 2 单（本月 1）／别的货 3 单（本月 2）—— 全部 5、本月 3、耳机 2、本月耳机 1，四个数互不相同
+    orderNames.set("yy1", { itemName: "耳机", productNames: ["耳机"] });
+    orderNames.set("yy2", { itemName: "耳机", productNames: ["耳机"] });
+    orderNames.set("zz1", { itemName: "别的货", productNames: ["别的货"] });
+    orderNames.set("zz2", { itemName: "别的货", productNames: ["别的货"] });
+    orderNames.set("zz3", { itemName: "别的货", productNames: ["别的货"] });
+    const shipments = [
+      shipment({ id: "yy1", createdAtMs: beijingMonthStartMs() + 1000, updatedAtMs: nowMs }),
+      shipment({ id: "yy2", createdAtMs: beijingMonthStartMs() - 40 * 86400_000, updatedAtMs: nowMs }),
+      shipment({ id: "zz1", createdAtMs: beijingMonthStartMs() + 2000, updatedAtMs: nowMs }),
+      shipment({ id: "zz2", createdAtMs: beijingMonthStartMs() + 3000, updatedAtMs: nowMs }),
+      shipment({ id: "zz3", createdAtMs: beijingMonthStartMs() - 50 * 86400_000, updatedAtMs: nowMs }),
+    ];
+    const [first, second, third] = await askSeries({
+      shipments,
+      messages: ["耳机有多少单", "我一共有多少单", "那本月呢"],
+    });
+    assert.equal(totalCountOf(first!), 2, `第一轮耳机单量不对：\n${first}`);
+    assert.equal(totalCountOf(second!), 5, `第二轮没退回全部品类：\n${second}`);
+    assert.ok(third!.includes("全部品类"), `第三轮把清掉的「耳机」捡回来了：\n${third}`);
+    assert.ok(third!.includes("查询范围：本月"), `第三轮没按本月：\n${third}`);
+    assert.equal(totalCountOf(third!), 3, `第三轮单量不对（被旧品名缩小了）：\n${third}`);
+  });
+
+  await check("56) 但真正的追问，还是要能把品名带过去", async () => {
+    orderNames.set("ab1", { itemName: "耳机", productNames: ["耳机"] });
+    orderNames.set("ab2", { itemName: "耳机", productNames: ["耳机"] });
+    orderNames.set("ac1", { itemName: "别的货", productNames: ["别的货"] });
+    orderNames.set("ac2", { itemName: "别的货", productNames: ["别的货"] });
+    orderNames.set("ac3", { itemName: "别的货", productNames: ["别的货"] });
+    const shipments = [
+      shipment({ id: "ab1", createdAtMs: beijingMonthStartMs() + 1000, updatedAtMs: nowMs }),
+      shipment({ id: "ab2", createdAtMs: beijingMonthStartMs() - 40 * 86400_000, updatedAtMs: nowMs }),
+      shipment({ id: "ac1", createdAtMs: beijingMonthStartMs() + 2000, updatedAtMs: nowMs }),
+      shipment({ id: "ac2", createdAtMs: beijingMonthStartMs() + 3000, updatedAtMs: nowMs }),
+      shipment({ id: "ac3", createdAtMs: beijingMonthStartMs() - 50 * 86400_000, updatedAtMs: nowMs }),
+    ];
+    // 上一轮问的就是耳机，紧接着「那本月呢」——品名必须带过去（本月耳机 1 单）
+    const [, followUp] = await askSeries({ shipments, messages: ["耳机有多少单", "那本月呢"] });
+    assert.ok(followUp!.includes("品名：耳机"), `追问时把品名丢了：\n${followUp}`);
+    assert.ok(followUp!.includes("查询范围：本月"), `追问时没按本月：\n${followUp}`);
+    assert.equal(totalCountOf(followUp!), 1, `本月耳机单量不对：\n${followUp}`);
+  });
+
   if (failures.length > 0) {
-    throw new Error(`${failures.length}/54 项不通过（TZ=${TZ_LABEL}）：${failures.join("；")}`);
+    throw new Error(`${failures.length}/56 项不通过（TZ=${TZ_LABEL}）：${failures.join("；")}`);
   }
-  console.log(`AI 答复数字校验：54 项全部通过（TZ=${TZ_LABEL}）`);
+  console.log(`AI 答复数字校验：56 项全部通过（TZ=${TZ_LABEL}）`);
 }
 
 main().catch((error) => {
