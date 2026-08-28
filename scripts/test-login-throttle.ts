@@ -19,9 +19,13 @@ import {
   __resetFailureStoreForTest,
   clearFailures,
   failureRetryAfterMs,
+  clearLoginFailures,
   isFailureBlocked,
+  isLoginBlocked,
   loginFailureKey,
+  loginRetryAfterMs,
   recordFailure,
+  recordLoginFailure,
 } from "../apps/api/src/modules/core/rate-limit";
 
 const failures: string[] = [];
@@ -83,18 +87,15 @@ check("3) 换 IP 不管用 —— 这就是加这道闸的全部意义", () => {
   );
   assert.ok(!/\d+\.\d+\.\d+\.\d+/.test(key), `限流键里混进了 IP：${key}`);
   // 键里除了账号和固定后缀不许有别的东西
-  assert.equal(key, "xt001::login-account", `限流键的构成变了：${key}`);
+  assert.equal(key, "XT001::login-account", `限流键的构成变了：${key}`);
 });
 
-check("4) 大小写不同的同一个账号算同一个桶", () => {
-  /**
-   * 不统一大小写的话，"XT001" 和 "xt001" 各算各的，
-   * 攻击者换个大小写就是一个全新的计数桶 —— 这道闸等于白加。
-   */
-  for (let i = 0; i < 10; i += 1) recordFailure(keyOf("XT001"));
-  for (let i = 0; i < 10; i += 1) recordFailure(keyOf("xt001"));
-  assert.equal(isFailureBlocked(keyOf("Xt001")), true, "换个大小写就绕过去了");
-});
+/**
+ * 原第 4 项「大小写不同的同一个账号算同一个桶」**已删除**（2026-08-29）。
+ * 那条断言的是旧口径（按小写记），而旧口径本身就是第 11 项那个洞的病根。
+ * 新口径由第 12 项守着：大小写不同 = 不同账号，各算各的。
+ * ⚠️ 别看到编号跳了就顺手补一项回来 —— 补回来会跟第 11、12 项打架。
+ */
 
 check("5) 只挡被敲的那个账号，不许连累别人", () => {
   // ⚠️ 三个互不相同的账号，防止「一个数假绿」
@@ -162,25 +163,122 @@ check("10) 登录接口里三个失败出口都记了一笔（源码检查）", 
     "utf-8",
   );
   const loginBody = src.slice(src.indexOf('app.post("/auth/login"'), src.indexOf('app.post("/auth/register"'));
-  const recordCount = (loginBody.match(/recordFailure\(failureKey\)/g) ?? []).length;
+  const recordCount = (loginBody.match(/recordLoginFailure\(body\.account\)/g) ?? []).length;
   assert.equal(
     recordCount,
     3,
     `登录里记失败的地方有 ${recordCount} 处，应该是 3 处（账号不存在/被封、role 对不上、密码错）`,
   );
-  assert.ok(loginBody.includes("clearFailures(failureKey)"), "登录成功没有清零计数");
+  assert.ok(loginBody.includes("clearLoginFailures(body.account)"), "登录成功没有清零计数");
   assert.ok(
-    loginBody.includes("loginFailureKey(body.account)"),
-    "登录接口没用共用的 loginFailureKey，自己现拼了限流键 —— 那样测试守不住它",
+    loginBody.includes("loginRetryAfterMs(body.account)"),
+    "登录接口没用共用的 loginRetryAfterMs，自己现拼了限流键 —— 那样测试守不住它",
   );
   assert.ok(
-    !/failureKey\s*=\s*rateLimitKey\(/.test(loginBody),
-    "登录接口又自己拼限流键了，请统一走 loginFailureKey",
+    !/rateLimitKey\(\s*body\.account/.test(loginBody),
+    "登录接口又自己拼限流键了，请统一走 core/rate-limit 里那几个 login* 函数",
+  );
+  assert.ok(
+    !/toLowerCase\(\)/.test(loginBody),
+    "又把账号转小写了 —— 那正是第 11 项那个洞的病根（合法登录能抹掉别人的计数）",
+  );
+});
+
+
+check("11) 复核实测那个洞：用大小写不同的账号登录成功，不许把别人的计数清掉", () => {
+  /**
+   * 第七轮复核实测出来的（我复现了）：
+   *   ① 对 `admin` 猜错 19 次
+   *   ② 用 `Admin` 正常登录成功 → 清零
+   *   ③ 再猜 `admin` 第 20 次 → **仍然放行**
+   * 病根：查库区分大小写，计数键却统一转小写，
+   * 于是一个**合法登录**就能把另一个账号的失败计数抹掉。
+   */
+  for (let i = 0; i < 19; i += 1) recordLoginFailure("admin");
+  assert.equal(isLoginBlocked("admin"), false, "才 19 次就被拦了");
+
+  clearLoginFailures("Admin"); // ② Admin 登录成功
+
+  recordLoginFailure("admin"); // ③ 第 20 次
+  assert.equal(
+    isLoginBlocked("admin"),
+    true,
+    "用 Admin 登录成功把 admin 的计数清掉了 —— 这道闸能被一个合法登录抹掉",
+  );
+});
+
+check("12) 大小写不同 = 不同账号，各算各的（跟查库同一个口径）", () => {
+  /**
+   * ⚠️ 口径 2026-08-29 反过来了，注意别改回去。
+   * 原来我按小写记，理由是「不然换个大小写就是新桶」。那个理由不成立：
+   * 攻击者拿错的大小写去猜，库里查不到这个人，**不管密码对不对都是 401**，
+   * 他得不到任何信息，只能死磕正确的那个写法。
+   * 反倒是按小写记开了个洞（见第 11 项）。
+   *
+   * 现在跟 `findUnique({id})` 完全一致：`admin` 和 `Admin` 就是两个账号。
+   */
+  for (let i = 0; i < 20; i += 1) recordLoginFailure("admin");
+  assert.equal(isLoginBlocked("admin"), true, "猜满 20 次的那个写法没被拦");
+  assert.equal(
+    isLoginBlocked("Admin"),
+    false,
+    "把另一个写法也连坐了 —— 那是另一个账号，不该受影响",
+  );
+});
+
+check("13) 本人登录成功，自己的计数要清掉（别把正常人关在门外）", () => {
+  /**
+   * 上一项的修法不能修过头：`admin` 自己打错几次、然后登录成功，
+   * 那几次必须清掉，否则他白天陆续打错就会把自己累积到 20。
+   */
+  for (let i = 0; i < 19; i += 1) recordLoginFailure("XT001");
+  clearLoginFailures("XT001"); // ← 本人登录成功
+  for (let i = 0; i < 19; i += 1) recordLoginFailure("XT001");
+  assert.equal(isLoginBlocked("XT001"), false, "本人登录成功之后计数没清掉");
+});
+
+check("14) 还是只挡被敲的那个账号，别连累别人", () => {
+  for (let i = 0; i < 20; i += 1) recordLoginFailure("XT001");
+  assert.equal(isLoginBlocked("XT001"), true);
+  assert.equal(isLoginBlocked("XT002"), false, "把没被敲的账号也挡了");
+  assert.equal(isLoginBlocked("xt001x"), false, "把名字相近的账号也挡了");
+});
+
+check("15) 登录接口走的是共用的那几个 login* 函数（源码检查）", () => {
+  /**
+   * ⚠️ 这一项只能证明「代码里写了这几个字」，证明不了行为 ——
+   * 包进 `if (false)` 它就抓不到了（2026-08-29 在产品行校验上刚栽过）。
+   * 真正的守卫是上面 11~14 项。这一项只防「有人把它改回单桶写法」。
+   */
+  const fs = require("node:fs") as typeof import("node:fs");
+  const path = require("node:path") as typeof import("node:path");
+  const src = fs.readFileSync(
+    path.join(__dirname, "..", "apps", "api", "src", "modules", "auth", "routes.ts"),
+    "utf-8",
+  );
+  const loginBody = src
+    .slice(src.indexOf('app.post("/auth/login"'), src.indexOf('app.post("/auth/register"'))
+    .split("\n")
+    .filter((l) => {
+      const t = l.trim();
+      return !t.startsWith("*") && !t.startsWith("//") && !t.startsWith("/*");
+    })
+    .join("\n");
+  assert.equal(
+    (loginBody.match(/recordLoginFailure\(body\.account\)/g) ?? []).length,
+    3,
+    "记失败的地方不是 3 处（账号不存在/被封、role 对不上、密码错）",
+  );
+  assert.ok(loginBody.includes("clearLoginFailures(body.account)"), "登录成功没清零");
+  assert.ok(loginBody.includes("loginRetryAfterMs(body.account)"), "没用双桶的拦截判断");
+  assert.ok(
+    !/clearFailures\(/.test(loginBody),
+    "又改回直接调 clearFailures 了 —— 请统一走 clearLoginFailures，口径才跟查库一致",
   );
 });
 
 if (failures.length > 0) {
-  console.error(`\n${failures.length}/10 项不通过：${failures.join("；")}`);
+  console.error(`\n${failures.length}/15 项不通过：${failures.join("；")}`);
   process.exit(1);
 }
-console.log("登录限流：10 项全部通过");
+console.log("登录限流：15 项全部通过");

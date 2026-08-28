@@ -4,12 +4,11 @@ import { fail, ok, requireAuth } from "../core/http-utils";
 import { logger } from "../core/logger";
 import {
   checkRateLimit,
-  clearFailures,
-  failureRetryAfterMs,
+  clearLoginFailures,
   getClientIp,
-  loginFailureKey,
+  loginRetryAfterMs,
   rateLimitKey,
-  recordFailure,
+  recordLoginFailure,
 } from "../core/rate-limit";
 import { signAuthToken } from "./token";
 import { hashPassword, verifyPassword } from "./crypto-utils";
@@ -56,8 +55,7 @@ export function registerAuthRoutes(app: MinimalHttpApp): void {
      * 攻击者换个大小写就是一个新计数桶，这道闸等于白加。
      * （查库那句 findUnique 是区分大小写的，所以计数比登录本身更宽 —— 宁可宽也不能漏。）
      */
-    const failureKey = loginFailureKey(body.account);
-    const waitMs = failureRetryAfterMs(failureKey);
+    const waitMs = loginRetryAfterMs(body.account);
     if (waitMs > 0) {
       const waitMin = Math.max(1, Math.ceil(waitMs / 60_000));
       fail(
@@ -87,24 +85,24 @@ export function registerAuthRoutes(app: MinimalHttpApp): void {
      * 一次都不会被计数 —— 而那两条路照样能拿来试账号存不存在。
      */
     if (!user || user.status !== "active") {
-      recordFailure(failureKey);
+      recordLoginFailure(body.account);
       fail(res, 401, "UNAUTHORIZED", "invalid credentials");
       return;
     }
     if (body.role && body.role !== user.role) {
-      recordFailure(failureKey);
+      recordLoginFailure(body.account);
       fail(res, 401, "UNAUTHORIZED", "invalid credentials");
       return;
     }
     if (!verifyPassword(body.password, user.passwordHash)) {
-      recordFailure(failureKey);
+      recordLoginFailure(body.account);
       fail(res, 401, "UNAUTHORIZED", "invalid credentials");
       return;
     }
 
     // 登录成功 → 把这个账号的失败计数清零。
     // 不清的话，白天陆续打错几次会一路累积到 20，最后把自己关在门外。
-    clearFailures(failureKey);
+    clearLoginFailures(body.account);
 
     const token = signAuthToken({
       userId: user.id,

@@ -144,13 +144,52 @@ export function clearFailures(key: string): void {
  * 测试脚本自己又照着抄了一遍。做变异时把生产那句改成
  *   `rateLimitKey(`${ip}_${account}`, "login-account")`
  * —— **10 项照样全绿**，因为测试比对的是它自己抄的那份。
- * 「测试重写一遍被测逻辑」＝ 测了个寂寞，这个项目里已经栽过第三次了。
+ * 「测试重写一遍被测逻辑」＝ 测了个寂寞。
  *
- * ⚠️ 键里**不许出现 IP**：整道闸的意义就是「换 IP 也躲不掉」。
- * ⚠️ 账号要统一小写：不然 "ABC" 和 "abc" 各算各的，换个大小写就绕过去了。
+ * ⚠️⚠️ **按账号原样计数，不许转小写**（2026-08-29 第七轮复核之后改的）。
+ *
+ * 我原来在这里 `.toLowerCase()`，理由写的是「不然换个大小写就是一个新计数桶」。
+ * **那个理由是错的**，而且它自己开了个洞：
+ *
+ *   洞（复核实测）：查库是 `findUnique({id: body.account})`，**区分大小写**；
+ *   计数却按小写。于是 ① 对 `admin` 猜错 19 次 → ② 用 `Admin` 正常登录成功
+ *   → 清零，清掉的是同一个桶 → ③ 再猜 `admin` 第 20 次仍然放行。
+ *   **一个合法登录就能把这道闸抹掉。**
+ *
+ *   为什么原来那个理由是错的：攻击者拿**错的大小写**去猜根本没有意义 ——
+ *   `xt001` 在库里查不到这个人，不管密码对不对都是 401，
+ *   他从这条路上得不到任何关于密码的信息。他只能死磕**正确的那个写法**，
+ *   而那个写法的计数是准的。所以「换大小写躲开计数」这件事本身不成立。
+ *
+ *   我第一版的修法是「记两个桶（小写 + 原样），成功只清原样桶」——
+ *   那个也不行：本人（`XT001`）白天陆续打错几次，小写桶 `xt001` 永远清不掉，
+ *   累积到 20 就把**他自己**关在门外了。自测第 13 项当场逮住的就是这个。
+ *
+ * 所以：**原样计数、原样清零**，一个桶，口径跟查库完全一致。
+ * ⚠️ 键里同样不许出现 IP —— 整道闸的意义就是「换 IP 也躲不掉」。
  */
 export function loginFailureKey(account: string): string {
-  return rateLimitKey(account.trim().toLowerCase(), "login-account");
+  return rateLimitKey(account.trim(), "login-account");
+}
+
+/** 这个账号现在是不是被拦着 */
+export function isLoginBlocked(account: string, now: number = Date.now()): boolean {
+  return isFailureBlocked(loginFailureKey(account), LOGIN_FAILURE_MAX, now);
+}
+
+/** 还要等多少毫秒 */
+export function loginRetryAfterMs(account: string, now: number = Date.now()): number {
+  return failureRetryAfterMs(loginFailureKey(account), LOGIN_FAILURE_MAX, now);
+}
+
+/** 记一次登录失败 */
+export function recordLoginFailure(account: string, now: number = Date.now()): void {
+  recordFailure(loginFailureKey(account), LOGIN_FAILURE_WINDOW_MS, now);
+}
+
+/** 登录成功后清零 —— 清的就是它自己那个桶，跟查库同一个口径 */
+export function clearLoginFailures(account: string): void {
+  clearFailures(loginFailureKey(account));
 }
 
 /** 测试用：把失败计数全清了（生产代码不要调） */
