@@ -499,17 +499,33 @@ export function registerWhrConsolidationClientRoutes(app: MinimalHttpApp): void 
       throw e;
     }
 
-    // ---- 事务成功后清理不再被引用的旧图片，避免磁盘越堆越多 ----
+    /**
+     * ---- 事务成功后清理不再被引用的旧图片，避免磁盘越堆越多 ----
+     *
+     * ⚠️ 删之前必须**再去数据库确认一遍没人引用了**（2026-08-28 补）。
+     * `keptPaths` 是本次提交要保留的清单，而清理跑在事务**外面**、锁已经放掉了：
+     * 两个人先后改同一张预报单时，前一个人的清理会拿着自己那份旧清单，
+     * 把后一个人刚刚重新引用上的图片文件**删掉** ——
+     * 数据库里还记着这个路径，磁盘上的文件却没了，客户点开就是一张裂图，
+     * 而且**找不回来**。
+     *
+     * 现在每删一个之前查一次「全表还有没有人引用它」，没人引用才删。
+     * 查的范围是整张表、不限这一张预报单：同一个路径理论上不会被别的单引用，
+     * 但真被引用了就更不能删。
+     */
     const keptPaths = new Set(
       itemData.map((it) => it.productImageBase64).filter((p): p is string => !!p),
     );
     for (const oldPath of existingPaths) {
-      if (!keptPaths.has(oldPath)) {
-        try {
-          deleteImageFile(oldPath);
-        } catch {
-          /* 清理失败不影响主流程 */
-        }
+      if (keptPaths.has(oldPath)) continue;
+      try {
+        const stillUsed = await prisma.whrConsolidationPrealertItem.count({
+          where: { productImageBase64: oldPath },
+        });
+        if (stillUsed > 0) continue;
+        deleteImageFile(oldPath);
+      } catch {
+        /* 清理失败不影响主流程；宁可留个没人用的文件，也不能删掉还在用的 */
       }
     }
 
