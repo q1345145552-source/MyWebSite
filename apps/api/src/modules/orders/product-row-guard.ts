@@ -1,0 +1,69 @@
+/**
+ * 建单时产品行的校验（纯函数，方便单测）。
+ *
+ * 2026-08-29 复核实测：这些全都能 200 存进去 ——
+ *   · 每箱 0 个 + 订单级总数 999  → 存成 999，跟明细完全对不上
+ *   · 每箱 -3 个                 → 放行，总数是负数
+ *   · 每箱 1.5 个 × 2 箱          → 存成 3（「个」不可分，1.5 本身不成立）
+ * 根因是这里原来只检查「全填或全空」，不检查填的是什么，
+ * 而批量导入那条路一直要求正整数 —— 同一个业务口径两条路两个标准。
+ *
+ * 前端有一份同名规则（apps/web/src/modules/orders/productRowGuard.ts），
+ * 那是给人看提示用的；这一份挡的是绕过页面直接调接口的。两道都要有。
+ */
+
+export interface ProductRowForGuard {
+  packageCount?: unknown;
+  productQuantity?: unknown;
+}
+
+function isPositiveInteger(v: unknown): v is number {
+  return typeof v === "number" && Number.isFinite(v) && Number.isInteger(v) && v > 0;
+}
+
+/**
+ * @returns 有问题时返回给人看的中文提示；全部合格返回 null。
+ */
+export function validateProductRows(rows: ProductRowForGuard[]): string | null {
+  if (rows.length === 0) return null;
+
+  /**
+   * ⚠️ 箱数不许兜底成 1（2026-08-28 起）。没填或填 0 会被悄悄当成 1 箱，
+   * 而箱数是重量、方数、产品数量三个合计的乘数，一错全错，
+   * 客户拿到的是一个「看起来很正常」的错数。宁可拦住让他补，也不能猜。
+   */
+  for (let i = 0; i < rows.length; i += 1) {
+    if (!isPositiveInteger(rows[i].packageCount)) {
+      return `产品行${i + 1}的箱数必须是正整数`;
+    }
+  }
+
+  // 「每箱几个」要么全填、要么全空 —— 只填几行的话，没填的按 0 参与合计，
+  // 总数偏小而且没人知道。
+  const qtys = rows.map((r) => r.productQuantity);
+  const filled = qtys.filter((q) => q !== undefined && q !== null).length;
+  if (filled > 0 && filled < qtys.length) {
+    return "同一张单的「每箱几个」需要全部填写或全部留空";
+  }
+  for (let i = 0; i < rows.length; i += 1) {
+    const q = rows[i].productQuantity;
+    if (q === undefined || q === null) continue;
+    if (!isPositiveInteger(q)) {
+      return `产品行${i + 1}的「每箱几个」必须是正整数`;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * 订单级的「产品数量」（没有产品行时用的那个总数）。
+ * 0 是允许的 —— 表示没填。
+ */
+export function validateOrderLevelQuantity(v: unknown): string | null {
+  if (v === undefined || v === null) return null;
+  if (typeof v !== "number" || !Number.isFinite(v) || !Number.isInteger(v) || v < 0) {
+    return "「产品数量」必须是不小于 0 的整数";
+  }
+  return null;
+}

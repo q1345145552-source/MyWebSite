@@ -7,6 +7,7 @@ import { Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, Responsive
 import type { AiKnowledgeItem } from "../../../../../packages/shared-types/entities";
 import { getOptionalSession, type AuthSession } from "../../auth/auth-session";
 import CountUpNumber from "../../modules/layout/CountUpNumber";
+import { validateProductRows, packageCountForPayload } from "../../modules/orders/productRowGuard";
 import EmptyStateCard from "../../modules/layout/EmptyStateCard";
 import RoleShell from "../../modules/layout/RoleShell";
 import Toast from "../../modules/layout/Toast";
@@ -573,12 +574,18 @@ export default function AdminHomePage() {
     }
     // 从产品行计算总数
     const activeProducts = editProducts;
-    const totalPackageCount = activeProducts.reduce((s, p) => s + (Number(p.packageCount) || 1), 0);
+    // ⚠️ 先把产品行卡住再算合计（2026-08-29 补）。箱数是三个合计的乘数，
+    // 原来 `Number(p.packageCount) || 1` 会把「没填」和「填 0」悄悄当成 1 箱。
+    {
+      const rowIssue = validateProductRows(activeProducts);
+      if (rowIssue) { setMessage(rowIssue); return; }
+    }
+    const totalPackageCount = activeProducts.reduce((s, p) => s + Number(String(p.packageCount).trim()), 0);
     // ⚠️ 产品行上的「数量」口径是**单箱几个**（这一页的表头就写着「单箱数量」），
     // 所以总数必须乘箱数。2026-08-28 复核实测：这里原来直接相加，跟批量导入犯的是同一个错。
     // 口径见 apps/api/src/modules/orders/routes.ts:833 的注释。
     const totalProductQuantity = activeProducts.reduce(
-      (s, p) => s + (Number(p.productQuantity) || 0) * (Number(p.packageCount) || 1),
+      (s, p) => s + (Number(p.productQuantity) || 0) * Number(String(p.packageCount).trim()),
       0,
     );
     const primaryItemName = activeProducts[0]?.itemName.trim() || orderEditForm.itemName.trim();
@@ -596,7 +603,7 @@ export default function AdminHomePage() {
     let hasProductDims = false;
     for (const p of activeProducts) {
       const l = Number(p.lengthCm); const w = Number(p.widthCm); const h = Number(p.heightCm);
-      const qty = Number(p.packageCount) || 1;
+      const qty = Number(String(p.packageCount).trim());
       if (l > 0 && w > 0 && h > 0) {
         autoVolume += (l * w * h * qty) / 1_000_000;
         hasProductDims = true;
@@ -616,7 +623,7 @@ export default function AdminHomePage() {
       const products = activeProducts.map(p => ({
         id: p.id,
         itemName: p.itemName.trim(),
-        packageCount: Number(p.packageCount) || 1,
+        packageCount: packageCountForPayload(p.packageCount),
         lengthCm: p.lengthCm ? Number(p.lengthCm) : undefined,
         widthCm: p.widthCm ? Number(p.widthCm) : undefined,
         heightCm: p.heightCm ? Number(p.heightCm) : undefined,

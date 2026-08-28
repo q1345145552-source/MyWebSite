@@ -50,6 +50,14 @@ jobs:
       - name: TypeScript check (test scripts)
         run: npx -p typescript tsc --noEmit --project tsconfig.scripts.json
 
+      # 产品行校验（2026-08-29 加）。
+      # 复核真调接口测出来：每箱填 0/-3/1.5 全部 200 放行，
+      # 而且前端三处 `Number(...) || 1` 会把「箱数没填」悄悄变成 1 箱 ——
+      # 老板最早报的那个「箱数被系统猜成 1」改了后端也还在。
+      # 前后端两份实现一份口径，所以这个脚本两边都测。
+      - name: Test product row guard
+        run: npm run test:product-rows
+
       # 批量下单解析的自测（2026-08-28 接进 CI）。
       # 这个脚本会跑 100 张单 / 300 行明细，覆盖多产品合并、公共字段继承、
       # 方数与重量汇总、以及十几种填错的拦截。以前只能手动跑，容易忘。

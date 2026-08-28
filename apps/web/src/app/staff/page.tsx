@@ -20,6 +20,7 @@ import {
   gridTdStyle,
 } from "../../modules/shipment/ShipmentTableGrid";
 import { splitStaffShipment } from "../../services/business-api";
+import { validateProductRows, packageCountForPayload } from "../../modules/orders/productRowGuard";
 import EmptyStateCard from "../../modules/layout/EmptyStateCard";
 import RoleShell from "../../modules/layout/RoleShell";
 import DetailModal from "../../modules/layout/DetailModal";
@@ -748,13 +749,20 @@ export default function StaffHomePage() {
     const itemName = hasProducts ? staffFormProducts[0].itemName.trim() : form.itemName.trim();
     const batchNo = form.batchNo.trim();
     const arrivedAt = form.arrivedAt.trim();
+    // ⚠️ 不许 `|| 1`（2026-08-29 改）：箱数没填就该是 0、就该被下面那道校验拦住，
+    // 悄悄当成 1 箱会让重量/方数/产品数量三个合计一起错，而且错得很像真的。
     const packageCount = hasProducts
-      ? staffFormProducts.reduce((s, p) => s + (Number(p.packageCount) || 1), 0)
+      ? staffFormProducts.reduce((s, p) => s + (Number(String(p.packageCount).trim()) || 0), 0)
       : Number(form.packageCount.trim());
     const productQuantityText = form.productQuantity.trim();
     const productQuantity = productQuantityText ? Number(productQuantityText) : undefined;
     const volumeM3 = Number(form.volumeM3.trim());
     const weightKg = Number(form.weightKg.trim());
+
+    if (hasProducts) {
+      const rowIssue = validateProductRows(staffFormProducts.filter((p) => p.itemName.trim()));
+      if (rowIssue) { setMessage(rowIssue); return; }
+    }
 
     if (!form.trackingNo.trim()) {
       setMessage("运单号为必填，请手动输入。");
@@ -800,7 +808,7 @@ export default function StaffHomePage() {
         cargoType: form.cargoType,
         transportMode: form.transportMode,
         remark: form.remark?.trim() || undefined,
-        products: hasProducts ? staffFormProducts.filter(p => p.itemName.trim()).map(p => ({ itemName: p.itemName.trim(), packageCount: Number(p.packageCount) || 1, lengthCm: p.lengthCm ? Number(p.lengthCm) : undefined, widthCm: p.widthCm ? Number(p.widthCm) : undefined, heightCm: p.heightCm ? Number(p.heightCm) : undefined, productQuantity: p.productQuantity ? Number(p.productQuantity) : undefined, weightKg: p.weightKg ? Number(p.weightKg) : undefined, cargoType: (p.cargoType || "normal").toLowerCase(), domesticTrackingNo: p.domesticTrackingNo.trim() || "货拉拉" })) : undefined,
+        products: hasProducts ? staffFormProducts.filter(p => p.itemName.trim()).map(p => ({ itemName: p.itemName.trim(), packageCount: packageCountForPayload(p.packageCount), lengthCm: p.lengthCm ? Number(p.lengthCm) : undefined, widthCm: p.widthCm ? Number(p.widthCm) : undefined, heightCm: p.heightCm ? Number(p.heightCm) : undefined, productQuantity: p.productQuantity ? Number(p.productQuantity) : undefined, weightKg: p.weightKg ? Number(p.weightKg) : undefined, cargoType: (p.cargoType || "normal").toLowerCase(), domesticTrackingNo: p.domesticTrackingNo.trim() || "货拉拉" })) : undefined,
       });
       // 并行上传产品图片
       if (orderImageFiles.length > 0) {

@@ -3,6 +3,7 @@
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { validateProductRows, packageCountForPayload } from "../../modules/orders/productRowGuard";
 import EmptyStateCard from "../../modules/layout/EmptyStateCard";
 import RoleShell from "../../modules/layout/RoleShell";
 import Toast from "../../modules/layout/Toast";
@@ -1246,10 +1247,15 @@ export default function ClientHomePage() {
                 const hasProducts = formProducts.length > 0 && formProducts.some((p) => p.itemName.trim());
                 if (!hasProducts && !form.itemName) { setToast("请填写品名"); return; }
                 if (!form.transportMode || !form.warehouseId) { setToast("请填写必填项"); return; }
+                // ⚠️ 箱数没填就得让客户补，不能悄悄当成 1 箱（2026-08-29 补）
+                if (hasProducts) {
+                  const rowIssue = validateProductRows(formProducts.filter((p) => p.itemName.trim()));
+                  if (rowIssue) { setToast(rowIssue); return; }
+                }
                 try {
                   const payload: any = { ...form, packageCount: +form.packageCount || 0, weightKg: form.weightKg ? +form.weightKg : undefined, volumeM3: form.volumeM3 ? +form.volumeM3 : undefined, transportMode: form.transportMode as "sea"  |  "land", trackingNo: form.trackingNo?.trim() || undefined };
                   if (hasProducts) {
-                    payload.products = formProducts.filter((p) => p.itemName.trim()).map((p) => ({ itemName: p.itemName.trim(), packageCount: Number(p.packageCount) || 1, lengthCm: p.lengthCm ? Number(p.lengthCm) : undefined, widthCm: p.widthCm ? Number(p.widthCm) : undefined, heightCm: p.heightCm ? Number(p.heightCm) : undefined, productQuantity: p.productQuantity ? Number(p.productQuantity) : undefined, weightKg: p.weightKg ? Number(p.weightKg) : undefined, domesticTrackingNo: p.domesticTrackingNo?.trim() || "货拉拉", cargoType: "normal" }));
+                    payload.products = formProducts.filter((p) => p.itemName.trim()).map((p) => ({ itemName: p.itemName.trim(), packageCount: packageCountForPayload(p.packageCount), lengthCm: p.lengthCm ? Number(p.lengthCm) : undefined, widthCm: p.widthCm ? Number(p.widthCm) : undefined, heightCm: p.heightCm ? Number(p.heightCm) : undefined, productQuantity: p.productQuantity ? Number(p.productQuantity) : undefined, weightKg: p.weightKg ? Number(p.weightKg) : undefined, domesticTrackingNo: p.domesticTrackingNo?.trim() || "货拉拉", cargoType: "normal" }));
                     payload.itemName = payload.products[0].itemName;
                   }
                   const result = await createClientPrealert(payload);

@@ -1,4 +1,5 @@
 // B-3 ~ B-7: 已从 node:sqlite 迁移到 Prisma + PostgreSQL（2026-05-18）
+import { validateProductRows, validateOrderLevelQuantity } from "./product-row-guard";
 import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../db/prisma";
@@ -749,33 +750,25 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
     };
 
     /**
-     * ⚠️ 产品行的箱数**不许兜底成 1**（2026-08-28 修）。
-     * 原来是 `Math.max(1, p.packageCount || 1)` —— 没填或填 0 会被悄悄当成 1 箱，
-     * 而箱数是重量、方数、产品数量三个合计的乘数，一错全错，
-     * 客户拿到的是一个「看起来很正常」的错数。宁可拦住让他补，也不能猜。
-     * 批量导入那条路本来就是必填（batchOrderImport 的 required: true），这里跟它对齐。
+     * 产品行的校验统一交给 product-row-guard（2026-08-29 抽出去了，方便单测）。
+     * 规矩：箱数正整数、「每箱几个」全填或全空且填了就得是正整数 ——
+     * 跟批量导入（batchOrderImport）和前端 productRowGuard 同一份口径。
      *
-     * ⚠️ 前端三端都是 `Number(p.packageCount) || 1` 才发出来的，所以正常操作
-     * 一律 ≥1、行为不变；这道闸挡的是直接调接口的和真正非法的输入。
+     * ⚠️ 前端三端原来都是 `Number(p.packageCount) || 1` 才发出来的，
+     * 所以这道闸以前根本挡不到「员工把箱数清空」那种情况 —— 2026-08-29 已经
+     * 把那三处的兜底一起去掉了，别再加回来。
      */
     if (body.products?.length) {
-      for (let i = 0; i < body.products.length; i += 1) {
-        const pc = body.products[i].packageCount;
-        if (typeof pc !== "number" || !Number.isInteger(pc) || pc <= 0) {
-          fail(res, 400, "VALIDATION_ERROR", `产品行${i + 1}的箱数必须是正整数`);
-          return;
-        }
-      }
-      /**
-       * ⚠️ 「每箱几个」要么全填、要么全空 —— 跟批量导入同一个规矩。
-       * 只填几行的话，没填的按 0 参与合计，总数偏小而且没人知道。
-       */
-      const qtys = body.products.map((p) => p.productQuantity);
-      const filled = qtys.filter((q) => q !== undefined && q !== null).length;
-      if (filled > 0 && filled < qtys.length) {
-        fail(res, 400, "VALIDATION_ERROR", "同一张单的「每箱几个」需要全部填写或全部留空");
+      const rowIssue = validateProductRows(body.products);
+      if (rowIssue) {
+        fail(res, 400, "VALIDATION_ERROR", rowIssue);
         return;
       }
+    }
+    const orderQtyIssue = validateOrderLevelQuantity(body.productQuantity);
+    if (orderQtyIssue) {
+      fail(res, 400, "VALIDATION_ERROR", orderQtyIssue);
+      return;
     }
 
     const staffProducts = body.products?.length
