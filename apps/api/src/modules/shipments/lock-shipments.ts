@@ -27,6 +27,18 @@
  * 调用方谁都不用再想「这批里会不会有父单」。
  */
 
+/**
+ * 「这批 id 里有查不到的」。
+ * 单独一个类型，是为了让调用方能把它翻成 404 而不是笼统的 500「服务器繁忙」——
+ * 员工看到「运单 xxx 不存在」才知道该去改什么。
+ */
+export class ShipmentsNotFoundError extends Error {
+  constructor(public readonly missingIds: string[]) {
+    super(`运单不存在或不属于当前公司：${missingIds.join("、")}`);
+    this.name = "ShipmentsNotFoundError";
+  }
+}
+
 /** 锁完之后返回按锁定顺序排好的 id（调用方一般用不上，测试和排查时有用） */
 export async function lockShipmentsChildrenFirst(
   tx: any,
@@ -41,13 +53,45 @@ export async function lockShipmentsChildrenFirst(
   });
 
   /**
+   * ⚠️⚠️ **查不到的运单必须当场报错，不许悄悄丢掉**（2026-08-29 第九轮补）。
+   *
+   * 这是**我上一轮抽出这个函数时引入的回归**：
+   * 原来建派送单是在循环里逐个 `findFirst`，找不到就抛
+   * `LastmileShipmentNotFoundError` → 404、整批失败。
+   * 改成批量 `findMany` 之后，查不到的 id 直接不在结果里，
+   * 于是这个函数只返回「查到的那些」，调用方拿着它接着干活 ——
+   *
+   * 复核用真实路由夹具打出来的结果：
+   *   传一批全是无效 id → **返回 200，建出一张 count: 0 的空派送单**；
+   *   有效无效混着传   → **部分成功**，无效那几票**一声不吭地没了**。
+   * 原来的「404 + 整批失败」语义被我改没了。
+   *
+   * ⚠️ 别家公司的 id 同样会落进这里（where 带了 companyId）——
+   * 那本来就该 404，不该悄悄跳过。
+   */
+  const foundIds = new Set<string>(rows.map((r: any) => r.id));
+  const missing = [...new Set(shipmentIds)].filter((id) => !foundIds.has(id));
+  if (missing.length > 0) {
+    throw new ShipmentsNotFoundError(missing);
+  }
+
+  /**
    * ⚠️ 多层分柜（A 是 B 的父单，B 又是 C 的父单）会让「两层」这个模型失效：
    * B 既是子单又是父单，放进哪一层都可能跟别人反着。
    *
    * 主流程已经禁止了（装柜时 `if (locked.parentTrackingNo) throw 子运单不能再次装柜`），
    * 第八轮复核在测试库也确认 **0 个多层分柜**。
-   * 但历史数据里万一冒出来一个，我宁可**当场报错**，也不要它安安静静地去死锁 ——
-   * 死锁是随机出现的、查起来极难；报错至少指得出是哪一票货。
+   *
+   * ⚠️⚠️ **这道拦截只挡得住一半，别当成保险箱**（2026-08-29 第九轮更正）。
+   * 它认的是「中间单**和它的子单同时出现在这一批里**」；
+   * 要是只把中间单单独传进来，这里**什么都看不出来**（它在这一批里就是个普通子单）。
+   * 我上一版的注释写的是「历史数据里万一冒出来一个就会当场报错」——
+   * **说过头了**，复核当场点了出来。
+   *
+   * 真要根治得在**建子单的时候**就禁止（那条路已经禁了），
+   * 或者建一张父子关系表按层数排序。现在这道只是「能抓到就抓到」的兜底：
+   * 抓到了总比让它安安静静去死锁强 —— 死锁随机出现、查起来极难，
+   * 报错至少指得出是哪一票货。
    */
   const trackingNosInBatch = new Set<string>(rows.map((r: any) => r.trackingNo));
   const middle = rows.filter(

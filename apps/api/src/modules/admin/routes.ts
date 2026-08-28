@@ -1,5 +1,6 @@
 // B-6: 已从 node:sqlite 迁移到 Prisma + PostgreSQL（2026-05-20）
 import { lockShipmentsChildrenFirst } from "../shipments/lock-shipments";
+import { parseNumericStrict, requireNonNegativeInt } from "../core/int-guard";
 import { validateProductRows } from "../orders/product-row-guard";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../db/prisma";
@@ -592,6 +593,27 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
       }
     }
 
+    /**
+     * ⚠️ 用 parseNumericStrict 而不是 Number（2026-08-29 第九轮补）：
+     * `Number(true)` 是 1、`Number([5])` 是 5，JSON 里传布尔或数组能直接穿过校验。
+     * ⚠️ 位置挪到了**碰数据库之前**（2026-08-29）：原来夹在查库之后，
+     *    参数本来就不合法的请求还是会先查一轮库；而且自测想验它就得连库。
+     * ⚠️ 校验用 requireNonNegativeInt：原来只判 `isFinite && >= 0`，
+     * 复核实测 **2.5 和超过 32 位上限的数都能过** —— 这两个字段在库里都是 `Int`。
+     */
+    const productQuantity =
+      body.productQuantity !== undefined ? parseNumericStrict(body.productQuantity) : undefined;
+    const packageCount =
+      body.packageCount !== undefined ? parseNumericStrict(body.packageCount) : undefined;
+    if (productQuantity !== undefined) {
+      const issue = requireNonNegativeInt(productQuantity, "产品数量");
+      if (issue) { fail(res, 400, "VALIDATION_ERROR", issue); return; }
+    }
+    if (packageCount !== undefined) {
+      const issue = requireNonNegativeInt(packageCount, "箱数");
+      if (issue) { fail(res, 400, "VALIDATION_ERROR", issue); return; }
+    }
+
     if (!rawId) {
       fail(res, 400, "BAD_REQUEST", "orderId is required");
       return;
@@ -640,17 +662,6 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
     const itemName = body.itemName?.trim();
     if (has("itemName") && !itemName) {
       fail(res, 400, "BAD_REQUEST", "itemName is required");
-      return;
-    }
-
-    const productQuantity = has("productQuantity") ? Number(body.productQuantity) : undefined;
-    const packageCount = has("packageCount") ? Number(body.packageCount) : undefined;
-    if (productQuantity !== undefined && (!Number.isFinite(productQuantity) || productQuantity < 0)) {
-      fail(res, 400, "BAD_REQUEST", "invalid productQuantity");
-      return;
-    }
-    if (packageCount !== undefined && (!Number.isFinite(packageCount) || packageCount < 0)) {
-      fail(res, 400, "BAD_REQUEST", "invalid packageCount");
       return;
     }
 

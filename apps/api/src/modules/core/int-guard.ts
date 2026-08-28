@@ -71,3 +71,28 @@ export function requireProductWithinInt(a: number, b: number, label: string): st
   }
   return null;
 }
+
+/**
+ * 严格把请求体里的值转成数字。**不是数字/数字字符串的一律给 NaN。**
+ *
+ * ⚠️ 为什么不能直接用 `Number(...)`（2026-08-29 第九轮补）：
+ *   Number(true)  === 1     ← JSON 里传 `true`，校验会当成「1 箱」放行
+ *   Number([5])   === 5     ← 传数组也能过
+ *   Number(null)  === 0     ← 传 null 变成 0
+ *   Number(" 7 ") === 7     ← 带空格的字符串（这个倒是可以接受）
+ * 复核实测：运单创建和装柜件数这两处都是先 `Number(...)` 再校验，
+ * 所以 `packageCount: true` 会被存成 1 箱 —— 校验一点都没挡住。
+ *
+ * 规矩：只收 number，或者「去掉首尾空格后是合法数字」的 string。
+ * 布尔、数组、对象、null、空串一律 NaN，交给下面的 require* 报错。
+ */
+export function parseNumericStrict(raw: unknown): number {
+  if (typeof raw === "number") return raw;
+  if (typeof raw === "string") {
+    const t = raw.trim();
+    if (t === "") return Number.NaN;
+    const n = Number(t);
+    return Number.isNaN(n) ? Number.NaN : n;
+  }
+  return Number.NaN;
+}

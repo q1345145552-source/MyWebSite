@@ -10,7 +10,7 @@
 //           → ARRIVED → CUSTOMS → DELIVERING → SIGNED
 //   两个「延迟」是可跳过的中间态：正常走就是 SEALED → IN_TRANSIT → ARRIVED
 
-import { requirePositiveInt } from "../core/int-guard";
+import { parseNumericStrict, requirePositiveInt } from "../core/int-guard";
 import { lockAndSyncParents, lockShipmentsChildrenFirst } from "../shipments/lock-shipments";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../db/prisma";
@@ -817,7 +817,8 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
     const containerId = body.containerId?.trim();
     const shipmentId = body.shipmentId?.trim();
     const volume = Number(body.loadedVolumeM3);
-    const pieces = Number(body.loadedPieceCount);
+    // ⚠️ parseNumericStrict：Number(true) 是 1，传布尔能直接当成 1 件穿过去
+    const pieces = parseNumericStrict(body.loadedPieceCount);
     if (!containerId || !shipmentId || !Number.isFinite(volume) || volume <= 0) {
       fail(res, 400, "BAD_REQUEST", "containerId, shipmentId, loadedVolumeM3>0, loadedPieceCount>0 are required");
       return;

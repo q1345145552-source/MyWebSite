@@ -1,5 +1,5 @@
 // B-3 ~ B-7: 已从 node:sqlite 迁移到 Prisma + PostgreSQL（2026-05-18）
-import { requirePositiveInt } from "../core/int-guard";
+import { parseNumericStrict, requirePositiveInt } from "../core/int-guard";
 import { lockShipmentsChildrenFirst } from "../shipments/lock-shipments";
 import { validateProductRows, validateOrderLevelQuantity } from "./product-row-guard";
 import crypto from "node:crypto";
@@ -211,7 +211,7 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
     // 没有产品行的单子，箱数全靠订单级这个字段：正整数 + 不超过 32 位上限
     // ⚠️ 上一版漏了上限，复核实测 2147483648 能过（2026-08-29 补）
     if (!body.products?.length) {
-      const pkgIssue = requirePositiveInt(Number(body.packageCount ?? NaN), "箱数");
+      const pkgIssue = requirePositiveInt(parseNumericStrict(body.packageCount), "箱数");
       if (pkgIssue) {
         fail(res, 400, "VALIDATION_ERROR", pkgIssue);
         return;
@@ -380,6 +380,58 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
     const orderId = body.orderId?.trim();
     if (!orderId) { fail(res, 400, "BAD_REQUEST", "orderId is required"); return; }
 
+    /**
+     * ⚠️⚠️ **确认收货是「把仓库实收的数字定下来」，写错就一路错到底**（2026-08-29 第九轮收紧）。
+     *
+     * 原来这里只判 `Number.isFinite(n) && n >= 0`，复核用真实 handler 夹具
+     * 传一整套 0 进来，**返回 200，件数/重量/方数全部准备写成 0**。
+     * 三个毛病：
+     *   · `0` 被放行 —— 仓库收到的货不可能是 0 件、0 公斤、0 方；
+     *     写成 0 之后方数没了，而仓库版集货是「方数 × 单价」收费的
+     *   · 小数和超 32 位上限被放行 —— packageCount / productQuantity 在库里是 `Int`
+     *   · 先 `Number(...)` 再判 —— `Number(true)` 是 1，JSON 传布尔能当成 1 件
+     *
+     * ⚠️ 位置放在**碰数据库之前**（2026-08-29 挪的），跟别的入口一个规矩：
+     *    参数本来就不合法的请求不该先查一轮库；而且自测想验它就得连库。
+     * ⚠️ 只校验**传了的**字段：员工可以只改箱数、不动重量，没传的不该被逼着填。
+     */
+    let receivePackageCount: number | undefined;
+    if (body.packageCount !== undefined) {
+      const n = parseNumericStrict(body.packageCount);
+      const issue = requirePositiveInt(n, "箱数");
+      if (issue) { fail(res, 400, "VALIDATION_ERROR", issue); return; }
+      receivePackageCount = n;
+    }
+    let receiveProductQuantity: number | undefined;
+    if (body.productQuantity !== undefined) {
+      const n = parseNumericStrict(body.productQuantity);
+      const issue = requirePositiveInt(n, "产品数量");
+      if (issue) { fail(res, 400, "VALIDATION_ERROR", issue); return; }
+      receiveProductQuantity = n;
+    }
+    /**
+     * 重量和方数在库里是 `Decimal`，不是 `Int`，所以不能用整数那套闸；
+     * 但同样不许是 0、负数、非数字 —— 收到的货不可能没有重量、没有体积。
+     */
+    let receiveWeightKg: number | undefined;
+    if (body.weightKg !== undefined && body.weightKg !== null) {
+      const n = parseNumericStrict(body.weightKg);
+      if (!Number.isFinite(n) || n <= 0) {
+        fail(res, 400, "VALIDATION_ERROR", "重量必须大于 0");
+        return;
+      }
+      receiveWeightKg = n;
+    }
+    let receiveVolumeM3: number | undefined;
+    if (body.volumeM3 !== undefined && body.volumeM3 !== null) {
+      const n = parseNumericStrict(body.volumeM3);
+      if (!Number.isFinite(n) || n <= 0) {
+        fail(res, 400, "VALIDATION_ERROR", "体积必须大于 0");
+        return;
+      }
+      receiveVolumeM3 = n;
+    }
+
     const order = await prisma.order.findFirst({
       where: { id: orderId, companyId: auth.companyId },
       // currentStatus 是写「国内仓已收货」轨迹时要用的 fromStatus（2026-08-06）
@@ -391,29 +443,6 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    // 【审查问题 6】原来直接 Number(...) 就往库里写，Excel 里箱数填成"三箱"
-    // 会变成 NaN → Prisma 写库报错 → 500。这里补上和 admin/routes.ts 一致的校验。
-    const numOrFail = (raw: unknown, field: string): number | null => {
-      const n = Number(raw);
-      if (!Number.isFinite(n) || n < 0) {
-        fail(res, 400, "BAD_REQUEST", `invalid ${field}`);
-        return null;
-      }
-      return n;
-    };
-    let receivePackageCount: number | undefined;
-    if (body.packageCount !== undefined) {
-      const n = numOrFail(body.packageCount, "packageCount");
-      if (n === null) return;
-      receivePackageCount = n;
-    }
-    let receiveProductQuantity: number | undefined;
-    if (body.productQuantity !== undefined) {
-      const n = numOrFail(body.productQuantity, "productQuantity");
-      if (n === null) return;
-      receiveProductQuantity = n;
-    }
-
     const now = new Date();
     const updateData: any = {
       approvalStatus: "received",
@@ -423,42 +452,72 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
     if (body.itemName?.trim()) updateData.itemName = body.itemName.trim();
     if (receivePackageCount !== undefined) updateData.packageCount = receivePackageCount;
     if (body.packageUnit) updateData.packageUnit = body.packageUnit;
-    if (body.weightKg !== undefined) updateData.weightKg = body.weightKg as any;
-    if (body.volumeM3 !== undefined) updateData.volumeM3 = body.volumeM3 as any;
+    if (receiveWeightKg !== undefined) updateData.weightKg = receiveWeightKg as any;
+    if (receiveVolumeM3 !== undefined) updateData.volumeM3 = receiveVolumeM3 as any;
     if (receiveProductQuantity !== undefined) updateData.productQuantity = receiveProductQuantity;
     if (body.transportMode) updateData.transportMode = body.transportMode;
     if (body.cargoType) updateData.cargoType = body.cargoType;
     if (body.domesticTrackingNo) updateData.domesticTrackingNo = body.domesticTrackingNo;
 
-    await prisma.order.update({ where: { id: orderId }, data: updateData });
-
-    // 同步更新运单
-    const shipment = order.shipments[0];
-    if (shipment) {
-      const sUpdate: any = { updatedAt: now };
-      if (body.weightKg !== undefined) sUpdate.weightKg = body.weightKg as any;
-      if (body.volumeM3 !== undefined) sUpdate.volumeM3 = body.volumeM3 as any;
-      if (receivePackageCount !== undefined) sUpdate.packageCount = receivePackageCount;
-      if (body.packageUnit) sUpdate.packageUnit = body.packageUnit;
-      if (body.transportMode) sUpdate.transportMode = body.transportMode;
-      if (body.itemName?.trim()) sUpdate.itemName = body.itemName.trim();
-      await prisma.shipment.update({ where: { id: shipment.id }, data: sUpdate });
-
-      // 2026-08-06：国内仓收到货是客户最关心的一步，原来一条轨迹都不写。
-      // ⚠️ 只写轨迹，**不动 currentStatus** —— inWarehouseCN 不在运单状态流程里（STATUS_FLOW），
-      //    真去改状态会被流转校验拦下，而且三端列表的筛选口径也会跟着变。
-      await prisma.statusLog.create({
-        data: {
-          id: `sl_rcv_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-          companyId: auth.companyId, shipmentId: shipment.id,
-          operatorId: auth.userId, operatorRole: auth.role, operatorName: auth.name ?? "",
-          fromStatus: shipment.currentStatus, toStatus: "inWarehouseCN",
-          remark: "国内仓已收货，等待装柜",
-          nextStop: "装柜",
-          changedAt: now,
-        },
+    /**
+     * ⚠️⚠️ **订单 + 运单 + 轨迹必须在同一个事务里**（2026-08-29 第九轮改）。
+     *
+     * 原来是三次独立的 `prisma.*` 写：
+     *   ① order.update  ② shipment.update  ③ statusLog.create
+     * 中间任何一步失败，就留下**半套数据** —— 比如订单已经是「已收货」、
+     * 运单的件数重量还是旧的、客户轨迹里没有「国内仓已收货」那条。
+     * 而且两个仓管同时点确认收货，会各写一条到仓轨迹（客户看到两条一样的）。
+     *
+     * ⚠️ 锁序【订单 → 运单】，跟删订单那两条路一致。
+     * ⚠️ 「锁只保证不同时，不保证数据没变」：锁完必须**重查**审批状态，
+     *    不能接着用事务外那份 order（CLAUDE.md 第 28 条）。
+     */
+    await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM orders WHERE id = ${orderId} AND company_id = ${auth.companyId} FOR UPDATE`;
+      const fresh = await tx.order.findFirst({
+        where: { id: orderId, companyId: auth.companyId },
+        select: { approvalStatus: true },
       });
-    }
+      if (!fresh) throw new BusinessError("订单不存在", 404, "NOT_FOUND");
+      if (fresh.approvalStatus === "received") {
+        // 上面那道「已确认收货」的判断是在事务外做的，两个人同时点会双双通过
+        throw new BusinessError("这张单刚刚已经被确认收货了，本次没有重复执行，请刷新后再看");
+      }
+
+      const shipment = order.shipments[0];
+      if (shipment) {
+        await tx.$queryRaw`SELECT id FROM shipments WHERE id = ${shipment.id} FOR UPDATE`;
+      }
+
+      await tx.order.update({ where: { id: orderId }, data: updateData });
+
+      // 同步更新运单
+      if (shipment) {
+        const sUpdate: any = { updatedAt: now };
+        if (receiveWeightKg !== undefined) sUpdate.weightKg = receiveWeightKg as any;
+        if (receiveVolumeM3 !== undefined) sUpdate.volumeM3 = receiveVolumeM3 as any;
+        if (receivePackageCount !== undefined) sUpdate.packageCount = receivePackageCount;
+        if (body.packageUnit) sUpdate.packageUnit = body.packageUnit;
+        if (body.transportMode) sUpdate.transportMode = body.transportMode;
+        if (body.itemName?.trim()) sUpdate.itemName = body.itemName.trim();
+        await tx.shipment.update({ where: { id: shipment.id }, data: sUpdate });
+
+        // 2026-08-06：国内仓收到货是客户最关心的一步，原来一条轨迹都不写。
+        // ⚠️ 只写轨迹，**不动 currentStatus** —— inWarehouseCN 不在运单状态流程里（STATUS_FLOW），
+        //    真去改状态会被流转校验拦下，而且三端列表的筛选口径也会跟着变。
+        await tx.statusLog.create({
+          data: {
+            id: `sl_rcv_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            companyId: auth.companyId, shipmentId: shipment.id,
+            operatorId: auth.userId, operatorRole: auth.role, operatorName: auth.name ?? "",
+            fromStatus: shipment.currentStatus, toStatus: "inWarehouseCN",
+            remark: "国内仓已收货，等待装柜",
+            nextStop: "装柜",
+            changedAt: now,
+          },
+        });
+      }
+    });
 
     ok(res, { orderId, status: "received", updatedAt: now.toISOString() });
   });
@@ -842,7 +901,7 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
      * packageCount 填 0 或 2.5」照样 200 —— 管理员那条旧批量导入走的正是这条路。
      */
     if (!body.products?.length) {
-      const pkgIssue = requirePositiveInt(Number(body.packageCount ?? NaN), "箱数");
+      const pkgIssue = requirePositiveInt(parseNumericStrict(body.packageCount), "箱数");
       if (pkgIssue) {
         fail(res, 400, "VALIDATION_ERROR", pkgIssue);
         return;

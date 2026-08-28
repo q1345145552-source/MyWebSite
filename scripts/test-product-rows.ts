@@ -227,9 +227,11 @@ async function loadRoutes(): Promise<Map<string, Handler>> {
   const orders = await import("../apps/api/src/modules/orders/routes");
   const admin = await import("../apps/api/src/modules/admin/routes");
   const containers = await import("../apps/api/src/modules/containers/routes");
+  const adminOps = await import("../apps/api/src/modules/admin-ops/routes");
   (orders as any).registerOrderRoutes(fakeApp);
   (admin as any).registerAdminRoutes(fakeApp);
   (containers as any).registerContainerRoutes(fakeApp);
+  (adminOps as any).registerAdminOpsRoutes(fakeApp);
   return routes;
 }
 
@@ -559,19 +561,217 @@ async function main(): Promise<void> {
      */
     const handler = routeTable.get("POST /admin/containers/load");
     assert.ok(handler, "没注册 /admin/containers/load");
-    for (const [label, pieces] of [["2.5", 2.5], ["0", 0], ["-1", -1], ["超上限", 2147483648]] as Array<[string, number]>) {
+    /**
+     * ⚠️ 第一版只断言「拿到 400」，**没看报错内容、也没有正向对照** ——
+     * 第九轮复核实测：把这个接口改成无条件返回 400，这一项照样全绿。
+     * 这正是本文件 252-259 行写着「光看 400 是不够的」并为此加了
+     * assertIsProductRowError 的那条教训，第 17 项当时忘了用。
+     */
+    const BAD_PIECES: Array<[string, unknown]> = [
+      ["2.5", 2.5],
+      ["0", 0],
+      ["-1", -1],
+      ["超上限", 2147483648],
+      // ⚠️ Number(true) === 1，先转再判的写法会把布尔当成 1 件放行
+      ["布尔 true", true],
+      ["数组 [5]", [5]],
+    ];
+    for (const [label, pieces] of BAD_PIECES) {
       const r = await callRoute(handler!, ADMIN, {
         containerId: "c_1", shipmentId: "s_1", loadedVolumeM3: 1.2, loadedPieceCount: pieces,
       });
       assert.equal(r.status, 400, `装柜件数【${label}】没被拦，拿到 ${r.status}`);
+      assert.ok(
+        /件数/.test(r.message),
+        `装柜件数【${label}】是被 400 了，但报错不是件数那道闸发的：${JSON.stringify(r.message)}`,
+      );
+    }
+
+    /**
+     * **正向对照**：合法件数不许被这道闸拦。
+     * ⚠️ 故意不给 containerId，让它停在「参数缺失」那道闸（也在连库之前），
+     * 拿到的报错**不该**提「件数」—— 这就证明合法的 3 件放行了。
+     */
+    const good = await callRoute(handler!, ADMIN, {
+      shipmentId: "s_1", loadedVolumeM3: 1.2, loadedPieceCount: 3,
+    });
+    assert.ok(
+      !/件数必须/.test(good.message),
+      `合法的 3 件被件数闸拦住了：${good.message}`,
+    );
+  });
+
+  await checkAsync("18) 查不到的运单必须当场报错，不许悄悄丢掉（直接单测共用函数）", async () => {
+    /**
+     * ⚠️⚠️ **这是我上一轮抽出 lockShipmentsChildrenFirst 时引入的回归。**
+     * 原来建派送单是循环里逐个 findFirst，找不到抛 404、整批失败。
+     * 改成批量 findMany 之后，查不到的 id 直接不在结果里 ——
+     * 第九轮复核用真实路由夹具打出来：
+     *   全是无效 id → **200，建出一张 count: 0 的空派送单**
+     *   有效无效混着 → **部分成功**，无效那几票一声不吭地没了
+     *
+     * ⚠️ 第一版我是去调整条路由，结果**测不出东西**：
+     * 本脚本禁了数据库，路由走到 findMany 就抛连库错误，
+     * 我的断言只写了 `status !== 200`，连库失败也满足 —— 假绿。
+     * 现在直接给这个函数喂一个**假 tx**：它不连库，
+     * 而且能精确控制「查到了哪几行」，才真正测得到那道检查。
+     */
+    const { lockShipmentsChildrenFirst, ShipmentsNotFoundError } = await import(
+      "../apps/api/src/modules/shipments/lock-shipments"
+    );
+
+    /** 假 tx：findMany 只返回 present 里那几行，$queryRaw 记下锁了谁 */
+    const makeTx = (present: Array<{ id: string; trackingNo: string; parentTrackingNo: string | null }>) => {
+      const locked: string[] = [];
+      return {
+        locked,
+        tx: {
+          shipment: { findMany: async () => present },
+          $queryRaw: async (strings: TemplateStringsArray, ...vals: unknown[]) => {
+            locked.push(String(vals[0]));
+            return [];
+          },
+        },
+      };
+    };
+
+    // ① 全是查不到的 → 必须抛，不许安安静静返回空数组
+    {
+      const { tx, locked } = makeTx([]);
+      await assert.rejects(
+        () => lockShipmentsChildrenFirst(tx as any, ["s_no_1", "s_no_2"], "c_test"),
+        (e: unknown) => e instanceof ShipmentsNotFoundError,
+        "传全是无效运单时没有报错 —— 调用方会拿着空清单建出一张空派送单",
+      );
+      assert.deepEqual(locked, [], "都没查到还去锁了东西");
+    }
+
+    // ② 有效无效混着 → 同样必须整批失败，不许部分成功
+    {
+      const { tx } = makeTx([{ id: "s_ok", trackingNo: "TH1", parentTrackingNo: null }]);
+      await assert.rejects(
+        () => lockShipmentsChildrenFirst(tx as any, ["s_ok", "s_no"], "c_test"),
+        (e: unknown) => e instanceof ShipmentsNotFoundError && /s_no/.test((e as Error).message),
+        "有效无效混着传时只成功了一半 —— 无效那几票一声不吭地没了",
+      );
+    }
+
+    // ③ 全都查得到 → 正常放行，而且**先锁子单再锁父单、层内按 id 排**
+    {
+      // ⚠️ 故意让父单的 id 排在子单前面（s_a < s_b），
+      //    混排的话锁序会是 a,b；正确的应该是先子单 s_b、再父单 s_a
+      const { tx, locked } = makeTx([
+        { id: "s_a", trackingNo: "TH_P", parentTrackingNo: null },
+        { id: "s_b", trackingNo: "TH_C", parentTrackingNo: "TH_P" },
+      ]);
+      const ordered = await lockShipmentsChildrenFirst(tx as any, ["s_a", "s_b"], "c_test");
+      assert.deepEqual(ordered, ["s_b", "s_a"], "没有「先全部子单、再全部父单」");
+      assert.deepEqual(locked, ["s_b", "s_a"], "实际发出去的锁顺序不对");
+    }
+
+    // ④ 多层分柜（既是子单又是父单）要当场报错，不许安安静静去死锁
+    {
+      const { tx } = makeTx([
+        { id: "s_1", trackingNo: "TH_A", parentTrackingNo: null },
+        { id: "s_2", trackingNo: "TH_B", parentTrackingNo: "TH_A" },
+        { id: "s_3", trackingNo: "TH_C", parentTrackingNo: "TH_B" },
+      ]);
+      await assert.rejects(
+        () => lockShipmentsChildrenFirst(tx as any, ["s_1", "s_2", "s_3"], "c_test"),
+        /多层分柜/,
+        "中间单（既是子单又是父单）没被拦住",
+      );
     }
   });
 
+  await checkAsync("19) 管理员改单的**订单级**箱数/产品数量同样要卡", async () => {
+    /**
+     * 第九轮复核实测：/admin/orders/update 的 productQuantity=2.5、
+     * packageCount=2.5、超 32 位上限全都能过 —— 我前面几项只测了 `products` 产品行，
+     * 没测「订单级那两个字段」。
+     * ⚠️ 这道校验原来夹在查库之后，现在挪到了碰库之前，所以这里测得到。
+     */
+    const handler = routeTable.get("POST /admin/orders/update")!;
+    const BAD: Array<[string, string, unknown]> = [
+      ["箱数 2.5", "packageCount", 2.5],
+      ["箱数 -1", "packageCount", -1],
+      ["箱数 超上限", "packageCount", 2147483648],
+      ["箱数 布尔", "packageCount", true],
+      ["产品数量 2.5", "productQuantity", 2.5],
+      ["产品数量 超上限", "productQuantity", 2147483648],
+      ["产品数量 数组", "productQuantity", [5]],
+    ];
+    for (const [label, field, value] of BAD) {
+      const r = await callRoute(handler, ADMIN, { orderId: "o_test", [field]: value });
+      assert.equal(r.status, 400, `【${label}】没被拦，拿到 ${r.status}`);
+      assert.ok(
+        /箱数|产品数量/.test(r.message),
+        `【${label}】是被 400 了，但报错不是数值闸发的：${JSON.stringify(r.message)}`,
+      );
+    }
+    /**
+     * 正向对照：0 是允许的（表示没填），不许被误拦。
+     * ⚠️ 故意**不给 orderId**，让它停在「orderId is required」那道闸（也在连库之前）——
+     * 给全了它就会一路走到 `prisma.order.findFirst` 真的去连库。
+     * 这个坑我这两轮已经踩到第四次了，所以脚本开头才加了那道「连不通的数据库地址」硬闸。
+     */
+    const zero = await callRoute(handler, ADMIN, { productQuantity: 0, packageCount: 7 });
+    assert.ok(!/产品数量|箱数/.test(zero.message), `合法的 0 / 7 被数值闸拦了：${zero.message}`);
+    assert.ok(/orderId/.test(zero.message), `没停在「缺 orderId」那道闸，而是：${zero.message}`);
+  });
+
+  await checkAsync("20) 确认收货：0 / 小数 / 超上限 / 布尔 一律拦下", async () => {
+    /**
+     * 第九轮复核用真实 handler 夹具传一整套 0 进来，**返回 200**，
+     * 订单和运单的件数、重量、方数全部准备写成 0，还准备写一条到仓轨迹。
+     *
+     * ⚠️ 收到的货不可能是 0 件、0 公斤、0 方。而仓库版集货是
+     * 「**方数 × 单价**」收费的 —— 方数被写成 0，这一票就等于白送。
+     * 这不是「报个 500」那种毛病，是**安安静静算错钱**。
+     */
+    const handler = routeTable.get("POST /staff/prealerts/receive");
+    assert.ok(handler, "没注册 /staff/prealerts/receive");
+    const BAD: Array<[string, Record<string, unknown>]> = [
+      ["件数 0", { packageCount: 0 }],
+      ["件数 2.5", { packageCount: 2.5 }],
+      ["件数 超上限", { packageCount: 2147483648 }],
+      ["件数 布尔", { packageCount: true }],
+      ["产品数量 0", { productQuantity: 0 }],
+      ["重量 0", { weightKg: 0 }],
+      ["重量 负数", { weightKg: -1 }],
+      ["体积 0", { volumeM3: 0 }],
+      ["体积 布尔", { volumeM3: true }],
+      // 复核夹具打的就是这一整套
+      ["整套全 0", { packageCount: 0, productQuantity: 0, weightKg: 0, volumeM3: 0 }],
+    ];
+    for (const [label, patch] of BAD) {
+      const r = await callRoute(handler!, STAFF, { orderId: "o_test", ...patch });
+      assert.equal(r.status, 400, `确认收货【${label}】没被拦，拿到 ${r.status}`);
+      assert.ok(
+        /件数|箱数|产品数量|重量|体积/.test(r.message),
+        `【${label}】是被 400 了，但报错不是数值闸发的：${JSON.stringify(r.message)}`,
+      );
+    }
+
+    /**
+     * 正向对照：合法数值不许被误伤。
+     * ⚠️ 故意不给 orderId，停在「orderId is required」（在连库之前）。
+     */
+    const good = await callRoute(handler!, STAFF, {
+      packageCount: 7, productQuantity: 30, weightKg: 12.5, volumeM3: 0.86,
+    });
+    assert.ok(
+      !/必须/.test(good.message),
+      `合法的一套数值被拦了：${good.message}`,
+    );
+    assert.ok(/orderId/.test(good.message), `没停在「缺 orderId」那道闸：${good.message}`);
+  });
+
   if (failures.length > 0) {
-    console.error(`\n${failures.length}/18 项不通过：${failures.join("；")}`);
+    console.error(`\n${failures.length}/21 项不通过：${failures.join("；")}`);
     process.exit(1);
   }
-  console.log("产品行校验：18 项全部通过");
+  console.log("产品行校验：21 项全部通过");
 }
 
 main().catch((error) => {

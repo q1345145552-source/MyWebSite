@@ -1,5 +1,5 @@
 // B-7: 已从 node:sqlite 迁移到 Prisma + PostgreSQL（2026-05-20）
-import { lockAndSyncParents, lockShipmentsChildrenFirst } from "../shipments/lock-shipments";
+import { ShipmentsNotFoundError, lockAndSyncParents, lockShipmentsChildrenFirst } from "../shipments/lock-shipments";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../db/prisma";
 import { syncParentStatusFromChildren } from "../shipments/parent-status";
@@ -694,6 +694,15 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
         await lockAndSyncParents(tx, [...parentNosToSync], auth.companyId, syncParentStatusFromChildren);
       });
     } catch (e: any) {
+      /**
+       * ⚠️ 共用的批量锁函数查不到运单时抛的是 ShipmentsNotFoundError，
+       * 也要翻成 404（2026-08-29 补）—— 不翻的话会掉进下面的 500
+       * 「服务器繁忙」，员工根本不知道是哪一票单号不对。
+       */
+      if (e instanceof ShipmentsNotFoundError) {
+        fail(res, 404, "NOT_FOUND", e.message);
+        return;
+      }
       if (e instanceof LastmileShipmentNotFoundError) {
         fail(res, 404, "NOT_FOUND", e.message);
         return;
