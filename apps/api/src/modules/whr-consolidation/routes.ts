@@ -1,3 +1,5 @@
+import { DECIMAL_10_2, requireDecimal, requireUnitPrice } from "../core/decimal-guard";
+import { parseNumericStrict } from "../core/int-guard";
 import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
@@ -112,9 +114,17 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
       fail(res, 400, "BAD_REQUEST", `一个计划最多 ${MAX_CUSTOMERS_PER_PLAN} 个客户`);
       return;
     }
-    const totalVolumeM3 = body.totalVolumeM3 == null ? 68 : Number(body.totalVolumeM3);
-    if (!Number.isFinite(totalVolumeM3) || totalVolumeM3 <= 0) {
-      fail(res, 400, "BAD_REQUEST", "总方数必须大于 0");
+    /**
+     * ⚠️ 柜总方数（2026-08-29 收紧）：原来只判「大于 0」，**没有上限、不限小数位**。
+     * 库里是 `Decimal(10,2)`，所以：小数最多 2 位、整数最多 8 位。
+     * 上限一填大，全系统唯一那道「本柜已用方数不许超上限」的闸就废了。
+     * ⚠️ 这里卡的是**数据库能不能存**；老板要是想再加业务上限
+     *   （比如「一个柜最多 200 方」），那是另一回事，得他给数字。
+     */
+    const totalVolumeM3 = body.totalVolumeM3 == null ? 68 : parseNumericStrict(body.totalVolumeM3);
+    const volIssue = requireDecimal(totalVolumeM3, "总方数", DECIMAL_10_2);
+    if (volIssue) {
+      fail(res, 400, "BAD_REQUEST", volIssue);
       return;
     }
 
@@ -137,8 +147,11 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
         ["敏感货", c.unitPriceSensitive],
       ];
       for (const [label, val] of priceChecks) {
-        if (val == null || !Number.isFinite(Number(val)) || Number(val) <= 0) {
-          fail(res, 400, "BAD_REQUEST", `第 ${i + 1} 个客户${label}单价必须大于0`);
+        // ⚠️ 用 requireUnitPrice（2026-08-29）：原来只判「大于 0」，
+        // 而 0.001 也大于 0 —— 库里是 Decimal(10,2)，会被**存成 0.00**，这一柜白送。
+        const priceIssue = val == null ? `第 ${i + 1} 个客户${label}单价为必填` : requireUnitPrice(val, `第 ${i + 1} 个客户${label}单价`);
+        if (priceIssue) {
+          fail(res, 400, "BAD_REQUEST", priceIssue);
           return;
         }
       }
@@ -428,8 +441,10 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
     for (const [field, raw] of priceFields) {
       if (raw == null) continue;
       const n = Number(raw);
-      if (!Number.isFinite(n) || n <= 0) {
-        fail(res, 400, "BAD_REQUEST", "单价必须大于 0");
+      // 同上：0.001 会被 Decimal(10,2) 存成 0.00
+      const priceIssue = requireUnitPrice(raw, "单价");
+      if (priceIssue) {
+        fail(res, 400, "BAD_REQUEST", priceIssue);
         return;
       }
       updateData[field] = n;
@@ -492,8 +507,10 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
       ["敏感货", body.unitPriceSensitive],
     ];
     for (const [label, val] of priceChecks) {
-      if (val == null || !Number.isFinite(Number(val)) || Number(val) <= 0) {
-        fail(res, 400, "BAD_REQUEST", `${label}单价必须大于 0`);
+      // 同上：0.001 会被 Decimal(10,2) 存成 0.00
+      const priceIssue = val == null ? `${label}单价为必填` : requireUnitPrice(val, `${label}单价`);
+      if (priceIssue) {
+        fail(res, 400, "BAD_REQUEST", priceIssue);
         return;
       }
     }
@@ -836,8 +853,10 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
     for (const [field, raw] of rejectPriceFields) {
       if (raw == null) continue;
       const n = Number(raw);
-      if (!Number.isFinite(n) || n <= 0) {
-        fail(res, 400, "BAD_REQUEST", "单价必须大于 0");
+      // 同上：0.001 会被 Decimal(10,2) 存成 0.00
+      const priceIssue = requireUnitPrice(raw, "单价");
+      if (priceIssue) {
+        fail(res, 400, "BAD_REQUEST", priceIssue);
         return;
       }
       priceUpdate[field] = n;

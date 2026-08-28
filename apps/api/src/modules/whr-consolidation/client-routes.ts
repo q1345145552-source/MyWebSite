@@ -1,3 +1,4 @@
+import { DECIMAL_10_2, requireDecimal } from "../core/decimal-guard";
 import { requirePositiveInt, requireProductWithinInt } from "../core/int-guard";
 import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
@@ -286,10 +287,18 @@ export function registerWhrConsolidationClientRoutes(app: MinimalHttpApp): void 
         ["宽", it.widthCm],
         ["高", it.heightCm],
       ];
+      /**
+       * ⚠️ 长宽高（2026-08-29 收紧）：原来只判「大于 0」，**不限小数位**。
+       * 库里是 `Decimal(10,2)` —— 客户填 12.345，**存进去变成 12.35**，
+       * 而页面是按 12.345 算的方数。两个数对不上，
+       * 客户拿计算器照着单据上的尺寸算方数永远算不出单据上的方数。
+       * 复核实测：¥850/方 的柜子上这个差价是 **¥5.10**。
+       * 这条路按「方数 × 单价」收费，所以它是钱的问题，不是显示问题。
+       */
       for (const [label, val] of dims) {
-        const n = Number(val);
-        if (!Number.isFinite(n) || n <= 0) {
-          fail(res, 400, "BAD_REQUEST", `第 ${row} 行${label}(cm)必须大于 0，否则无法计算方数`);
+        const dimIssue = requireDecimal(val, `第 ${row} 行${label}(cm)`, DECIMAL_10_2);
+        if (dimIssue) {
+          fail(res, 400, "BAD_REQUEST", dimIssue);
           return;
         }
       }

@@ -1,3 +1,5 @@
+import { DECIMAL_10_2, requireDecimal } from "../core/decimal-guard";
+import { parseNumericStrict, requirePositiveInt, requireProductWithinInt } from "../core/int-guard";
 import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
@@ -52,6 +54,51 @@ const TASK_LOCKED_FOR_PRODUCT_DELETE = [
  *
  * 抽成纯函数是为了能测：路由那一层要连数据库，测不动。
  */
+
+/**
+ * 普通版集货产品行的数值校验 —— **三个入口共用一份**（2026-08-29 抽出来的）。
+ *
+ * 为什么抽：同一段校验在这个文件里有**三份拷贝**（建单、改单、管理员强改）。
+ * 第九轮复核报的时候我只改了建单那一份，另外两份原样留着 ——
+ * 这个项目里「三个入口只修了一个」已经发生过两次了（产品行校验那次也是）。
+ * 一份实现三处调用，才不会再漏。
+ *
+ * 原来的写法错在哪：
+ *   · 件数/装箱数量 `if (!x || x < 1)` —— **2.5 能过**，而库里是 `Int`
+ *   · 单件重量/长宽高 `=== undefined || === null` —— **只查填没填，不查填的是什么**，
+ *     负数、0、超大数、21 位小数全进得来；库里是 `Decimal(10,2)`，
+ *     多余小数位被静默抹掉 → 页面算的方数和库里存的尺寸对不上
+ *     （复核实测 ¥850/方 差 ¥5.10）。这条路的方数是要拿去算钱的。
+ *
+ * @returns 有问题时返回给人看的中文提示；合格返回 null。
+ */
+function validateConsolidationProductRow(p: any, index: number): string | null {
+  const label = `产品行${index + 1}`;
+  const pkgIssue = requirePositiveInt(parseNumericStrict(p.packageCount), `${label}的件数`);
+  if (pkgIssue) return pkgIssue;
+  const qpbIssue = requirePositiveInt(parseNumericStrict(p.quantityPerBox), `${label}的装箱数量`);
+  if (qpbIssue) return qpbIssue;
+  // totalQuantity = 件数 × 装箱数量，也是 Int，两个因子各自合法乘起来照样能爆
+  const totalIssue = requireProductWithinInt(
+    parseNumericStrict(p.packageCount),
+    parseNumericStrict(p.quantityPerBox),
+    `${label}的总数量`,
+  );
+  if (totalIssue) return totalIssue;
+  for (const [field, name] of [
+    ["unitWeightKg", "单件重量(kg)"],
+    ["lengthCm", "长(cm)"],
+    ["widthCm", "宽(cm)"],
+    ["heightCm", "高(cm)"],
+  ] as Array<[string, string]>) {
+    const val = p[field];
+    if (val === undefined || val === null) return `${label}的${name}为必填`;
+    const issue = requireDecimal(val, `${label}的${name}`, DECIMAL_10_2);
+    if (issue) return issue;
+  }
+  return null;
+}
+
 export function checkConsolidationDeletable(input: {
   paymentStatus: string;
   taskStatus: string;
@@ -442,6 +489,23 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       return;
     }
 
+    /**
+     * ⚠️ 产品行校验挪到**碰数据库之前**（2026-08-29），跟别的入口一个规矩：
+     * 参数本来就不合法的请求不该先查一轮库；而且自测想验它就得连库。
+     */
+    // 校验产品行必填字段
+    for (let i = 0; i < body.products.length; i++) {
+      const p = body.products[i];
+      if (!p.productName?.trim()) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的产品名为必填`); return; }
+      {
+        const issue = validateConsolidationProductRow(p, i);
+        if (issue) { fail(res, 400, "BAD_REQUEST", issue); return; }
+      }
+      if (!p.material?.trim()) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的材质为必填`); return; }
+      if (!p.cargoValue?.trim()) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的货值为必填`); return; }
+      if (p.cargoType && !CARGO_TYPES.includes(p.cargoType)) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的货型不合法`); return; }
+    }
+
     // 校验任务
     const task = await prisma.consolidationTask.findFirst({
       // ⚠️ 必须带 companyId（2026-08-27 补）：原来只按 id 查，
@@ -456,21 +520,6 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
     if (task.status !== "collecting") {
       fail(res, 400, "BAD_REQUEST", "只有收集中状态的任务才能添加预报单");
       return;
-    }
-
-    // 校验产品行必填字段
-    for (let i = 0; i < body.products.length; i++) {
-      const p = body.products[i];
-      if (!p.productName?.trim()) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的产品名为必填`); return; }
-      if (!p.packageCount || p.packageCount < 1) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的件数必须大于0`); return; }
-      if (!p.quantityPerBox || p.quantityPerBox < 1) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的装箱数量必须大于0`); return; }
-      if (p.unitWeightKg === undefined || p.unitWeightKg === null) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的单件重量为必填`); return; }
-      if (p.lengthCm === undefined || p.lengthCm === null) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的长为必填`); return; }
-      if (p.widthCm === undefined || p.widthCm === null) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的宽为必填`); return; }
-      if (p.heightCm === undefined || p.heightCm === null) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的高为必填`); return; }
-      if (!p.material?.trim()) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的材质为必填`); return; }
-      if (!p.cargoValue?.trim()) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的货值为必填`); return; }
-      if (p.cargoType && !CARGO_TYPES.includes(p.cargoType)) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的货型不合法`); return; }
     }
 
     const trackingNo = await generateTrackingNo();
@@ -627,12 +676,11 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       for (let i = 0; i < body.products.length; i++) {
         const p = body.products[i];
         if (!p.productName?.trim()) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的产品名为必填`); return; }
-        if (!p.packageCount || p.packageCount < 1) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的件数必须大于0`); return; }
-        if (!p.quantityPerBox || p.quantityPerBox < 1) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的装箱数量必须大于0`); return; }
-        if (p.unitWeightKg === undefined || p.unitWeightKg === null) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的单件重量为必填`); return; }
-        if (p.lengthCm === undefined || p.lengthCm === null) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的长为必填`); return; }
-        if (p.widthCm === undefined || p.widthCm === null) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的宽为必填`); return; }
-        if (p.heightCm === undefined || p.heightCm === null) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的高为必填`); return; }
+        {
+          // 三个入口共用同一份校验，见 validateConsolidationProductRow
+          const issue = validateConsolidationProductRow(p, i);
+          if (issue) { fail(res, 400, "BAD_REQUEST", issue); return; }
+        }
         if (!p.material?.trim()) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的材质为必填`); return; }
         if (!p.cargoValue?.trim()) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的货值为必填`); return; }
         if (p.cargoType && !CARGO_TYPES.includes(p.cargoType)) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的货型不合法`); return; }
@@ -1984,12 +2032,11 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       for (let i = 0; i < body.products.length; i++) {
         const p = body.products[i];
         if (!p.productName?.trim()) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的产品名为必填`); return; }
-        if (!p.packageCount || p.packageCount < 1) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的件数必须大于0`); return; }
-        if (!p.quantityPerBox || p.quantityPerBox < 1) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的装箱数量必须大于0`); return; }
-        if (p.unitWeightKg === undefined || p.unitWeightKg === null) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的单件重量为必填`); return; }
-        if (p.lengthCm === undefined || p.lengthCm === null) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的长为必填`); return; }
-        if (p.widthCm === undefined || p.widthCm === null) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的宽为必填`); return; }
-        if (p.heightCm === undefined || p.heightCm === null) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的高为必填`); return; }
+        {
+          // 三个入口共用同一份校验，见 validateConsolidationProductRow
+          const issue = validateConsolidationProductRow(p, i);
+          if (issue) { fail(res, 400, "BAD_REQUEST", issue); return; }
+        }
         if (!p.material?.trim()) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的材质为必填`); return; }
         if (!p.cargoValue?.trim()) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的货值为必填`); return; }
         if (p.cargoType && !CARGO_TYPES.includes(p.cargoType)) { fail(res, 400, "BAD_REQUEST", `产品行${i + 1}的货型不合法`); return; }

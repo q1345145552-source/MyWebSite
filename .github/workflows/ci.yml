@@ -56,6 +56,14 @@ jobs:
       - name: Test login throttle
         run: npm run test:login-throttle
 
+      # 算钱数值校验（2026-08-29 加，第九轮复核确认的 5 组）。
+      # 这一批的共同点是**不会报错、只会安安静静算错钱**：
+      # 单价 0.001 被 Decimal(10,2) 存成 0.00（这一柜白送）、
+      # 尺寸多一位小数导致客户对不上账（实测 ¥850/方 差 ¥5.10）、
+      # 普通版集货 2.5 件能进 Int 列。
+      - name: Test money guards
+        run: npm run test:money-guards
+
       # 产品行校验（2026-08-29 加）。
       # 复核真调接口测出来：每箱填 0/-3/1.5 全部 200 放行，
       # 而且前端三处 `Number(...) || 1` 会把「箱数没填」悄悄变成 1 箱 ——

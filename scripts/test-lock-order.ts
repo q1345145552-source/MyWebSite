@@ -224,11 +224,18 @@ console.log("加锁顺序");
  * ⚠️ 往这张表里加东西前先问一句：这个事务有没有「读一个值 → 拿它做决定 → 再写」？
  * 有的话就必须加锁，不能放进白名单。
  */
+/**
+ * ⚠️ **按「文件 + 路由」匹配，不许写行号**（2026-08-29 改）。
+ * 上一版写的是 `whr-consolidation/routes.ts:161`，我在同文件上面加了两行 import，
+ * 行号漂到 174，白名单当场失效、测试变红。
+ * 同一个坑我刚在 WRITE_WITHOUT_LOCK_OK 上修过一次，这张表漏了。
+ * 按路由匹配：代码挪位置不受影响；真换了一处地方漏锁，路由对不上照样会红。
+ */
 const NO_LOCK_NEEDED: Array<[string, string]> = [
   ["client-addresses/routes.ts", "新建收货地址：纯插入一行新数据，不依赖任何已有状态"],
-  ["whr-consolidation/routes.ts:161", "新建拼柜计划：纯插入，计划这时候还不存在"],
+  ["/admin/whr-consolidation/plans", "新建拼柜计划：纯插入，计划这时候还不存在"],
   [
-    "whr-consolidation/routes.ts:1110",
+    "/admin/whr-consolidation/prealerts/item-cargo-type",
     "改货型：只改这一行的货型 + 写一条日志。用户 2026-08-15 拍板「全部手动报价」，" +
       "这条路故意不重算金额，也不动方数件数，没有共享的合计要护",
   ],
@@ -274,7 +281,7 @@ check("1) 每个会写数据的事务，第一条写语句都排在第一把锁�
    */
   const bad = allBlocks
     .filter((b) => b.firstLockLine === null || b.firstWriteLine! < b.firstLockLine)
-    .filter((b) => !NO_LOCK_NEEDED.some(([key]) => `${rel(b.file)}:${b.line}`.includes(key)))
+    .filter((b) => !NO_LOCK_NEEDED.some(([key]) => `${rel(b.file)}:${b.line} ${b.route}`.includes(key)))
     .filter((b) => !KNOWN_UNFIXED.includes(`${rel(b.file)}:${b.line}`))
     .map((b) => `${rel(b.file)}:${b.line} ${b.route}（首次写 ${b.firstWriteLine}，首把锁 ${b.firstLockLine ?? "无"}）`);
   assert.deepEqual(bad, [], "下面这些事务在拿到锁之前就写数据了，锁等于白加：\n     " + bad.join("\n     "));
