@@ -56,6 +56,13 @@ jobs:
       - name: Test batch order parser
         run: npm run test:batch-import
 
+      # 整柜拆柜派送清单导出（2026-08-28 加）。
+      # 老板实测「多尺寸的单子长宽高三格全空白」，而这个模块一个测试都没有。
+      # 一票货里有多个不同尺寸时，后端给的是「60/50」这种字符串，
+      # 前端原来只认数字、字符串一律丢掉 —— 五项里第 2 项就是盯这个的。
+      - name: Test lastmile dispatch export
+        run: npm run test:lastmile-export
+
       # AI 答复的数字校验（2026-08-28 加）。
       # 覆盖三件事：模型润色时改了数字要被拦下、「今天/本月」按北京时间算、
       # 时间窗按下单时间而不是最后更新时间。

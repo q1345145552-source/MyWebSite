@@ -74,7 +74,7 @@ export type LastmileExportData = {
   generatedAt: string;
 };
 
-type TemplateLine = {
+export type TemplateLine = {
   clientId: string;
   clientName: string;
   trackingNo: string;
@@ -84,9 +84,16 @@ type TemplateLine = {
   volumeM3: number | null;
   /** null = 没填重量，同上 */
   weightKg: number | null;
-  lengthCm: number | null;
-  widthCm: number | null;
-  heightCm: number | null;
+  /**
+   * ⚠️ 可能是字符串。一票货里有好几个不同尺寸时，后端给的是「60/50」这种并排写法
+   * （orders/routes.ts:1657）。原来这里只收数字、字符串一律丢成 null，
+   * 结果**多尺寸的整柜导出，长宽高三格全是空白**（2026-08-28 老板实测；单尺寸正常）。
+   * 现在原样留着，写进 Excel 时数字走数字格、字符串走文本格。
+   * 长宽高不参与合计（lineTotal 从没拿这三个 key 调用过），所以不会影响任何求和。
+   */
+  lengthCm: number | string | null;
+  widthCm: number | string | null;
+  heightCm: number | string | null;
   receiverName: string;
   receiverPhone: string;
   receiverAddress: string;
@@ -223,6 +230,21 @@ function setOptionalNumberCell(sheetXml: string, ref: string, value: number | nu
   return setNumberCell(sheetXml, ref, value);
 }
 
+/**
+ * 长/宽/高专用：一票多尺寸时值是「60/50」这种字符串，
+ * 塞进数字格会把 xlsx 写坏，所以字符串走文本格。null 就留空。
+ */
+function setDimensionCell(
+  sheetXml: string,
+  ref: string,
+  value: number | string | null | undefined,
+  strings: SharedStringsEditor,
+): string {
+  if (value == null || value === "") return sheetXml;
+  if (typeof value === "number") return Number.isFinite(value) ? setNumberCell(sheetXml, ref, value) : sheetXml;
+  return setTextCell(sheetXml, ref, value, strings);
+}
+
 function setFormulaCell(sheetXml: string, ref: string, formula: string, cachedValue: number): string {
   const prefix = xmlPrefix(sheetXml, "c");
   return replaceCellXml(sheetXml, ref, "n", `<${prefix}f>${escapeXml(formula)}</${prefix}f><${prefix}v>${Number.isFinite(cachedValue) ? String(cachedValue) : "0"}</${prefix}v>`);
@@ -254,14 +276,24 @@ function round(value: number, digits: number): number {
   return Math.round((value + Number.EPSILON) * factor) / factor;
 }
 
-function expandTemplateLines(data: LastmileExportData): TemplateLine[] {
+/** 导出给自测脚本用（scripts/test-lastmile-export.ts）—— 这一层是纯计算，不碰网络不碰 DOM */
+export function expandTemplateLines(data: LastmileExportData): TemplateLine[] {
   const lines: TemplateLine[] = [];
   for (const customer of data.customers) {
     for (const shipment of customer.shipments) {
-      // 只认数字：后端遇到「一票多个不同尺寸」会给 "60/50" 这种字符串，
-      // 打印表格那三个格子是数字格，塞字符串会坏，所以那种情况仍然留空。
-      const numOrNull = (v: number | string | null | undefined): number | null =>
-        typeof v === "number" ? v : null;
+      /**
+       * ⚠️ 2026-08-28 改：原来「只认数字」，后端遇到「一票多个不同尺寸」给的是
+       * "60/50" 这种字符串，被整个丢成 null —— 多尺寸的单子长宽高三格全空白。
+       * 现在原样留着，写单元格时再按类型分流（数字走数字格、字符串走文本格）。
+       */
+      const dimOrNull = (v: number | string | null | undefined): number | string | null => {
+        if (typeof v === "number") return Number.isFinite(v) ? v : null;
+        if (typeof v === "string") {
+          const trimmed = v.trim();
+          return trimmed ? trimmed : null;
+        }
+        return null;
+      };
       /**
        * ⚠️ 这个标记很重要：下面算方数时，「有长宽高就按尺寸重算」这条路
        * **只能给真实产品行走**。装柜这一票的方数是后端按**实际装柜体积**给的，
@@ -272,9 +304,9 @@ function expandTemplateLines(data: LastmileExportData): TemplateLine[] {
       const products = shipment.products.length > 0 ? shipment.products : [{
         itemName: shipment.itemName,
         packageCount: shipment.packageCount,
-        lengthCm: numOrNull(shipment.lengthCm),
-        widthCm: numOrNull(shipment.widthCm),
-        heightCm: numOrNull(shipment.heightCm),
+        lengthCm: dimOrNull(shipment.lengthCm),
+        widthCm: dimOrNull(shipment.widthCm),
+        heightCm: dimOrNull(shipment.heightCm),
         // 运单 weightKg 是整票总重；只有真实产品的 weightKg 才是单箱重。
         weightKg: null,
       }];
@@ -283,8 +315,13 @@ function expandTemplateLines(data: LastmileExportData): TemplateLine[] {
         const share = Number(product.packageCount || 0) / packageTotal;
         // ⚠️ shipment.volumeM3 可能是 null（这票货没填）。`null * share` 在 JS 里等于 0，
         // 直接算就会把「没填」变成「0 方」，所以必须先判空。重量同理。
-        const volume = !usingFallback && product.lengthCm && product.widthCm && product.heightCm
-          ? Number(product.packageCount || 0) * product.lengthCm * product.widthCm * product.heightCm / 1_000_000
+        // 尺寸现在可能是「60/50」这种字符串，拿它做乘法会得到 NaN —— 只有三个都是数字才重算
+        const dimsAreNumbers =
+          typeof product.lengthCm === "number" &&
+          typeof product.widthCm === "number" &&
+          typeof product.heightCm === "number";
+        const volume = !usingFallback && dimsAreNumbers && product.lengthCm && product.widthCm && product.heightCm
+          ? Number(product.packageCount || 0) * Number(product.lengthCm) * Number(product.widthCm) * Number(product.heightCm) / 1_000_000
           : (shipment.volumeM3 == null ? null : Number(shipment.volumeM3) * share);
         const weight = product.weightKg == null
           ? (shipment.weightKg == null ? null : Number(shipment.weightKg) * share)
@@ -347,7 +384,8 @@ function optionalLineTotal(lines: TemplateLine[], key: "volumeM3" | "weightKg"):
   return lineTotal(lines, key);
 }
 
-function lineTotal(lines: TemplateLine[], key: "packageCount" | "volumeM3" | "weightKg" | "lengthCm" | "widthCm" | "heightCm"): number {
+/** ⚠️ 只用于会求和的列。长宽高**不在这里** —— 对尺寸求和是没意义的数，而且它可能是「60/50」这种字符串 */
+function lineTotal(lines: TemplateLine[], key: "packageCount" | "volumeM3" | "weightKg"): number {
   return round(
     lines.reduce((sum, line) => sum + Number(line[key] || 0), 0),
     key === "volumeM3" ? 6 : 2,
@@ -381,9 +419,10 @@ function patchInternalTemplate(
     xml = setNumberCell(xml, `D${row}`, line.packageCount);
     xml = setOptionalNumberCell(xml, `E${row}`, line.volumeM3);
     xml = setOptionalNumberCell(xml, `F${row}`, line.weightKg);
-    if (line.lengthCm != null) xml = setNumberCell(xml, `G${row}`, line.lengthCm);
-    if (line.widthCm != null) xml = setNumberCell(xml, `H${row}`, line.widthCm);
-    if (line.heightCm != null) xml = setNumberCell(xml, `I${row}`, line.heightCm);
+    // 数字走数字格，「60/50」这种多尺寸走文本格（塞进数字格会把文件写坏）
+    xml = setDimensionCell(xml, `G${row}`, line.lengthCm, strings);
+    xml = setDimensionCell(xml, `H${row}`, line.widthCm, strings);
+    xml = setDimensionCell(xml, `I${row}`, line.heightCm, strings);
     xml = setTextCell(xml, `J${row}`, line.receiverPhone, strings);
     xml = setTextCell(xml, `L${row}`, line.receiverAddress, strings);
     const mark = line.clientId && line.clientId !== "未关联客户" ? `唛头：${line.clientId}` : "";
