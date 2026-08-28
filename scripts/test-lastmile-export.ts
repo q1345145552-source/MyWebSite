@@ -190,6 +190,89 @@ function sharedText(shared: string, index: number): string {
   return items[index] ?? "";
 }
 
+
+// ══════════════════════════════════════════════════════════════════════
+// 第 10~13 项：复核独立变异实测出来的两块**没有任何测试**的地方
+//   · 超过 25 行会走「克隆工作表」那条路 —— 破坏它，9 项全绿
+//   · 客户签收模板（中英泰那张）整条路 —— 破坏它，9 项全绿
+// ══════════════════════════════════════════════════════════════════════
+
+const CUSTOMER_TEMPLATE = path.join(
+  __dirname, "..", "apps", "web", "public", "templates", "lastmile", "customer-receipt-template.xlsx",
+);
+
+/**
+ * ⚠️ 客户签收模板的 XML 带 `x:` 前缀（`<x:c r="B6">`），整柜模板不带。
+ * 生产代码用 xmlPrefix() 处理了这个差异，测试的正则也必须一起兼容 ——
+ * 写这两项时我第一版没加，抠出来全是「找不到单元格」，差点当成 bug 报出去。
+ */
+function cellXmlAnyNs(xml: string, ref: string): string {
+  const m = xml.match(
+    new RegExp(`<(?:\\w+:)?c\\b[^>]*?\\br="${ref}"[^>]*?(?:/>|>[\\s\\S]*?</(?:\\w+:)?c>)`),
+  );
+  assert.ok(m, `找不到单元格 ${ref}`);
+  return m[0];
+}
+
+/**
+ * ⚠️ 必须把**每一个** `<si>` 都数上，哪怕它里面是富文本（多个 `<r><t>`）或者是空的。
+ * 第一版写成「<si> 后面紧跟 <t>」的整块匹配，富文本那几条被跳过 → 下标整体错位，
+ * 抠出来的是别的格子的文字（实测：想读运单号，读到的是地址）。
+ * 下标错位是最阴的一种假绿：断言看起来在比对，比的却是另一格。
+ */
+function sharedTextAnyNs(shared: string, index: number): string {
+  const blocks = [...shared.matchAll(/<(?:\w+:)?si\b[^>]*>([\s\S]*?)<\/(?:\w+:)?si>/g)].map((m) => m[1]);
+  const block = blocks[index];
+  if (block === undefined) return "";
+  // 富文本会被拆成多段 <t>，拼起来才是客户看到的整句
+  return [...block.matchAll(/<(?:\w+:)?t[^>]*>([\s\S]*?)<\/(?:\w+:)?t>/g)].map((m) => m[1]).join("");
+}
+
+/** 从某个格子里读出「客户在 Excel 里看到的东西」——数字格读数，文本格查共享串 */
+function cellValue(sheet: string, shared: string, ref: string): string {
+  const cell = cellXmlAnyNs(sheet, ref);
+  const v = cell.match(/<(?:\w+:)?v>([\s\S]*?)<\/(?:\w+:)?v>/)?.[1];
+  if (v === undefined) return "";
+  return /t="s"/.test(cell) ? sharedTextAnyNs(shared, Number(v)) : v;
+}
+
+/**
+ * 造 n 票货。
+ * ⚠️ 每一票的件数、方数、重量都**互不相同**（件数 = i+1，方数/重量按下标递增）——
+ * 拿相同的数造数据，序号错位、页与页串行、合计漏加这些毛病一个都测不出来。
+ */
+function buildDataWithLines(n: number, over: Partial<Record<string, unknown>> = {}): LastmileExportData {
+  const data = buildData({ lengthCm: 60, widthCm: 40, heightCm: 30 }) as any;
+  const proto = data.customers[0].shipments[0];
+  data.customers[0].shipments = Array.from({ length: n }, (_, i) => ({
+    ...proto,
+    lastmileOrderId: `lm_${i + 1}`,
+    trackingNo: `SZ${String(i + 1).padStart(9, "0")}`,
+    itemName: `货品${i + 1}`,
+    packageCount: i + 1,
+    volumeM3: Number((0.1 * (i + 1)).toFixed(3)),
+    weightKg: 10 * (i + 1),
+  }));
+  Object.assign(data, over);
+  return data as LastmileExportData;
+}
+
+async function renderZip(data: LastmileExportData, templatePath: string) {
+  const bytes = await buildLastmileTemplateWorkbook(data, fs.readFileSync(templatePath));
+  const zip = await JSZip.loadAsync(bytes);
+  const sheetOf = async (name: string): Promise<string> => {
+    const f = zip.file(`xl/worksheets/${name}.xml`);
+    assert.ok(f, `解压后找不到 ${name}.xml，工作表只有：${Object.keys(zip.files).join(", ")}`);
+    return f!.async("string");
+  };
+  const workbook = await zip.file("xl/workbook.xml")!.async("string");
+  const sharedFile = zip.file("xl/sharedStrings.xml");
+  const shared = sharedFile ? await sharedFile.async("string") : "";
+  const sheetNames = [...workbook.matchAll(/<(?:\w+:)?sheet[^>]*\bname="([^"]*)"/g)].map((m) => m[1]);
+  const sheetFiles = Object.keys(zip.files).filter((n) => /^xl\/worksheets\/sheet\d+\.xml$/.test(n));
+  return { zip, sheetOf, shared, sheetNames, sheetFiles };
+}
+
 async function main(): Promise<void> {
   await checkAsync("6) 真模板：单一尺寸写成**数字格**，值就是那个数", async () => {
     const { sheet } = await renderRealWorkbook({ lengthCm: 60, widthCm: 40, heightCm: 30 });
@@ -243,15 +326,129 @@ async function main(): Promise<void> {
     assert.ok(cellXml(sheet, "F35").includes("SUM(F10:F34)"), "重量合计公式丢了");
     assert.ok(cellXml(sheet, "E35").includes("<v>1.928</v>"), "方数合计被尺寸重算改掉了");
   });
+
+  await checkAsync("10) 超过 25 行：会克隆出第二张工作表，序号接着排、一票不丢", async () => {
+    /**
+     * 复核独立变异实测：把「超过 25 行分页」那条路破坏掉，**9 项照样全绿** ——
+     * 之前所有用例都只有 1 票货，一次都没走到克隆那条路上。
+     * 整柜模板一页只有 25 个明细行（第 10~34 行），第 26 票起必须开新页。
+     */
+    const { sheetOf, shared, sheetNames, sheetFiles } = await renderZip(
+      buildDataWithLines(26), TEMPLATE,
+    );
+
+    assert.equal(sheetFiles.length, 2, `26 票货应该分成 2 张工作表，实际 ${sheetFiles.length} 张`);
+    assert.equal(sheetNames.length, 2, `workbook.xml 里应该登记 2 张表，实际：${sheetNames.join(" | ")}`);
+    assert.ok(
+      sheetNames[1].endsWith("-2"),
+      `第二张表名没带页码后缀，Excel 里会看不出这是第 2 页：${sheetNames[1]}`,
+    );
+
+    const page1 = await sheetOf("sheet1");
+    const page2 = await sheetOf("sheet2");
+
+    // 第一页：25 行，序号 1..25，运单号首尾都要对上
+    assert.equal(cellValue(page1, shared, "A10"), "1", "第一页第一行序号不是 1");
+    assert.equal(cellValue(page1, shared, "A34"), "25", "第一页最后一行序号不是 25");
+    assert.equal(cellValue(page1, shared, "B10"), "SZ000000001", "第一页第一票运单号不对");
+    assert.equal(cellValue(page1, shared, "B34"), "SZ000000025", "第一页最后一票运单号不对");
+
+    // 第二页：序号必须**接着**排（26），不能从 1 重新开始
+    assert.equal(
+      cellValue(page2, shared, "A10"),
+      "26",
+      "第二页序号从头开始了 —— 客户会看到两个「1 号」",
+    );
+    assert.equal(cellValue(page2, shared, "B10"), "SZ000000026", "第 26 票没落到第二页第一行");
+
+    // 第二页多余的行必须是空的，不能残留模板里的样板数据
+    assert.ok(
+      !/<(?:\w+:)?v>/.test(cellXmlAnyNs(page2, "A11")),
+      `第二页第 11 行还留着值，会被当成一票不存在的货：${cellXmlAnyNs(page2, "A11")}`,
+    );
+  });
+
+  await checkAsync("11) 正好 25 行时不许多开一页（边界）", async () => {
+    // ⚠️ 只测 26 会漏掉「25 也开了第二页」这种错法：客户会拿到一张全空的第 2 页
+    const { sheetFiles } = await renderZip(buildDataWithLines(25), TEMPLATE);
+    assert.equal(sheetFiles.length, 1, `25 票货应该只有 1 张工作表，实际 ${sheetFiles.length} 张`);
+  });
+
+  await checkAsync("12) 客户签收模板：中文页的明细、序号和三个合计都要对", async () => {
+    /**
+     * 复核独立变异实测：把客户签收模板那条路破坏掉，**9 项照样全绿** ——
+     * 前 9 项走的全是整柜模板（scope: "container"），客户这张一次都没跑过。
+     * 这张是**给客户签字的纸质单据**，印错了是拿着错单去要签名。
+     */
+    const data = buildDataWithLines(3, {
+      scope: "customer",
+      deliveryDate: "2026-08-29",
+      driverName: "王五",
+      phoneNumber: "0899999999",
+    });
+    const { sheetOf, shared } = await renderZip(data, CUSTOMER_TEMPLATE);
+    const cn = await sheetOf("sheet1");
+
+    // 三票货的件数是 1 / 2 / 3，方数 0.1 / 0.2 / 0.3，重量 10 / 20 / 30 —— 互不相同
+    assert.equal(cellValue(cn, shared, "B6"), "1", "第 1 行序号不对");
+    assert.equal(cellValue(cn, shared, "B8"), "3", "第 3 行序号不对");
+    assert.equal(cellValue(cn, shared, "C6"), "SZ000000001", "第 1 行运单号不对");
+    assert.equal(cellValue(cn, shared, "D6"), "货品1", "第 1 行品名不对");
+    assert.equal(cellValue(cn, shared, "E6"), "1", "第 1 行件数不对");
+    assert.equal(cellValue(cn, shared, "E8"), "3", "第 3 行件数不对");
+
+    // 合计：件数 1+2+3=6，方数 0.1+0.2+0.3=0.6，重量 10+20+30=60
+    assert.equal(cellValue(cn, shared, "E16"), "6", "件数合计不对");
+    assert.equal(cellValue(cn, shared, "F16"), "0.6", "方数合计不对");
+    assert.equal(cellValue(cn, shared, "G16"), "60", "重量合计不对");
+    for (const ref of ["E16", "F16", "G16"]) {
+      assert.ok(
+        /<(?:\w+:)?f>SUM\(/.test(cellXmlAnyNs(cn, ref)),
+        `${ref} 的 SUM 公式没了，客户在 Excel 里改一行数字合计就不会跟着变`,
+      );
+    }
+
+    // 司机和日期印在单子上（客户是照着这个联系人的）
+    assert.equal(cellValue(cn, shared, "G18"), "2026-08-29", "派送日期没印上");
+    assert.ok(cellValue(cn, shared, "G19").includes("王五"), "司机信息没印上");
+  });
+
+  await checkAsync("13) 客户签收模板：泰文页要清掉预置的 1..20 序号", async () => {
+    /**
+     * 泰文模板 A8:A27 预置了 1..20。只填 3 票货时，剩下 17 行如果不清，
+     * 客户手上那张纸就有 20 个序号、只有 3 行有内容 ——
+     * 看起来像「还有 17 件货没写上」。生产代码有这段清理（clearRange），
+     * 但一直没有测试守着。
+     */
+    const data = buildDataWithLines(3, {
+      scope: "customer",
+      deliveryDate: "2026-08-29",
+      driverName: "王五",
+      phoneNumber: "0899999999",
+    });
+    const { sheetOf, shared } = await renderZip(data, CUSTOMER_TEMPLATE);
+    const th = await sheetOf("sheet2");
+
+    // 有货的那三行要有内容
+    assert.notEqual(cellValue(th, shared, "A8"), "", "泰文页第 1 行是空的");
+    // 第 4 行往后（A11 起）必须全空 —— 预置序号被清掉了
+    for (const ref of ["A11", "A15", "A27"]) {
+      assert.equal(
+        cellValue(th, shared, ref),
+        "",
+        `泰文页 ${ref} 还留着预置序号，客户会以为还有没写上的货`,
+      );
+    }
+  });
 }
 
 main()
   .then(() => {
     if (failures.length > 0) {
-      console.error(`\n${failures.length}/9 项不通过：${failures.join("；")}`);
+      console.error(`\n${failures.length}/13 项不通过：${failures.join("；")}`);
       process.exit(1);
     }
-    console.log("整柜拆柜派送清单导出：9 项全部通过");
+    console.log("整柜拆柜派送清单导出：13 项全部通过");
   })
   .catch((error) => {
     console.error(error);
