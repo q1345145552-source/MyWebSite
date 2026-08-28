@@ -432,6 +432,13 @@ export function registerWhrConsolidationClientRoutes(app: MinimalHttpApp): void 
     }
 
     let result: { totalVolumeM3: number; totalPackages: number };
+    /**
+     * 锁内算出来的「本柜已用方数」。返回给前端的必须是这个，
+     * 不能用事务外那份 planUsedAfter —— 那是进门时的快照，
+     * 别的客户在这中间提交过的话，页面上显示的方数就是旧的，
+     * 客户会以为还有空间（复核 2026-08-28 指出）。
+     */
+    let lockedPlanUsedVolume: number | null = null;
     try {
       result = await prisma.$transaction(async (tx) => {
         /**
@@ -454,6 +461,35 @@ export function registerWhrConsolidationClientRoutes(app: MinimalHttpApp): void 
         await lockPrealertExpecting(tx, prealert.id, EDITABLE_PREALERT_STATUS, "货品修改");
 
         /**
+         * ⚠️ 「保留原有图片」的白名单要在**锁里**再核一遍（2026-08-29 补）。
+         * 上面那份 existingPaths 是进门时读的。两个人先后改同一张预报单时，
+         * 后一个人可能回传一个**前一个人刚刚拿掉**的图片路径 ——
+         * 于是这张单又引用上了它，而前一个人的清理正准备把那个文件删掉，
+         * 结果是数据库记着路径、磁盘上文件没了，客户看到裂图且找不回。
+         * 锁后重查一遍当前还挂着哪些图，回传的路径必须在里面。
+         */
+        const lockedItems = await tx.whrConsolidationPrealertItem.findMany({
+          where: { prealertId: prealert.id },
+          select: { productImageBase64: true },
+        });
+        const lockedPaths = new Set(
+          lockedItems
+            .map((it: { productImageBase64: string | null }) => it.productImageBase64)
+            .filter((v: string | null): v is string => Boolean(v)),
+        );
+        for (const it of itemData) {
+          const keep = it.productImageBase64;
+          // 本次新存的图不在 lockedPaths 里（它还没写进库），只校验「声称要保留的旧图」
+          if (keep && existingPaths.has(keep) && !lockedPaths.has(keep)) {
+            throw new BusinessError(
+              "这张预报单的图片刚刚被改过，你保留的那张已经不在了，本次修改没有保存，请刷新后重试",
+              409,
+              "VALIDATION_ERROR",
+            );
+          }
+        }
+
+        /**
          * 方数上限也必须在锁里重算一遍：上面那次是拿事务外的快照算的。
          * 只有本柜设了上限（planTotal > 0）才拦，跟事务外那道口径一致。
          */
@@ -472,6 +508,7 @@ export function registerWhrConsolidationClientRoutes(app: MinimalHttpApp): void 
           }
           const freshOtherCustomers = await sumPlanUsedVolume(plan.id, tx, prealert.customerId);
           const freshUsedAfter = round3(freshOtherCustomers + freshMyOther + myNewVolume);
+          lockedPlanUsedVolume = freshUsedAfter;
           if (freshUsedAfter > planTotal) {
             throw new BusinessError(
               `本柜已用 ${round3(freshOtherCustomers + freshMyOther)} 方，` +
@@ -534,7 +571,8 @@ export function registerWhrConsolidationClientRoutes(app: MinimalHttpApp): void 
       totalVolumeM3: result.totalVolumeM3,
       totalPackages: result.totalPackages,
       itemCount: itemData.length,
-      planUsedVolumeM3: planUsedAfter,
+      // ⚠️ 优先用锁内算的那个数；只有本柜没设上限（planTotal 为 0）时锁内不会算，才退回快照
+      planUsedVolumeM3: lockedPlanUsedVolume ?? planUsedAfter,
       planTotalVolumeM3: planTotal,
     });
   });

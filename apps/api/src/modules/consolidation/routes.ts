@@ -524,35 +524,54 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       }
     }
 
-    const prealert = await prisma.consolidationPrealert.create({
-      data: {
-        taskId: body.taskId,
-        companyId: auth.companyId,
-        clientId: auth.userId,
-        trackingNo,
-        expressNo: body.expressNo?.trim() || null,
-        mark: body.mark.trim(),
-        status: "pending",
-        products: {
-          create: productData.map((pd, idx) => {
-            const img = imageDataList.find((im) => im.idx === idx);
-            return {
-              ...pd,
-              productImageFileName: img?.fileName || null,
-              productImageMime: img?.mime || null,
-              productImageBase64: img?.base64 || null,
-            };
-          }),
-        },
-      },
-    });
-
     /**
-     * ⚠️ 同上：合计在握着任务锁的事务里重算，别用事务外那份可能已经过时的清单。
+     * ⚠️ 插入必须**在锁里面**（2026-08-29 修）。
+     * 上一版是「事务外插入 → 再开事务锁任务重算合计」——
+     * 上面那道 `task.status !== "collecting"` 也在事务外，
+     * 于是任务已经满柜确认、已报价、甚至已付款时，新预报单照样插得进去：
+     * 客户看到的账单跟实际货物对不上，而报价那一步早就算完了。
+     *
+     * 现在：锁任务 → 重查状态 → 确认还在收货中 → 才插入 → 同一个事务里重算合计。
      */
-    await prisma.$transaction(async (tx) => {
+    const prealert = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM consolidation_tasks WHERE id = ${body.taskId} FOR UPDATE`;
+      const fresh = await tx.consolidationTask.findUnique({
+        where: { id: body.taskId },
+        select: { status: true },
+      });
+      if (!fresh) throw new BusinessError("集货任务不存在", 404, "NOT_FOUND");
+      if (fresh.status !== "collecting") {
+        throw new BusinessError(
+          "这个集货任务刚刚已经不在收货中了（可能已满柜或已报价），预报单没有提交，请刷新后再看",
+          409,
+          "VALIDATION_ERROR",
+        );
+      }
+
+      const created = await tx.consolidationPrealert.create({
+        data: {
+          taskId: body.taskId!,
+          companyId: auth.companyId,
+          clientId: auth.userId,
+          trackingNo,
+          expressNo: body.expressNo?.trim() || null,
+          mark: body.mark!.trim(),
+          status: "pending",
+          products: {
+            create: productData.map((pd, idx) => {
+              const img = imageDataList.find((im) => im.idx === idx);
+              return {
+                ...pd,
+                productImageFileName: img?.fileName || null,
+                productImageMime: img?.mime || null,
+                productImageBase64: img?.base64 || null,
+              };
+            }),
+          },
+        },
+      });
       await recalcTaskTotals(body.taskId!, tx);
+      return created;
     });
 
     ok(res, formatPrealert(prealert));
@@ -1196,35 +1215,39 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
      * 用 updateMany 把状态写进条件，数据库自己保证只有一个人改得动，
      * 不用为这一处专门开事务。
      */
-    const received = await prisma.consolidationPrealert.updateMany({
-      where: { id: body.prealertId, companyId: auth.companyId, status: "pending" },
-      data: {
-        status: "received",
-        signedAt: now,
-        receivedProofFileName: body.proofFileName?.trim() || proofPath.split("/").pop() || "",
-        receivedProofMime: body.proofMime?.trim() || "image/png",
-        receivedProofBase64: proofPath,
-      },
+    /**
+     * ⚠️ 改状态和重算合计必须在**同一个任务锁**里（2026-08-29 修）。
+     *
+     * 上一版把 updateMany 留在锁外面，理由是「它带 status:"pending" 条件、本身是原子的」。
+     * 那句话对，但**不够** —— 原子只保证「不会两个人同时签成功」，
+     * 挡不住别人在这中间用旧清单写合计：
+     * 删除那条路握着任务锁 → 读预报单清单（这张还是 pending，不计入合计）
+     * → 删掉另一张 → 写合计。这边的签收随后提交，
+     * **任务上的总件数/总方数就少了这一张**，直到下一次重算才对得上。
+     *
+     * 现在整段进锁：谁先拿到任务锁谁先做，另一个看到的一定是提交后的真实状态。
+     * `status: "pending"` 那个条件保留 —— 它顺便挡住「已经被签收了」的重复提交。
+     */
+    const received = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM consolidation_tasks WHERE id = ${pa.taskId} FOR UPDATE`;
+      const done = await tx.consolidationPrealert.updateMany({
+        where: { id: body.prealertId, companyId: auth.companyId, status: "pending" },
+        data: {
+          status: "received",
+          signedAt: now,
+          receivedProofFileName: body.proofFileName?.trim() || proofPath.split("/").pop() || "",
+          receivedProofMime: body.proofMime?.trim() || "image/png",
+          receivedProofBase64: proofPath,
+        },
+      });
+      if (done.count === 0) return done;
+      await recalcTaskTotals(pa.taskId, tx);
+      return done;
     });
     if (received.count === 0) {
       fail(res, 400, "BAD_REQUEST", "这张预报单刚刚已经被签收了，请刷新后再看");
       return;
     }
-
-    /**
-     * ⚠️ 合计要在**握着任务锁的事务里**重算（2026-08-28 补）。
-     * 原来是裸调用、既没事务也没锁：删除那条路刚把一张预报单删掉、
-     * 这边用删之前读到的清单把合计写回去 —— 任务上的总件数/总方数
-     * 跟实际货物对不上，而且没人会发现。
-     * 锁的是 consolidation_tasks 那一行，跟删除、付款、改单走同一把锁、同一个顺序。
-     *
-     * 上面那句 updateMany 带着 `status: "pending"` 条件，本身是原子的
-     * （谁先改到谁算数，count === 0 就是被人抢先了），所以不用挪进来。
-     */
-    await prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT id FROM consolidation_tasks WHERE id = ${pa.taskId} FOR UPDATE`;
-      await recalcTaskTotals(pa.taskId, tx);
-    });
 
     ok(res, { success: true, prealertId: body.prealertId, status: "received" });
   });
@@ -1974,6 +1997,21 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
     }
 
     await prisma.$transaction(async (tx) => {
+      /**
+       * ⚠️⚠️ 锁必须在**事务最开头**（2026-08-29 修）。
+       * 上一版把这两句放在产品行增删之后 —— 实际顺序成了
+       * 【产品 → 任务 → 预报单】，跟别处的【任务 → 预报单】反着，会死锁；
+       * 而且产品行是在**没拿到锁**的情况下先删改的，
+       * 删除那条路正好在这一刻把整张预报单删掉时，这边的写入会撞上或写成孤儿。
+       *
+       * ⚠️ 我上一轮用正则扫「每个事务里 FOR UPDATE 的先后」，得出「17 条路径锁序统一」，
+       * 那个结论是**错的** —— 正则只看得见加锁语句，看不见锁之前已经写了什么。
+       * 复核实测把这条揪了出来。以后判断锁序不能只看 FOR UPDATE 的位置，
+       * 要看**第一条写语句**在不在锁后面。
+       */
+      await tx.$queryRaw`SELECT id FROM consolidation_tasks WHERE id = ${pa.taskId} FOR UPDATE`;
+      await tx.$queryRaw`SELECT id FROM consolidation_prealerts WHERE id = ${pa.id} FOR UPDATE`;
+
       if (body.products) {
         // 产品行按行增量同步，不再整批删除重建（重建会把没重传的图片弄丢）
         const rows = body.products;
@@ -2041,16 +2079,6 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       const updateData: any = {};
       if (body.mark?.trim()) updateData.mark = body.mark.trim();
       if (body.expressNo !== undefined) updateData.expressNo = body.expressNo?.trim() || null;
-
-      /**
-       * ⚠️ 锁序统一成【任务 → 预报单】（2026-08-28 补）。
-       * 删除那三条路是「先锁任务、再删预报单、锁内重算合计」；
-       * 这条路原来只锁预报单、却又去写任务的合计 —— 方向正好相反，会死锁。
-       * 而且合计原来在事务**外面**重算：删除那边刚把货删掉、这边用旧结果写回去，
-       * 任务上的总件数/总方数就跟实际货物对不上了。
-       */
-      await tx.$queryRaw`SELECT id FROM consolidation_tasks WHERE id = ${pa.taskId} FOR UPDATE`;
-      await tx.$queryRaw`SELECT id FROM consolidation_prealerts WHERE id = ${pa.id} FOR UPDATE`;
 
       await tx.consolidationPrealert.update({
         where: { id: body.prealertId },

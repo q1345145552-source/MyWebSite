@@ -160,7 +160,27 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    await prisma.container.update({ where: { id: container.id }, data: { transportMode: mode } });
+    /**
+     * ⚠️ 上面那道「这个状态不许改运输方式」是**事务外**读的（2026-08-29 补）。
+     * 另一个人正好在这一刻把柜推到「已开船」，这边照样把它改成陆运 ——
+     * 柜子就落在一个陆运流程里根本不存在的状态上，后面推进和撤销全乱。
+     * 现在跟推进柜子状态走同一把锁（containers 那一行），锁完拿新状态再判一次。
+     */
+    await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM containers WHERE id = ${container.id} FOR UPDATE`;
+      const fresh = await tx.container.findUnique({
+        where: { id: container.id },
+        select: { currentStatus: true },
+      });
+      if (!fresh) throw new BusinessError("装柜任务不存在", 404, "NOT_FOUND");
+      if (blocked.includes(fresh.currentStatus)) {
+        throw new BusinessError(
+          `这个柜刚刚被推到「${CONTAINER_STATUS_LABEL[fresh.currentStatus] ?? fresh.currentStatus}」了，` +
+            `${mode === "land" ? "陆运" : "海运"}流程里没有这一步，运输方式没有改，请刷新后再看`,
+        );
+      }
+      await tx.container.update({ where: { id: container.id }, data: { transportMode: mode } });
+    });
     ok(res, { id: container.id, containerNo: container.containerNo, transportMode: mode });
   });
 
@@ -455,9 +475,16 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
       await tx.$queryRaw`SELECT id FROM containers WHERE id = ${id} FOR UPDATE`;
       const fresh = await tx.container.findUnique({ where: { id }, select: { currentStatus: true } });
       if (!fresh) throw new BusinessError("装柜任务不存在", 404, "NOT_FOUND");
-      if (fresh.currentStatus === "SEALED" || fresh.currentStatus === "IN_TRANSIT" || fresh.currentStatus === "ARRIVED") {
+      /**
+       * ⚠️ 用**白名单**：只有还在装柜中的柜子能封（2026-08-29 修）。
+       * 上一版是黑名单，只拦 SEALED / IN_TRANSIT / ARRIVED ——
+       * 已经到「清关放行」「入泰仓」「已签收」的柜子照样能被写回 SEALED，
+       * 状态直接倒退，而轨迹里早就写了后面那些环节。
+       * 柜子的状态流程有十几档，黑名单永远补不全；白名单只有一档，加新状态也不会漏。
+       */
+      if (fresh.currentStatus !== "LOADING") {
         throw new BusinessError(
-          `这个柜刚刚被推到「${CONTAINER_STATUS_LABEL[fresh.currentStatus] ?? fresh.currentStatus}」了，封柜没有执行，请刷新后再看`,
+          `这个柜现在是「${CONTAINER_STATUS_LABEL[fresh.currentStatus] ?? fresh.currentStatus}」，只有装柜中的柜子能封柜，本次操作没有执行`,
         );
       }
       return tx.container.update({
@@ -759,6 +786,19 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
 
     try {
       await prisma.$transaction(async (tx) => {
+      /**
+       * ⚠️ 锁序【柜 → 柜内记录 → 运单】（2026-08-29 补）。
+       * 上一版这条只锁了柜内记录，不碰柜子那把锁 —— 推进柜子状态那条握着柜锁、
+       * 正在按锁后的清单推进时，这边可以同时把一条记录删掉，
+       * 推进那边就会对着一条已经不存在的记录写状态和轨迹。
+       * 先锁柜之后，卸柜和推进必须排队。
+       */
+      const lockTarget = await tx.shipmentContainerItem.findFirst({
+        where: { id: body.itemId, container: { companyId: auth.companyId } },
+        select: { containerId: true },
+      });
+      if (!lockTarget) throw new Error("装柜记录不存在");
+      await tx.$queryRaw`SELECT id FROM containers WHERE id = ${lockTarget.containerId} FOR UPDATE`;
       // 锁柜内记录防并发
       await tx.$queryRaw`SELECT id FROM shipment_container_items WHERE id = ${body.itemId} FOR UPDATE`;
       const item = await tx.shipmentContainerItem.findFirst({

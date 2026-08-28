@@ -415,6 +415,20 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
         await tx.container.update({ where: { id: container.id }, data: updateData });
 
         if (shipmentNextStatus && freshShipmentIds.length > 0) {
+          /**
+           * ⚠️ 运单也要锁（2026-08-29 补）。
+           * 上一版只锁了柜子，运单是普通 findMany 读出来的 ——
+           * 别的路径（装柜同步状态、卸柜、泰国签收）可以在读完之后改掉运单状态，
+           * 这边随后把它覆盖回去，那次改动连同它写的轨迹就对不上了。
+           *
+           * ⚠️ **按 id 排序再锁**：两个柜子同时推进、又正好涉及同几张运单时，
+           * 加锁顺序相反会被 PostgreSQL 判定死锁掐掉一个。
+           * 下面锁父单那里用的也是这个办法（按单号排序）。
+           */
+          const lockIds = [...freshShipmentIds].sort();
+          for (const sid of lockIds) {
+            await tx.$queryRaw`SELECT id FROM shipments WHERE id = ${sid} FOR UPDATE`;
+          }
           const freshShipments = await tx.shipment.findMany({
             where: { id: { in: freshShipmentIds }, companyId: auth.companyId },
             select: { id: true, currentStatus: true, parentTrackingNo: true },

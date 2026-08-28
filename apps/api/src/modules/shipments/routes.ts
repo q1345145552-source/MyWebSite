@@ -846,6 +846,14 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
     }
 
     const result = await prisma.$transaction(async (tx) => {
+      /**
+       * ⚠️ 先锁运单（2026-08-29 补）。
+       * 这条路删掉一条轨迹之后，会**按剩下的最后一条把运单当前状态改回去**。
+       * 推进柜子状态那条正在按锁后的清单改这批运单的状态、写轨迹，
+       * 两边同时干，谁后写谁算数 —— 运单状态和轨迹就对不上了。
+       * 锁序跟别处一致：柜 → 柜内记录 → 运单，这里只碰运单，锁它一个即可。
+       */
+      await tx.$queryRaw`SELECT id FROM shipments WHERE id = ${log.shipmentId} FOR UPDATE`;
       await tx.statusLog.delete({ where: { id: logId } });
 
       // 剩下的最后一条决定当前状态；一条不剩就不动它
