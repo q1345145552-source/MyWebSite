@@ -69,6 +69,14 @@ jobs:
       - name: Test consolidation delete guard
         run: npm run test:consolidation-delete
 
+      # 接口响应格式（2026-08-28 加）。
+      # 契约（docs/api-contract.md 第 2、3 节）要求成功和失败都带
+      # errors / requestId / timestamp，但全局异常处理原来自己拼 { code, message }，
+      # 同一个系统里两种错误格式。第 4 项会扫全后端，
+      # 逮住任何绕开 ok()/fail() 自己拼响应体的地方。
+      - name: Test API response shape
+        run: npm run test:api-response
+
       # AI 答复的数字校验（2026-08-28 加）。
       # 覆盖三件事：模型润色时改了数字要被拦下、「今天/本月」按北京时间算、
       # 时间窗按下单时间而不是最后更新时间。

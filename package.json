@@ -19,6 +19,7 @@
     "db:seed": "tsx apps/api/prisma/seed.ts",
     "db:reset": "prisma migrate reset --schema=apps/api/prisma/schema.prisma",
     "test:batch-import": "tsx scripts/test-staff-batch-import.ts",
+    "test:api-response": "tsx scripts/test-api-response-shape.ts",
     "test:consolidation-delete": "tsx scripts/test-consolidation-delete-guard.ts",
     "test:lastmile-export": "tsx scripts/test-lastmile-export.ts",
     "test:ai-numbers": "TZ=UTC tsx scripts/test-ai-answer-numbers.ts && TZ=Asia/Shanghai tsx scripts/test-ai-answer-numbers.ts",

@@ -16,6 +16,8 @@
 import assert from "node:assert/strict";
 import {
   expandTemplateLines,
+  patchInternalTemplate,
+  SharedStringsEditor,
   type LastmileExportData,
 } from "../apps/web/src/modules/lastmile/exportDispatchWorkbooks";
 
@@ -119,8 +121,92 @@ check("5) 空字符串按「没填」处理，不许写成一个空格子里的�
   assert.equal(line.widthCm, null, "空串没当成没填");
 });
 
+
+// ══════════════════════════════════════════════════════════════════════
+// 下面这几项验的是**最终写进 xlsx 的 XML**，不是中间对象。
+//
+// ⚠️ 复核指出：上面 1~5 项只验到 expandTemplateLines 的返回值 ——
+// 中间对象对了，落点仍然可能错（数字塞进文本格、字符串塞进数字格写成 0）。
+// 那正是这个 bug 当初的形态。所以再补一层，直接读生成出来的单元格 XML。
+// ══════════════════════════════════════════════════════════════════════
+
+/** 造一张最小的工作表 XML：patchInternalTemplate 会清 A10:N34，格子必须都存在 */
+function buildSheetXml(): string {
+  const cells: string[] = [];
+  const cols = "ABCDEFGHIJKLMN".split("");
+  const rows: number[] = [3, 5, 35];
+  for (let r = 10; r <= 34; r += 1) rows.push(r);
+  for (const r of rows.sort((a, b) => a - b)) {
+    const inner = cols.map((c) => `<c r="${c}${r}"/>`).join("");
+    cells.push(`<row r="${r}">${inner}</row>`);
+  }
+  return `<?xml version="1.0"?><worksheet><sheetData>${cells.join("")}</sheetData></worksheet>`;
+}
+
+const EMPTY_SHARED_STRINGS = '<?xml version="1.0"?><sst count="0" uniqueCount="0"></sst>';
+
+/** 把某个格子的 XML 抠出来 */
+function cellXml(xml: string, ref: string): string {
+  const m = xml.match(new RegExp(`<c\\b[^>]*?\\br="${ref}"[^>]*?(?:/>|>[\\s\\S]*?</c>)`));
+  assert.ok(m, `找不到单元格 ${ref}`);
+  return m[0];
+}
+
+function renderSheet(dims: {
+  lengthCm: number | string | null;
+  widthCm: number | string | null;
+  heightCm: number | string | null;
+}): { xml: string; strings: SharedStringsEditor } {
+  const data = buildData(dims);
+  const lines = expandTemplateLines(data);
+  const strings = new SharedStringsEditor(EMPTY_SHARED_STRINGS);
+  const xml = patchInternalTemplate(buildSheetXml(), strings, data, lines, 0, lines);
+  return { xml, strings };
+}
+
+check("6) 最终 XML：单一尺寸写成**数字格**，值就是那个数", () => {
+  const { xml } = renderSheet({ lengthCm: 60, widthCm: 40, heightCm: 30 });
+  for (const [ref, val] of [["G10", "60"], ["H10", "40"], ["I10", "30"]] as Array<[string, string]>) {
+    const cell = cellXml(xml, ref);
+    assert.ok(!/t="s"/.test(cell), `${ref} 被写成了文本格：${cell}`);
+    assert.ok(cell.includes(`<v>${val}</v>`), `${ref} 的值不对：${cell}`);
+  }
+});
+
+check("7) 最终 XML：多尺寸写成**文本格**，而且真能读出「60/50」", () => {
+  const { xml, strings } = renderSheet({ lengthCm: "60/50", widthCm: "40/35", heightCm: "30/25" });
+  const sst = strings.finish();
+  for (const [ref, text] of [["G10", "60/50"], ["H10", "40/35"], ["I10", "30/25"]] as Array<[string, string]>) {
+    const cell = cellXml(xml, ref);
+    assert.ok(/t="s"/.test(cell), `${ref} 不是文本格，字符串塞进数字格会被写成 0：${cell}`);
+    const idx = cell.match(/<v>(\d+)<\/v>/)?.[1];
+    assert.ok(idx !== undefined, `${ref} 没有共享字符串下标：${cell}`);
+    // 按下标去共享字符串表里把文字捞出来，确认客户在 Excel 里看到的就是这个
+    const items = [...sst.matchAll(/<si>\s*<t[^>]*>([\s\S]*?)<\/t>\s*<\/si>/g)].map((m) => m[1]);
+    assert.equal(items[Number(idx)], text, `${ref} 在 Excel 里显示的不是「${text}」`);
+  }
+  // 绝不能出现「长 0 宽 0 高 0」——那是字符串误入数字格的典型症状
+  assert.ok(!/r="G10"[^>]*>(?:(?!<\/c>)[\s\S])*<v>0<\/v>/.test(xml), "长被写成了 0");
+});
+
+check("8) 最终 XML：没填尺寸时格子是空的，不许写 0", () => {
+  const { xml } = renderSheet({ lengthCm: null, widthCm: null, heightCm: null });
+  for (const ref of ["G10", "H10", "I10"]) {
+    const cell = cellXml(xml, ref);
+    assert.ok(!/<v>/.test(cell), `${ref} 没填却写了值：${cell}`);
+  }
+});
+
+check("9) 最终 XML：合计那两个 SUM 公式没被尺寸改动影响", () => {
+  const { xml } = renderSheet({ lengthCm: "60/50", widthCm: "40/35", heightCm: "30/25" });
+  assert.ok(cellXml(xml, "E35").includes("SUM(E10:E34)"), "方数合计公式丢了");
+  assert.ok(cellXml(xml, "F35").includes("SUM(F10:F34)"), "重量合计公式丢了");
+  // 方数缓存值仍是后端给的实际装柜体积，没被尺寸重算掉
+  assert.ok(cellXml(xml, "E35").includes("<v>1.928</v>"), `方数合计被改了：${cellXml(xml, "E35")}`);
+});
+
 if (failures.length > 0) {
-  console.error(`\n${failures.length}/5 项不通过：${failures.join("；")}`);
+  console.error(`\n${failures.length}/9 项不通过：${failures.join("；")}`);
   process.exit(1);
 }
-console.log("整柜拆柜派送清单导出：5 项全部通过");
+console.log("整柜拆柜派送清单导出：9 项全部通过");

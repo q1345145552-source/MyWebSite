@@ -130,7 +130,8 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-class SharedStringsEditor {
+/** 导出给自测脚本用（scripts/test-lastmile-export.ts），生产代码里只在本文件内部用 */
+export class SharedStringsEditor {
   private readonly additions: string[] = [];
   private readonly originalCount: number;
   private readonly originalUniqueCount: number;
@@ -392,7 +393,11 @@ function lineTotal(lines: TemplateLine[], key: "packageCount" | "volumeM3" | "we
   );
 }
 
-function patchInternalTemplate(
+/**
+ * 导出给自测脚本用：只有测到**最终 XML** 才能证明「数字进数字格、字符串进文本格」，
+ * 光验中间对象（expandTemplateLines）是验不到落点的。
+ */
+export function patchInternalTemplate(
   sheetXml: string,
   strings: SharedStringsEditor,
   data: LastmileExportData,
