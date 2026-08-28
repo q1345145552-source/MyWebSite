@@ -89,7 +89,12 @@ function newRequestId(): string {
   return `req_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function createJsonResponse(rawRes: ServerResponse): HttpResponse {
+/**
+ * 造一个响应对象。**所有响应都从这里的 `json()` 出去**，盖章也做在那儿。
+ * 导出是为了让自测脚本能拿真的实现跑一遍（scripts/test-api-response-shape.ts）——
+ * 上一版测试是正则扫源码，复核实测能绕过（先把响应体存进变量再发就认不出来了）。
+ */
+export function createJsonResponse(rawRes: ServerResponse): HttpResponse {
   let statusCode = 200;
   const requestId = newRequestId();
   return {
@@ -102,8 +107,30 @@ function createJsonResponse(rawRes: ServerResponse): HttpResponse {
       rawRes.statusCode = statusCode;
       rawRes.setHeader("Content-Type", "application/json; charset=utf-8");
       rawRes.setHeader("X-Request-Id", requestId);
-      rawRes.end(JSON.stringify(payload));
+      rawRes.end(JSON.stringify(stampEnvelope(payload, requestId)));
     },
+  };
+}
+
+/**
+ * 在**唯一的出口**上给响应体盖章：补上 `requestId`（没有 timestamp 的也补上）。
+ *
+ * ⚠️ 为什么放在这里、而不是只改 `ok()` / `fail()`：
+ * 2026-08-28 复核实测，AI 那一组接口有自己的 `jsonOk` / `jsonError`（52 处调用），
+ * 拼出来的响应体没有 requestId；而我上一版的做法是「让大家都去调 ok()/fail()」，
+ * 靠人记得 —— 记不住。所有响应最后都要经过这一个 `json()`，
+ * 在这里盖章，**现在漏的和以后新写的都盖得到**，一个调用点都不用改。
+ *
+ * 只认「长得像契约响应体」的对象（有 code 字段），别的原样放行。
+ */
+function stampEnvelope(payload: unknown, requestId: string): unknown {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+  const body = payload as Record<string, unknown>;
+  if (typeof body.code !== "string") return payload;
+  return {
+    ...body,
+    requestId: typeof body.requestId === "string" && body.requestId ? body.requestId : requestId,
+    timestamp: typeof body.timestamp === "string" && body.timestamp ? body.timestamp : new Date().toISOString(),
   };
 }
 
@@ -261,9 +288,24 @@ export function createApp(): MinimalHttpApp {
             if (!rawRes.writableEnded) rawRes.end();
             return;
           }
+          /**
+           * ⚠️ 这条路**绕开了 res.json**（那时候还没有 res 对象），
+           * 所以盖章要自己来 —— 复核就是在这里逮到少字段的（2026-08-28 补齐）。
+           * 格式必须跟 fail() 拼出来的一模一样，别让前端遇到第三种形状。
+           */
+          const pipelineRequestId = newRequestId();
           rawRes.statusCode = 500;
           rawRes.setHeader("Content-Type", "application/json; charset=utf-8");
-          rawRes.end(JSON.stringify({ code: "INTERNAL_ERROR", message: "Internal server error" }));
+          rawRes.setHeader("X-Request-Id", pipelineRequestId);
+          rawRes.end(
+            JSON.stringify({
+              code: "INTERNAL_ERROR",
+              message: "Internal server error",
+              errors: [{ reason: "Internal server error" }],
+              requestId: pipelineRequestId,
+              timestamp: new Date().toISOString(),
+            }),
+          );
         });
       });
 

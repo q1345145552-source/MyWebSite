@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { ok, fail } from "../apps/api/src/modules/core/http-utils";
-import type { HttpResponse } from "../apps/api/src/server";
+import { createJsonResponse, type HttpResponse } from "../apps/api/src/server";
 
 const failures: string[] = [];
 function check(name: string, body: () => void): void {
@@ -78,53 +78,118 @@ check("3) 没有 requestId 时也不能崩（老的测试桩不带这个字段�
 });
 
 /**
- * ⚠️ 这一项是这个脚本真正的价值所在。
+ * ⚠️ 上一版这一项是**正则扫源码**找 `.json({ code:`。
+ * 复核实测能绕过：把业务错误写成
+ *     const payload = { code, message };
+ *     res.status(400).json(payload);
+ * 4 项照样全绿 —— 正则认不出变量、helper 和 rawRes.end(JSON.stringify(...))。
  *
- * ①②③ 只能证明 ok()/fail() 自己是对的 —— 而当初出问题的地方，
- * 恰恰是**绕开它们自己拼响应体**的那几处。人会忘，所以让脚本每次都扫一遍。
+ * 所以改成**真的跑一遍**：拿真的 createJsonResponse 造一个响应对象，
+ * 用各种写法往里塞响应体，看盖章有没有生效。
+ * 现在盖章做在唯一出口 `json()` 上，怎么拼的都盖得到。
  */
-check("4) 后端没有任何地方绕开 ok()/fail() 自己拼响应体", () => {
+function captureRealResponse(): {
+  res: HttpResponse;
+  read: () => { status: number; headers: Record<string, string>; body: Record<string, unknown> };
+} {
+  const headers: Record<string, string> = {};
+  let ended = "";
+  let status = 0;
+  const rawRes = {
+    set statusCode(v: number) { status = v; },
+    get statusCode() { return status; },
+    setHeader(k: string, v: string) { headers[k] = v; },
+    end(chunk: string) { ended = chunk; },
+  };
+  const res = createJsonResponse(rawRes as never);
+  return {
+    res,
+    read: () => ({ status, headers, body: JSON.parse(ended || "{}") as Record<string, unknown> }),
+  };
+}
+
+check("4) 不管响应体怎么拼，出口都会盖上 requestId 和 timestamp", () => {
+  // ① 走 ok()
+  {
+    const { res, read } = captureRealResponse();
+    ok(res, { a: 1 });
+    const { body, headers } = read();
+    assert.ok(String(body.requestId).startsWith("req_"), `ok() 没盖章：${JSON.stringify(body)}`);
+    assert.ok(ISO.test(String(body.timestamp)), "ok() 的 timestamp 不对");
+    assert.equal(headers["X-Request-Id"], body.requestId, "响应头和响应体里的编号对不上");
+  }
+  // ② 走 fail()
+  {
+    const { res, read } = captureRealResponse();
+    fail(res, 400, "BAD_REQUEST", "不行");
+    const { body } = read();
+    assert.ok(String(body.requestId).startsWith("req_"), "fail() 没盖章");
+    assert.deepEqual(body.errors, [{ reason: "不行" }]);
+  }
+  // ③ 绕开 ok/fail 自己拼一个对象字面量（AI 那组 helper 就是这么干的）
+  {
+    const { res, read } = captureRealResponse();
+    res.status(403).json({ code: "FORBIDDEN", message: "没权限" });
+    const { body } = read();
+    assert.ok(String(body.requestId).startsWith("req_"), `自己拼字面量时没盖上章：${JSON.stringify(body)}`);
+    assert.ok(ISO.test(String(body.timestamp)), "自己拼字面量时没补 timestamp");
+  }
+  // ④ 复核那个绕过写法：先存进变量再发
+  {
+    const { res, read } = captureRealResponse();
+    const payload = { code: "NOT_FOUND", message: "找不到" };
+    res.status(404).json(payload);
+    const { body } = read();
+    assert.ok(
+      String(body.requestId).startsWith("req_"),
+      `先存变量再发就绕过去了（复核实测过的写法）：${JSON.stringify(body)}`,
+    );
+  }
+  // ⑤ 不长得像契约响应体的东西别乱改（比如静态文件那种裸数据）
+  {
+    const { res, read } = captureRealResponse();
+    res.status(200).json({ hello: "world" });
+    const { body } = read();
+    assert.deepEqual(body, { hello: "world" }, "不带 code 的响应体被动了");
+  }
+});
+
+check("5) 已经带了编号的响应体不许被覆盖", () => {
+  const { res, read } = captureRealResponse();
+  res.status(200).json({ code: "OK", message: "s", requestId: "req_来自上游", timestamp: "2026-01-01T00:00:00.000Z" });
+  const { body } = read();
+  assert.equal(body.requestId, "req_来自上游", "把上游传下来的编号盖掉了");
+  assert.equal(body.timestamp, "2026-01-01T00:00:00.000Z", "把已有的时间戳盖掉了");
+});
+
+check("6) 还有没有地方完全绕开 res.json 直接写响应（那种盖不到章）", () => {
   const apiRoot = path.join(__dirname, "..", "apps", "api", "src");
   const offenders: string[] = [];
-
   const walk = (dir: string): void => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        walk(full);
-        continue;
-      }
+      if (entry.isDirectory()) { walk(full); continue; }
       if (!entry.name.endsWith(".ts")) continue;
-      const text = fs.readFileSync(full, "utf-8");
-      text.split("\n").forEach((line, i) => {
-        // 找 `.json({` 里直接写 code: 的：那就是在自己拼响应体
-        if (/\.json\(\s*\{/.test(line) && /code\s*:/.test(line)) {
-          offenders.push(`${path.relative(apiRoot, full)}:${i + 1}  ${line.trim().slice(0, 80)}`);
-        }
-        // 跨行写法：`.json({` 单独一行，紧接着下一行是 code:
-        if (/\.json\(\s*\{\s*$/.test(line)) {
-          const next = text.split("\n")[i + 1] ?? "";
-          if (/^\s*code\s*:/.test(next)) {
-            offenders.push(`${path.relative(apiRoot, full)}:${i + 1}  （跨行）${next.trim().slice(0, 60)}`);
-          }
+      fs.readFileSync(full, "utf-8").split("\n").forEach((line, i) => {
+        // 绕开 res.json 直接往 socket 写 JSON 的，盖章盖不到，必须自己补齐字段
+        if (/\.end\(\s*JSON\.stringify/.test(line)) {
+          offenders.push(`${path.relative(apiRoot, full)}:${i + 1}`);
         }
       });
     }
   };
   walk(apiRoot);
-
-  // http-utils.ts 本身就是拼响应体的地方，它是唯一的例外
-  const real = offenders.filter((o) => !o.startsWith("modules/core/http-utils.ts"));
+  // server.ts 的管线兜底是已知的一处，它自己补齐了全部字段（有注释说明）
+  const unknown = offenders.filter((o) => !o.startsWith("server.ts"));
   assert.deepEqual(
-    real,
+    unknown,
     [],
-    "下面这些地方绕开了 ok()/fail() 自己拼响应体，会漏掉 errors/requestId/timestamp：\n     " +
-      real.join("\n     "),
+    "下面这些地方绕开了 res.json 直接写响应，盖不到 requestId：\n     " + unknown.join("\n     "),
   );
 });
 
 if (failures.length > 0) {
-  console.error(`\n${failures.length}/4 项不通过：${failures.join("；")}`);
+  console.error(`\n${failures.length}/6 项不通过：${failures.join("；")}`);
   process.exit(1);
 }
-console.log("接口响应格式：4 项全部通过");
+console.log("接口响应格式：6 项全部通过");
