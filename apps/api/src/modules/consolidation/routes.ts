@@ -36,6 +36,40 @@ const TASK_LOCKED_FOR_PRODUCT_DELETE = [
 ];
 
 /**
+ * 「这张预报单 / 这件货，现在还能不能删」——三条删除路径共用同一把尺子。
+ *
+ * ⚠️ 2026-08-28 补。之前这把尺子只长在「删单件货物」那条路上，
+ * 而「删整张预报单」（管理员和客户各一条）**一道检查都没有** ——
+ * 删整张的杀伤力更大（数据库对货物明细是级联删除，一删全没），
+ * 却反而没人管。`product-delete` 的提示语还写着
+ * 「整张不要了请走『删除预报单』，那条路会一并清干净」，等于把人往没锁的门里领。
+ *
+ * 结果就是：任务已付款 → 管理员删掉整张预报单 → **货没了，钱一分没退**。
+ * 而且货删光之后「撤销付款」那条路会直接 400，退款的口子也跟着封死。
+ *
+ * 界线沿用用户 2026-08-15 拍板的那条：**客户还没交钱就能删**。
+ * 已付款要删，请先走「撤销付款」——那条路会正经退钱，不在这里私自动账。
+ *
+ * 抽成纯函数是为了能测：路由那一层要连数据库，测不动。
+ */
+export function checkConsolidationDeletable(input: {
+  paymentStatus: string;
+  taskStatus: string;
+}): { ok: true } | { ok: false; message: string } {
+  // pending_review = 客户已交凭证等审核，算已付款
+  if (input.paymentStatus !== "unpaid") {
+    return {
+      ok: false,
+      message: "该任务客户已付款或正在审核付款，不能删。要删请先走「撤销付款」，那条路会退钱",
+    };
+  }
+  if (TASK_LOCKED_FOR_PRODUCT_DELETE.includes(input.taskStatus)) {
+    return { ok: false, message: "该任务已进入装柜流程，不能再删" };
+  }
+  return { ok: true };
+}
+
+/**
  * 生成任务编号 JH + 7位数字（如 JH0000001）
  * 使用数据库事务锁防止并发冲突
  */
@@ -72,8 +106,19 @@ async function generateTrackingNo(): Promise<string> {
  * 重新计算任务汇总数据（总件数、总体积、预报单数量）
  * 只统计已签收（received）的预报单
  */
-async function recalcTaskTotals(taskId: string): Promise<void> {
-  const prealerts = await prisma.consolidationPrealert.findMany({
+/**
+ * 重算任务的总件数/总方数/预报单数。
+ *
+ * ⚠️ `db` 一定要传事务客户端（2026-08-28 补）。
+ * 原来写死用全局 prisma，删除和重算就分在两个事务里：
+ * 删成功、重算失败时，任务上会留着一份跟实际货物对不上的数字。
+ * 不传时退回全局 prisma，老调用点行为不变。
+ */
+async function recalcTaskTotals(
+  taskId: string,
+  db: Pick<typeof prisma, "consolidationPrealert" | "consolidationTask"> = prisma,
+): Promise<void> {
+  const prealerts = await db.consolidationPrealert.findMany({
     where: { taskId, status: "received" },
     include: {
       products: { select: { packageCount: true, volume: true } },
@@ -90,7 +135,7 @@ async function recalcTaskTotals(taskId: string): Promise<void> {
     }
   }
 
-  await prisma.consolidationTask.update({
+  await db.consolidationTask.update({
     where: { id: taskId },
     data: {
       totalPackages,
@@ -690,11 +735,38 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    await prisma.consolidationPrealert.delete({
-      where: { id: body.prealertId },
-    });
+    /**
+     * ⚠️ 2026-08-28 补：这条路原来只看预报单自己的 status，**没看任务付没付款**。
+     * 任务已付款、这张预报单还没签收时，客户自己就能把它删掉 —— 货没了、钱不退。
+     * 而且判断在事务外面：仓库正好在这一刻签收，判断和删除之间就能插进去。
+     * 现在跟管理员那条走同一把尺子、同一套「锁住 → 重查 → 判断」。
+     */
+    await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM consolidation_tasks WHERE id = ${pa.taskId} FOR UPDATE`;
+      const fresh = await tx.consolidationTask.findUnique({
+        where: { id: pa.taskId },
+        select: { status: true, paymentStatus: true },
+      });
+      if (!fresh) throw new BusinessError("集货任务不存在", 404, "NOT_FOUND");
+      const verdict = checkConsolidationDeletable({
+        paymentStatus: fresh.paymentStatus,
+        taskStatus: fresh.status,
+      });
+      if (!verdict.ok) throw new BusinessError(verdict.message, 400, "BAD_REQUEST");
 
-    await recalcTaskTotals(pa.taskId);
+      // 锁后再确认这张单还没被签收（上面那道是事务外的快照）
+      const freshPa = await tx.consolidationPrealert.findUnique({
+        where: { id: pa.id },
+        select: { status: true },
+      });
+      if (!freshPa) throw new BusinessError("预报单不存在", 404, "NOT_FOUND");
+      if (freshPa.status !== "pending") {
+        throw new BusinessError("这张预报单刚刚被仓库签收了，没有删除，请刷新后再看", 409, "VALIDATION_ERROR");
+      }
+
+      await tx.consolidationPrealert.delete({ where: { id: body.prealertId } });
+      await recalcTaskTotals(pa.taskId, tx);
+    });
 
     ok(res, { deleted: true, id: body.prealertId });
   });
@@ -1975,8 +2047,33 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    await prisma.consolidationPrealert.delete({ where: { id: body.prealertId } });
-    await recalcTaskTotals(pa.taskId);
+    /**
+     * ⚠️ 2026-08-28 补：这条路原来**一道检查都没有** —— 没付款判断、没锁、没事务。
+     * 任务已付款也照删，而且是级联删除（货物明细跟着一起没），钱一分不退；
+     * 货删光之后「撤销付款」还会 400，退款的口子也跟着封死。
+     * 现在跟「删单件货物」用同一把尺子，并且照 tasks/delete 那套：
+     * **锁住任务 → 重查 → 用重查的值判断 → 再动手**。
+     * 事务外面判断挡不住并发：员工正好在这一刻收款，判断和删除中间就能插进去。
+     */
+    // BusinessError 由 server.ts:210 的全局处理统一转成 HTTP 响应，这里直接抛
+    await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM consolidation_tasks WHERE id = ${pa.taskId} FOR UPDATE`;
+      const fresh = await tx.consolidationTask.findUnique({
+        where: { id: pa.taskId },
+        select: { status: true, paymentStatus: true },
+      });
+      if (!fresh) throw new BusinessError("集货任务不存在", 404, "NOT_FOUND");
+      const verdict = checkConsolidationDeletable({
+        paymentStatus: fresh.paymentStatus,
+        taskStatus: fresh.status,
+      });
+      if (!verdict.ok) throw new BusinessError(verdict.message, 400, "BAD_REQUEST");
+
+      await tx.consolidationPrealert.delete({ where: { id: body.prealertId } });
+      // 总件数/总方数按已签收预报单汇总，必须**在同一个事务里**重算，
+      // 否则删成功、重算失败时，任务上留着一份对不上的数字
+      await recalcTaskTotals(pa.taskId, tx);
+    });
 
     ok(res, { deleted: true, prealertId: body.prealertId });
   });
@@ -2019,25 +2116,41 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    // 界线同仓库版（用户 2026-08-15 拍板）：客户还没交钱就能删。
-    // 普通版的付款动作在任务上，pending_review 表示客户已交凭证等审核，算已付款。
-    if (product.prealert.task.paymentStatus !== "unpaid") {
-      fail(res, 400, "BAD_REQUEST", "该任务客户已付款或正在审核付款，货物不能再删");
-      return;
-    }
-    if (TASK_LOCKED_FOR_PRODUCT_DELETE.includes(product.prealert.task.status)) {
-      fail(res, 400, "BAD_REQUEST", "该任务已进入装柜流程，货物不能再删");
-      return;
-    }
-    // 最后一件不给删：整张不要了请走「删除预报单」，那条路会一并清干净
-    if (product.prealert._count.products <= 1) {
-      fail(res, 400, "BAD_REQUEST", "这是该预报单最后一件货物，不能删。整张不要了请删除预报单");
-      return;
-    }
+    /**
+     * ⚠️ 2026-08-28 补：这三道检查原来全在事务**外面**读的快照上做，
+     * 判断和删除之间隔着 await —— 客户正好在这一刻付款，货照样被删掉，钱不退。
+     * 现在照 tasks/delete 那套：锁住任务 → 重查 → 用重查的值判断 → 再动手。
+     * 「最后一件不给删」也要用锁后的实时件数，不然两个人各删一件就把整张删空了。
+     */
+    await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM consolidation_tasks WHERE id = ${product.prealert.taskId} FOR UPDATE`;
+      const fresh = await tx.consolidationTask.findUnique({
+        where: { id: product.prealert.taskId },
+        select: { status: true, paymentStatus: true },
+      });
+      if (!fresh) throw new BusinessError("集货任务不存在", 404, "NOT_FOUND");
+      const verdict = checkConsolidationDeletable({
+        paymentStatus: fresh.paymentStatus,
+        taskStatus: fresh.status,
+      });
+      if (!verdict.ok) throw new BusinessError(verdict.message, 400, "BAD_REQUEST");
 
-    await prisma.consolidationPrealertProduct.delete({ where: { id: product.id } });
-    // 任务的总件数/总方数是按已签收预报单汇总出来的，删完必须重算
-    await recalcTaskTotals(product.prealert.taskId);
+      // 最后一件不给删：整张不要了请走「删除预报单」，那条路会一并清干净
+      const remaining = await tx.consolidationPrealertProduct.count({
+        where: { prealertId: product.prealertId },
+      });
+      if (remaining <= 1) {
+        throw new BusinessError(
+          "这是该预报单最后一件货物，不能删。整张不要了请删除预报单",
+          400,
+          "BAD_REQUEST",
+        );
+      }
+
+      await tx.consolidationPrealertProduct.delete({ where: { id: product.id } });
+      // 任务的总件数/总方数是按已签收预报单汇总出来的，删完必须在同一个事务里重算
+      await recalcTaskTotals(product.prealert.taskId, tx);
+    });
 
     ok(res, { deleted: true, productId: product.id, productName: product.productName });
   });

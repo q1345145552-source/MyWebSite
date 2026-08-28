@@ -63,6 +63,12 @@ jobs:
       - name: Test lastmile dispatch export
         run: npm run test:lastmile-export
 
+      # 普通版集货「还能不能删」那把尺子（2026-08-28 加）。
+      # 「删整张预报单」原来一道检查都没有：已付款也照删、级联把货物明细一起删光、
+      # 钱一分不退，而且货删完之后「撤销付款」会 400，退款的口子也跟着封死。
+      - name: Test consolidation delete guard
+        run: npm run test:consolidation-delete
+
       # AI 答复的数字校验（2026-08-28 加）。
       # 覆盖三件事：模型润色时改了数字要被拦下、「今天/本月」按北京时间算、
       # 时间窗按下单时间而不是最后更新时间。
