@@ -192,7 +192,14 @@ export function parseStaffBatchRows(rows: Record<string, unknown>[]): StaffBatch
     const widthCm = positiveNumber(draft, rowNumber, "宽cm", numericValue(row, ["宽cm", "宽"]));
     const heightCm = positiveNumber(draft, rowNumber, "高cm", numericValue(row, ["高cm", "高"]));
     const weightKg = positiveNumber(draft, rowNumber, "单箱重量kg", numericValue(row, ["单箱重量"]));
-    const productQuantity = positiveNumber(draft, rowNumber, "产品数量", numericValue(row, ["产品数量"]), { integer: true });
+    /**
+     * ⚠️ 两个表头都要认。
+     * 模板原来这一列叫「产品数量」，跟旁边的「**单箱**重量kg」口径不一致，
+     * 员工很容易当成「这一行一共几个」来填 —— 而代码要的是「每箱几个」。
+     * 2026-08-28 把模板表头改成「单箱数量（每箱几个）」，
+     * 但**老模板下载过、正在用的文件还认「产品数量」**，两个都得收。
+     */
+    const productQuantity = positiveNumber(draft, rowNumber, "单箱数量", numericValue(row, ["单箱数量", "产品数量"]), { integer: true });
     const dimensionCount = [lengthCm, widthCm, heightCm].filter((value) => value !== undefined).length;
     if (dimensionCount > 0 && dimensionCount < 3) {
       draft.issues.push({ rowNumber, trackingNo, message: "长、宽、高需要同时填写" });
@@ -242,9 +249,24 @@ export function parseStaffBatchRows(rows: Record<string, unknown>[]): StaffBatch
     const volumeM3 = dimensions.every(Boolean)
       ? draft.products.reduce((sum, product) => sum + ((product.lengthCm ?? 0) * (product.widthCm ?? 0) * (product.heightCm ?? 0) * product.packageCount) / 1_000_000, 0)
       : undefined;
+    /**
+     * ⚠️ 产品数量必须**乘箱数**：这一列填的是「单箱几个」，不是这一行的总数。
+     *
+     * 2026-08-28 老板在真页面上实测：三行明细各填 2/3/4 箱、每箱 2/3/4 个，
+     * 正确总数是 2×2 + 3×3 + 4×4 = 29，系统报的是 9（= 2+3+4）。
+     * 口径见 apps/api/src/modules/orders/routes.ts:833 的注释：
+     * 同一个字段名在产品行上是「单箱数量」、在订单上才是「总数」。
+     * 上面重量和体积两行都乘了 packageCount，唯独这一行漏了。
+     *
+     * ⚠️ 那条注释里还写着「批量导入那条路不受影响，解析器本来就会把合计算好」——
+     * **那句话是错的**，就是这里没算对。注释已一并更正。
+     */
     const hasProductQuantity = draft.products.some((product) => product.productQuantity !== undefined);
     const productQuantity = hasProductQuantity
-      ? draft.products.reduce((sum, product) => sum + (product.productQuantity ?? 0), 0)
+      ? draft.products.reduce(
+          (sum, product) => sum + (product.productQuantity ?? 0) * product.packageCount,
+          0,
+        )
       : undefined;
     const itemNames = Array.from(new Set(draft.products.map((product) => product.itemName)));
     const domesticTrackingNos = Array.from(new Set(draft.products.map((product) => product.domesticTrackingNo).filter((value): value is string => Boolean(value))));

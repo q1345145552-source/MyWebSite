@@ -67,7 +67,19 @@ for (let i = 1; i <= 100; i += 1) {
   const where = `第 ${i} 单`;
   assert.equal(order.trackingNo, `UTMULTI${String(i).padStart(5, "0")}`, `${where} 运单号不对`);
   assert.equal(order.packageCount, 9, `${where} 箱数不对`);
-  assert.equal(order.productQuantity, 9, `${where} 产品数量不对`);
+  /**
+   * ⚠️ 产品数量 = Σ(箱数 × 单箱数量) = 2×2 + 3×3 + 4×4 = **29**。
+   *
+   * 这一行原来断言的是 9（= 2+3+4），把**错的答案写死成了期望值** ——
+   * 解析器少乘了箱数，测试却照着解析器的输出写，等于给 bug 盖了个章。
+   * 2026-08-28 老板在真页面上实测出来的：他填 2/3/4 箱、每箱 2/3/4 个，
+   * 系统报 9，实际应该是 29。
+   *
+   * 口径见 apps/api/src/modules/orders/routes.ts:833 的注释：
+   * 产品行上的这个字段是**单箱数量**，订单级才是总数。
+   * 同一个函数里重量和体积都乘了箱数，唯独数量没乘。
+   */
+  assert.equal(order.productQuantity, 29, `${where} 产品数量不对`);
   assert.equal(order.weightKg, 88, `${where} 重量不对`);
   assert.ok(Math.abs((order.volumeM3 ?? 0) - 1.928) < 1e-9, `${where} 体积不对：${order.volumeM3}`);
   assert.deepEqual(
@@ -114,5 +126,38 @@ const conflict = parseStaffBatchRows([
 ]);
 assert.equal(conflict.orders.length, 0);
 assert.equal(conflict.issues.some((issue) => issue.message.includes("仓库")), true);
+
+/**
+ * 新旧两个表头都要认，而且都必须**乘箱数**。
+ * 模板 2026-08-28 从「产品数量」改成「单箱数量（每箱几个）」，
+ * 但老模板下载过、正在用的文件还是旧表头 —— 少认一个，那些文件的数量会整列变空。
+ *
+ * 用互不相同的数字：5 箱 × 每箱 7 个 = 35，2 箱 × 每箱 3 个 = 6，合计 41。
+ * （41 和 5/7/2/3/35/6 都不一样，算错了一眼就看得出来）
+ */
+for (const [表头, 说明] of [
+  ["单箱数量（每箱几个）", "新表头"],
+  ["产品数量", "老表头（老模板下载过的文件）"],
+] as Array<[string, string]>) {
+  const common = {
+    "唛头 *": "TESTQTY",
+    "运单号 *": "UTQTY00001",
+    "仓库 *": "义乌仓",
+    "到仓日期 *（YYYY-MM-DD）": "2026-08-27",
+    "运输方式 *（海运/陆运）": "海运",
+  };
+  const parsed = parseStaffBatchRows([
+    { ...common, "品名 *": "甲", "箱数 *": 5, "单箱重量kg *（数字）": 1, [表头]: 7 },
+    { ...common, "品名 *": "乙", "箱数 *": 2, "单箱重量kg *（数字）": 1, [表头]: 3 },
+  ]);
+  assert.deepEqual(parsed.issues, [], `${说明}：解析报错了`);
+  assert.equal(parsed.orders.length, 1, `${说明}：没并成一张单`);
+  assert.equal(parsed.orders[0].packageCount, 7, `${说明}：箱数不对`);
+  assert.equal(
+    parsed.orders[0].productQuantity,
+    41,
+    `${说明}：产品数量应该是 5×7 + 2×3 = 41（漏乘箱数的话会得到 10）`,
+  );
+}
 
 console.log("staff batch import parser: 100 orders / 300 rows passed");

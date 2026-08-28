@@ -839,8 +839,11 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
      * 少乘了箱数 —— 2 个产品各 3 箱、每箱 10 个，真实总数 60，会被写成 20；
      * 而且产品行这个字段允许留空，全空时直接写成 0，把员工填的总数覆盖掉。
      *
-     * 批量导入那条路不受影响：解析器本来就会把订单级的合计算好一起传上来
-     * （见 batchOrderImport.ts 里的 productQuantity 汇总），走的是同一个分支。
+     * ⚠️ 2026-08-28 更正：原来这里写着「批量导入那条路不受影响，解析器本来就会把
+     * 订单级的合计算好一起传上来」—— **那句话是错的**。
+     * `batchOrderImport.ts` 的汇总当时也漏乘了箱数（老板实测：填 2/3/4 箱、每箱 2/3/4 个，
+     * 正确 29，系统报 9）。那边已经补上 `× packageCount`。
+     * 教训：修一处口径时，别只在注释里断言「别的路没事」，要真去看一眼那条路的代码。
      */
     const productQuantityNum = Number(body.productQuantity ?? 0);
     const packageUnit = body.packageUnit ?? "box";
