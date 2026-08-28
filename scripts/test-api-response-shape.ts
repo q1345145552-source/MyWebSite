@@ -171,14 +171,29 @@ check("6) 还有没有地方完全绕开 res.json 直接写响应（那种盖不
       if (entry.isDirectory()) { walk(full); continue; }
       if (!entry.name.endsWith(".ts")) continue;
       fs.readFileSync(full, "utf-8").split("\n").forEach((line, i) => {
-        // 绕开 res.json 直接往 socket 写 JSON 的，盖章盖不到，必须自己补齐字段
-        if (/\.end\(\s*JSON\.stringify/.test(line)) {
+        /**
+         * 绕开 res.json 直接往 socket 写 JSON 的，盖章盖不到，必须自己补齐字段。
+         *
+         * ⚠️ 2026-08-29 补 write / send：原来只认 `.end(JSON.stringify` ——
+         * 独立变异把一处改成 `rawRes.write(JSON.stringify(...))`，
+         * **6 项照样全绿**。同一件事换个方法名就漏掉了。
+         */
+        if (/\.(end|write|send)\(\s*JSON\.stringify/.test(line)) {
           offenders.push(`${path.relative(apiRoot, full)}:${i + 1}`);
         }
       });
     }
   };
   walk(apiRoot);
+  /**
+   * ⚠️ 自检：扫描器必须至少认出 server.ts 那处已知的兜底。
+   * 一处都没认出来，说明正则写窄了或者路径找错了 —— 那下面的绿灯不作数。
+   * （这个脚本自己就在这上面栽过：只认 `.end(` 漏掉 `.write(`。）
+   */
+  assert.ok(
+    offenders.some((o) => o.startsWith("server.ts")),
+    "连 server.ts 那处已知的直写都没扫到 —— 扫描器坏了，这一项的绿灯不作数",
+  );
   // server.ts 的管线兜底是已知的一处，它自己补齐了全部字段（有注释说明）
   const unknown = offenders.filter((o) => !o.startsWith("server.ts"));
   assert.deepEqual(

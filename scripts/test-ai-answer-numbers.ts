@@ -1460,10 +1460,53 @@ async function main() {
     assert.equal(contexts.filter((c) => c.includes("answerDraft")).length, 0, "查单进度不该调模型");
   });
 
+  await check("63) 兜底分支的统计答复同样不给模型碰", async () => {
+    /**
+     * 2026-08-29 独立变异实测：把**兜底分支**（ai-service.ts 最后那个 else，
+     * 「什么都没匹配上、直接报名下全部单量」）的 `answerHasBusinessData = true`
+     * 删掉，**62 项 × 2 时区照样全绿** —— 前面 57~62 项测的都是别的分支，
+     * 谁也没走到这一条上，等于这个分支的「不润色」没有任何测试守着。
+     *
+     * 怎么走到兜底分支（这几个条件缺一不可，改动前先读 ai-service.ts:236-349）：
+     *   · 没有运单号；
+     *   · 不是问候语、不是服务问答；
+     *   · 问句里**没有**任何统计词（「多少」「几单」「本月」…），
+     *     否则会被 isSummaryIntent 收走；
+     *   · 问句长度 ≤ 2，否则 shouldAskClarification 会先反问；
+     *   · 模型返回的 intent 是 "tracking"（不是 summary / unknown / greeting）。
+     * 「货」这一个字正好全中。
+     */
+    const shipments = [
+      shipment({ id: "az1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "departed" }),
+      shipment({ id: "az2", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "departed" }),
+      shipment({ id: "az3", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "delivered" }),
+    ];
+    const { answer, contexts } = await ask({
+      shipments,
+      message: "货",
+      intent: JSON.stringify({ intent: "tracking" }),
+      polish: (draft) => `${draft}\n您的货物均已妥投，感谢信赖。`,
+    });
+
+    // ⚠️ 三个数字互不相同（3 / 2 / 1），相同的数会假绿
+    assert.ok(/总单量：3 单/.test(answer), `兜底分支总单量不对：\n${answer}`);
+    assert.ok(/在途中：2 单/.test(answer), `兜底分支在途不对：\n${answer}`);
+    assert.ok(/已完成：1 单/.test(answer), `兜底分支已完成不对：\n${answer}`);
+    assert.ok(
+      !answer.includes("均已妥投"),
+      `兜底分支的答复被模型润色了 —— 它报的是客户名下**全部**单量，最不能让模型碰：\n${answer}`,
+    );
+    assert.equal(
+      contexts.filter((c) => c.includes("answerDraft")).length,
+      0,
+      "兜底分支的统计答复被送去润色了",
+    );
+  });
+
   if (failures.length > 0) {
-    throw new Error(`${failures.length}/62 项不通过（TZ=${TZ_LABEL}）：${failures.join("；")}`);
+    throw new Error(`${failures.length}/63 项不通过（TZ=${TZ_LABEL}）：${failures.join("；")}`);
   }
-  console.log(`AI 答复数字校验：62 项全部通过（TZ=${TZ_LABEL}）`);
+  console.log(`AI 答复数字校验：63 项全部通过（TZ=${TZ_LABEL}）`);
 }
 
 main().catch((error) => {

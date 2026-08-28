@@ -490,31 +490,36 @@ export function registerWhrConsolidationClientRoutes(app: MinimalHttpApp): void 
         }
 
         /**
-         * 方数上限也必须在锁里重算一遍：上面那次是拿事务外的快照算的。
-         * 只有本柜设了上限（planTotal > 0）才拦，跟事务外那道口径一致。
+         * 方数在锁里**无条件重算一遍**：上面那次是拿事务外的快照算的。
+         *
+         * ⚠️ 2026-08-29 改：原来这一整段包在 `if (planTotal > 0)` 里 ——
+         * 本柜没设上限时锁内不算，返回给前端的 planUsedVolumeM3 就退回
+         * **事务外那份旧快照**。别人在这几毫秒里报了货，客户看到的已用方数就是旧的。
+         * 生产 185 个柜里没设上限的占多数，所以这条其实是常态路径。
+         * 「拦不拦」和「返回的数准不准」是两件事：拦只在设了上限时拦，
+         * 但返回的数任何时候都得是锁里算出来的那个。
          */
-        if (planTotal > 0) {
-          const freshOthers = await tx.whrConsolidationPrealert.findMany({
-            where: {
-              customerId: prealert.customerId,
-              id: { not: prealert.id },
-              ...ACTIVE_PREALERT_WHERE,
-            },
-            select: { items: { select: { volumeM3: true } } },
-          });
-          let freshMyOther = 0;
-          for (const pa of freshOthers) {
-            for (const it of pa.items) freshMyOther += toNum(it.volumeM3);
-          }
-          const freshOtherCustomers = await sumPlanUsedVolume(plan.id, tx, prealert.customerId);
-          const freshUsedAfter = round3(freshOtherCustomers + freshMyOther + myNewVolume);
-          lockedPlanUsedVolume = freshUsedAfter;
-          if (freshUsedAfter > planTotal) {
-            throw new BusinessError(
-              `本柜已用 ${round3(freshOtherCustomers + freshMyOther)} 方，` +
-                `本次再报 ${myNewVolume} 方将达到 ${freshUsedAfter} 方，超过计划上限 ${planTotal} 方`,
-            );
-          }
+        const freshOthers = await tx.whrConsolidationPrealert.findMany({
+          where: {
+            customerId: prealert.customerId,
+            id: { not: prealert.id },
+            ...ACTIVE_PREALERT_WHERE,
+          },
+          select: { items: { select: { volumeM3: true } } },
+        });
+        let freshMyOther = 0;
+        for (const pa of freshOthers) {
+          for (const it of pa.items) freshMyOther += toNum(it.volumeM3);
+        }
+        const freshOtherCustomers = await sumPlanUsedVolume(plan.id, tx, prealert.customerId);
+        const freshUsedAfter = round3(freshOtherCustomers + freshMyOther + myNewVolume);
+        lockedPlanUsedVolume = freshUsedAfter;
+        // 只有本柜设了上限（planTotal > 0）才拦，跟事务外那道口径一致
+        if (planTotal > 0 && freshUsedAfter > planTotal) {
+          throw new BusinessError(
+            `本柜已用 ${round3(freshOtherCustomers + freshMyOther)} 方，` +
+              `本次再报 ${myNewVolume} 方将达到 ${freshUsedAfter} 方，超过计划上限 ${planTotal} 方`,
+          );
         }
 
         await tx.whrConsolidationPrealertItem.deleteMany({ where: { prealertId: prealert.id } });
@@ -571,7 +576,7 @@ export function registerWhrConsolidationClientRoutes(app: MinimalHttpApp): void 
       totalVolumeM3: result.totalVolumeM3,
       totalPackages: result.totalPackages,
       itemCount: itemData.length,
-      // ⚠️ 优先用锁内算的那个数；只有本柜没设上限（planTotal 为 0）时锁内不会算，才退回快照
+      // 锁内一定算过了（2026-08-29 起不再只在有上限时算），?? 只是兜底
       planUsedVolumeM3: lockedPlanUsedVolume ?? planUsedAfter,
       planTotalVolumeM3: planTotal,
     });
