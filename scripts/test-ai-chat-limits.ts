@@ -155,7 +155,49 @@ async function main() {
     assert.ok(out.includes("MINUTE_LIMIT_OK"), `子进程没通过：\n${out}`);
   });
 
-  await check("8) 全程没有走到 service.chat（没连库、没调 DeepSeek）", async () => {
+  await check("8) 日上限按北京日历日换桶：北京 23:59 用满，过了 0 点要放行", async () => {
+    /**
+     * ⚠️ 之前一项都没测「换桶」—— 桶的 key 是 `ai-chat-day-${beijingDayKey()}`，
+     * 而 `beijingDayKey()` 要是写成按**服务器时区**取日期（生产容器是 UTC），
+     * 换桶就会发生在北京早上 8 点，而不是 0 点：
+     * 北京 0 点到 8 点之间的客户还在用昨天那个已经用满的桶，问一句就被拒。
+     *
+     * 时间是从 `Date.now()` 读的，所以这里把时钟**冻在一个固定时刻**再跨过 0 点，
+     * 不依赖「今天几号」，什么时候跑都是同一个结果。
+     */
+    const realNow = Date.now;
+    try {
+      // 北京 2026-01-01 23:59:00 ＝ UTC 2026-01-01 15:59:00
+      const beijing2359 = Date.UTC(2026, 0, 1, 15, 59, 0);
+      Date.now = () => beijing2359;
+      const userId = "u_day_rollover";
+      for (let i = 1; i <= 200; i += 1) {
+        const result = await call(userId, tooLong);
+        assert.equal(result.status, 400, `北京 23:59 的第 ${i} 条就被日闸拦了`);
+      }
+      const over = await call(userId, tooLong);
+      assert.equal(over.status, 429, "北京 23:59 的第 201 条没被日闸拦住");
+      assert.ok(over.message.includes("每天最多 200 条"), `提示语不对：${over.message}`);
+
+      // 往前拨 2 分钟，跨过北京 0 点 —— 新的一天，同一个账号必须重新放行
+      Date.now = () => beijing2359 + 2 * 60_000;
+      const nextDay = await call(userId, tooLong);
+      assert.equal(
+        nextDay.status,
+        400,
+        "过了北京 0 点还在拦 —— 日桶没换，客户后半夜到早上 8 点都问不了",
+      );
+
+      // 再回到 23:59 那一刻：昨天那个桶该还是满的（别把「换桶」写成「清零」）
+      Date.now = () => beijing2359;
+      const yesterdayStillFull = await call(userId, tooLong);
+      assert.equal(yesterdayStillFull.status, 429, "换桶被写成了清零，昨天的计数丢了");
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
+  await check("9) 全程没有走到 service.chat（没连库、没调 DeepSeek）", async () => {
     assert.equal(
       reachedService,
       false,
@@ -164,9 +206,9 @@ async function main() {
   });
 
   if (failures.length > 0) {
-    throw new Error(`${failures.length}/8 项不通过：${failures.join("；")}`);
+    throw new Error(`${failures.length}/9 项不通过：${failures.join("；")}`);
   }
-  console.log("AI 聊天接口限流：8 项全部通过");
+  console.log("AI 聊天接口限流：9 项全部通过");
 }
 
 main().catch((error) => {

@@ -68,8 +68,20 @@ async function main() {
       (caught as Error).message.includes("超时"),
       `报的不是超时：${(caught as Error).message}`,
     );
-    // 给足余量，但必须远小于 Node 默认的 300 秒
-    assert.ok(elapsed < 5_000, `等了 ${elapsed} 毫秒才断，超时没生效`);
+    /**
+     * ⚠️ 原来只写 `elapsed < 5_000` —— 那是假绿：
+     * 超时值改成 1 毫秒（等于没给对方任何机会）或者 4 秒（客户早走了），
+     * 这条断言照样通过，等于**根本没验到配的那个值有没有生效**。
+     * 现在卡在配置值的上下：太快说明用的不是这个值，太慢说明超时压根没起作用。
+     */
+    assert.ok(
+      elapsed >= TIMEOUT_MS * 0.5,
+      `才等了 ${elapsed} 毫秒就断（配的是 ${TIMEOUT_MS} 毫秒）—— 用的不是配置的超时值`,
+    );
+    assert.ok(
+      elapsed < TIMEOUT_MS * 10,
+      `等了 ${elapsed} 毫秒才断（配的是 ${TIMEOUT_MS} 毫秒）—— 超时没按配置生效`,
+    );
   });
 
   await check("2) 头发回来了、body 挂住，也照样能断开", async () => {
@@ -86,7 +98,19 @@ async function main() {
     }
     const elapsed = Date.now() - started;
     assert.ok(caught instanceof Error, "没有抛错：计时器可能在读 body 之前就被清掉了");
-    assert.ok(elapsed < 5_000, `等了 ${elapsed} 毫秒才断`);
+    assert.ok(
+      (caught as Error).message.includes("超时"),
+      `报的不是超时：${(caught as Error).message}`,
+    );
+    // 同上：卡在配置值上下，别写成「小于 5 秒」
+    assert.ok(
+      elapsed >= TIMEOUT_MS * 0.5,
+      `才等了 ${elapsed} 毫秒就断（配的是 ${TIMEOUT_MS} 毫秒）`,
+    );
+    assert.ok(
+      elapsed < TIMEOUT_MS * 10,
+      `等了 ${elapsed} 毫秒才断（配的是 ${TIMEOUT_MS} 毫秒）`,
+    );
   });
 
   await check("3) DEEPSEEK_TIMEOUT_MS 填了非正整数时退回默认值并留一条日志", async () => {

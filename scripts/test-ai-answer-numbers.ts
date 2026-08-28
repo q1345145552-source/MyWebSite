@@ -378,8 +378,16 @@ async function main() {
       message: "我在途有多少单",
       polish: rewriteDraft([COUNT_LINE, "$1：999 单"]),
     });
+    /**
+     * ⚠️ 只写「不含 999」是假绿：把审计内容改成**空串**，这两条断言照样通过
+     * （空串不含 999；`"".slice(0,20)` 是空串，任何字符串都 startsWith 空串）。
+     * 2026-08-28 变异测试实测：`answerSummary: ""` 时 56 项一项都没挂。
+     * 现在要求它**真的等于**发给客户那段话的前 200 字。
+     */
+    assert.ok(audit.answerSummary.length > 0, "审计日志里的答复是空的");
+    assert.equal(audit.answerSummary, answer.slice(0, 200), "审计存的不是发给客户的那段话");
+    assert.ok(audit.answerSummary.includes("符合条件：1 单"), "审计里没存校验后的真实数字");
     assert.ok(!audit.answerSummary.includes("999"), "审计日志里存了模型编的数字");
-    assert.ok(answer.startsWith(audit.answerSummary.slice(0, 20)));
   });
 
   // ── 5.「今天」按北京时间：北京今天 0 点刚过下的单必须算今天 ────────────────
@@ -517,7 +525,17 @@ async function main() {
     orderNames.set("n1", { itemName: "壳", productNames: ["壳"] });
     const shipments = [shipment({ id: "n1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs })];
     const { answer } = await ask({ shipments, message: "手机壳订单有多少单？" });
-    assert.ok(answer.includes("壳"), `没给出相近品名提示：\n${answer}`);
+    /**
+     * ⚠️ 只写 `includes("壳")` 是假绿：答复里回显的问句本身就有「手机壳」三个字，
+     * 把整段相近品名建议删掉，这条断言照样通过。
+     * 2026-08-28 变异测试实测：把建议改成永远走兜底文案时，56 项一项都没挂。
+     * 现在盯**那一行建议本身**。
+     */
+    assert.ok(answer.includes("可尝试这些相近品名：壳。"), `没给出相近品名提示：\n${answer}`);
+    assert.ok(
+      !answer.includes("请确认品名是否与系统录入一致"),
+      `明明有相近品名，却回了兜底文案：\n${answer}`,
+    );
   });
 
   await check("14) 认品名时认最长的那个，一个字的品名不认", async () => {
@@ -775,6 +793,14 @@ async function main() {
     const { answer } = await ask({ shipments: [parent, child], message: "我一共有多少单" });
     assert.ok(answer.includes("100.00 千克"), `重量被重复统计了：\n${answer}`);
     assert.ok(!answer.includes("200.00"), `重量被重复统计了：\n${answer}`);
+    /**
+     * ⚠️ 只验重量是假绿：**体积**走的是另一条累加语句，把它改成加两倍
+     * （1.000 → 2.000），上面两条断言照样通过。
+     * 2026-08-28 变异测试实测：体积翻倍时 56 项一项都没挂。
+     */
+    assert.ok(answer.includes("1.000 立方米"), `体积被重复统计了：\n${answer}`);
+    assert.ok(!answer.includes("2.000"), `体积被重复统计了：\n${answer}`);
+    assert.equal(totalCountOf(answer), 1, `父子单被当成两票货：\n${answer}`);
   });
 
   await check("29) 没填重量体积时不显示 0.00，而是压根不打这一行", async () => {
@@ -785,6 +811,12 @@ async function main() {
     assert.ok(!answer.includes("0.00 千克"), `空值被显示成 0 了：\n${answer}`);
     assert.ok(!answer.includes("0.000 立方米"), `空值被显示成 0 了：\n${answer}`);
     assert.ok(!answer.includes("总重量约"), `没数据还打了重量行：\n${answer}`);
+    /**
+     * ⚠️ 少了这一条就是假绿：上面只禁了重量行，**体积行**没禁 ——
+     * 让它打一句「总体积约：暂无数据」，56 项一项都没挂（2026-08-28 变异测试实测）。
+     * 体积行是印给客户看方数的，多打一行没有的东西比少打更容易被当成真数据。
+     */
+    assert.ok(!answer.includes("总体积约"), `没数据还打了体积行：\n${answer}`);
   });
 
   await check("30) 缺父单的家族取最早的下单时间，不取分柜时间", async () => {
