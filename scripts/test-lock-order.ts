@@ -27,9 +27,29 @@ const LOCK_HELPERS: Record<string, string[]> = {
   lockPlanAliveByPrealert: ["whr_consolidation_plans"],
   lockPlanByPrealert: ["whr_consolidation_plans"],
   lockPrealertExpecting: ["whr_consolidation_prealerts"],
+  /**
+   * ⚠️ 这个 helper 第一件事就是 `SELECT ... FROM shipments ... FOR UPDATE`
+   * 锁住父单（parent-status.ts:105）。2026-08-29 之前它没登记在这里 ——
+   * 于是「把父单锁改成反序」这个变异，7 项照样全绿。
+   * 新增间接加锁的 helper 一定要登记，不然这个脚本就是睁眼瞎。
+   */
+  syncParentStatusFromChildren: ["shipments"],
 };
 
 const WRITE_RE = /\btx\.\w+\.(create|update|updateMany|delete|deleteMany|upsert|createMany)\b/;
+/**
+ * ⚠️ **raw SQL 写入也是写**（2026-08-29 补）。
+ * 独立变异实测：在第一把锁前面塞一句 `tx.$executeRaw\`UPDATE ...\``，
+ * 上面那条正则只认 `tx.模型.方法`，**一个都抓不到，5 项照样全绿**。
+ * 注意别把 `SELECT ... FOR UPDATE` 当成写 —— 它里面也有 UPDATE 这个词，
+ * 所以必须匹配到 `UPDATE 表名 SET` 这种完整形状。
+ */
+const RAW_WRITE_RE = /\btx\.\$(executeRaw|executeRawUnsafe|queryRaw|queryRawUnsafe)\b/;
+const RAW_WRITE_SQL_RE = /\b(INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM|TRUNCATE)\b/i;
+function isWriteLine(line: string): boolean {
+  if (WRITE_RE.test(line)) return true;
+  return RAW_WRITE_RE.test(line) && RAW_WRITE_SQL_RE.test(line);
+}
 const RAW_LOCK_RE = /FROM\s+(\w+)\s+WHERE[\s\S]*FOR UPDATE|FOR UPDATE/;
 
 interface TxBlock {
@@ -79,7 +99,7 @@ function scanFile(file: string): TxBlock[] {
           if (t && locks[locks.length - 1] !== t) locks.push(t);
           if (firstLockLine === null) firstLockLine = j + 1;
         }
-        if (firstWriteLine === null && WRITE_RE.test(l)) firstWriteLine = j + 1;
+        if (firstWriteLine === null && isWriteLine(l)) firstWriteLine = j + 1;
         j += 1;
       }
       blocks.push({ file, route, line: start + 1, locks, firstLockLine, firstWriteLine });
@@ -134,22 +154,29 @@ const NO_LOCK_NEEDED: Array<[string, string]> = [
 ];
 
 /**
- * ⚠️ **已知没加锁、但还没修**的三条（2026-08-29 这个脚本刚写出来时就扫到的）。
- *
- * 它们**是真问题**，不是白名单 —— 跟上面 NO_LOCK_NEEDED 完全两回事：
- *   · /admin/orders/delete        删订单，会连带影响运单和柜内记录
- *   · /admin/lastmile/status      改尾端派送状态，是状态机
- *   · /admin/lastmile/orders      建/改尾端派送单
- * 都不在这轮复核的范围里，改之前要先把它们各自的并发场景理清楚，
- * 所以先挂在这里、等老板拍板再动，而不是偷偷放行。
- *
- * 这张表**只许变短、不许变长**（见第 5 项）—— 新写的接口漏了锁会立刻被第 1 项逮住。
+ * 第 7 项的豁免：**新建**一行热表数据不需要先锁它（那行还不存在，锁不到）。
+ * ⚠️ 只放「纯 create」，凡是 update / delete 一律不许进这张表。
  */
-const KNOWN_UNFIXED = [
-  "admin/routes.ts:1168",
-  "admin-ops/routes.ts:706",
-  "admin-ops/routes.ts:760",
+const WRITE_WITHOUT_LOCK_OK: string[] = [
+  // 建派送单：`adminLastmileOrder.create` 插的是**全新的一行**，那行还不存在、锁不到。
+  // 这个事务已经按排序锁完了全部运单（同文件 ~626 行），并发那面是护住的。
+  "admin-ops/routes.ts:663",
 ];
+
+/**
+ * 已知没加锁、但还没修的路径。
+ *
+ * **2026-08-29 已经空了** —— 原来挂在这里的三条
+ *   · /admin/orders/delete    删订单
+ *   · /admin/lastmile/status  签收
+ *   · /admin/lastmile/orders  删派送单
+ * 当天全部补上了锁（第六轮复核点名要修签收那条）。
+ *
+ * 这张表**只许变短、不许变长**（见第 5 项）：
+ * 往里加东西 = 承认自己写了一条没锁的写库路径，要老板拍板，不许偷偷放行。
+ * 新写的接口漏了锁会立刻被第 1 项逮住。
+ */
+const KNOWN_UNFIXED: string[] = [];
 
 check("1) 每个会写数据的事务，第一条写语句都排在第一把锁后面", () => {
   /**
@@ -193,6 +220,119 @@ check("3) 柜子：所有事务都按【柜 → 柜内记录 → 运单】的顺
   assert.deepEqual(bad, [], "下面这些柜子相关事务的锁序跟别处反着，会死锁：\n     " + bad.join("\n     "));
 });
 
+check("6) 循环里取锁的，必须锁在**排过序**的清单上", () => {
+  /**
+   * 独立变异实测（2026-08-29）：把撤销柜子那处的父单锁改成反序，**5 项照样全绿** ——
+   * 因为前面几项只看「锁了哪几张表、谁先谁后」，看不见**同一张表内部**的取锁顺序。
+   *
+   * 一批运单 / 一批父单，两个事务一个 A→B、一个 B→A，就是最经典的反向等待。
+   * 所以规矩定死：**取锁的循环，迭代的那个表达式里必须看得见 `.sort(`**。
+   * 不接受「SQL 里 orderBy 了所以是有序的」—— 那种得翻到别处才看得出来，
+   * 下一个改代码的人看不见，等于没有。要排序就排在眼前这一行。
+   */
+  const bad: string[] = [];
+  let lockLoopsSeen = 0;
+  for (const file of walk(ROOT)) {
+    const lines = fs.readFileSync(file, "utf-8").split("\n");
+    for (let i = 0; i < lines.length; i += 1) {
+      /**
+       * ⚠️ 这里第一版写的是 `of\s+([^)]+)\)` —— 迭代的表达式里只要有一对括号
+       * （`[...ids].sort()` 就是）就匹配不上，**一个循环都没扫到，照样全绿**。
+       * 我自己新写的检查，自己又假绿了一次。所以下面还加了「至少要扫到几个」的自检。
+       * 用贪婪的 `(.+)` 吃到行尾最后一个 `)`。
+       */
+      const m = /for\s*\(\s*const\s+\w+\s+of\s+(.+)\)\s*\{\s*$/.exec(lines[i]);
+      if (!m) continue;
+      // 往下看几行：这个循环体里有没有取锁
+      let locks = false;
+      for (let j = i + 1; j < Math.min(i + 7, lines.length); j += 1) {
+        const t = lines[j].trim();
+        if (t.startsWith("}")) break;
+        if (t.startsWith("*") || t.startsWith("//")) continue;
+        if (t.includes("FOR UPDATE") || Object.keys(LOCK_HELPERS).some((h) => t.includes(`${h}(`))) {
+          locks = true;
+          break;
+        }
+      }
+      if (!locks) continue;
+      lockLoopsSeen += 1;
+      if (m[1].includes(".sort(")) continue;
+      bad.push(`${rel(file)}:${i + 1}  for (... of ${m[1].trim()})`);
+    }
+  }
+  assert.deepEqual(
+    bad,
+    [],
+    "下面这些循环在给一批行加锁，但迭代的清单没排序 —— 两个事务顺序相反就死锁：\n     " +
+      bad.join("\n     "),
+  );
+  // ⚠️ 自检：一个都没扫到就说明正则又写窄了，上面那个 deepEqual 的绿灯不作数
+  assert.ok(
+    lockLoopsSeen >= 6,
+    `只扫到 ${lockLoopsSeen} 个「循环里取锁」的地方，比预期少 —— 正则可能又写窄了，这一项的绿灯不作数`,
+  );
+});
+
+/**
+ * 「写哪张表，就必须先锁哪张表」—— 只管下面这几张**真出过事**的热表。
+ * 别的表大多是子表（轨迹、产品行、图片），锁住父行就够了，全都要求反而全是噪音。
+ */
+const HOT_TABLES: Record<string, string> = {
+  shipment: "shipments",
+  container: "containers",
+  order: "orders",
+  adminLastmileOrder: "admin_lastmile_orders",
+};
+
+check("7) 改了运单/柜子/订单/派送单的事务，必须先锁住同一张表", () => {
+  /**
+   * 独立变异实测（2026-08-29）：把「推进柜子状态」里新加的**逐票运单锁**整段删掉，
+   * **5 项照样全绿** —— 因为前面几项只查「已有的锁排得对不对」，
+   * 不查「该有的锁在不在」。删掉一把锁反而没人管，这是最要命的一种假绿。
+   *
+   * 这一项反过来查：事务里 `tx.shipment.update(...)` 了，
+   * 那它就必须在**这条写语句之前**锁过 shipments。
+   */
+  const bad: string[] = [];
+  for (const file of walk(ROOT)) {
+    const lines = fs.readFileSync(file, "utf-8").split("\n");
+    for (const b of scanFile(file)) {
+      // 这个事务块的范围：从 b.line 到下一个块（scanFile 已经切好，这里重扫一遍拿写的表）
+      let j = b.line; // b.line 是 1-based 的 $transaction 那一行
+      const held = new Set<string>();
+      while (j < lines.length) {
+        const l = lines[j];
+        if (l.includes("$transaction") || /app\.(post|get|delete)\("/.test(l)) break;
+        const t = l.trim();
+        if (t.startsWith("*") || t.startsWith("//") || t.startsWith("/*")) { j += 1; continue; }
+        // 先记下这一行拿到的锁
+        const helper = Object.keys(LOCK_HELPERS).find((h) => l.includes(`${h}(`));
+        if (helper) for (const tb of LOCK_HELPERS[helper]) held.add(tb);
+        if (l.includes("FOR UPDATE")) {
+          const tb = /FROM\s+(\w+)/.exec(l)?.[1];
+          if (tb) held.add(tb);
+        }
+        // 再看这一行有没有写热表
+        for (const [model, table] of Object.entries(HOT_TABLES)) {
+          const re = new RegExp(`\\btx\\.${model}\\.(create|update|updateMany|delete|deleteMany|upsert|createMany)\\b`);
+          if (re.test(l) && !held.has(table)) {
+            bad.push(`${rel(file)}:${j + 1} ${b.route}（改了 ${table}，但之前没锁过它）`);
+          }
+        }
+        j += 1;
+      }
+    }
+  }
+  const filtered = [...new Set(bad)].filter(
+    (line) => !WRITE_WITHOUT_LOCK_OK.some((k) => line.includes(k)),
+  );
+  assert.deepEqual(
+    filtered,
+    [],
+    "下面这些地方改了热表却没先锁住它：\n     " + filtered.join("\n     "),
+  );
+});
+
 check("4) 扫到的事务数量不能突然变少（防止我把正则写窄了自己骗自己）", () => {
   // 这个数字是 2026-08-29 实际扫出来的。以后加接口只会变多；
   // 变少说明正则漏掉了一批，那时候上面三项的「全绿」就不作数了。
@@ -215,7 +355,7 @@ check("5) 「已知没加锁」那张表只许变短，不许变长", () => {
 });
 
 if (failures.length > 0) {
-  console.error(`\n${failures.length}/5 项不通过：${failures.join("；")}`);
+  console.error(`\n${failures.length}/7 项不通过：${failures.join("；")}`);
   process.exit(1);
 }
-console.log(`加锁顺序：5 项全部通过（扫了 ${allBlocks.length} 个会写数据的事务）`);
+console.log(`加锁顺序：7 项全部通过（扫了 ${allBlocks.length} 个会写数据的事务）`);

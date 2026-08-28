@@ -425,8 +425,7 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
            * 加锁顺序相反会被 PostgreSQL 判定死锁掐掉一个。
            * 下面锁父单那里用的也是这个办法（按单号排序）。
            */
-          const lockIds = [...freshShipmentIds].sort();
-          for (const sid of lockIds) {
+          for (const sid of [...freshShipmentIds].sort()) {
             await tx.$queryRaw`SELECT id FROM shipments WHERE id = ${sid} FOR UPDATE`;
           }
           const freshShipments = await tx.shipment.findMany({
@@ -674,6 +673,20 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
       let affectedShipments = 0;
 
       if (changedAt && shipmentStatusOfThisPush && shipmentIds.length > 0) {
+        /**
+         * ⚠️⚠️ **先按 id 排序把这批运单全锁住，再动它们**（2026-08-29 补）。
+         *
+         * 原来这里一把运单锁都没有，直接 deleteMany 轨迹 + updateMany 运单 ——
+         * updateMany 的行锁是 Postgres **按扫描顺序**取的，方向不固定，
+         * 而「推进柜子状态」那条路是 `[...ids].sort()` 逐个锁的（本文件 ~429 行）。
+         * 一边有序、一边随机，两个柜共用同一批运单（分柜后很常见）时会反向等待。
+         *
+         * 排序之外还有一个理由：下面「按剩下的最后一条轨迹重算状态」是**先读后写**，
+         * 不锁的话，读完到写之间别人插一条轨迹，这里就会拿旧的算、把新的盖掉。
+         */
+        for (const sid of [...shipmentIds].sort()) {
+          await tx.$queryRaw`SELECT id FROM shipments WHERE id = ${sid} FOR UPDATE`;
+        }
         const del = await tx.statusLog.deleteMany({
           where: {
             companyId: auth.companyId,
@@ -720,8 +733,14 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
           where: { id: { in: shipmentIds }, companyId: auth.companyId },
           select: { id: true, parentTrackingNo: true },
         });
+        /**
+         * ⚠️ **必须排序**（2026-08-29 补）—— 「推进柜子状态」那条路是
+         * `[...parentNosToSync].sort()`（本文件 ~490 行），这里原来没排。
+         * 两个柜子同时撤销、且涉及同一批父单时，一边 A→B、一边 B→A，
+         * 反向等待就是死锁。同一个规矩两处写法必须一样。
+         */
         const parentNos = [...new Set(kids.map((k) => k.parentTrackingNo).filter((v): v is string => !!v))];
-        for (const trackingNo of parentNos) {
+        for (const trackingNo of [...parentNos].sort()) {
           await syncParentStatusFromChildren(tx, trackingNo, auth.companyId);
         }
       }

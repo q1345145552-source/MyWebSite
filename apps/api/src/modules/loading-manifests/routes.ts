@@ -809,6 +809,14 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
       });
       if (!item) throw new Error("装柜记录不存在");
 
+      /**
+       * ⚠️ 子运单也要锁（2026-08-29 补）。
+       * 下面要改它的件数、体积、重量，原来只锁了柜子和柜内记录 ——
+       * 同一票货正在被「推进柜子状态」改状态时，两边各写各的，后写的盖掉先写的。
+       * 锁序【柜 → 柜内记录 → 运单】，跟本文件装柜那条路和 containers 那边一致。
+       */
+      await tx.$queryRaw`SELECT id FROM shipments WHERE id = ${item.shipment.id} FOR UPDATE`;
+
       const totalLoaded = item.loadedPieceCount;
       const reqPieces = typeof body.pieceCount === "number" && body.pieceCount > 0 && body.pieceCount < totalLoaded ? body.pieceCount : totalLoaded;
       const childPkg = item.shipment.packageCount ?? 0;

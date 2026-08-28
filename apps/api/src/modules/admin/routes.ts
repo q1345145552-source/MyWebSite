@@ -1166,7 +1166,48 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
 
     // 事务：级联清理所有关联记录后删除订单
     await prisma.$transaction(async (tx) => {
-      for (const s of order.shipments) {
+      /**
+       * ⚠️⚠️ **先锁订单，再把运单清单在锁里重读一遍**（2026-08-29 补）。
+       *
+       * 原来这条路一把锁都没有，而且拿的是**事务外**读到的那份 order.shipments：
+       *   · 读完到删完之间新分出来的子单不在清单里 → 它还挂着这个 orderId，
+       *     最后那句 order.delete 撞外键 → 整个请求 500，员工只看到「服务器繁忙」；
+       *   · 两个人同时删同一张订单，第二个人删已经不存在的行 → 同样 500；
+       *   · 逐个删运单时行锁是按循环顺序取的，而装柜/推进柜子是
+       *     `[...ids].sort()` 有序取 —— 方向不固定，会跟它们死锁。
+       *
+       * 「锁只保证不同时，不保证数据没变」（CLAUDE.md 第 28 条）：
+       * 所以锁完必须**重读**，不能接着用锁之前那份清单。
+       */
+      await tx.$queryRaw`SELECT id FROM orders WHERE id = ${orderId} AND company_id = ${auth.companyId} FOR UPDATE`;
+      const freshShipments = await tx.shipment.findMany({
+        where: { orderId, companyId: auth.companyId },
+        select: { id: true },
+      });
+      const shipmentIdsToDelete = freshShipments.map((s) => s.id);
+      /**
+       * 按 id 排序逐个上锁 —— 顺序必须跟装柜/推进柜子那两条路一致，不然会反向等待。
+       * ⚠️ 排序写在 `.sort()` 上、不靠 SQL 的 orderBy：test-lock-order 第 6 项
+       * 就是按「取锁的循环里必须看得见 .sort()」查的，规则统一才不会有人漏。
+       */
+      /**
+       * 锁序【订单 → 派送单 → 运单 → 父单】（2026-08-29 补）。
+       * 派送单要排在运单**前面**：签收那条路（admin-ops/routes.ts）是
+       * 先锁派送单再锁运单，这里反过来的话，删单和签收同时点就成环。
+       */
+      const lastmileIds = (
+        await tx.adminLastmileOrder.findMany({
+          where: { shipmentId: { in: shipmentIdsToDelete } },
+          select: { id: true },
+        })
+      ).map((r) => r.id);
+      for (const lid of [...lastmileIds].sort()) {
+        await tx.$queryRaw`SELECT id FROM admin_lastmile_orders WHERE id = ${lid} FOR UPDATE`;
+      }
+      for (const sid of [...shipmentIdsToDelete].sort()) {
+        await tx.$queryRaw`SELECT id FROM shipments WHERE id = ${sid} FOR UPDATE`;
+      }
+      for (const s of freshShipments) {
         await tx.adminCustomsCase.updateMany({ where: { shipmentId: s.id }, data: { shipmentId: null } });
         await tx.adminLastmileOrder.deleteMany({ where: { shipmentId: s.id } });
         await tx.warehouseLocation.updateMany({ where: { shipmentId: s.id }, data: { shipmentId: null } });

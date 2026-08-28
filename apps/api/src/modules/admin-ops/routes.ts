@@ -605,7 +605,25 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
     const results: Array<{ id: string; shipmentId: string }> = [];
     try {
       await prisma.$transaction(async (tx) => {
-        for (const sid of shipmentIds) {
+        /**
+         * ⚠️⚠️ **锁序：先把这批运单按 id 排序全部锁完，再逐个干活**（2026-08-29 改）。
+         *
+         * 原来是在循环里「锁子单 → 干活 → 锁父单 → 下一个子单」，两个毛病：
+         *   ① shipmentIds 是前端传什么顺序就什么顺序，两个员工同时给
+         *      同一批货建派送单、顺序相反，就是最经典的反向等待死锁；
+         *   ② 父单锁夹在两个子单锁中间 —— 本事务拿着父单 P 去要子单 S2，
+         *      「推进柜子状态」那条路（containers/routes.ts ~429）却是
+         *      先锁完所有子单（有序）再锁父单，它拿着 S2 来要 P。**成环。**
+         *
+         * 现在统一成跟柜子那条路一样的【全部子单（有序）→ 全部父单（有序）】。
+         */
+        const orderedIds = [...shipmentIds].sort();
+        for (const sid of [...shipmentIds].sort()) {
+          await tx.$queryRaw`SELECT id FROM shipments WHERE id = ${sid} FOR UPDATE`;
+        }
+        /** 父单留到最后统一同步，别夹在子单锁中间（见上面 ②） */
+        const parentNosToSync = new Set<string>();
+        for (const sid of orderedIds) {
           /**
            * ⚠️ 一票货不能同时在两张「还没签收」的派送单里（2026-08-25 新增）。
            *
@@ -621,8 +639,8 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
            *
            * ⚠️ 先给运单行上锁再查：两个员工同时把同一票货加进各自的派送单时，
            * 不锁的话两边都查到「没有在途派送单」，双双放行。
+           * ⚠️ 锁已经在上面按 id 排序一次性拿完了（2026-08-29 挪的），这里只管读。
            */
-          await tx.$queryRaw`SELECT id FROM shipments WHERE id = ${sid} FOR UPDATE`;
           const ownShipment = await tx.shipment.findFirst({
             where: { id: sid, companyId: auth.companyId },
             select: { id: true, trackingNo: true, currentStatus: true, parentTrackingNo: true },
@@ -653,9 +671,14 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
           if (ownShipment.parentTrackingNo) {
             // ⚠️ 不能直接把父单写成 outForDelivery：分柜后可能只有一个子单出去派送，
             // 其余还在仓库。按全部子单重新推算（2026-08-22）。
-            await syncParentStatusFromChildren(tx, ownShipment.parentTrackingNo, auth.companyId);
+            // ⚠️ 但**不在这里同步** —— 见上面锁序那段 ②，父单锁不能夹在子单锁中间。
+            parentNosToSync.add(ownShipment.parentTrackingNo);
           }
           results.push({ id, shipmentId: sid });
+        }
+        // 子单全部处理完之后，父单按单号排序统一同步（跟柜子那条路同一个顺序）
+        for (const trackingNo of [...parentNosToSync].sort()) {
+          await syncParentStatusFromChildren(tx, trackingNo, auth.companyId);
         }
       });
     } catch (e: any) {
@@ -710,11 +733,41 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
       });
       if (!own) return null;
 
+      /**
+       * ⚠️⚠️ **锁住派送单这一行，再复查一遍它现在是什么状态**（2026-08-29 补）。
+       *
+       * 原来这条路一把锁都没有。两个人同时点「签收」同一票货：
+       * 第二个人的 UPDATE 会等第一个人提交，等到之后**照样往下走** ——
+       * 因为它拿的是事务外那份「还没签收」的判断，结果
+       *   · 客户轨迹里多出**两条一模一样的「已签收」**；
+       *   · 后一张签收图**盖掉**前一张（司机拍的凭证就这么没了）。
+       * 「锁只保证不同时，不保证数据没变」—— 所以锁完必须重查（CLAUDE.md 第 28 条）。
+       *
+       * 锁序统一成【派送单 → 运单 → 父单】，删除派送单那条路（下面）也是这个顺序。
+       */
+      await tx.$queryRaw`SELECT id FROM admin_lastmile_orders WHERE id = ${own.id} FOR UPDATE`;
+      const fresh = await tx.adminLastmileOrder.findUnique({
+        where: { id: own.id },
+        select: { status: true },
+      });
+      if (!fresh) return null;
+      // 拿**锁后**的状态判断，不是事务外那份
+      const alreadySigned = fresh.status === "SIGNED";
+
       const row = await tx.adminLastmileOrder.update({ where: { id: own.id }, data: updateData });
       if (body.status !== "SIGNED") return row;
+      /**
+       * 已经签收过了就到此为止：派送单本身该改的（比如重新上传一张更清楚的签收图）
+       * 上面那句 update 已经改完，但**运单状态和轨迹一个字都不再动** ——
+       * 再走一遍就是那条重复的「已签收」。
+       */
+      if (alreadySigned) return row;
 
       {
         const updated = row;
+        // 锁住运单再读，不然读到的 currentStatus 可能是别人正在改的旧值，
+        // 写进轨迹的 fromStatus 就是错的
+        await tx.$queryRaw`SELECT id FROM shipments WHERE id = ${updated.shipmentId} FOR UPDATE`;
         const shipment = await tx.shipment.findUnique({ where: { id: updated.shipmentId }, select: { id: true, currentStatus: true, parentTrackingNo: true } });
         if (shipment) {
           await tx.shipment.update({ where: { id: shipment.id }, data: { currentStatus: "delivered", updatedAt: now } });
@@ -758,6 +811,13 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
     // 现在：删记录的同时把运单退回「已到仓」，并写一条状态轨迹说明原因。
     const now = new Date();
     const result = await prisma.$transaction(async (tx) => {
+      /**
+       * ⚠️ 锁序【派送单 → 运单 → 父单】，跟上面「签收」那条路一致（2026-08-29 补）。
+       * 原来这条路也是一把锁都没有：删单和签收同时点，
+       * 删这边读到的运单状态可能是签收之前的旧值，于是把已经签收的货
+       * 退回「已到仓」—— 那是把对的改错。
+       */
+      await tx.$queryRaw`SELECT id FROM admin_lastmile_orders WHERE id = ${id} AND company_id = ${auth.companyId} FOR UPDATE`;
       const row = await tx.adminLastmileOrder.findFirst({
         where: { id, companyId: auth.companyId },
         select: { id: true, shipmentId: true, deliveryNo: true },
@@ -766,6 +826,7 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
 
       await tx.adminLastmileOrder.delete({ where: { id: row.id } });
 
+      await tx.$queryRaw`SELECT id FROM shipments WHERE id = ${row.shipmentId} FOR UPDATE`;
       const ship = await tx.shipment.findUnique({
         where: { id: row.shipmentId },
         select: { id: true, currentStatus: true, parentTrackingNo: true },

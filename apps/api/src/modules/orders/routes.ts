@@ -487,6 +487,24 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
         where: { orderId },
         select: { id: true },
       });
+      const shipmentIdsToDelete = orderShipments.map((s) => s.id);
+      /**
+       * 锁序【订单 → 派送单 → 运单 → 父单】（2026-08-29 补）。
+       * 派送单要排在运单**前面**：签收那条路（admin-ops/routes.ts）是
+       * 先锁派送单再锁运单，这里反过来的话，删单和签收同时点就成环。
+       */
+      const lastmileIds = (
+        await tx.adminLastmileOrder.findMany({
+          where: { shipmentId: { in: shipmentIdsToDelete } },
+          select: { id: true },
+        })
+      ).map((r) => r.id);
+      for (const lid of [...lastmileIds].sort()) {
+        await tx.$queryRaw`SELECT id FROM admin_lastmile_orders WHERE id = ${lid} FOR UPDATE`;
+      }
+      for (const sid of [...shipmentIdsToDelete].sort()) {
+        await tx.$queryRaw`SELECT id FROM shipments WHERE id = ${sid} FOR UPDATE`;
+      }
       for (const s of orderShipments) {
         await tx.adminCustomsCase.updateMany({ where: { shipmentId: s.id }, data: { shipmentId: null } });
         await tx.adminLastmileOrder.deleteMany({ where: { shipmentId: s.id } });
