@@ -316,20 +316,20 @@ export default function RoleShell(props: {
         {/* 左上角这个位置是放品牌的，原来写「工作台导航」——
             左边一排链接，本来就看得出是导航，等于一句废话。
             换成公司名，三端每一页都带着（2026-08-11）。 */}
-        <div className="dashboard-sidebar-head">
-          <h2 className="dashboard-sidebar-title">湘泰物流</h2>
-          {/* 电脑端专用：把侧边栏收起来，宽度让给表格。
-              手机端由 CSS 隐藏它（那边已经有汉堡 + 关闭按钮了）。 */}
-          <button
-            type="button"
-            className="sidebar-collapse-btn"
-            onClick={toggleSidebarCollapsed}
-            title="收起侧边栏"
-            aria-label="收起侧边栏"
-          >
-            ‹‹
-          </button>
-        </div>
+        <h2 className="dashboard-sidebar-title">湘泰物流</h2>
+        {/* 电脑端专用：把侧边栏收起来，宽度让给表格。
+            手机端由 CSS 隐藏它（那边已经有汉堡 + 关闭按钮了）。
+            ⚠️ 绝对定位、不放进文档流：包一层 flex 会动到标题的下边距，
+            实测把 a3 品牌标题的 20px 下边距挤成 12px、整排菜单上移 3px。 */}
+        <button
+          type="button"
+          className="sidebar-collapse-btn"
+          onClick={toggleSidebarCollapsed}
+          title="收起侧边栏"
+          aria-label="收起侧边栏"
+        >
+          ‹‹
+        </button>
         <div className="dashboard-sidebar-group">
           {roleMenus[session.role].map((item) => (
             <a
@@ -433,7 +433,11 @@ export default function RoleShell(props: {
           </button>
           {/* 侧边栏收起来之后，把它请回来的按钮。
               ⚠️ 必须放在顶栏、不能放侧边栏里 —— 放里面的话收起来就再也点不到了。
-              只有收起状态才显示（见 globals.css 的 .sidebar-collapsed）。 */}
+              只有收起状态才显示（见 globals.css 的 .sidebar-collapsed）。
+              ⚠️ 也是绝对定位、不进文档流：顶栏是 flex + space-between，
+              多一个子元素会把标题挤到正中间（实测 x 从 208 跳到 654），
+              而且顶栏会从 44px 变高到 53px —— 装柜页那根 sticky 柜号列
+              是按顶栏 42px 高定位的，顶栏一变高就对不齐。 */}
           <button
             type="button"
             className="sidebar-expand-btn"

@@ -892,40 +892,64 @@ main {
    手机端侧边栏是抽屉（position:fixed + translateX），靠 .open 推出来。
    要是收起状态在那边也 display:none，用户在电脑上收过一次，
    换手机打开时点汉堡就什么都不出来 —— 而且他不会知道是为什么。 */
-.dashboard-sidebar-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  /* 标题原来自带 0 0 12px 的下边距，现在整体挪到这一行上，
-     标题本身清零 —— 否则按钮会被标题的下边距顶得偏上。 */
-  margin: 0 0 12px 0;
-}
-.dashboard-sidebar-head .dashboard-sidebar-title {
-  margin: 0;
-}
-
+/* ⚠️ 两个按钮都用**绝对定位**，一个都不许进文档流。
+   第一版把它们当普通子元素放进去，实测（a3 外观、1440px）三处排版被改掉：
+     · 侧边栏：给标题包一层 flex → a3 品牌标题的 20px 下边距被挤成 12px，
+       整排菜单跟着上移 3px；
+     · 顶栏：多一个 flex 子元素 → space-between 把标题挤到正中间（x 从 208 跳到 654）；
+     · 顶栏高度 44px → 53px —— 装柜页（staff/container-loading）那根 sticky 柜号列
+       是按「顶栏高 42px」定位的，顶栏一变高就对不齐。
+   绝对定位之后这三处的数字和改动前一模一样（有前后对比实测）。 */
 .sidebar-collapse-btn,
 .sidebar-expand-btn {
   display: none;
-  flex: 0 0 auto;
+  position: absolute;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   padding: 0;
   border: 1px solid var(--hairline);
   border-radius: 6px;
-  background: transparent;
-  color: var(--ink-mute);
-  font-size: 13px;
+  /* ⚠️ 这个 !important 不能省。第 1216 行有条兜底规则
+     `button:not([style*="background: transparent"]) { background: var(--brand); color: var(--white) }`，
+     它把页面上**每一个** button 都刷成品牌蓝，而且选择器特异性比类名高。
+     不躲开的话，这两个小按钮会长成两颗实心蓝主按钮
+     （A3 规格是「一个页面只留一个实心主按钮」）。
+     旁边的 .mobile-hamburger 躲的是同一条规则，写法一致。 */
+  background: transparent !important;
+  color: var(--ink-mute) !important;
+  font-size: 12px;
   line-height: 1;
   cursor: pointer;
+  z-index: 2;
 }
 .sidebar-collapse-btn:hover,
 .sidebar-expand-btn:hover {
   border-color: var(--brand);
-  color: var(--brand);
+  color: var(--brand) !important;
+}
+
+/* A3 的侧边栏是深藏青，收起按钮得用浅色，否则深灰字贴在深底上看不见。
+   展开按钮在顶栏（浅底），沿用上面的深灰即可，不用改。 */
+.a3-shell .sidebar-collapse-btn {
+  border-color: rgba(255, 255, 255, 0.22);
+  color: var(--navdark-ink) !important;
+}
+.a3-shell .sidebar-collapse-btn:hover {
+  border-color: rgba(255, 255, 255, 0.45);
+  color: #fff !important;
+}
+/* 侧边栏是 position:sticky（手机端是 fixed），本身就是绝对定位的参照物 */
+.sidebar-collapse-btn {
+  top: 12px;
+  right: 8px;
+}
+/* 顶栏是 position:sticky，同理 */
+.sidebar-expand-btn {
+  left: 2px;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 @media (min-width: 901px) {
@@ -940,6 +964,11 @@ main {
   }
   .dashboard-layout.sidebar-collapsed .sidebar-expand-btn {
     display: inline-flex;
+  }
+  /* 给那个绝对定位的展开按钮腾出位置，免得压住标题。
+     只在收起时加，展开时顶栏的内边距一点不变。 */
+  .dashboard-layout.sidebar-collapsed .glass-topbar {
+    padding-left: 32px;
   }
 }
 
