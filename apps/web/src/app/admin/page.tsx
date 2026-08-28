@@ -574,7 +574,13 @@ export default function AdminHomePage() {
     // 从产品行计算总数
     const activeProducts = editProducts;
     const totalPackageCount = activeProducts.reduce((s, p) => s + (Number(p.packageCount) || 1), 0);
-    const totalProductQuantity = activeProducts.reduce((s, p) => s + (Number(p.productQuantity) || 0), 0);
+    // ⚠️ 产品行上的「数量」口径是**单箱几个**（这一页的表头就写着「单箱数量」），
+    // 所以总数必须乘箱数。2026-08-28 复核实测：这里原来直接相加，跟批量导入犯的是同一个错。
+    // 口径见 apps/api/src/modules/orders/routes.ts:833 的注释。
+    const totalProductQuantity = activeProducts.reduce(
+      (s, p) => s + (Number(p.productQuantity) || 0) * (Number(p.packageCount) || 1),
+      0,
+    );
     const primaryItemName = activeProducts[0]?.itemName.trim() || orderEditForm.itemName.trim();
     if (!primaryItemName) {
       setMessage("请填写品名。");

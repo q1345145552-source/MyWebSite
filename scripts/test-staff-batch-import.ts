@@ -100,6 +100,14 @@ for (let i = 1; i <= 100; i += 1) {
   );
 }
 
+/**
+ * 后续明细行可以省略**公共字段**（唛头/仓库/日期/运输方式），继承上一行。
+ * ⚠️ 但「每箱几个」是**逐行的数据**、不是公共字段，
+ *    所以这一行也得填 —— 2026-08-28 加了「要么全填要么全空」之后，
+ *    第一行填了第二行不填会被判成填漏（见下面那组用例）。
+ *    这里把它补上，用一个跟别的数都不一样的 5：
+ *    第 1 行 2 箱 × 每箱 2 个 = 4，第 2 行 1 箱 × 每箱 5 个 = 5，合计 9。
+ */
 const inherited = parseStaffBatchRows([
   ...buildRows(1).slice(0, 1),
   {
@@ -110,12 +118,14 @@ const inherited = parseStaffBatchRows([
     "宽cm（数字）": 20,
     "高cm（数字）": 30,
     "单箱重量kg *（数字）": 2,
+    产品数量: 5,
   },
 ]);
 assert.deepEqual(inherited.issues, []);
 assert.equal(inherited.orders.length, 1);
 assert.equal(inherited.orders[0].products.length, 2);
 assert.equal(inherited.orders[0].packageCount, 3);
+assert.equal(inherited.orders[0].productQuantity, 9, "继承行的数量没算对（2×2 + 1×5 = 9）");
 
 const conflict = parseStaffBatchRows([
   ...buildRows(1).slice(0, 1),
@@ -136,7 +146,7 @@ assert.equal(conflict.issues.some((issue) => issue.message.includes("仓库")), 
  * （41 和 5/7/2/3/35/6 都不一样，算错了一眼就看得出来）
  */
 for (const [表头, 说明] of [
-  ["单箱数量（每箱几个）", "新表头"],
+  ["每箱几个", "新表头"],
   ["产品数量", "老表头（老模板下载过的文件）"],
 ] as Array<[string, string]>) {
   const common = {
@@ -158,6 +168,80 @@ for (const [表头, 说明] of [
     41,
     `${说明}：产品数量应该是 5×7 + 2×3 = 41（漏乘箱数的话会得到 10）`,
   );
+}
+
+/**
+ * ⚠️ 新旧两列**同时出现**时，取值不许受列顺序影响（2026-08-28 复核实测报的）。
+ *
+ * findValue 是「按列顺序找第一个包含任一关键词的列」。
+ * 表里同时有旧列「产品数量」和新列「每箱几个」时，
+ * 一次性查两个关键词会**看哪一列排在前面**，同一份数据能算出两个不同的总数 ——
+ * 复核实测是 10 和 200，**有报大风险**。规矩定死：新列优先，跟列顺序无关。
+ */
+for (const [顺序说明, buildRow] of [
+  [
+    "新列在前",
+    (n: number, q: number, legacy: number) => ({
+      "每箱几个": q, 产品数量: legacy, "品名 *": `甲${n}`, "箱数 *": n,
+    }),
+  ],
+  [
+    "旧列在前",
+    (n: number, q: number, legacy: number) => ({
+      产品数量: legacy, "每箱几个": q, "品名 *": `甲${n}`, "箱数 *": n,
+    }),
+  ],
+] as Array<[string, (n: number, q: number, legacy: number) => Record<string, unknown>]>) {
+  const common = {
+    "唛头 *": "TESTBOTH",
+    "运单号 *": "UTBOTH00001",
+    "仓库 *": "义乌仓",
+    "到仓日期 *（YYYY-MM-DD）": "2026-08-27",
+    "运输方式 *（海运/陆运）": "海运",
+    "单箱重量kg *（数字）": 1,
+  };
+  // 新列填 7，旧列故意填一个完全不同的 99；5 箱 → 只可能是 5×7=35，绝不该是 5×99
+  const parsed = parseStaffBatchRows([{ ...common, ...buildRow(5, 7, 99) }]);
+  assert.deepEqual(parsed.issues, [], `${顺序说明}：解析报错了`);
+  assert.equal(
+    parsed.orders[0].productQuantity,
+    35,
+    `${顺序说明}：取值受了列顺序影响（应该固定认新列 5×7=35，认成旧列会得到 495）`,
+  );
+}
+
+/**
+ * ⚠️ 每箱几个「要么全填、要么全空」（2026-08-28 补）。
+ * 原来只要有一行填了，其余空行就按 0 静默计入 —— 总数偏小而且没人知道。
+ * 跟单箱重量、尺寸同一个规矩：数字算错比导入失败严重得多。
+ */
+{
+  const common = {
+    "唛头 *": "TESTPART",
+    "运单号 *": "UTPART00001",
+    "仓库 *": "义乌仓",
+    "到仓日期 *（YYYY-MM-DD）": "2026-08-27",
+    "运输方式 *（海运/陆运）": "海运",
+    "单箱重量kg *（数字）": 1,
+  };
+  const partial = parseStaffBatchRows([
+    { ...common, "品名 *": "甲", "箱数 *": 5, "每箱几个": 7 },
+    { ...common, "品名 *": "乙", "箱数 *": 2 }, // 这一行没填数量
+  ]);
+  assert.equal(partial.orders.length, 0, "部分填写还让它过了");
+  assert.equal(
+    partial.issues.some((i) => i.message.includes("每箱几个")),
+    true,
+    `没报「要么全填要么全空」：${JSON.stringify(partial.issues)}`,
+  );
+
+  // 全空是允许的（这一列本来就是选填）
+  const allEmpty = parseStaffBatchRows([
+    { ...common, "品名 *": "甲", "箱数 *": 5 },
+    { ...common, "品名 *": "乙", "箱数 *": 2 },
+  ]);
+  assert.deepEqual(allEmpty.issues, [], "全部留空反而被拦了");
+  assert.equal(allEmpty.orders[0].productQuantity, undefined, "全空时不该编出一个数");
 }
 
 console.log("staff batch import parser: 100 orders / 300 rows passed");

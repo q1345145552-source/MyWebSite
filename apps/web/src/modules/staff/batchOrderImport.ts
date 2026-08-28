@@ -196,10 +196,26 @@ export function parseStaffBatchRows(rows: Record<string, unknown>[]): StaffBatch
      * ⚠️ 两个表头都要认。
      * 模板原来这一列叫「产品数量」，跟旁边的「**单箱**重量kg」口径不一致，
      * 员工很容易当成「这一行一共几个」来填 —— 而代码要的是「每箱几个」。
-     * 2026-08-28 把模板表头改成「单箱数量（每箱几个）」，
+     * 2026-08-28 把模板表头改成「每箱几个」，
      * 但**老模板下载过、正在用的文件还认「产品数量」**，两个都得收。
      */
-    const productQuantity = positiveNumber(draft, rowNumber, "单箱数量", numericValue(row, ["单箱数量", "产品数量"]), { integer: true });
+    /**
+     * ⚠️ 两个表头要**分两次查**，不能写成 `["单箱数量","产品数量"]` 一次查。
+     * findValue 是「按列顺序找第一个包含任一关键词的列」——
+     * 表里同时存在旧列「产品数量」和新列「每箱几个」时，
+     * 取哪一列**取决于列的先后顺序**。2026-08-28 复核实测：同一份数据
+     * 因为列序不同能算出 10 或 200，**有报大风险**。
+     * 现在固定「新列优先，没有新列才回落到旧列」，跟列顺序无关。
+     *
+     * ⚠️⚠️ 新表头**绝对不能**叫「单箱数量」：那四个字里含有「箱数」，
+     * 而表头是包含匹配，`numericValue(row, ["箱数"])` 会把这一列认成**箱数**列。
+     * 实测：5 箱、每箱 7 个，箱数被读成 7，总数算出 49 而不是 35。
+     * 所以定成「每箱几个」—— 跟现有任何一个表头都不含相同子串。
+     */
+    const perBoxRaw = numericValue(row, ["每箱几个"]);
+    const legacyRaw = numericValue(row, ["产品数量"]);
+    const quantityRaw = perBoxRaw.value !== undefined || perBoxRaw.invalid ? perBoxRaw : legacyRaw;
+    const productQuantity = positiveNumber(draft, rowNumber, "每箱几个", quantityRaw, { integer: true });
     const dimensionCount = [lengthCm, widthCm, heightCm].filter((value) => value !== undefined).length;
     if (dimensionCount > 0 && dimensionCount < 3) {
       draft.issues.push({ rowNumber, trackingNo, message: "长、宽、高需要同时填写" });
@@ -236,6 +252,18 @@ export function parseStaffBatchRows(rows: Record<string, unknown>[]): StaffBatch
     }
     if (dimensions.some(Boolean) && dimensions.some((complete) => !complete)) {
       draft.issues.push({ trackingNo: draft.trackingNo, message: "同一运单的产品尺寸需要全部填写或全部留空" });
+    }
+    /**
+     * ⚠️ 「要么全填、要么全空」——跟上面单箱重量、尺寸同一个规矩（2026-08-28 补）。
+     * 原来只要有**一行**填了数量，其余空行就按 0 静默计入，总数偏小而且没人知道。
+     * 数字算错比导入失败严重得多，宁可拦住让他补齐。
+     */
+    const quantities = draft.products.map((product) => product.productQuantity);
+    if (quantities.some((q) => q !== undefined) && quantities.some((q) => q === undefined)) {
+      draft.issues.push({
+        trackingNo: draft.trackingNo,
+        message: "同一运单的每箱几个需要全部填写或全部留空",
+      });
     }
     if (draft.issues.length > 0) {
       issues.push(...draft.issues);

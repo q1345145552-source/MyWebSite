@@ -845,7 +845,21 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
      * 正确 29，系统报 9）。那边已经补上 `× packageCount`。
      * 教训：修一处口径时，别只在注释里断言「别的路没事」，要真去看一眼那条路的代码。
      */
-    const productQuantityNum = Number(body.productQuantity ?? 0);
+    /**
+     * ⚠️ 2026-08-28 再补：**前端没传时不能存成 0**。
+     * 复核实测这条路「信任前端合计，前端没传就写 0」——
+     * 客户订单上的产品数量凭空变成 0，而产品行里明明填着数。
+     * 前端传了就用它（那是员工在订单级填的总数，说了算）；
+     * 没传、而产品行有数量时，按 Σ(箱数 × 单箱数量) 兜底，跟批量导入同一个算法。
+     */
+    const productQuantityFromRows = staffProducts.reduce(
+      (s, p) => s + (p.productQuantity ?? 0) * p.packageCount,
+      0,
+    );
+    const productQuantityNum =
+      body.productQuantity === undefined || body.productQuantity === null
+        ? productQuantityFromRows
+        : Number(body.productQuantity);
     const packageUnit = body.packageUnit ?? "box";
 
     // 事务前计算应收金额（按产品行分别计价求和）
