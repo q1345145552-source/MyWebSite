@@ -1,4 +1,5 @@
 // B-7: 已从 node:sqlite 迁移到 Prisma + PostgreSQL（2026-05-20）
+import { lockShipmentsChildrenFirst } from "../shipments/lock-shipments";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../db/prisma";
 import { syncParentStatusFromChildren } from "../shipments/parent-status";
@@ -617,10 +618,14 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
          *
          * 现在统一成跟柜子那条路一样的【全部子单（有序）→ 全部父单（有序）】。
          */
-        const orderedIds = [...shipmentIds].sort();
-        for (const sid of [...shipmentIds].sort()) {
-          await tx.$queryRaw`SELECT id FROM shipments WHERE id = ${sid} FOR UPDATE`;
-        }
+        /**
+         * ⚠️ 走共用函数（2026-08-29 第八轮改）。
+         * 原来是 `[...shipmentIds].sort()` 一锅端 —— 而尾端页面取候选运单走的是
+         * `/staff/shipments?all=1`，后端 `all=1` **明确不过滤父子**
+         * （shipments/routes.ts:427-429），父单和子单都能被勾进同一张派送单。
+         * 复核在测试库查到 5 组父子单同时可派送，双连接实测出真死锁。
+         */
+        const orderedIds = await lockShipmentsChildrenFirst(tx, shipmentIds, auth.companyId);
         /** 父单留到最后统一同步，别夹在子单锁中间（见上面 ②） */
         const parentNosToSync = new Set<string>();
         for (const sid of orderedIds) {

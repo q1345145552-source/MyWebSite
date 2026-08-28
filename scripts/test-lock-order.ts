@@ -56,6 +56,14 @@ const LOCK_HELPERS: Record<string, string[]> = {
    * 新增间接加锁的 helper 一定要登记，不然这个脚本就是睁眼瞎。
    */
   syncParentStatusFromChildren: ["shipments"],
+  /**
+   * ⚠️ 2026-08-29 新增的共用批量锁。**新加间接加锁的 helper 必须登记在这里**，
+   * 否则这个脚本会把它当成「没加锁就写」而误报 —— 或者更糟，
+   * 把用了它的地方当成「压根没锁」。
+   * （`syncParentStatusFromChildren` 上个月就是漏登记，
+   *   导致「父单锁改成反序」这个变异全绿。）
+   */
+  lockShipmentsChildrenFirst: ["shipments"],
 };
 
 const WRITE_RE = /\btx\.\w+\.(create|update|updateMany|delete|deleteMany|upsert|createMany)\b/;
@@ -229,9 +237,17 @@ const NO_LOCK_NEEDED: Array<[string, string]> = [
  * ⚠️ 只放「纯 create」，凡是 update / delete 一律不许进这张表。
  */
 const WRITE_WITHOUT_LOCK_OK: string[] = [
-  // 建派送单：`adminLastmileOrder.create` 插的是**全新的一行**，那行还不存在、锁不到。
-  // 这个事务已经按排序锁完了全部运单（同文件 ~626 行），并发那面是护住的。
-  "admin-ops/routes.ts:663",
+  /**
+   * 建派送单：`adminLastmileOrder.create` 插的是**全新的一行**，那行还不存在、锁不到。
+   * 这个事务已经先用 lockShipmentsChildrenFirst 锁完了全部运单，并发那面是护住的。
+   *
+   * ⚠️ 这里**故意不写行号**（2026-08-29 改）：上一版写的是
+   * `"admin-ops/routes.ts:663"`，我在同一个文件上面插了几行注释，
+   * 行号就漂到 668，豁免当场失效、测试变红。
+   * 豁免按「文件 + 路由 + 表名」匹配，代码挪位置不受影响；
+   * 而真要是**换了一处**地方漏锁，路由或表名就对不上，照样会红。
+   */
+  "admin-ops/routes.ts:%d /admin/lastmile/orders（改了 admin_lastmile_orders",
 ];
 
 /**
@@ -422,8 +438,10 @@ check("7) 改了运单/柜子/订单/派送单的事务，必须先锁住同一�
       }
     }
   }
+  /** 豁免比对时把行号抹掉，代码挪位置不影响 */
+  const stripLine = (t: string): string => t.replace(/\.ts:\d+ /, ".ts:%d ");
   const filtered = [...new Set(bad)].filter(
-    (line) => !WRITE_WITHOUT_LOCK_OK.some((k) => line.includes(k)),
+    (line) => !WRITE_WITHOUT_LOCK_OK.some((k) => stripLine(line).includes(k)),
   );
   assert.deepEqual(
     filtered,
@@ -433,58 +451,39 @@ check("7) 改了运单/柜子/订单/派送单的事务，必须先锁住同一�
 });
 
 /**
- * 「一次锁一批运单」的地方，**逐个人工读过**并确认不会跟别处反向的清单。
+ * ⚠️⚠️ 原来这里是一张「审阅登记表」BULK_SHIPMENT_LOCKS_REVIEWED，
+ * 我给三处批量锁各写了一条「这批 id 里不会同时出现父单和它的子单」的理由。
  *
- * ⚠️ 这不是白名单，是**审阅登记表**：静态分析判断不了「这批 id 里有没有
- * 某一票是另一票的父单」（要查数据库才知道）。所以这里退一步 ——
- * 新冒出来的批量锁一律先红，逼人去读一遍、写下理由再登记。
+ * **第八轮复核把三条理由全推翻了**：
+ *   · 建派送单 —— 尾端页面取候选运单走 `/staff/shipments?all=1`，
+ *     后端 `all=1` 就是**明确不过滤父子**（shipments/routes.ts:427-429）。
+ *     测试库里有 5 组父子单同时可派送，双连接实测出真死锁。
+ *   · 柜子那两条 —— `/admin/containers/load` **根本不检查父子关系**，
+ *     父单和它的子单可以分别装进同一个柜。
  *
- * ⚠️ 登记之前必须回答一个问题：**这批 id 里可能同时出现父单和它的子单吗？**
- *   · 不可能 → 登记，写清为什么
- *   · 可能   → 必须像 admin/routes.ts 删订单那样拆成 childIds / parentIds 两轮
+ * 三条理由，三条全错。**靠人工推理的白名单，可靠性就等于那个人的推理。**
+ * 所以整张表删掉，换成一条不需要推理的规矩：
+ *   **批量锁运单只许走 lockShipmentsChildrenFirst()**，
+ *   由它在锁之前真去查一遍父子关系。
  */
-const BULK_SHIPMENT_LOCKS_REVIEWED: Array<[string, string]> = [
-  [
-    "admin-ops/routes.ts:621",
-    "建派送单：这批 id 是员工在页面上勾的「要派送的货」，父单在循环之后" +
-      "用 parentNosToSync 排序统一锁（同文件 ~660）。第一轮锁的都是被派送那一票本身，" +
-      "父单只在第二轮出现，跟别处「先子后父」一致",
-  ],
-  [
-    "containers/routes.ts:428",
-    "推进柜子状态：这批是**柜内装着的**运单，父单在同一事务里靠 " +
-      "[...parentNosToSync].sort() 第二轮锁（同文件 ~490）。分柜之后进柜的是子单，" +
-      "父单不会跟子单一起出现在柜内清单里",
-  ],
-  [
-    "containers/routes.ts:687",
-    "撤销柜子状态：跟上面那条同一批 id、同一套两轮锁法（父单在 ~725 行第二轮）",
-  ],
-];
 
-check("8) 批量锁运单的地方，必须「先全部子单、再全部父单」", () => {
+check("8) 批量锁运单只许走 lockShipmentsChildrenFirst，不许自己拼", () => {
   /**
-   * ⚠️⚠️ **这一项是给一个扫描器看不见的盲区打的补丁。**
+   * ⚠️⚠️ 这一项换过做法（2026-08-29 第八轮），别改回去。
    *
-   * 第七轮复核在本地库开两个连接实测出死锁：删订单把父单和子单
-   * **混在一起按 id 排序**逐个锁，而系统里别处都是「子单（按 id 排）→ 父单」。
-   * 某个父单的 id 恰好排在它子单前面时，两边方向相反 → `deadlock detected`。
+   * 第七轮我发现「删订单把父单子单混排」会死锁，于是加了这一项，
+   * 靠「迭代变量名里有没有 child/parent」判断。
+   * 那样有两个毛病：① 靠命名，改个名就绕过去了；
+   * ② 剩下的只能挂进人工审阅表 —— 而我写的三条理由第八轮被证明**全是错的**。
    *
-   * 上面第 3、6、7 项**一条都抓不到**它：父单子单都是 `shipments` 这张表，
-   * 扫描器按**表**看顺序，看不见同一张表内部谁先谁后；
-   * 而 `[...ids].sort()` 也确确实实排过序，第 6 项也就放行了。
-   *
-   * 静态分析没法一般性地解决这个问题（要知道哪个 id 是父单得查数据库），
-   * 所以这里退一步：**凡是从「查出来的整批运单」里取锁的地方，
-   * 必须看得见 childIds / parentIds 这样的分组**。
-   * 不分组 = 混排 = 跟别处反着。
+   * 现在的规矩不需要任何推理：**凡是一次锁一批运单的，只许调共用函数**，
+   * 由它去查父子关系、分两层、层内排序。
+   * 于是这一项只要查一件事：还有没有人自己拼这个循环。
    */
   const bad: string[] = [];
   for (const file of walk(ROOT)) {
+    if (file.endsWith("lock-shipments.ts")) continue; // 共用函数自己就是那份实现
     const lines = fs.readFileSync(file, "utf-8").split("\n");
-    const text = lines.join("\n");
-    // 只看「一次查出一批运单、再逐个锁」的地方
-    if (!/findMany\(\{[\s\S]{0,200}?shipment/.test(text) && !/tx\.shipment\.findMany/.test(text)) continue;
     for (let i = 0; i < lines.length; i += 1) {
       const t = lines[i].trim();
       if (t.startsWith("*") || t.startsWith("//") || t.startsWith("/*")) continue;
@@ -493,28 +492,85 @@ check("8) 批量锁运单的地方，必须「先全部子单、再全部父单�
       // 这个循环里锁的是 shipments 吗
       let locksShipments = false;
       for (let j = i + 1; j < Math.min(i + 5, lines.length); j += 1) {
-        if (lines[j].includes("FROM shipments") && lines[j].includes("FOR UPDATE")) { locksShipments = true; break; }
-        if (lines[j].trim().startsWith("}")) break;
+        const b = lines[j];
+        if (b.includes("FROM shipments") && b.includes("FOR UPDATE")) { locksShipments = true; break; }
+        if (b.trim().startsWith("}")) break;
       }
       if (!locksShipments) continue;
-      const iter = m[1];
       /**
-       * 放行两种：
-       *   · 明确分了组（childIds / parentIds / parentNos…）
-       *   · 只锁一票货（单数变量名，不是从一批里来的）
-       * 拦的是 `[...allShipmentIds].sort()` 这种「一锅端」。
+       * 放行「只锁一票货」的循环（比如按单号逐个同步父单）——
+       * 那种一次就一行，不存在批内顺序问题。
+       * 判断依据：迭代的是不是一个**复数命名的 id 清单**。
        */
-      if (/child|parent|kid/i.test(iter)) continue;
-      if (!/Ids|ids|List|Nos/.test(iter)) continue;
-      if (BULK_SHIPMENT_LOCKS_REVIEWED.some(([key]) => `${rel(file)}:${i + 1}`.startsWith(key))) continue;
-      bad.push(`${rel(file)}:${i + 1}  for (... of ${iter.trim()})`);
+      if (!/Ids|ids|List|Nos/.test(m[1])) continue;
+      bad.push(`${rel(file)}:${i + 1}  for (... of ${m[1].trim()})`);
     }
   }
   assert.deepEqual(
     bad,
     [],
-    "下面这些地方把整批运单一锅端着锁，父单子单混在一起 —— 跟别处「先子后父」反着：\n     " +
+    "下面这些地方自己拼了「批量锁运单」的循环，请改用 lockShipmentsChildrenFirst()：\n     " +
       bad.join("\n     "),
+  );
+});
+
+check("9) 共用的批量锁函数本身要守住三条：查父子、分两层、层内排序", () => {
+  /**
+   * 上一项只保证「大家都调它」。这一项盯**它自己**别被改坏 ——
+   * 全系统的锁序现在都押在这一个函数上，它错了就是全错。
+   */
+  const fs2 = require("node:fs") as typeof import("node:fs");
+  const src = fs2.readFileSync(path.join(ROOT, "shipments", "lock-shipments.ts"), "utf-8")
+    .split("\n")
+    .filter((l) => {
+      const t = l.trim();
+      return !t.startsWith("*") && !t.startsWith("//") && !t.startsWith("/*");
+    })
+    .join("\n");
+  /**
+   * ⚠️ 光查「源码里有没有 parentTrackingNo 这个词」是不够的（2026-08-29 修）。
+   * 变异「childIds = rows.map(全部)，parentIds = []」把分层拆掉了，
+   * 而 `parentTrackingNo` 在上面那句 findMany 的 select 里还在，照样绿。
+   * 必须查**分层那两句的具体形状**。
+   */
+  assert.ok(/parentTrackingNo/.test(src), "不查父子关系了 —— 那分层就是瞎分的");
+  /**
+   * ⚠️ 按**行**判断，不写一整条正则（2026-08-29 修）。
+   * 第一版写的是 `rows\.filter\([^)]*=>...`，而真实代码是
+   *   `rows.filter((r: any) => r.parentTrackingNo)`
+   * —— `[^)]*` 跨不过 `(r: any)` 里那个右括号，于是干净的代码也被判红。
+   * **写断言前先把真实那一行打出来看一眼**，别照脑子里的形状写正则。
+   */
+  const childLine = src.split("\n").find((l) => /const\s+childIds\s*=/.test(l)) ?? "";
+  const parentLine = src.split("\n").find((l) => /const\s+parentIds\s*=/.test(l)) ?? "";
+  assert.ok(
+    /filter/.test(childLine) && /(?<!!)r\.parentTrackingNo/.test(childLine),
+    `childIds 不再是「有父单的那些」了 —— 分层被拆掉，等于回到一锅端：${childLine.trim()}`,
+  );
+  assert.ok(
+    /filter/.test(parentLine) && /!\s*r\.parentTrackingNo/.test(parentLine),
+    `parentIds 不再是「没有父单的那些」了 —— 分层被拆掉：${parentLine.trim()}`,
+  );
+  assert.ok(
+    /childIds[\s\S]{0,600}parentIds/.test(src),
+    "子单必须排在父单前面（childIds 要出现在 parentIds 之前）",
+  );
+  // 两层都必须真的进了取锁循环，不能有一层被架空
+  for (const layer of ["childIds", "parentIds"]) {
+    assert.ok(
+      new RegExp(`for \\(const sid of \\[\\.\\.\\.${layer}\\]\\.sort\\(\\)\\)`).test(src),
+      `${layer} 那一层没有「按 id 排序逐个锁」的循环了`,
+    );
+  }
+  // 两层都必须排序
+  assert.equal(
+    (src.match(/\.sort\(\)/g) ?? []).length,
+    2,
+    "两层里应该各有一个 .sort() —— 少一个就是那一层没排序",
+  );
+  assert.ok(
+    /既是子单又是父单|多层分柜/.test(src),
+    "多层分柜（既是子单又是父单）的拦截没了 —— 那种数据会安安静静地去死锁",
   );
 });
 
@@ -540,7 +596,7 @@ check("5) 「已知没加锁」那张表只许变短，不许变长", () => {
 });
 
 if (failures.length > 0) {
-  console.error(`\n${failures.length}/8 项不通过：${failures.join("；")}`);
+  console.error(`\n${failures.length}/9 项不通过：${failures.join("；")}`);
   process.exit(1);
 }
-console.log(`加锁顺序：8 项全部通过（扫了 ${allBlocks.length} 个会写数据的事务）`);
+console.log(`加锁顺序：9 项全部通过（扫了 ${allBlocks.length} 个会写数据的事务）`);

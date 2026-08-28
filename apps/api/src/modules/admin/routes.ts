@@ -1,4 +1,5 @@
 // B-6: 已从 node:sqlite 迁移到 Prisma + PostgreSQL（2026-05-20）
+import { lockShipmentsChildrenFirst } from "../shipments/lock-shipments";
 import { validateProductRows } from "../orders/product-row-guard";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../db/prisma";
@@ -1236,14 +1237,9 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
        * 「按 id 全排一遍」看着很整齐，但整齐 ≠ 跟别人一致 —— 锁序只有
        * **全系统同一个顺序**才有意义，自己一套排法等于没排。
        */
-      const childIds = freshShipments.filter((r) => r.parentTrackingNo).map((r) => r.id);
-      const parentIds = freshShipments.filter((r) => !r.parentTrackingNo).map((r) => r.id);
-      for (const sid of [...childIds].sort()) {
-        await tx.$queryRaw`SELECT id FROM shipments WHERE id = ${sid} FOR UPDATE`;
-      }
-      for (const sid of [...parentIds].sort()) {
-        await tx.$queryRaw`SELECT id FROM shipments WHERE id = ${sid} FOR UPDATE`;
-      }
+      // 走共用函数（2026-08-29 第八轮统一）：分层逻辑只留一份，
+      // 免得每个调用点各写各的、又出现「我推理说这里不会有父单」那种事
+      await lockShipmentsChildrenFirst(tx, shipmentIdsToDelete, auth.companyId);
       for (const s of freshShipments) {
         await tx.adminCustomsCase.updateMany({ where: { shipmentId: s.id }, data: { shipmentId: null } });
         await tx.adminLastmileOrder.deleteMany({ where: { shipmentId: s.id } });

@@ -1,3 +1,5 @@
+import { PG_INT_MAX, requireSumWithinInt } from "../core/int-guard";
+
 /**
  * 建单时产品行的校验（纯函数，方便单测）。
  *
@@ -16,14 +18,6 @@ export interface ProductRowForGuard {
   packageCount?: unknown;
   productQuantity?: unknown;
 }
-
-/**
- * 数据库那几列是 Prisma 的 `Int`，也就是 PostgreSQL `integer` —— **32 位**，
- * 最大 2147483647。超过这个数会一路穿过校验，到写库那一刻才炸，
- * 员工看到的是「服务器繁忙」，根本不知道是自己填的数太大（2026-08-29 第七轮复核报的）。
- * 在门口就拦住，报一句看得懂的话。
- */
-const PG_INT_MAX = 2147483647;
 
 function isPositiveInteger(v: unknown): v is number {
   return (
@@ -66,6 +60,26 @@ export function validateProductRows(rows: ProductRowForGuard[]): string | null {
       return `产品行${i + 1}的「每箱几个」必须是正整数`;
     }
   }
+
+  /**
+   * ⚠️ **合计也要卡**（2026-08-29 第八轮补）。
+   * 单行都合法不代表合计合法：两行各 15 亿箱，每行都 < 21 亿，
+   * 合计 30 亿写进 Order.packageCount（Int）就爆了 —— 复核实测返回 200。
+   */
+  const pkgSum = requireSumWithinInt(
+    rows.map((r) => (typeof r.packageCount === "number" ? r.packageCount : 0)),
+    "箱数",
+  );
+  if (pkgSum) return pkgSum;
+  const qtySum = requireSumWithinInt(
+    rows.map((r) =>
+      typeof r.packageCount === "number" && typeof r.productQuantity === "number"
+        ? r.packageCount * r.productQuantity
+        : 0,
+    ),
+    "产品数量",
+  );
+  if (qtySum) return qtySum;
 
   return null;
 }

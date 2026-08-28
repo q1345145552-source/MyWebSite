@@ -1,4 +1,6 @@
 // B-3 ~ B-7: 已从 node:sqlite 迁移到 Prisma + PostgreSQL（2026-05-18）
+import { requirePositiveInt } from "../core/int-guard";
+import { lockShipmentsChildrenFirst } from "../shipments/lock-shipments";
 import { validateProductRows, validateOrderLevelQuantity } from "./product-row-guard";
 import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
@@ -206,11 +208,12 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    // 没有产品行的单子，箱数全靠订单级这个字段，同样不许是 0 或小数
+    // 没有产品行的单子，箱数全靠订单级这个字段：正整数 + 不超过 32 位上限
+    // ⚠️ 上一版漏了上限，复核实测 2147483648 能过（2026-08-29 补）
     if (!body.products?.length) {
-      const pc = Number(body.packageCount ?? 0);
-      if (!Number.isInteger(pc) || pc <= 0) {
-        fail(res, 400, "VALIDATION_ERROR", "箱数必须是正整数");
+      const pkgIssue = requirePositiveInt(Number(body.packageCount ?? NaN), "箱数");
+      if (pkgIssue) {
+        fail(res, 400, "VALIDATION_ERROR", pkgIssue);
         return;
       }
     }
@@ -547,14 +550,9 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
        * 「按 id 全排一遍」看着很整齐，但整齐 ≠ 跟别人一致 —— 锁序只有
        * **全系统同一个顺序**才有意义，自己一套排法等于没排。
        */
-      const childIds = orderShipments.filter((r) => r.parentTrackingNo).map((r) => r.id);
-      const parentIds = orderShipments.filter((r) => !r.parentTrackingNo).map((r) => r.id);
-      for (const sid of [...childIds].sort()) {
-        await tx.$queryRaw`SELECT id FROM shipments WHERE id = ${sid} FOR UPDATE`;
-      }
-      for (const sid of [...parentIds].sort()) {
-        await tx.$queryRaw`SELECT id FROM shipments WHERE id = ${sid} FOR UPDATE`;
-      }
+      // 走共用函数（2026-08-29 第八轮统一）：分层逻辑只留一份，
+      // 免得每个调用点各写各的、又出现「我推理说这里不会有父单」那种事
+      await lockShipmentsChildrenFirst(tx, shipmentIdsToDelete, auth.companyId);
       for (const s of orderShipments) {
         await tx.adminCustomsCase.updateMany({ where: { shipmentId: s.id }, data: { shipmentId: null } });
         await tx.adminLastmileOrder.deleteMany({ where: { shipmentId: s.id } });
@@ -837,6 +835,18 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
     if (orderQtyIssue) {
       fail(res, 400, "VALIDATION_ERROR", orderQtyIssue);
       return;
+    }
+    /**
+     * ⚠️ **没有产品行时，订单级的箱数也要卡**（2026-08-29 第八轮补）。
+     * 上一轮我只卡了产品行，复核实测「员工建单不传 products、
+     * packageCount 填 0 或 2.5」照样 200 —— 管理员那条旧批量导入走的正是这条路。
+     */
+    if (!body.products?.length) {
+      const pkgIssue = requirePositiveInt(Number(body.packageCount ?? NaN), "箱数");
+      if (pkgIssue) {
+        fail(res, 400, "VALIDATION_ERROR", pkgIssue);
+        return;
+      }
     }
 
     const staffProducts = body.products?.length

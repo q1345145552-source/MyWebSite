@@ -10,6 +10,8 @@
 //           → ARRIVED → CUSTOMS → DELIVERING → SIGNED
 //   两个「延迟」是可跳过的中间态：正常走就是 SEALED → IN_TRANSIT → ARRIVED
 
+import { requirePositiveInt } from "../core/int-guard";
+import { lockShipmentsChildrenFirst } from "../shipments/lock-shipments";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../db/prisma";
 import { syncParentStatusFromChildren } from "../shipments/parent-status";
@@ -425,9 +427,9 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
            * 加锁顺序相反会被 PostgreSQL 判定死锁掐掉一个。
            * 下面锁父单那里用的也是这个办法（按单号排序）。
            */
-          for (const sid of [...freshShipmentIds].sort()) {
-            await tx.$queryRaw`SELECT id FROM shipments WHERE id = ${sid} FOR UPDATE`;
-          }
+          // 走共用函数：柜子里可能同时装着父单和它的子单
+          // （/admin/containers/load 根本不检查父子关系），不能一锅端着排
+          await lockShipmentsChildrenFirst(tx, freshShipmentIds, auth.companyId);
           const freshShipments = await tx.shipment.findMany({
             where: { id: { in: freshShipmentIds }, companyId: auth.companyId },
             select: { id: true, currentStatus: true, parentTrackingNo: true },
@@ -684,9 +686,8 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
          * 排序之外还有一个理由：下面「按剩下的最后一条轨迹重算状态」是**先读后写**，
          * 不锁的话，读完到写之间别人插一条轨迹，这里就会拿旧的算、把新的盖掉。
          */
-        for (const sid of [...shipmentIds].sort()) {
-          await tx.$queryRaw`SELECT id FROM shipments WHERE id = ${sid} FOR UPDATE`;
-        }
+        // 走共用函数，理由同上（推进那条）
+        await lockShipmentsChildrenFirst(tx, shipmentIds, auth.companyId);
         const del = await tx.statusLog.deleteMany({
           where: {
             companyId: auth.companyId,
@@ -803,8 +804,19 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
     const shipmentId = body.shipmentId?.trim();
     const volume = Number(body.loadedVolumeM3);
     const pieces = Number(body.loadedPieceCount);
-    if (!containerId || !shipmentId || !Number.isFinite(volume) || volume <= 0 || !Number.isFinite(pieces) || pieces <= 0) {
+    if (!containerId || !shipmentId || !Number.isFinite(volume) || volume <= 0) {
       fail(res, 400, "BAD_REQUEST", "containerId, shipmentId, loadedVolumeM3>0, loadedPieceCount>0 are required");
+      return;
+    }
+    /**
+     * ⚠️ 装柜件数必须是**正整数**（2026-08-29 第八轮补）。
+     * 原来只判 `Number.isFinite(pieces) && pieces > 0`，复核实测 `2.5` 能进事务。
+     * `ShipmentContainerItem.loadedPieceCount` 在 schema 里是 `Int`，
+     * 小数要么写库报 500，要么先把「已装几件 / 还剩几件」算成小数。
+     */
+    const piecesIssue = requirePositiveInt(pieces, "装柜件数");
+    if (piecesIssue) {
+      fail(res, 400, "VALIDATION_ERROR", piecesIssue);
       return;
     }
 

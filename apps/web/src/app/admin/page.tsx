@@ -253,10 +253,19 @@ export default function AdminHomePage() {
     transportMode: "sea" as "sea" | "land", domesticTrackingNo: "", batchNo: "", shipDate: "",
     receiverNameTh: "", receiverPhoneTh: "", receiverAddressTh: "",
   });
+  /**
+   * ⚠️ `packageCount` 存**字符串**（2026-08-29 第八轮改）。
+   * 原来是 number、初值 1，而且输入框 onChange 写着
+   *   `n[i].packageCount = Math.max(1, Number(e.target.value))`
+   * —— 管理员把箱数**清空的那一刻就被改成 1**，比发送还早，
+   * 后端那道正整数校验永远看不到真相。这就是老板最早报的
+   * 「系统自己把箱数猜成 1」在管理员端剩下的最后一处。
+   * 现在原样存字符串，提交时统一交给 validateProductRows 判。
+   */
   const [createProducts, setCreateProducts] = useState<Array<{
-    itemName: string; packageCount: number; lengthCm: string; widthCm: string;
+    itemName: string; packageCount: string; lengthCm: string; widthCm: string;
     heightCm: string; productQuantity: string; cargoType: string; domesticTrackingNo: string;
-  }>>([{ itemName: "", packageCount: 1, lengthCm: "", widthCm: "", heightCm: "", productQuantity: "", cargoType: "normal", domesticTrackingNo: "" }]);
+  }>>([{ itemName: "", packageCount: "", lengthCm: "", widthCm: "", heightCm: "", productQuantity: "", cargoType: "normal", domesticTrackingNo: "" }]);
   const [batchRows, setBatchRows] = useState<Array<any>>([]);
   const [batchLoading, setBatchLoading] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ current: 0, success: 0, fail: 0 });
@@ -2526,7 +2535,7 @@ export default function AdminHomePage() {
             {createProducts.map((p, i) => (
               <div key={i} style={{ display: "grid", gridTemplateColumns: "2fr 0.6fr 0.8fr 0.8fr 0.8fr 1.2fr", gap: 4, marginBottom: 4 }}>
                 <input value={p.itemName} onChange={(e) => { const n = [...createProducts]; n[i].itemName = e.target.value; setCreateProducts(n); }} placeholder="品名" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 6px", fontSize: 11 }} />
-                <input type="number" value={p.packageCount} onChange={(e) => { const n = [...createProducts]; n[i].packageCount = Math.max(1, Number(e.target.value)); setCreateProducts(n); }} placeholder="箱数" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 6px", fontSize: 11 }} />
+                <input type="number" value={p.packageCount} onChange={(e) => { const n = [...createProducts]; n[i].packageCount = e.target.value; setCreateProducts(n); }} placeholder="箱数" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 6px", fontSize: 11 }} />
                 <input value={p.productQuantity} onChange={(e) => { const n = [...createProducts]; n[i].productQuantity = e.target.value; setCreateProducts(n); }} placeholder="数量/箱" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 6px", fontSize: 11 }} />
                 <input value={`${p.lengthCm}×${p.widthCm}×${p.heightCm}`} onChange={(e) => { const parts = e.target.value.split("×"); const n = [...createProducts]; n[i].lengthCm = parts[0] || ""; n[i].widthCm = parts[1] || ""; n[i].heightCm = parts[2] || ""; setCreateProducts(n); }} placeholder="L×W×H cm" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 6px", fontSize: 11 }} />
                 <select value={p.cargoType} onChange={(e) => { const n = [...createProducts]; n[i].cargoType = e.target.value; setCreateProducts(n); }} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 6px", fontSize: 11 }}>
@@ -2538,13 +2547,18 @@ export default function AdminHomePage() {
                 </div>
               </div>
             ))}
-            <button onClick={() => setCreateProducts([...createProducts, { itemName: "", packageCount: 1, lengthCm: "", widthCm: "", heightCm: "", productQuantity: "", cargoType: "normal", domesticTrackingNo: "" }])} style={{ border: "1px solid var(--c-blue)", borderRadius: 6, padding: "4px 10px", background: "var(--c-blue-bg)", color: "var(--c-blue)", cursor: "pointer", fontSize: 12, marginBottom: 16 }}>添加产品行</button>
+            <button onClick={() => setCreateProducts([...createProducts, { itemName: "", packageCount: "", lengthCm: "", widthCm: "", heightCm: "", productQuantity: "", cargoType: "normal", domesticTrackingNo: "" }])} style={{ border: "1px solid var(--c-blue)", borderRadius: 6, padding: "4px 10px", background: "var(--c-blue-bg)", color: "var(--c-blue)", cursor: "pointer", fontSize: 12, marginBottom: 16 }}>添加产品行</button>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
               <button onClick={() => setShowCreateOrderModal(false)} style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 14px", background: "var(--white)", cursor: "pointer", color: "var(--t-strong)" }}>取消</button>
               <button disabled={loading} onClick={async () => {
                 if (!createForm.clientId.trim()) { setMessage("请选择客户"); return; }
-                const validProducts = createProducts.filter(p => p.itemName.trim() && p.packageCount > 0);
+                const validProducts = createProducts.filter(p => p.itemName.trim());
                 if (validProducts.length === 0) { setMessage("请至少填写一个产品行"); return; }
+                // ⚠️ 跟另外三个入口同一份口径（箱数正整数、每箱几个全填或全空）
+                {
+                  const rowIssue = validateProductRows(validProducts);
+                  if (rowIssue) { setMessage(rowIssue); return; }
+                }
                 setLoading(true);
                 try {
                   await createStaffOrder({
@@ -2558,11 +2572,11 @@ export default function AdminHomePage() {
                     receiverPhoneTh: createForm.receiverPhoneTh.trim() || undefined,
                     receiverAddressTh: createForm.receiverAddressTh.trim() || undefined,
                     itemName: validProducts[0].itemName.trim(),
-                    packageCount: validProducts[0].packageCount,
+                    packageCount: packageCountForPayload(validProducts[0].packageCount),
                     packageUnit: "box",
                     products: validProducts.map(p => ({
                       itemName: p.itemName.trim(),
-                      packageCount: p.packageCount,
+                      packageCount: packageCountForPayload(p.packageCount),
                       lengthCm: Number(p.lengthCm) || undefined,
                       widthCm: Number(p.widthCm) || undefined,
                       heightCm: Number(p.heightCm) || undefined,
@@ -2639,7 +2653,10 @@ export default function AdminHomePage() {
                       await createStaffOrder({
                         clientId: String(r["客户ID"] ?? r.clientId ?? ""), warehouseId: String(r["仓库ID"] ?? r.warehouseId ?? "wh_yiwu_01"),
                         arrivedAt: String(r["到仓日期"] ?? r.arrivedAt ?? new Date().toISOString().slice(0, 10)),
-                        itemName: String(r["品名"] ?? r.itemName ?? ""), packageCount: Number(r["箱数"] ?? r.packageCount ?? 1),
+                        itemName: String(r["品名"] ?? r.itemName ?? ""),
+                        // ⚠️ 不许 `?? 1`（2026-08-29 去掉）：表里没填箱数就该报错让人去补，
+                        // 悄悄当成 1 箱会让重量/方数/产品数量三个合计一起错，而且错得很像真的
+                        packageCount: Number(r["箱数"] ?? r.packageCount ?? NaN),
                         packageUnit: (r["包装单位"] ?? r.packageUnit ?? "box") as "bag" | "box",
                         transportMode: (r["运输方式"] ?? r.transportMode ?? "sea") as "sea" | "land",
                         domesticTrackingNo: String(r["国内单号"] ?? r.domesticTrackingNo ?? ""),

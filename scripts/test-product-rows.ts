@@ -12,6 +12,19 @@
  *   （apps/web/.../productRowGuard.ts）是两份实现、一份口径，
  *   所以两边都要测 —— 只测一边，另一边改坏了没人知道。
  */
+/**
+ * ⚠️⚠️ **硬闸：这个脚本一次数据库都不许连。**
+ *
+ * 这一轮我在同一个坑里栽了**三次** —— 写「正常输入不许被误伤」的用例时，
+ * 给了一份合法数据，它就一路走到 `prisma.order.create` 真的连上了 Neon 测试库
+ * （每次都是靠外键报错才发现）。`test-ai-chat-limits.ts` 开头记着同一条教训。
+ *
+ * 靠「我记得要避开」是不行的，所以在这里把数据库地址换成一个**根本连不通**的，
+ * 一旦有用例不小心走到写库，就会当场炸出来，而不是安安静静地连上去。
+ * ⚠️ 必须在 import 任何会创建 PrismaClient 的模块**之前**设。
+ */
+process.env.DATABASE_URL = "postgresql://blocked:blocked@127.0.0.1:1/never?connect_timeout=1";
+
 import assert from "node:assert/strict";
 import {
   validateProductRows as apiValidate,
@@ -213,8 +226,10 @@ async function loadRoutes(): Promise<Map<string, Handler>> {
   };
   const orders = await import("../apps/api/src/modules/orders/routes");
   const admin = await import("../apps/api/src/modules/admin/routes");
+  const containers = await import("../apps/api/src/modules/containers/routes");
   (orders as any).registerOrderRoutes(fakeApp);
   (admin as any).registerAdminRoutes(fakeApp);
+  (containers as any).registerContainerRoutes(fakeApp);
   return routes;
 }
 
@@ -320,7 +335,22 @@ check("10) 全仓库不许再有「把箱数兜底成 1」的写法", () => {
       fs.readFileSync(full, "utf-8").split("\n").forEach((line, i) => {
         const t = line.trim();
         if (t.startsWith("*") || t.startsWith("//")) return; // 注释里提到不算
-        if (/packageCount\s*\)?\s*\|\|\s*1\b/.test(line) || /Math\.max\(\s*1\s*,[^)]*packageCount/.test(line)) {
+        /**
+         * ⚠️ 上一版只认两种写法（`packageCount || 1` 和 `Math.max(1, ...packageCount)`），
+         * 第八轮复核找出两处它抓不到的：
+         *   · `n[i].packageCount = Math.max(1, Number(e.target.value))`
+         *     —— packageCount 在**等号左边**，右边根本没有这个词
+         *   · `packageCount: Number(r["箱数"] ?? r.packageCount ?? 1)`
+         *     —— 用的是 `?? 1` 不是 `|| 1`
+         * 现在分两路认：① 这一行提到 packageCount，② 这一行有兜底成 1 的写法。
+         * 两个条件同时成立才算 —— 只看①会把正常代码全标红。
+         */
+        const mentionsPkg = /packageCount/.test(line);
+        const hasFallbackToOne =
+          /(\|\||\?\?)\s*1\b/.test(line) ||
+          /Math\.max\(\s*1\s*,/.test(line) ||
+          /Math\.max\([^,]+,\s*1\s*\)/.test(line);
+        if (mentionsPkg && hasFallbackToOne) {
           hits.push(`${path.relative(path.join(__dirname, ".."), full)}:${i + 1}  ${t.slice(0, 90)}`);
         }
       });
@@ -347,6 +377,15 @@ check("10) 全仓库不许再有「把箱数兜底成 1」的写法", () => {
      * 不发给后端、不进数据库；后端收到后按自己那套重算并校验。
      */
     "client/whr-consolidation/page.tsx",
+    /**
+     * 拆柜派送清单导出：`const packageTotal = ...reduce(...) || 1` ——
+     * 这个 `|| 1` 是**除零保护**，不是猜箱数：下一行拿它当分母
+     *   `Number(product.packageCount || 0) / packageTotal`
+     * 合计为 0 时分子也一定是 0，share 仍然是 0，结果不受影响；
+     * 不兜底反而会算出 NaN 印到客户签收单上。
+     * （2026-08-29 逐行读过确认。）
+     */
+    "lastmile/exportDispatchWorkbooks.ts",
   ];
   const bad = hits.filter((h) => !allowed.some((a) => h.includes(a)));
   assert.deepEqual(bad, [], "下面这些地方还在把箱数兜底成 1：\n     " + bad.join("\n     "));
@@ -445,11 +484,94 @@ async function main(): Promise<void> {
     );
   });
 
+  await checkAsync("15) 没有产品行时，订单级箱数同样要卡（三条路都测）", async () => {
+    /**
+     * 第八轮复核真调路由测出来的：
+     *   · 客户建单无产品行，packageCount=2147483648 → 200
+     *   · 员工建单无产品行，packageCount=0、2.5     → 200
+     * 上一轮我只卡了**产品行**，没卡「没有产品行时那个订单级的箱数」——
+     * 而管理员那条旧批量导入走的正是这条路（它完全不传 products 数组）。
+     */
+    const BAD_PKG: Array<[string, unknown]> = [
+      ["0", 0],
+      ["-3", -3],
+      ["2.5", 2.5],
+      ["超 32 位上限", 2147483648],
+      ["没填", undefined],
+    ];
+    const client = routeTable.get("POST /client/prealerts")!;
+    const staff = routeTable.get("POST /staff/orders")!;
+    for (const [label, pkg] of BAD_PKG) {
+      const c = await callRoute(client, CLIENT, {
+        warehouseId: "w_1", transportMode: "sea", itemName: "耳机", packageCount: pkg,
+      });
+      assert.equal(c.status, 400, `客户建单【箱数 ${label}】没被拦，拿到 ${c.status}`);
+      assert.ok(/箱数/.test(c.message), `客户建单【箱数 ${label}】被别的闸拦了：${c.message}`);
+
+      const st = await callRoute(staff, STAFF, {
+        clientId: "u_test_client", trackingNo: "TH0001", warehouseId: "w_1",
+        transportMode: "sea", itemName: "耳机", packageCount: pkg,
+      });
+      assert.equal(st.status, 400, `员工建单【箱数 ${label}】没被拦，拿到 ${st.status}`);
+      assert.ok(/箱数/.test(st.message), `员工建单【箱数 ${label}】被别的闸拦了：${st.message}`);
+    }
+  });
+
+  await checkAsync("16) 单行都合法但**合计**溢出，也要拦", async () => {
+    /**
+     * 复核实测：两个产品行各 15 亿箱 → 每行都 < 21 亿、单行校验全过，
+     * 合计 30 亿写进 Order.packageCount（Int）就爆了，返回 200。
+     * ⚠️ 两行故意用**不同**的数（15 亿 / 16 亿），相同的数会假绿。
+     */
+    const handler = routeTable.get("POST /client/prealerts")!;
+    const r = await callRoute(handler, CLIENT, {
+      warehouseId: "w_1", transportMode: "sea", itemName: "耳机",
+      products: [
+        { itemName: "耳机", packageCount: 1500000000, productQuantity: 1 },
+        { itemName: "手机壳", packageCount: 1600000000, productQuantity: 1 },
+      ],
+    });
+    assert.equal(r.status, 400, `合计溢出没被拦，拿到 ${r.status}`);
+    assert.ok(/合计/.test(r.message), `拦是拦了，但不是合计那道闸：${r.message}`);
+
+    /**
+     * 合计**没有**溢出的正常单子不许误伤：3 + 4 = 7。
+     * ⚠️ 故意不给 warehouseId，让它停在「缺必填项」那道闸（也在连库之前）——
+     * 给全了它就会一路走到 `prisma.order.create` **真的去连库**。
+     * 这个坑我这轮已经踩第三次了：test-ai-chat-limits.ts 开头就记着同一条教训。
+     */
+    const ok2 = await callRoute(handler, CLIENT, {
+      transportMode: "sea", itemName: "耳机",
+      products: [
+        { itemName: "耳机", packageCount: 3, productQuantity: 2 },
+        { itemName: "手机壳", packageCount: 4, productQuantity: 5 },
+      ],
+    });
+    assert.ok(!/箱数|合计/.test(ok2.message), `正常单子被数值闸误伤了：${ok2.message}`);
+    assert.ok(/missing required|必填/.test(ok2.message), `没停在「缺必填项」那道闸，而是：${ok2.message}`);
+  });
+
+  await checkAsync("17) 装柜件数不许是小数", async () => {
+    /**
+     * 复核实测 loadedPieceCount=2.5 能进事务。
+     * ShipmentContainerItem.loadedPieceCount 是 Int，小数要么写库 500，
+     * 要么先把「已装几件 / 还剩几件」算成小数。
+     */
+    const handler = routeTable.get("POST /admin/containers/load");
+    assert.ok(handler, "没注册 /admin/containers/load");
+    for (const [label, pieces] of [["2.5", 2.5], ["0", 0], ["-1", -1], ["超上限", 2147483648]] as Array<[string, number]>) {
+      const r = await callRoute(handler!, ADMIN, {
+        containerId: "c_1", shipmentId: "s_1", loadedVolumeM3: 1.2, loadedPieceCount: pieces,
+      });
+      assert.equal(r.status, 400, `装柜件数【${label}】没被拦，拿到 ${r.status}`);
+    }
+  });
+
   if (failures.length > 0) {
-    console.error(`\n${failures.length}/15 项不通过：${failures.join("；")}`);
+    console.error(`\n${failures.length}/18 项不通过：${failures.join("；")}`);
     process.exit(1);
   }
-  console.log("产品行校验：15 项全部通过");
+  console.log("产品行校验：18 项全部通过");
 }
 
 main().catch((error) => {

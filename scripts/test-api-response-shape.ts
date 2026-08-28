@@ -170,7 +170,18 @@ check("6) 还有没有地方完全绕开 res.json 直接写响应（那种盖不
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) { walk(full); continue; }
       if (!entry.name.endsWith(".ts")) continue;
-      fs.readFileSync(full, "utf-8").split("\n").forEach((line, i) => {
+      /**
+       * ⚠️ **按「本行 + 后 3 行」一起看**（2026-08-29 补）。
+       * 逐行扫描漏掉了跨行写法，而 server.ts 那处管线兜底恰恰就是跨行的：
+       *     rawRes.end(
+       *       JSON.stringify({ ... })
+       * 也就是说这个扫描器**一处直写都没真正认出来**，
+       * 我上一轮加的「必须至少认出 server.ts」那条自检，
+       * 是靠同文件里另一处单行写法**蒙对的**。
+       */
+      const rawLines = fs.readFileSync(full, "utf-8").split("\n");
+      rawLines.forEach((_l, i) => {
+        const line = rawLines.slice(i, i + 4).join("\n");
         /**
          * 绕开 res.json 直接往 socket 写 JSON 的，盖章盖不到，必须自己补齐字段。
          *
@@ -210,8 +221,78 @@ check("6) 还有没有地方完全绕开 res.json 直接写响应（那种盖不
   );
 });
 
+check("7) 业务代码**物理上**拿不到原始 socket（这条比扫正则可靠得多）", () => {
+  /**
+   * ⚠️⚠️ 2026-08-29 想清楚的一件事，比上面第 6 项重要。
+   *
+   * 第八轮复核报了三种能绕过第 6 项正则的写法：
+   *   `Reflect.apply(rawRes.write, ...)`、解构 `const { write } = rawRes`、
+   *   `const m = "write"; rawRes[m](...)`。
+   * 确实全都绕得过。但**继续加正则是追不完的** —— 间接调用的花样无穷无尽。
+   *
+   * 实测之后发现根本不用追：`createJsonResponse` 返回的是一个
+   * **只有 requestId / status / json 三个成员的新对象**，
+   * 业务 handler 拿到的就是它，上面**根本没有 write / end / socket**。
+   * 那三种「绕法」在真实代码里会直接 TypeError 崩掉（我跑过）。
+   *
+   * 所以真正该守的是**这个结构保证本身**：
+   *   ① handler 拿到的 res 只暴露 status / json
+   *   ② 业务模块里谁都碰不到原始 ServerResponse
+   * 这两条守住了，间接调用有多少花样都无所谓 —— 没有东西可调。
+   */
+  const probe: any = { statusCode: 0, setHeader() {}, end() {} };
+  const res = createJsonResponse(probe as never);
+  const exposed = new Set<string>();
+  for (let o = res as any; o && o !== Object.prototype; o = Object.getPrototypeOf(o)) {
+    for (const k of Object.getOwnPropertyNames(o)) exposed.add(k);
+  }
+  const dangerous = ["write", "end", "socket", "connection", "writeHead", "flushHeaders", "pipe"];
+  const leaked = dangerous.filter((k) => exposed.has(k) || typeof (res as any)[k] === "function");
+  assert.deepEqual(
+    leaked,
+    [],
+    `handler 拿到的 res 上暴露了原始 socket 的方法：${leaked.join("、")}\n` +
+      `     —— 一旦暴露，业务代码就能绕开盖章那一步，而且怎么绕都拦不住`,
+  );
+  assert.deepEqual(
+    [...exposed].sort(),
+    ["json", "requestId", "status"],
+    "res 暴露的成员变了。多一个就多一条能绕过盖章的路，请确认是不是有意的",
+  );
+});
+
+check("8) 业务模块里谁都不许碰原始 ServerResponse", () => {
+  /**
+   * 第 7 项保证「拿到的 res 是干净的」，这一项保证「没人从别处把 socket 弄进来」。
+   * 两条合起来，第 6 项那种追正则的活就只剩 server.ts 一个文件要管了。
+   */
+  const modulesRoot = path.join(__dirname, "..", "apps", "api", "src", "modules");
+  const offenders: string[] = [];
+  const walk = (dir: string): void => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) { walk(full); continue; }
+      if (!entry.name.endsWith(".ts")) continue;
+      fs.readFileSync(full, "utf-8").split("\n").forEach((line, i) => {
+        const t = line.trim();
+        if (t.startsWith("*") || t.startsWith("//") || t.startsWith("/*")) return;
+        if (/\bServerResponse\b|\brawRes\b|\bres\.socket\b|\bres\.connection\b/.test(line)) {
+          offenders.push(`${path.relative(modulesRoot, full)}:${i + 1}  ${t.slice(0, 80)}`);
+        }
+      });
+    }
+  };
+  walk(modulesRoot);
+  assert.deepEqual(
+    offenders,
+    [],
+    "下面这些业务模块碰到了原始 socket，等于给自己开了一条绕开盖章的路：\n     " +
+      offenders.join("\n     "),
+  );
+});
+
 if (failures.length > 0) {
-  console.error(`\n${failures.length}/6 项不通过：${failures.join("；")}`);
+  console.error(`\n${failures.length}/8 项不通过：${failures.join("；")}`);
   process.exit(1);
 }
-console.log("接口响应格式：6 项全部通过");
+console.log("接口响应格式：8 项全部通过");

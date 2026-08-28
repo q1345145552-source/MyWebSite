@@ -1,3 +1,4 @@
+import { requirePositiveInt, requireProductWithinInt } from "../core/int-guard";
 import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
@@ -253,14 +254,30 @@ export function registerWhrConsolidationClientRoutes(app: MinimalHttpApp): void 
         fail(res, 400, "BAD_REQUEST", `第 ${row} 行品名为必填`);
         return;
       }
+      /**
+       * ⚠️ 原来这里只判「是有限数字且 > 0」（2026-08-29 第八轮收紧）。
+       * 复核实测 **2.5 箱 / 每箱 2.5 个 / 超过 32 位上限**全都能穿过去。
+       * 这三个字段在 schema 里都是 `Int`：
+       *   WhrConsolidationPrealertItem.packageCount / quantityPerBox / totalQuantity
+       * 而且这条路的方数要拿去按「**方数 × 单价**」收费 ——
+       * 小数不会报错，只会让方数和金额悄悄算错，比报 500 更难发现。
+       */
       const pkg = Number(it.packageCount);
-      if (!Number.isFinite(pkg) || pkg <= 0) {
-        fail(res, 400, "BAD_REQUEST", `第 ${row} 行件数必须大于 0`);
+      const pkgIssue = requirePositiveInt(pkg, `第 ${row} 行件数`);
+      if (pkgIssue) {
+        fail(res, 400, "BAD_REQUEST", pkgIssue);
         return;
       }
       const qpb = it.quantityPerBox == null ? 1 : Number(it.quantityPerBox);
-      if (!Number.isFinite(qpb) || qpb <= 0) {
-        fail(res, 400, "BAD_REQUEST", `第 ${row} 行每箱数量必须大于 0`);
+      const qpbIssue = requirePositiveInt(qpb, `第 ${row} 行每箱数量`);
+      if (qpbIssue) {
+        fail(res, 400, "BAD_REQUEST", qpbIssue);
+        return;
+      }
+      // totalQuantity = 件数 × 每箱数量，也是 Int，两个因子各自合法乘起来照样能爆
+      const totalIssue = requireProductWithinInt(pkg, qpb, `第 ${row} 行总数量`);
+      if (totalIssue) {
+        fail(res, 400, "BAD_REQUEST", totalIssue);
         return;
       }
       // 长宽高必填：缺了方数算不出来，签收时会按 0 方计费
