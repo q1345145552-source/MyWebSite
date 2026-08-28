@@ -1,4 +1,5 @@
 // B-6: 已从 node:sqlite 迁移到 Prisma + PostgreSQL（2026-05-20）
+import { validateProductRows } from "../orders/product-row-guard";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
@@ -573,6 +574,23 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
     };
 
     const rawId = body.orderId?.trim();
+    /**
+     * ⚠️⚠️ **管理员改单这条路以前没有这道校验**（2026-08-29 补）。
+     * 第七轮复核点名：三个后端入口（员工建单 / 客户建单 / 管理员改单），
+     * 上一轮我只接上了员工建单那个。下面 orderProduct 那句
+     * `p.packageCount || 1` 就是把「箱数填 0」悄悄变成 1 箱的病根。
+     *
+     * ⚠️ 位置要放在**碰数据库之前**：放后面的话，参数本来就不合法的请求
+     * 还是会先去查一轮库；而且自测想验它就得连库。
+     */
+    if (body.products && body.products.length > 0) {
+      const rowIssue = validateProductRows(body.products);
+      if (rowIssue) {
+        fail(res, 400, "VALIDATION_ERROR", rowIssue);
+        return;
+      }
+    }
+
     if (!rawId) {
       fail(res, 400, "BAD_REQUEST", "orderId is required");
       return;
@@ -799,7 +817,8 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
       body.products.forEach((p, i) => {
         const data = {
           itemName: p.itemName.trim(),
-          packageCount: p.packageCount || 1,
+          // ⚠️ 不许 `|| 1`：上面已经卡死必须是正整数（2026-08-29 去掉兜底）
+          packageCount: p.packageCount,
           lengthCm: p.lengthCm ?? null,
           widthCm: p.widthCm ?? null,
           heightCm: p.heightCm ?? null,

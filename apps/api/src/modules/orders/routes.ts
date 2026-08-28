@@ -179,16 +179,47 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       }>;
     };
 
+    /**
+     * ⚠️⚠️ **客户建单这条路以前完全没有这道校验**（2026-08-29 补）。
+     *
+     * 第七轮复核真调这个路由传 `packageCount: 0`，返回 200，
+     * 订单/产品行/运单三处**全部存成 1** —— 老板最早报的
+     * 「系统自己把箱数猜成 1」在这条路上原样还在。
+     * 上一轮我只把 `/staff/orders` 接上了校验，三个后端入口修了一个。
+     *
+     * 下面原来那句 `Math.max(1, p.packageCount || 1)` 就是病根，
+     * 连它上面那行注释「PackageCount: 0 silently coerced to 1」都写着了 ——
+     * 有人早看见过，没修。
+     *
+     * ⚠️ 位置必须在**碰数据库之前**，三个入口都是这个规矩。
+     */
+    if (body.products?.length) {
+      const rowIssue = validateProductRows(body.products);
+      if (rowIssue) {
+        fail(res, 400, "VALIDATION_ERROR", rowIssue);
+        return;
+      }
+    }
+
     if (!body.warehouseId?.trim() || (!body.itemName && !body.products?.length) || !body.transportMode) {
       fail(res, 400, "BAD_REQUEST", "missing required prealert fields");
       return;
+    }
+
+    // 没有产品行的单子，箱数全靠订单级这个字段，同样不许是 0 或小数
+    if (!body.products?.length) {
+      const pc = Number(body.packageCount ?? 0);
+      if (!Number.isInteger(pc) || pc <= 0) {
+        fail(res, 400, "VALIDATION_ERROR", "箱数必须是正整数");
+        return;
+      }
     }
 
     // Compute products totals
     const products = body.products?.length
       ? body.products.map((p, i) => ({
           itemName: p.itemName.trim(),
-          packageCount: Math.max(1, p.packageCount || 1),
+          packageCount: p.packageCount,
           lengthCm: p.lengthCm ?? null,
           widthCm: p.widthCm ?? null,
           heightCm: p.heightCm ?? null,
@@ -213,8 +244,9 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
           sortOrder: 0,
         }];
 
-    // PackageCount: 0 silently coerced to 1
-    const totalPkg = products.reduce((s, p) => s + Math.max(1, p.packageCount || 1), 0);
+    // ⚠️ 不许 `Math.max(1, ...)`：上面已经卡死必须是正整数，这里再兜一次
+    // 等于把校验的结果又抹掉一遍（2026-08-29 去掉）
+    const totalPkg = products.reduce((s, p) => s + p.packageCount, 0);
     const totalWeight = products.reduce((s, p) => s + (p.weightKg ?? 0) * p.packageCount, 0);
     const totalVol = products.reduce((s, p) => {
       if (p.lengthCm && p.widthCm && p.heightCm) return s + (p.lengthCm * p.widthCm * p.heightCm * p.packageCount) / 1_000_000;
