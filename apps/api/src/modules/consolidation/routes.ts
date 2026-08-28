@@ -547,7 +547,13 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       },
     });
 
-    await recalcTaskTotals(body.taskId);
+    /**
+     * ⚠️ 同上：合计在握着任务锁的事务里重算，别用事务外那份可能已经过时的清单。
+     */
+    await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM consolidation_tasks WHERE id = ${body.taskId} FOR UPDATE`;
+      await recalcTaskTotals(body.taskId!, tx);
+    });
 
     ok(res, formatPrealert(prealert));
   });
@@ -621,6 +627,14 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
        * 仓库正好在这一刻签收了，客户这边照样能改掉货物明细 ——
        * 签收单上写的和系统里存的就对不上了。
        */
+      /**
+       * ⚠️ 锁序统一成【任务 → 预报单】（2026-08-28 补）。
+       * 删除那三条路是「先锁任务、再删预报单、锁内重算合计」；
+       * 这条路原来只锁预报单、却又去写任务的合计 —— 方向正好相反，会死锁。
+       * 而且合计原来在事务**外面**重算：删除那边刚把货删掉、这边用旧结果写回去，
+       * 任务上的总件数/总方数就跟实际货物对不上了。
+       */
+      await tx.$queryRaw`SELECT id FROM consolidation_tasks WHERE id = ${pa.taskId} FOR UPDATE`;
       await tx.$queryRaw`SELECT id FROM consolidation_prealerts WHERE id = ${pa.id} FOR UPDATE`;
       const freshPa = await tx.consolidationPrealert.findUnique({
         where: { id: pa.id },
@@ -700,13 +714,14 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       if (body.mark?.trim()) updateData.mark = body.mark.trim();
       if (body.expressNo !== undefined) updateData.expressNo = body.expressNo?.trim() || null;
 
-      return tx.consolidationPrealert.update({
+      const saved = await tx.consolidationPrealert.update({
         where: { id: body.prealertId },
         data: updateData,
       });
+      // 合计必须在**握着任务锁的这个事务里**重算，不能等事务提交后再算
+      await recalcTaskTotals(pa.taskId, tx);
+      return saved;
     });
-
-    await recalcTaskTotals(pa.taskId);
 
     ok(res, formatPrealert(updated));
   });
@@ -1196,7 +1211,20 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    await recalcTaskTotals(pa.taskId);
+    /**
+     * ⚠️ 合计要在**握着任务锁的事务里**重算（2026-08-28 补）。
+     * 原来是裸调用、既没事务也没锁：删除那条路刚把一张预报单删掉、
+     * 这边用删之前读到的清单把合计写回去 —— 任务上的总件数/总方数
+     * 跟实际货物对不上，而且没人会发现。
+     * 锁的是 consolidation_tasks 那一行，跟删除、付款、改单走同一把锁、同一个顺序。
+     *
+     * 上面那句 updateMany 带着 `status: "pending"` 条件，本身是原子的
+     * （谁先改到谁算数，count === 0 就是被人抢先了），所以不用挪进来。
+     */
+    await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM consolidation_tasks WHERE id = ${pa.taskId} FOR UPDATE`;
+      await recalcTaskTotals(pa.taskId, tx);
+    });
 
     ok(res, { success: true, prealertId: body.prealertId, status: "received" });
   });
@@ -2014,15 +2042,24 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       if (body.mark?.trim()) updateData.mark = body.mark.trim();
       if (body.expressNo !== undefined) updateData.expressNo = body.expressNo?.trim() || null;
 
+      /**
+       * ⚠️ 锁序统一成【任务 → 预报单】（2026-08-28 补）。
+       * 删除那三条路是「先锁任务、再删预报单、锁内重算合计」；
+       * 这条路原来只锁预报单、却又去写任务的合计 —— 方向正好相反，会死锁。
+       * 而且合计原来在事务**外面**重算：删除那边刚把货删掉、这边用旧结果写回去，
+       * 任务上的总件数/总方数就跟实际货物对不上了。
+       */
+      await tx.$queryRaw`SELECT id FROM consolidation_tasks WHERE id = ${pa.taskId} FOR UPDATE`;
+      await tx.$queryRaw`SELECT id FROM consolidation_prealerts WHERE id = ${pa.id} FOR UPDATE`;
+
       await tx.consolidationPrealert.update({
         where: { id: body.prealertId },
         data: updateData,
       });
 
+      await recalcTaskTotals(pa.taskId, tx);
       return null;
     });
-
-    await recalcTaskTotals(pa.taskId);
 
     ok(res, { success: true, prealertId: body.prealertId });
   });
