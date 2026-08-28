@@ -338,15 +338,28 @@ async function main() {
   });
 
   // ── 2. 数字没被动 → 允许模型润色，不能一刀切退回草稿 ─────────────────────
-  await check("2) 数字没被动 → 允许润色", async () => {
+  await check("2) 带数字的答复：根本不调模型，直接发系统写好的原话", async () => {
+    /**
+     * 用户 2026-08-28 拍板：统计类回答不再让 DeepSeek 润色。
+     * 之前一直在跟模型斗智，最后一版实测两头不讨好 ——
+     * 正常改措辞会被整段退回（润色等于没生效），
+     * 而模型另起一句不带数字的假话（「以上订单均已完成。」）照样放行。
+     * 现在草稿里只要有一个数据占位符就直接发原话，模型碰都碰不到。
+     *
+     * ⚠️ 这一项同时盯着**省钱**：这个接口是全系统唯一直接花钱的地方，
+     * 统计类消息从此少调一次 DeepSeek。润色调用一旦被谁改回来，这里会红。
+     */
     const shipments = [shipment({ id: "b1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs })];
-    const { answer } = await ask({
+    const { answer, contexts } = await ask({
       shipments,
       message: "我在途有多少单",
+      // 这个桩要是被调用了，答复里就会出现「亲，帮你查好了」
       polish: (draft) => `亲，帮你查好了。\n${draft}\n有问题随时找我。`,
     });
-    assert.ok(answer.includes("亲，帮你查好了"), "数字没被动时润色稿被误杀了");
+    assert.ok(!answer.includes("亲，帮你查好了"), `带数字的答复还是被润色了：\n${answer}`);
     assert.equal(totalCountOf(answer), 1);
+    const polishCalls = contexts.filter((c) => c.includes("answerDraft"));
+    assert.equal(polishCalls.length, 0, `带数字的答复不该调模型，实际调了 ${polishCalls.length} 次（白花钱）`);
   });
 
   // ── 3. 千位分隔符不算「改了数字」（1,234.56 和 1234.56 是同一个数）────────
@@ -954,16 +967,16 @@ async function main() {
     assert.equal(totalCountOf(answer), 1);
   });
 
-  await check("39) 正常措辞的润色仍然要放行（别误杀）", async () => {
+  await check("39) 模型想在统计答复上加寒暄也没机会（它压根没被调用）", async () => {
     const shipments = [shipment({ id: "u1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs })];
-    const { answer } = await ask({
+    const { answer, contexts } = await ask({
       shipments,
       message: "我一共有多少单",
-      // 「一共」「十分」里带中文数字字样，但不是数量词，不能被拦
       polish: (draft) => `亲，一共帮你查好了，十分感谢等待。\n${draft}`,
     });
-    assert.ok(answer.includes("十分感谢等待"), `正常润色被误杀了：\n${answer}`);
+    assert.ok(!answer.includes("十分感谢等待"), `统计答复还是被润色了：\n${answer}`);
     assert.equal(totalCountOf(answer), 1);
+    assert.equal(contexts.filter((c) => c.includes("answerDraft")).length, 0, "不该调模型");
   });
 
   // ══ P1-5 复核抓到的「模型说了算」（2026-08-28）══════════════════════════
@@ -1339,21 +1352,16 @@ async function main() {
     assert.ok(/已完成：1 单/.test(answer), `已完成不对：\n${answer}`);
 
     /**
-     * ② 光验①会「假绿」：修好之后名称本身就被一起遮起来了，
-     *    测试桩的 replace 匹配不到东西、等于没攻击，①自然就过。
-     *    所以再盯一眼**发给模型的那份遮罩草稿**：
-     *    统计明细里的名称必须和数字**焊死在同一个占位符里**，
-     *    绝不能出现「名称：⟦N⟧」这种把名称暴露在外面的写法。
+     * ② 光验①会「假绿」：不同版本的修法都能让①过，但理由完全不同。
+     *    现在（2026-08-28 用户拍板后）真正的保证是：
+     *    **带数字的答复根本不调模型** —— 名称也好数字也好，模型一个都碰不到。
+     *    所以这里直接盯这条：一次润色调用都不许有。
      */
-    const polishContext = contexts.find((c) => c.includes("answerDraft"));
-    assert.ok(polishContext, "没抓到发给模型的润色上下文");
-    const maskedDraft = (JSON.parse(polishContext) as { answerDraft?: string }).answerDraft ?? "";
-    for (const label of ["总单量", "在途中", "已完成"]) {
-      assert.ok(
-        !new RegExp(`${label}[：:]\\s*⟦N`).test(maskedDraft),
-        `名称「${label}」暴露在占位符外面，模型可以把它挪到别的数字上：\n${maskedDraft}`,
-      );
-    }
+    assert.equal(
+      contexts.filter((c) => c.includes("answerDraft")).length,
+      0,
+      "统计答复被送去润色了 —— 只要模型碰得到，名称就有被换掉的可能",
+    );
   });
 
   await check("58) 只改数字旁边那句话的意思 → 也必须拦住", async () => {
@@ -1399,25 +1407,63 @@ async function main() {
     assert.ok(/在途运输中的有 2 单/.test(answer), `没退回原始草稿：\n${answer}`);
   });
 
-  await check("60) 正常润色仍要放行：只在数据行之外加话（防我改过头）", async () => {
+  await check("60) 不含数字的答复仍然会被润色（润色本来就该用在这种地方）", async () => {
+    /**
+     * 别把话说死成「一律不润色」。服务问答（时效、清关、能不能寄…）里没有系统算出来的数字，
+     * 那种答复正是润色有价值的地方，不能一起砍掉。
+     */
+    const shipments = [shipment({ id: "ag1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs })];
+    const { answer, contexts } = await ask({
+      shipments,
+      // 走服务问答分支（SERVICE_QA_RE 里的「能寄」），答复里没有统计数字
+      message: "锂电池能寄吗",
+      polish: (draft) => `亲，帮你确认过了。\n${draft}`,
+    });
+    assert.ok(answer.includes("帮你确认过了"), `不含数字的答复被误杀了：\n${answer}`);
+    assert.equal(
+      contexts.filter((c) => c.includes("answerDraft")).length,
+      1,
+      "不含数字的答复应该调一次模型",
+    );
+  });
+
+  await check("61) 模型另起一句不带数字的假话 → 也到不了客户手里", async () => {
+    /**
+     * 2026-08-28 复核实测的漏口：上一版只保护「含占位符的行」，
+     * 模型另起一句**不含任何数字**的话
+     *   「以上订单均已完成。」
+     * 五道检查一道都拦不住，而下面写着「已完成：1 单」，整段自相矛盾。
+     * 现在统计答复根本不调模型，这条从源头没了 —— 这一项就是盯着别把它改回去。
+     */
     const shipments = [
-      shipment({ id: "ag1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "loaded" }),
-      shipment({ id: "ag2", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "delivered" }),
+      shipment({ id: "ah1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "loaded" }),
+      shipment({ id: "ah2", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "loaded" }),
+      shipment({ id: "ah3", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "delivered" }),
     ];
     const { answer } = await ask({
       shipments,
       message: "我一共有多少单",
-      polish: (draft) => `亲，帮你查好了～\n\n${draft}\n\n还有别的需要随时找我。`,
+      polish: (draft) => `${draft}\n以上订单均已完成。`,
     });
-    assert.ok(answer.includes("帮你查好了"), `正常润色被误杀了：\n${answer}`);
-    assert.ok(answer.includes("还有别的需要随时找我"), `正常润色被误杀了：\n${answer}`);
-    assert.equal(totalCountOf(answer), 2, `单量不对：\n${answer}`);
+    assert.ok(!answer.includes("以上订单均已完成"), `模型编的假结论发给客户了：\n${answer}`);
+    assert.ok(/总单量：3 单/.test(answer) && /已完成：1 单/.test(answer), `数字不对：\n${answer}`);
+  });
+
+  await check("62) 查单进度也不给模型碰（状态和时间同样是系统查出来的事实）", async () => {
+    const target = shipment({ id: "ai1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs });
+    const { answer, contexts } = await ask({
+      shipments: [{ ...target, trackingNo: "THAI0001" } as Shipment],
+      message: "单号 THAI0001 到哪了",
+      polish: (draft) => `${draft}\n预计明天送达。`,
+    });
+    assert.ok(!answer.includes("预计明天送达"), `模型给客户编了个送达时间：\n${answer}`);
+    assert.equal(contexts.filter((c) => c.includes("answerDraft")).length, 0, "查单进度不该调模型");
   });
 
   if (failures.length > 0) {
-    throw new Error(`${failures.length}/60 项不通过（TZ=${TZ_LABEL}）：${failures.join("；")}`);
+    throw new Error(`${failures.length}/62 项不通过（TZ=${TZ_LABEL}）：${failures.join("；")}`);
   }
-  console.log(`AI 答复数字校验：60 项全部通过（TZ=${TZ_LABEL}）`);
+  console.log(`AI 答复数字校验：62 项全部通过（TZ=${TZ_LABEL}）`);
 }
 
 main().catch((error) => {

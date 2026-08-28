@@ -190,6 +190,14 @@ export class ClientAiService implements AiService {
     let evidenceOrderIds: string[] = [];
     let nextMemory: Partial<SessionMemory> | null = null;
     let shouldCreateKnowledgeGap = false;
+    /**
+     * 这条答复里有没有**系统自己算出来的业务数据**（单量/重量/方数/状态/时间）。
+     * 有的话一律不给模型润色 —— 见下面 refinedAnswer 那段的长注释。
+     * ⚠️ 用分支标记、不用「扫一眼有没有数字」：服务问答里那句
+     * 「已投喂的业务知识（当前 0 条）」也带数字，按数字判会把润色整个废掉，
+     * 而用户拍板的是**统计类**不润色，不是全部。
+     */
+    let answerHasBusinessData = false;
 
     /**
      * 抓到的单号在这个客户名下**找不到**、而这句话又明显是统计问题时，
@@ -222,6 +230,8 @@ export class ClientAiService implements AiService {
         evidenceShipmentIds = [shipment.id];
         evidenceOrderIds = [shipment.orderId];
       }
+      // 单号、状态、最近更新时间都是系统查出来的事实，同样不给模型改
+      answerHasBusinessData = true;
       nextMemory = { intent: "tracking" };
     } else if (this.isGreetingMessage(question) || this.acceptModelGreeting(question, modelIntent)) {
       answerDraft = this.formatGreetingAnswer();
@@ -328,6 +338,7 @@ export class ClientAiService implements AiService {
           );
         }
       }
+      answerHasBusinessData = true;
       nextMemory = {
         intent: "summary",
         statusScope,
@@ -346,6 +357,7 @@ export class ClientAiService implements AiService {
       });
       evidenceShipmentIds = shipments.map((item) => item.id);
       evidenceOrderIds = orders.map((item) => item.id);
+      answerHasBusinessData = true;
       nextMemory = { intent: "summary", metric: "count" };
     }
 
@@ -381,7 +393,29 @@ export class ClientAiService implements AiService {
       evidenceShipmentCount: evidenceShipmentIds.length,
       evidenceOrderCount: evidenceOrderIds.length,
     });
-    const refinedAnswer = await this.refineAnswerWithModel(question, llmContext, answerDraft, maskedDraft);
+    /**
+     * ⚠️⚠️ **带数字的答复一律不给模型润色**（用户 2026-08-28 拍板）。
+     *
+     * 之前一直在跟模型斗智：先比数字集合、再换占位符、再焊住整行、再要求「数据行逐字一致」。
+     * 每一版都被复核找到新的绕法，最后一版实测是**两头不讨好**：
+     *   · 员工正常改个措辞（「一共查到」→「您目前一共查到」）→ 整段被退回，润色等于没生效；
+     *   · 模型另起一句不带数字的假话（「以上订单均已完成。」）→ 照样放行，
+     *     跟下面「已完成：1 单」自相矛盾，客户看了更糊涂。
+     *
+     * 根子在于：**只要让模型碰这段话，就永远堵不完**。
+     * 所以改成——草稿里只要有一个数据占位符，就直接把系统写好的原话发出去，
+     * 连模型都不调。好处不止是数字不会错：
+     *   · 假话不可能出现（模型根本没参与）；
+     *   · 这个接口是全系统唯一直接花钱的地方，统计类消息从此少调一次 DeepSeek；
+     *   · 客户看到的东西可复现，出问题能照着代码复盘。
+     * 代价是统计回答固定是模板腔，不会因人而异 —— 用户认了。
+     *
+     * 服务问答那类（知识库答复、打招呼、澄清反问）里没有系统算出来的数字，
+     * 照旧走润色，那才是润色真正有用的地方。
+     */
+    const refinedAnswer = answerHasBusinessData
+      ? answerDraft
+      : await this.refineAnswerWithModel(question, llmContext, answerDraft, maskedDraft);
     if (!shouldCreateKnowledgeGap) {
       shouldCreateKnowledgeGap = this.shouldRecordKnowledgeGap({
         question,
