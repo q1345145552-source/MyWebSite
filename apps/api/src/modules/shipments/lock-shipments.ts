@@ -84,3 +84,72 @@ export async function lockShipmentsChildrenFirst(
   }
   return ordered;
 }
+
+/**
+ * 按**运单号**给一批父单上锁 —— 但内部统一换算成 **id** 再排序。
+ *
+ * ⚠️⚠️ 为什么必须有这个（2026-08-29，第八轮之后的补刀）：
+ *
+ * 我上面那个 `lockShipmentsChildrenFirst` 的父单层是 `[...parentIds].sort()`，
+ * 按 **id** 排。而系统里另外三处「第二轮同步父单」写的是
+ *   `for (const no of [...parentNosToSync].sort()) await syncParentStatusFromChildren(...)`
+ * （containers/routes.ts ~491 / ~744、admin-ops/routes.ts ~685），
+ * 而 `syncParentStatusFromChildren` 内部发的是
+ *   `SELECT id FROM shipments WHERE tracking_no = ... FOR UPDATE`
+ * —— 按**运单号**排。
+ *
+ * **同一批父单、两把不同的钥匙。** 两个事务从不同的门进来，顺序照样能反：
+ *   事务A（给两张父单建派送单）按 id 序锁 P1 → P2
+ *   事务B（推进一个柜，柜里装着 P1 和 P2 各自的子单）先锁两个子单，
+ *         再按运单号序锁 P2 → P1
+ * 成环。
+ *
+ * 测试库只读查过：**id 顺序和运单号顺序相反的父单对有 41 对**，
+ * 不是理论上可能，是数据里就有。
+ *
+ * 所以全系统父单层**只认 id 一个排序键**。调用方要是手里只有运单号，
+ * 就走这个函数换算，不许自己按运单号排。
+ */
+export async function lockParentsByTrackingNo(
+  tx: any,
+  parentTrackingNos: string[],
+  companyId: string,
+): Promise<string[]> {
+  if (parentTrackingNos.length === 0) return [];
+  const rows = await tx.shipment.findMany({
+    where: { trackingNo: { in: parentTrackingNos }, companyId },
+    select: { id: true },
+  });
+  const ordered: string[] = [];
+  // ⚠️ 按 id 排，跟 lockShipmentsChildrenFirst 的父单层同一把钥匙
+  for (const sid of rows.map((r: any) => r.id).sort()) {
+    await tx.$queryRaw`SELECT id FROM shipments WHERE id = ${sid} FOR UPDATE`;
+    ordered.push(sid);
+  }
+  return ordered;
+}
+
+/**
+ * 「锁一批父单 + 逐个重算它们的状态」—— 调用方**只许用这一个入口**。
+ *
+ * ⚠️ 为什么把循环也收进来（2026-08-29）：
+ * 分成「先调 lockParentsByTrackingNo，再自己写 for 循环」两步的话，
+ * 哪天有人把前面那句预锁删了，循环就重新变成决定锁序的那个人 ——
+ * 而它迭代的是**运单号**清单，又回到「两把钥匙」那个 bug。
+ * 合成一个函数，调用方连写错的机会都没有。
+ */
+export async function lockAndSyncParents(
+  tx: any,
+  parentTrackingNos: string[],
+  companyId: string,
+  sync: (tx: any, trackingNo: string, companyId: string) => Promise<unknown>,
+): Promise<void> {
+  const unique = [...new Set(parentTrackingNos)];
+  if (unique.length === 0) return;
+  // ① 先按 id 把这批父单全锁住（唯一决定锁序的一步）
+  await lockParentsByTrackingNo(tx, unique, companyId);
+  // ② 再逐个重算。这时候锁已经全在手里，②的顺序对死锁没有影响。
+  for (const trackingNo of unique) {
+    await sync(tx, trackingNo, companyId);
+  }
+}

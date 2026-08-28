@@ -11,7 +11,7 @@
 //   两个「延迟」是可跳过的中间态：正常走就是 SEALED → IN_TRANSIT → ARRIVED
 
 import { requirePositiveInt } from "../core/int-guard";
-import { lockShipmentsChildrenFirst } from "../shipments/lock-shipments";
+import { lockAndSyncParents, lockShipmentsChildrenFirst } from "../shipments/lock-shipments";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../db/prisma";
 import { syncParentStatusFromChildren } from "../shipments/parent-status";
@@ -488,9 +488,16 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
 
         // ⚠️ 排序后再逐个锁父单：两个柜子同时推进、又正好涉及同几张父单时，
         // 加锁顺序相反会被 PostgreSQL 判定死锁掐掉一个。固定顺序就不会打架。
-        for (const no of [...parentNosToSync].sort()) {
-          await syncParentStatusFromChildren(tx, no, auth.companyId);
-        }
+        /**
+         * ⚠️ 先按 **id** 把这批父单一次性锁完，再逐个同步（2026-08-29 补）。
+         * 不能直接 `for (const no of [...nos].sort())` —— 那是按**运单号**排，
+         * 而 lockShipmentsChildrenFirst 的父单层按 **id** 排，两把钥匙不一样，
+         * 同一对父单从不同路径进来会锁反。测试库里 id 顺序和运单号顺序
+         * 相反的父单对有 41 对。
+         * 下面循环里 syncParentStatusFromChildren 内部还会再锁一次，
+         * 同一事务重锁是免费的，不用去删。
+         */
+        await lockAndSyncParents(tx, parentNosToSync, auth.companyId, syncParentStatusFromChildren);
       },
       { timeout: 30000, maxWait: 10000 },
     );
@@ -741,9 +748,16 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
          * 反向等待就是死锁。同一个规矩两处写法必须一样。
          */
         const parentNos = [...new Set(kids.map((k) => k.parentTrackingNo).filter((v): v is string => !!v))];
-        for (const trackingNo of [...parentNos].sort()) {
-          await syncParentStatusFromChildren(tx, trackingNo, auth.companyId);
-        }
+        /**
+         * ⚠️ 先按 **id** 把这批父单一次性锁完，再逐个同步（2026-08-29 补）。
+         * 不能直接 `for (const no of [...nos].sort())` —— 那是按**运单号**排，
+         * 而 lockShipmentsChildrenFirst 的父单层按 **id** 排，两把钥匙不一样，
+         * 同一对父单从不同路径进来会锁反。测试库里 id 顺序和运单号顺序
+         * 相反的父单对有 41 对。
+         * 下面循环里 syncParentStatusFromChildren 内部还会再锁一次，
+         * 同一事务重锁是免费的，不用去删。
+         */
+        await lockAndSyncParents(tx, parentNos, auth.companyId, syncParentStatusFromChildren);
       }
 
       delete dates[container.currentStatus];

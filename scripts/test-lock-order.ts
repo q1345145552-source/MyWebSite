@@ -64,6 +64,8 @@ const LOCK_HELPERS: Record<string, string[]> = {
    *   导致「父单锁改成反序」这个变异全绿。）
    */
   lockShipmentsChildrenFirst: ["shipments"],
+  lockParentsByTrackingNo: ["shipments"],
+  lockAndSyncParents: ["shipments"],
 };
 
 const WRITE_RE = /\btx\.\w+\.(create|update|updateMany|delete|deleteMany|upsert|createMany)\b/;
@@ -374,8 +376,14 @@ check("6) 循环里取锁的，必须锁在**排过序**的清单上", () => {
       bad.join("\n     "),
   );
   // ⚠️ 自检：一个都没扫到就说明正则又写窄了，上面那个 deepEqual 的绿灯不作数
+  /**
+   * ⚠️ 阈值 2026-08-29 从 6 调到 4：三处「按运单号逐个同步父单」的循环
+   * 被收进了 lockAndSyncParents，**是有意减少的**，不是正则失灵。
+   * 以后这个数**只该因为又抽了共用函数而变小**；
+   * 无缘无故变小就说明正则又写窄了，这一项的绿灯不作数。
+   */
   assert.ok(
-    lockLoopsSeen >= 6,
+    lockLoopsSeen >= 4,
     `只扫到 ${lockLoopsSeen} 个「循环里取锁」的地方，比预期少 —— 正则可能又写窄了，这一项的绿灯不作数`,
   );
 });
@@ -489,11 +497,24 @@ check("8) 批量锁运单只许走 lockShipmentsChildrenFirst，不许自己拼"
       if (t.startsWith("*") || t.startsWith("//") || t.startsWith("/*")) continue;
       const m = /for\s*\(\s*const\s+\w+\s+of\s+(.+)\)\s*\{\s*$/.exec(lines[i]);
       if (!m) continue;
-      // 这个循环里锁的是 shipments 吗
+      /**
+       * 这个循环里锁的是 shipments 吗。
+       * ⚠️ 两种都要认（2026-08-29 补）：
+       *   ① 字面写着 `FROM shipments ... FOR UPDATE`
+       *   ② 调了一个**登记过会锁 shipments 的 helper**
+       * 只认①的话，「循环里逐个调 syncParentStatusFromChildren」这种
+       * 完全抓不到 —— 而那正是「父单按运单号排」那个 bug 的形状。
+       */
+      const helpersLockingShipments = Object.entries(LOCK_HELPERS)
+        .filter(([, tables]) => tables.includes("shipments"))
+        .map(([name]) => name)
+        // 共用入口自己不算（它就是正确答案）
+        .filter((n) => n !== "lockAndSyncParents");
       let locksShipments = false;
       for (let j = i + 1; j < Math.min(i + 5, lines.length); j += 1) {
         const b = lines[j];
         if (b.includes("FROM shipments") && b.includes("FOR UPDATE")) { locksShipments = true; break; }
+        if (helpersLockingShipments.some((h) => b.includes(`${h}(`))) { locksShipments = true; break; }
         if (b.trim().startsWith("}")) break;
       }
       if (!locksShipments) continue;
@@ -562,11 +583,49 @@ check("9) 共用的批量锁函数本身要守住三条：查父子、分两层�
       `${layer} 那一层没有「按 id 排序逐个锁」的循环了`,
     );
   }
-  // 两层都必须排序
-  assert.equal(
-    (src.match(/\.sort\(\)/g) ?? []).length,
-    2,
-    "两层里应该各有一个 .sort() —— 少一个就是那一层没排序",
+
+  /**
+   * ⚠️ 这里原来是 `assert.equal(src.match(/\.sort\(\)/g).length, 2)` —— 数 `.sort()`
+   * 出现几次。太脆：换成 `.sort((a,b)=>...)` 这种等价写法会误红，
+   * 在别处随手加一句 `.sort()` 又能凑数。
+   * 改成**逐个取锁循环**检查：文件里每一个会发 FOR UPDATE 的循环，
+   * 迭代的表达式都必须以 `.sort()` 结尾。
+   */
+  const lockLoops = src
+    .split("\n")
+    .map((l, i) => ({ l, i }))
+    .filter(({ i }) => {
+      const body = src.split("\n").slice(i + 1, i + 3).join("\n");
+      return /for\s*\(\s*const\s+\w+\s+of\s+/.test(src.split("\n")[i]) && /FOR UPDATE/.test(body);
+    });
+  assert.ok(lockLoops.length >= 3, `只找到 ${lockLoops.length} 个取锁循环，比预期少 —— 是不是有一层被删了`);
+  for (const { l, i } of lockLoops) {
+    const iter = /for\s*\(\s*const\s+\w+\s+of\s+(.+)\)\s*\{\s*$/.exec(l.trim())?.[1] ?? "";
+    assert.ok(
+      /\.sort\([^)]*\)\s*$/.test(iter.trim()),
+      `第 ${i + 1} 行那个取锁循环迭代的清单没有以 .sort() 结尾：${iter}`,
+    );
+  }
+
+  /**
+   * ⚠️ **父单层必须按 id 排，不许按运单号排**（2026-08-29 补，这条差点又漏）。
+   * 我这一轮抽出 lockShipmentsChildrenFirst 时父单层按 id 排，
+   * 而系统里另外三处第二轮同步父单是按**运单号**排的
+   * （syncParentStatusFromChildren 内部锁的是 `WHERE tracking_no = ...`）。
+   * 同一批父单两把钥匙，照样能锁反 —— 测试库里 id 顺序和运单号顺序
+   * 相反的父单对有 41 对。现在全系统父单层只认 id 一个键。
+   */
+  assert.ok(/lockParentsByTrackingNo/.test(src), "按运单号锁父单的换算函数没了");
+  /**
+   * ⚠️ 按**行**判断，别写整条正则（2026-08-29 —— 这个错我在同一个文件里
+   * 刚记过一次「`[^)]*` 跨不过 `(r: any)` 里的括号」，转头又踩了一遍）。
+   */
+  const idSortLine = src
+    .split("\n")
+    .find((l) => /lockParentsByTrackingNo/.test(src) && /\.map\(/.test(l) && /r\.id/.test(l) && /\.sort\(\)/.test(l));
+  assert.ok(
+    idSortLine,
+    "按运单号锁父单那条路没有换算成 id 再排序 —— 两把钥匙会锁反",
   );
   assert.ok(
     /既是子单又是父单|多层分柜/.test(src),

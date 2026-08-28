@@ -1,5 +1,5 @@
 // B-7: 已从 node:sqlite 迁移到 Prisma + PostgreSQL（2026-05-20）
-import { lockShipmentsChildrenFirst } from "../shipments/lock-shipments";
+import { lockAndSyncParents, lockShipmentsChildrenFirst } from "../shipments/lock-shipments";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../db/prisma";
 import { syncParentStatusFromChildren } from "../shipments/parent-status";
@@ -682,9 +682,16 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
           results.push({ id, shipmentId: sid });
         }
         // 子单全部处理完之后，父单按单号排序统一同步（跟柜子那条路同一个顺序）
-        for (const trackingNo of [...parentNosToSync].sort()) {
-          await syncParentStatusFromChildren(tx, trackingNo, auth.companyId);
-        }
+        /**
+         * ⚠️ 先按 **id** 把这批父单一次性锁完，再逐个同步（2026-08-29 补）。
+         * 不能直接 `for (const no of [...nos].sort())` —— 那是按**运单号**排，
+         * 而 lockShipmentsChildrenFirst 的父单层按 **id** 排，两把钥匙不一样，
+         * 同一对父单从不同路径进来会锁反。测试库里 id 顺序和运单号顺序
+         * 相反的父单对有 41 对。
+         * 下面循环里 syncParentStatusFromChildren 内部还会再锁一次，
+         * 同一事务重锁是免费的，不用去删。
+         */
+        await lockAndSyncParents(tx, [...parentNosToSync], auth.companyId, syncParentStatusFromChildren);
       });
     } catch (e: any) {
       if (e instanceof LastmileShipmentNotFoundError) {
