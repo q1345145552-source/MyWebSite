@@ -1307,10 +1307,59 @@ async function main() {
     assert.equal(totalCountOf(followUp!), 1, `本月耳机单量不对：\n${followUp}`);
   });
 
+  // ══ 数字对上了，名称却被换了（2026-08-28 生产实测）═══════════════════
+  // 老板实测：一共 3 单，AI 却答「已完成 3 单、总单量 1 单」。
+  // 占位符方案的五道检查全都只盯**占位符本身**（各出现一次 / 编号合法 / 顺序一致 /
+  // 外面没数字 / 外面没中文数量词），没有一道管「数字挂在哪个名称底下」。
+  // 模型把 ⟦N⟧ 留在原位、只调换「总单量：」「已完成：」这两个**文字标签**，五道全过。
+
+  await check("57) 模型只调换名称、不动占位符 → 也必须拦住", async () => {
+    // 一共 3 单：在途 2 / 已完成 1 —— 三个数互不相同，换了就一定看得出来
+    const shipments = [
+      shipment({ id: "ad1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "loaded" }),
+      shipment({ id: "ad2", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "loaded" }),
+      shipment({ id: "ad3", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "delivered" }),
+    ];
+    const { answer, contexts } = await ask({
+      shipments,
+      message: "我一共有多少单",
+      // 占位符一个不动，只把两个名称对调
+      polish: (draft) =>
+        draft
+          .replace(/总单量：/g, "@@TMP@@")
+          .replace(/已完成：/g, "总单量：")
+          .replace(/@@TMP@@/g, "已完成："),
+    });
+
+    // ① 客户看到的数字必须挂在正确的名称底下
+    assert.ok(!/已完成：3 单/.test(answer), `「已完成」拿到了总数：\n${answer}`);
+    assert.ok(!/总单量：1 单/.test(answer), `「总单量」拿到了已完成的数：\n${answer}`);
+    assert.ok(/总单量：3 单/.test(answer), `总单量不对：\n${answer}`);
+    assert.ok(/在途中：2 单/.test(answer), `在途不对：\n${answer}`);
+    assert.ok(/已完成：1 单/.test(answer), `已完成不对：\n${answer}`);
+
+    /**
+     * ② 光验①会「假绿」：修好之后名称本身就被一起遮起来了，
+     *    测试桩的 replace 匹配不到东西、等于没攻击，①自然就过。
+     *    所以再盯一眼**发给模型的那份遮罩草稿**：
+     *    统计明细里的名称必须和数字**焊死在同一个占位符里**，
+     *    绝不能出现「名称：⟦N⟧」这种把名称暴露在外面的写法。
+     */
+    const polishContext = contexts.find((c) => c.includes("answerDraft"));
+    assert.ok(polishContext, "没抓到发给模型的润色上下文");
+    const maskedDraft = (JSON.parse(polishContext) as { answerDraft?: string }).answerDraft ?? "";
+    for (const label of ["总单量", "在途中", "已完成"]) {
+      assert.ok(
+        !new RegExp(`${label}[：:]\\s*⟦N`).test(maskedDraft),
+        `名称「${label}」暴露在占位符外面，模型可以把它挪到别的数字上：\n${maskedDraft}`,
+      );
+    }
+  });
+
   if (failures.length > 0) {
-    throw new Error(`${failures.length}/56 项不通过（TZ=${TZ_LABEL}）：${failures.join("；")}`);
+    throw new Error(`${failures.length}/57 项不通过（TZ=${TZ_LABEL}）：${failures.join("；")}`);
   }
-  console.log(`AI 答复数字校验：56 项全部通过（TZ=${TZ_LABEL}）`);
+  console.log(`AI 答复数字校验：57 项全部通过（TZ=${TZ_LABEL}）`);
 }
 
 main().catch((error) => {
