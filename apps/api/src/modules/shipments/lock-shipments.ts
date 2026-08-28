@@ -1,3 +1,5 @@
+import { BusinessError } from "../core/business-error";
+
 /**
  * 「一次锁一批运单」的**唯一正确姿势**。
  *
@@ -32,10 +34,23 @@
  * 单独一个类型，是为了让调用方能把它翻成 404 而不是笼统的 500「服务器繁忙」——
  * 员工看到「运单 xxx 不存在」才知道该去改什么。
  */
-export class ShipmentsNotFoundError extends Error {
+export class ShipmentsNotFoundError extends BusinessError {
   constructor(public readonly missingIds: string[]) {
-    super(`运单不存在或不属于当前公司：${missingIds.join("、")}`);
-    this.name = "ShipmentsNotFoundError";
+    /**
+     * ⚠️ **必须继承 BusinessError**（2026-08-29 第十轮改）。
+     *
+     * 上一版继承的是普通 `Error`，于是只有建派送单那一处 try/catch 翻成了 404，
+     * 另外**四个调用点**（推进柜 / 撤销柜 / 两条删订单）抛上去会变成
+     * `500 服务器繁忙` —— 员工完全不知道是哪一票单号不对。
+     * 复核实测 `isBusinessError = false`，并指出柜子推进/撤销跟硬删除并发时
+     * 「预读之后发现运单已经不在了」是真会发生的。
+     *
+     * `business-error.ts` 开头就记着同一条教训：
+     * 「加四段 try/catch 治标不治本，下次再加一道闸门还是会有人忘」——
+     * 我加了一道新闸门，然后又忘了。继承它，最外层自动翻，忘不了。
+     */
+    super(`运单不存在或不属于当前公司：${missingIds.join("、")}`, 404, "NOT_FOUND");
+    this.missingIds = missingIds;
   }
 }
 

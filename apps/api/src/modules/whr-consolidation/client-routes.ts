@@ -1,5 +1,5 @@
-import { DECIMAL_10_2, requireDecimal } from "../core/decimal-guard";
-import { requirePositiveInt, requireProductWithinInt } from "../core/int-guard";
+import { DECIMAL_10_2, DECIMAL_10_6, requireDecimal, requireDerivedWithinDecimal } from "../core/decimal-guard";
+import { parseNumericStrict, requirePositiveInt, requireProductWithinInt } from "../core/int-guard";
 import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
@@ -263,13 +263,18 @@ export function registerWhrConsolidationClientRoutes(app: MinimalHttpApp): void 
        * 而且这条路的方数要拿去按「**方数 × 单价**」收费 ——
        * 小数不会报错，只会让方数和金额悄悄算错，比报 500 更难发现。
        */
-      const pkg = Number(it.packageCount);
+      // ⚠️ parseNumericStrict 而不是 Number（2026-08-29 第十轮补）：
+      //    Number(true) 是 1、Number([5]) 是 5 —— 复核实测传
+      //    {packageCount: true, quantityPerBox: [5], unitWeightKg: true}
+      //    这个接口返回 200，准备写「1 件 / 每箱 5 个 / 单重 1kg」。
+      //    这些数字要参与方数和收费，所以 Number() 这一步就是钱的漏口。
+      const pkg = parseNumericStrict(it.packageCount);
       const pkgIssue = requirePositiveInt(pkg, `第 ${row} 行件数`);
       if (pkgIssue) {
         fail(res, 400, "BAD_REQUEST", pkgIssue);
         return;
       }
-      const qpb = it.quantityPerBox == null ? 1 : Number(it.quantityPerBox);
+      const qpb = it.quantityPerBox == null ? 1 : parseNumericStrict(it.quantityPerBox);
       const qpbIssue = requirePositiveInt(qpb, `第 ${row} 行每箱数量`);
       if (qpbIssue) {
         fail(res, 400, "BAD_REQUEST", qpbIssue);
@@ -301,6 +306,39 @@ export function registerWhrConsolidationClientRoutes(app: MinimalHttpApp): void 
           fail(res, 400, "BAD_REQUEST", dimIssue);
           return;
         }
+      }
+
+      /**
+       * 单件重量（可以不填）—— 填了就得是合法的 `Decimal(10,2)`。
+       * 复核实测 `unitWeightKg: true` 会被 Number() 变成 1kg 存进去。
+       */
+      if (it.unitWeightKg !== undefined && it.unitWeightKg !== null) {
+        const wIssue = requireDecimal(it.unitWeightKg, `第 ${row} 行单件重量(kg)`, DECIMAL_10_2);
+        if (wIssue) {
+          fail(res, 400, "BAD_REQUEST", wIssue);
+          return;
+        }
+      }
+
+      /**
+       * ⚠️⚠️ **算出来的字段也要卡**（2026-08-29 第十轮补）。
+       * 每个输入都合法、算出来的数爆掉，是最隐蔽的一类：
+       *   · 单重 99999999.99 × 数量 2 → totalWeightKg 是 Decimal(10,2)，
+       *     数据库实测 `numeric field overflow`
+       *   · 1000×1000×1000cm × 10 件 = 10000 m³ → volumeM3 是 Decimal(10,6)，
+       *     最大只能存 9999.999999 → 裸 500
+       * ⚠️ 这里的算式必须跟下面真正写库那几行**一模一样**。
+       */
+      {
+        const unitW = it.unitWeightKg == null ? null : parseNumericStrict(it.unitWeightKg);
+        if (unitW !== null) {
+          const tw = requireDerivedWithinDecimal(unitW * pkg * qpb, `第 ${row} 行总重量(kg)`, DECIMAL_10_2);
+          if (tw) { fail(res, 400, "BAD_REQUEST", tw); return; }
+        }
+        const vol =
+          (parseNumericStrict(it.lengthCm) * parseNumericStrict(it.widthCm) * parseNumericStrict(it.heightCm) / 1_000_000) * pkg;
+        const tv = requireDerivedWithinDecimal(vol, `第 ${row} 行方数(m³)`, DECIMAL_10_6);
+        if (tv) { fail(res, 400, "BAD_REQUEST", tv); return; }
       }
       if (!it.material?.trim()) {
         fail(res, 400, "BAD_REQUEST", `第 ${row} 行材质为必填`);

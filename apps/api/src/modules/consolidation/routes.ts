@@ -1,4 +1,4 @@
-import { DECIMAL_10_2, requireDecimal } from "../core/decimal-guard";
+import { DECIMAL_10_2, DECIMAL_10_6, requireDecimal, requireDerivedWithinDecimal } from "../core/decimal-guard";
 import { parseNumericStrict, requirePositiveInt, requireProductWithinInt } from "../core/int-guard";
 import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
@@ -96,6 +96,34 @@ function validateConsolidationProductRow(p: any, index: number): string | null {
     const issue = requireDecimal(val, `${label}的${name}`, DECIMAL_10_2);
     if (issue) return issue;
   }
+
+  /**
+   * ⚠️⚠️ **算出来的字段也要卡**（2026-08-29 第十轮补）。
+   * 复核报的一条新的，也是最隐蔽的一类：**每个输入都合法，算出来的数爆掉**。
+   *   · 单重 99999999.99 × 数量 2 = 199999999.98 →
+   *     `totalWeight` 那列是 `Decimal(10,2)`，数据库实测 `numeric field overflow`
+   *   · 1000×1000×1000 cm × 10 件 = 10000 m³ →
+   *     `volume` 是 `Decimal(10,6)`，最大只能存 9999.999999 → 裸 500
+   * 只卡输入不卡输出，等于没卡。
+   * ⚠️ 这里算的口径必须跟下面真正写库那几行**一模一样**，
+   *    否则这道闸放行的数写库还是会炸。
+   */
+  const pkg = parseNumericStrict(p.packageCount);
+  const qpb = parseNumericStrict(p.quantityPerBox);
+  const totalQuantity = pkg * qpb;
+  const weightIssue = requireDerivedWithinDecimal(
+    parseNumericStrict(p.unitWeightKg) * totalQuantity,
+    `${label}的总重量`,
+    DECIMAL_10_2,
+  );
+  if (weightIssue) return weightIssue;
+  const volumeIssue = requireDerivedWithinDecimal(
+    (parseNumericStrict(p.lengthCm) * parseNumericStrict(p.widthCm) * parseNumericStrict(p.heightCm) / 1_000_000) * pkg,
+    `${label}的体积(m³)`,
+    DECIMAL_10_6,
+  );
+  if (volumeIssue) return volumeIssue;
+
   return null;
 }
 

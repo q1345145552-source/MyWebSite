@@ -767,11 +767,41 @@ async function main(): Promise<void> {
     assert.ok(/orderId/.test(good.message), `没停在「缺 orderId」那道闸：${good.message}`);
   });
 
+  await checkAsync("21) 「运单查不到」必须是业务错误，五个调用点都能自动翻成 404", async () => {
+    /**
+     * ⚠️ 上一版 `ShipmentsNotFoundError` 继承的是普通 `Error`，
+     * 于是**只有建派送单那一处** try/catch 翻成了 404，
+     * 另外四个调用点（推进柜 / 撤销柜 / 两条删订单）抛上去变成
+     * `500 服务器繁忙` —— 员工完全不知道是哪一票单号不对。
+     * 复核实测 `isBusinessError = false`，并指出「柜子推进/撤销跟硬删除并发时，
+     * 预读之后发现运单已经不在了」是真会发生的。
+     *
+     * `business-error.ts` 开头就记着同一条教训：
+     * 「加四段 try/catch 治标不治本，下次再加一道闸门还是会有人忘」。
+     * 我加了一道新闸门，然后又忘了。
+     *
+     * 现在它继承 `BusinessError`，最外层统一翻 —— 所以这一项盯的是
+     * **那个继承关系**，而不是某一处 try/catch 写没写。
+     * 结构保证比逐处 catch 可靠：新加调用点不用记得去接。
+     */
+    const { ShipmentsNotFoundError } = await import(
+      "../apps/api/src/modules/shipments/lock-shipments"
+    );
+    const { isBusinessError } = await import("../apps/api/src/modules/core/business-error");
+    const err = new ShipmentsNotFoundError(["s_x", "s_y"]);
+    assert.ok(
+      isBusinessError(err),
+      "ShipmentsNotFoundError 不是业务错误 —— 那它在四个调用点会变成 500「服务器繁忙」",
+    );
+    assert.equal((err as any).httpStatus, 404, "状态码不是 404");
+    assert.ok(/s_x/.test(err.message) && /s_y/.test(err.message), "报错里没说清是哪几票");
+  });
+
   if (failures.length > 0) {
-    console.error(`\n${failures.length}/21 项不通过：${failures.join("；")}`);
+    console.error(`\n${failures.length}/22 项不通过：${failures.join("；")}`);
     process.exit(1);
   }
-  console.log("产品行校验：21 项全部通过");
+  console.log("产品行校验：22 项全部通过");
 }
 
 main().catch((error) => {

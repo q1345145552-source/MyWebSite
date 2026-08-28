@@ -1,4 +1,12 @@
 /**
+ * ⚠️ 禁库硬闸：这个脚本不许连数据库。
+ * 下面第 16 项会**真调 /auth/login**，而登录路由在闸之后会去查用户表 ——
+ * 闸生效时根本走不到那一步；一旦闸失效，就会以「连不上数据库」的形式当场炸出来。
+ * 这正好是我们要的：**闸没生效 = 测试红**。
+ */
+process.env.DATABASE_URL = "postgresql://blocked:blocked@127.0.0.1:1/never?connect_timeout=1";
+
+/**
  * 登录限流的自测（不连数据库、不连网络，只测计数逻辑本身）。
  *
  * 为什么要有这个（老板 2026-08-29 拍板加的那道闸）：
@@ -277,8 +285,117 @@ check("15) 登录接口走的是共用的那几个 login* 函数（源码检查�
   );
 });
 
-if (failures.length > 0) {
-  console.error(`\n${failures.length}/15 项不通过：${failures.join("；")}`);
-  process.exit(1);
+
+// ══════════════════════════════════════════════════════════════════
+// ⚠️⚠️ 下面这一项是**真调 /auth/login**，不是测纯函数。
+//
+// 复核连着三轮报同一件事：这个脚本的 15 项**一次都没调过登录接口** ——
+// 1~9、11~14 测的是 core/rate-limit.ts 里的纯函数，10 和 15 只扫源码
+// 有没有那几个字。把账号锁定那道闸改成永不触发，15/15 照样全绿。
+// 复核还明说了「这道闸完全可以零成本真调」。它是对的，我拖了两轮没做。
+//
+// 怎么做到不连库：账号锁定这道闸在登录流程里排在**查用户表之前**。
+// 所以先用真的 recordLoginFailure 把计数灌满，再调路由：
+//   · 闸生效 → 直接 429 返回，根本走不到查库那一步
+//   · 闸失效 → 往下走去查库 → 数据库连不通 → 当场炸
+// 两种结果都能把「闸有没有接上」区分开。
+// ══════════════════════════════════════════════════════════════════
+
+type Handler = (req: any, res: any) => Promise<void> | void;
+
+async function loadLoginRoute(): Promise<Handler> {
+  const routes = new Map<string, Handler>();
+  const { registerAuthRoutes } = await import("../apps/api/src/modules/auth/routes");
+  registerAuthRoutes({
+    get(p: string, h: Handler) { routes.set(`GET ${p}`, h); },
+    post(p: string, h: Handler) { routes.set(`POST ${p}`, h); },
+    delete(p: string, h: Handler) { routes.set(`DELETE ${p}`, h); },
+    listen() {},
+  } as any);
+  const h = routes.get("POST /auth/login");
+  assert.ok(h, "没注册 /auth/login");
+  return h!;
 }
-console.log("登录限流：15 项全部通过");
+
+async function callLogin(
+  handler: Handler,
+  body: unknown,
+  ip: string,
+): Promise<{ status: number; message: string; threw: string | null }> {
+  let status = 0;
+  let payload: { message?: string } = {};
+  const res: any = {
+    status(code: number) { status = code; return res; },
+    json(value: unknown) { payload = value as { message?: string }; },
+  };
+  try {
+    await handler(
+      { method: "POST", path: "/auth/login", query: {}, headers: { "x-real-ip": ip }, body },
+      res,
+    );
+  } catch (e) {
+    return { status, message: payload.message ?? "", threw: e instanceof Error ? e.message : String(e) };
+  }
+  return { status, message: payload.message ?? "", threw: null };
+}
+
+async function main(): Promise<void> {
+  const login = await loadLoginRoute();
+
+  await checkAsyncTop("16) 账号锁定那道闸**真的接在登录路由上**（真调接口）", async () => {
+    __resetFailureStoreForTest();
+    const account = "XT_GATE_TEST";
+    // 灌满这个账号的失败计数（用的是生产那份 recordLoginFailure）
+    for (let i = 0; i < LOGIN_FAILURE_MAX; i += 1) recordLoginFailure(account);
+
+    /**
+     * ⚠️ 每次换一个 IP：不然会先撞上「每 IP 每分钟 10 次」那道旧闸，
+     * 拿到的 429 就分不清是哪道闸发的了。
+     */
+    const r = await callLogin(login, { account, password: "随便错的" }, "10.0.0.99");
+
+    assert.equal(
+      r.threw,
+      null,
+      `路由抛异常了，说明它绕过账号闸去查库了（闸没接上）：${r.threw}`,
+    );
+    assert.equal(r.status, 429, `账号已经错满 ${LOGIN_FAILURE_MAX} 次，却没被拦，拿到 ${r.status}`);
+    assert.ok(
+      /密码错太多次|分钟后再试/.test(r.message),
+      `拦是拦了，但不是账号锁定那道闸发的：${JSON.stringify(r.message)}`,
+    );
+  });
+
+  await checkAsyncTop("17) 没超限的账号不许被误拦（正向对照）", async () => {
+    /**
+     * ⚠️ 只验「没被账号闸拦下」。没超限的请求会往下走去查库，
+     * 而本脚本禁了数据库 —— 所以它**应该抛连库错误**，
+     * 那正好证明它穿过了账号闸。
+     */
+    __resetFailureStoreForTest();
+    const r = await callLogin(login, { account: "XT_CLEAN", password: "x" }, "10.0.0.100");
+    assert.notEqual(r.status, 429, "没超限的账号被账号闸拦了");
+    assert.ok(
+      r.threw !== null,
+      "既没被拦、也没往下走去查库 —— 说明它在别的地方就返回了，这一项没测到东西",
+    );
+  });
+
+  if (failures.length > 0) {
+    console.error(`\n${failures.length}/17 项不通过：${failures.join("；")}`);
+    process.exit(1);
+  }
+  console.log("登录限流：17 项全部通过");
+}
+
+async function checkAsyncTop(name: string, body: () => Promise<void>): Promise<void> {
+  try { await body(); console.log(`  ✅ ${name}`); }
+  catch (error) {
+    failures.push(name);
+    const m = error instanceof Error ? error.message : String(error);
+    console.log(`  ❌ ${name}\n     ${m.split("\n").join("\n     ")}`);
+  }
+}
+
+main().catch((e) => { console.error(e); process.exit(1); });
+

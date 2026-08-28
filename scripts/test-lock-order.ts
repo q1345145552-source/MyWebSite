@@ -114,7 +114,33 @@ function isWriteAt(lines: string[], i: number): boolean {
  * ⚠️ 这只是个补丁：**扫源码判断不了可达性**，真正的守卫是行为测试。
  */
 function isDeadLine(line: string): boolean {
-  return /\bif\s*\(\s*(false|0|!true)\s*\)/.test(line);
+  return /\bif\s*\(\s*(false|0|!true|1\s*===\s*2|1\s*==\s*2)\s*\)/.test(line);
+}
+
+/**
+ * 从第 i 行开始，往后**整个死代码块**的范围（左闭右开）。
+ *
+ * ⚠️⚠️ 上一版 `isDeadLine()` **只看当前那一行**，于是
+ *     if (false) {
+ *       await tx.$queryRaw`... FOR UPDATE`;   ← 这一行不含 if(false)，被当成真锁
+ *     }
+ * 整个绕过去了 —— **复核连着两轮报同一件事，我一直只补了单行写法。**
+ * 现在遇到 `if (写死的假条件) {` 就按大括号配对把整块跳掉。
+ * 单行写法（`if (false) await ...`）仍由上面那个函数管。
+ */
+function deadBlockEnd(lines: string[], i: number): number {
+  if (!isDeadLine(lines[i])) return i + 1;
+  // 单行形式：这一行里就写完了，跳一行
+  if (!/\{\s*$/.test(lines[i])) return i + 1;
+  let depth = 0;
+  for (let j = i; j < lines.length; j += 1) {
+    const t = lines[j];
+    // 粗略配对就够了：这里只求「别把死代码里的锁算进去」，不求完美解析
+    depth += (t.match(/\{/g) ?? []).length;
+    depth -= (t.match(/\}/g) ?? []).length;
+    if (depth <= 0 && j > i) return j + 1;
+  }
+  return lines.length;
 }
 const RAW_LOCK_RE = /FROM\s+(\w+)\s+WHERE[\s\S]*FOR UPDATE|FOR UPDATE/;
 
@@ -165,7 +191,8 @@ function scanFile(file: string): TxBlock[] {
          * 同一个事务里重复锁同一行/同一张表是免费的，
          * 决定会不会死锁的是**第一次**拿锁的先后。
          */
-        if (isDeadLine(l)) { j += 1; continue; } // 写死走不到的分支，里面的锁不算数
+        // 写死走不到的分支，**整块**都不算数（不只是 if 那一行）
+        if (isDeadLine(l)) { j = deadBlockEnd(lines, j); continue; }
         const helper = Object.keys(LOCK_HELPERS).find((h) => l.includes(`${h}(`));
         if (helper) {
           for (const t of LOCK_HELPERS[helper]) if (!locks.includes(t)) locks.push(t);

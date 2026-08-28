@@ -39,6 +39,8 @@ export interface DecimalRule {
 
 /** 项目里用到的几种字段规格，集中放这里，免得每处各写各的 */
 export const DECIMAL_10_2: DecimalRule = { precision: 10, scale: 2 };
+/** 订单/运单的方数用的是这个规格，别拿 10,2 那套去卡它 */
+export const DECIMAL_10_3: DecimalRule = { precision: 10, scale: 3 };
 export const DECIMAL_10_6: DecimalRule = { precision: 10, scale: 6 };
 
 /** 这个精度能表示的最小正数：scale=2 → 0.01，scale=6 → 0.000001 */
@@ -98,4 +100,33 @@ export function requireDecimal(
  */
 export function requireUnitPrice(raw: unknown, label: string): string | null {
   return requireDecimal(raw, label, DECIMAL_10_2);
+}
+
+/**
+ * **算出来的字段也要卡**（2026-08-29 第十轮补，复核报的一条新的）。
+ *
+ * ⚠️ 这条最隐蔽：**每个输入都合法，算出来的那个数爆掉。**
+ *   · 单重 99999999.99 × 数量 2 = 总重 199999999.98
+ *     两个输入各自都在 `Decimal(10,2)` 范围内，
+ *     但 `totalWeight` 那一列也是 `Decimal(10,2)` → 数据库实测 `numeric field overflow`
+ *   · 1000 × 1000 × 1000 cm × 10 件 = 10000 m³
+ *     长宽高各自都合法，而 `volume` 是 `Decimal(10,6)`，最大只能存 9999.999999 → 裸 500
+ *
+ * 只卡输入不卡输出，等于没卡。凡是「几个输入相乘/相加再写进库」的地方
+ * 都要用这个函数把**结果**再过一遍。
+ *
+ * ⚠️ 只查**能不能存**（范围），不查小数位 —— 算出来的数带多少位小数
+ * 是算式决定的，不是人填的，四舍五入到列精度是正常且预期的行为。
+ */
+export function requireDerivedWithinDecimal(
+  value: number,
+  label: string,
+  rule: DecimalRule = DECIMAL_10_2,
+): string | null {
+  if (!Number.isFinite(value)) return `${label}算不出有效数字，请检查填写的数值`;
+  const maxValue = 10 ** (rule.precision - rule.scale);
+  if (Math.abs(value) >= maxValue) {
+    return `${label}算出来是 ${value}，超过了系统能存的上限 ${maxValue}，请把这一行拆小一点`;
+  }
+  return null;
 }

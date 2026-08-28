@@ -420,6 +420,22 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
       return;
     }
 
+    /**
+     * ⚠️ 单价校验放在**碰数据库之前**（2026-08-29 第十轮补）。
+     * 原来它藏在查库和构建 updateData 之后 —— 参数本来就不合法还要先查一轮库；
+     * 更要紧的是**自测验不到它**：复核实测「断开这道闸，金额测试 6/6 照样全绿」，
+     * 正是因为测试走到那里之前就被连库拦下了。
+     * 下面赋值处那道校验保留 —— 重复校验不花钱，删了反而容易漏。
+     */
+    for (const raw of [body.unitPriceNormal, body.unitPriceInspection, body.unitPriceSensitive]) {
+      if (raw == null) continue;
+      const issue = requireUnitPrice(raw, "单价");
+      if (issue) {
+        fail(res, 400, "BAD_REQUEST", issue);
+        return;
+      }
+    }
+
     const customer = await prisma.whrConsolidationPlanCustomer.findFirst({
       where: { id: body.customerId, planId: body.planId, companyId: auth.companyId },
       select: { id: true },
@@ -764,6 +780,16 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
     if (!body.action || !["approve", "reject"].includes(body.action)) {
       fail(res, 400, "BAD_REQUEST", "action 必须是 approve 或 reject");
       return;
+    }
+
+    // ⚠️ 同上：单价校验放在碰数据库之前，否则自测验不到（复核实测过）
+    for (const raw of [body.unitPriceNormal, body.unitPriceInspection, body.unitPriceSensitive]) {
+      if (raw == null) continue;
+      const issue = requireUnitPrice(raw, "单价");
+      if (issue) {
+        fail(res, 400, "BAD_REQUEST", issue);
+        return;
+      }
     }
 
     const prealert = await prisma.whrConsolidationPrealert.findFirst({

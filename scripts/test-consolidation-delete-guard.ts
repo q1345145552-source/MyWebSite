@@ -73,8 +73,63 @@ check("7) 冒出没见过的新状态时，默认允许删（黑名单口径，�
   assert.equal(r.ok, true, "新状态被默认拦住了，跟黑名单口径不符");
 });
 
+
+check("8) 三个调用点都真的**用了**这个函数的结论，不是调了就扔", () => {
+  /**
+   * ⚠️ 复核连着两轮报同一件事：这个脚本只测纯函数
+   * `checkConsolidationDeletable`，**没人问「它的返回值有没有被用」**。
+   * 实测变异：三条删除路由拿到 verdict 之后直接忽略 → 7/7 照样全绿。
+   * 脚本自己开头还写着「接线那部分测不动，只能靠读代码核对」——
+   * 那就是承认这 7 项守不住接线。
+   *
+   * ⚠️ 这一项**只能证明「源码里写了」，证明不了「运行时真会拦」** ——
+   * 扫源码的通病（包进 `if (false)` 就抓不到）。
+   * 真正的行为测试要连数据库（那三条路都在事务里、先查一堆状态），本地跑不动。
+   * 所以这一项是**退而求其次**，比什么都没有强，别当成保险箱。
+   */
+  const fs = require("node:fs") as typeof import("node:fs");
+  const path = require("node:path") as typeof import("node:path");
+  const src = fs
+    .readFileSync(
+      path.join(__dirname, "..", "apps", "api", "src", "modules", "consolidation", "routes.ts"),
+      "utf-8",
+    )
+    .split("\n");
+
+  // ⚠️ 先剔注释 —— 这个项目里「自己写的注释骗了自己的扫描器」已经发生过两次
+  const isComment = (l: string): boolean => {
+    const t = l.trim();
+    return t.startsWith("*") || t.startsWith("//") || t.startsWith("/*");
+  };
+
+  const callSites: number[] = [];
+  src.forEach((l, i) => {
+    if (!isComment(l) && /checkConsolidationDeletable\(/.test(l) && !/^export function/.test(l.trim())) {
+      callSites.push(i);
+    }
+  });
+  assert.ok(
+    callSites.length >= 3,
+    `只找到 ${callSites.length} 个调用点，比预期少 —— 是不是有删除路由绕过了这道闸？`,
+  );
+
+  const bad: string[] = [];
+  for (const i of callSites) {
+    // 往后看 8 行：拿到的 verdict 必须被判断并抛错，不能调了就扔
+    const near = src.slice(i, i + 8).filter((l) => !isComment(l)).join("\n");
+    if (!/!\s*verdict\.ok/.test(near) || !/throw|fail\(/.test(near)) {
+      bad.push(`consolidation/routes.ts:${i + 1} 调了这个函数，但没有「!verdict.ok → 抛错」`);
+    }
+  }
+  assert.deepEqual(
+    bad,
+    [],
+    "下面这些地方调了删除守卫却没用它的结论 —— 等于这道闸没接上：\n     " + bad.join("\n     "),
+  );
+});
+
 if (failures.length > 0) {
-  console.error(`\n${failures.length}/7 项不通过：${failures.join("；")}`);
+  console.error(`\n${failures.length}/8 项不通过：${failures.join("；")}`);
   process.exit(1);
 }
-console.log("普通版集货删除检查：7 项全部通过");
+console.log("普通版集货删除检查：8 项全部通过");

@@ -1,4 +1,5 @@
 // B-3 ~ B-7: 已从 node:sqlite 迁移到 Prisma + PostgreSQL（2026-05-18）
+import { DECIMAL_10_2, DECIMAL_10_3, requireDecimal } from "../core/decimal-guard";
 import { parseNumericStrict, requirePositiveInt } from "../core/int-guard";
 import { lockShipmentsChildrenFirst } from "../shipments/lock-shipments";
 import { validateProductRows, validateOrderLevelQuantity } from "./product-row-guard";
@@ -413,23 +414,30 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
      * 重量和方数在库里是 `Decimal`，不是 `Int`，所以不能用整数那套闸；
      * 但同样不许是 0、负数、非数字 —— 收到的货不可能没有重量、没有体积。
      */
+    /**
+     * ⚠️⚠️ 重量和方数要按**数据库精度**卡，光判「大于 0」不够（2026-08-29 第十轮改）。
+     *
+     * 上一版我只加了 `n > 0`，复核当场用真实夹具打穿：
+     *   重量 0.001 kg → `Decimal(10,2)` **存成 0.00**
+     *   方数 0.0001 m³ → `Decimal(10,3)` **存成 0.000**
+     * 「不能写 0」只修了表面 —— 换成一个很小的正数，照样存进去是 0。
+     * 而仓库版集货是「方数 × 单价」收费的，方数变 0 这一票就白送了。
+     * 超大数则会写库 500。
+     *
+     * ⚠️ 两列精度**不一样**：Order/Shipment 的 weightKg 是 (10,2)、volumeM3 是 (10,3)。
+     *    别拿同一套规格去卡，会误伤合法的三位小数方数。
+     */
     let receiveWeightKg: number | undefined;
     if (body.weightKg !== undefined && body.weightKg !== null) {
-      const n = parseNumericStrict(body.weightKg);
-      if (!Number.isFinite(n) || n <= 0) {
-        fail(res, 400, "VALIDATION_ERROR", "重量必须大于 0");
-        return;
-      }
-      receiveWeightKg = n;
+      const issue = requireDecimal(body.weightKg, "重量(kg)", DECIMAL_10_2);
+      if (issue) { fail(res, 400, "VALIDATION_ERROR", issue); return; }
+      receiveWeightKg = parseNumericStrict(body.weightKg);
     }
     let receiveVolumeM3: number | undefined;
     if (body.volumeM3 !== undefined && body.volumeM3 !== null) {
-      const n = parseNumericStrict(body.volumeM3);
-      if (!Number.isFinite(n) || n <= 0) {
-        fail(res, 400, "VALIDATION_ERROR", "体积必须大于 0");
-        return;
-      }
-      receiveVolumeM3 = n;
+      const issue = requireDecimal(body.volumeM3, "体积(m³)", DECIMAL_10_3);
+      if (issue) { fail(res, 400, "VALIDATION_ERROR", issue); return; }
+      receiveVolumeM3 = parseNumericStrict(body.volumeM3);
     }
 
     const order = await prisma.order.findFirst({
@@ -484,9 +492,23 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
         throw new BusinessError("这张单刚刚已经被确认收货了，本次没有重复执行，请刷新后再看");
       }
 
+      /**
+       * ⚠️ 锁完运单要**重新读一遍它的状态**（2026-08-29 第十轮补）。
+       * 上一版锁是加了，但下面写轨迹的 `fromStatus` 用的还是**事务外**
+       * 那份 `order.shipments[0].currentStatus` ——
+       * 等锁的这段时间里运单被别的流程推进了，轨迹上就会记一个旧状态。
+       * 「锁只保证不同时，不保证数据没变」（CLAUDE.md 第 28 条）——
+       * 这条我在别处修过好几次了，这里又忘了。
+       */
       const shipment = order.shipments[0];
+      let freshShipmentStatus: string | undefined;
       if (shipment) {
         await tx.$queryRaw`SELECT id FROM shipments WHERE id = ${shipment.id} FOR UPDATE`;
+        const s2 = await tx.shipment.findUnique({
+          where: { id: shipment.id },
+          select: { currentStatus: true },
+        });
+        freshShipmentStatus = s2?.currentStatus ?? shipment.currentStatus;
       }
 
       await tx.order.update({ where: { id: orderId }, data: updateData });
@@ -510,7 +532,8 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
             id: `sl_rcv_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
             companyId: auth.companyId, shipmentId: shipment.id,
             operatorId: auth.userId, operatorRole: auth.role, operatorName: auth.name ?? "",
-            fromStatus: shipment.currentStatus, toStatus: "inWarehouseCN",
+            // ⚠️ 用锁后重读的状态，不是事务外那份
+            fromStatus: freshShipmentStatus ?? shipment.currentStatus, toStatus: "inWarehouseCN",
             remark: "国内仓已收货，等待装柜",
             nextStop: "装柜",
             changedAt: now,

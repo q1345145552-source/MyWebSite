@@ -211,11 +211,83 @@ async function main(): Promise<void> {
     );
   });
 
+
+  await checkAsync("7) 另外三个改单价的入口也要拦（复核指出我只测了建柜）", async () => {
+    /**
+     * ⚠️ 复核实测：断开「修改客户单价」那道金额闸，我这个脚本 6/6 照样全绿 ——
+     * 因为我只真调了「建柜」和「普通版建预报单」两个入口，
+     * 剩下三个（改单价 / 新增客户 / 审核时改单价）一个都没覆盖。
+     * 「五个入口只测了两个」跟「三个入口只修了一个」是同一类错。
+     *
+     * ⚠️ 字段名从路由源码里抄的（routes.ts:402/482/742），不是凭印象写的 ——
+     * 上一版我把 `destinationTh` 写成 `destination`，所有用例都停在
+     * 「目的地为必填」上，测了个寂寞。
+     */
+    const cases: Array<[string, string, Record<string, unknown>]> = [
+      ["修改客户单价", "POST /admin/whr-consolidation/customers/price",
+        { planId: "p_1", customerId: "u_client" }],
+      ["新增客户", "POST /admin/whr-consolidation/customers/add",
+        { planId: "p_1", clientId: "u_client" }],
+      ["审核时改单价", "POST /admin/whr-consolidation/prealerts/review",
+        { planId: "p_1", prealertId: "pa_1", action: "approve" }],
+    ];
+    for (const [label, key, base] of cases) {
+      const handler = routes.get(key);
+      assert.ok(handler, `没注册 ${key}（${label}）`);
+      // 0.001 会被 Decimal(10,2) 存成 0.00
+      const r1 = await callRoute(handler!, ADMIN, { ...base, unitPriceNormal: 0.001 });
+      assert.equal(r1.status, 400, `【${label}】单价 0.001 没被拦，拿到 ${r1.status}`);
+      assert.ok(/单价/.test(r1.message), `【${label}】拦是拦了，但不是单价闸：${r1.message}`);
+      // 3 位小数
+      const r2 = await callRoute(handler!, ADMIN, { ...base, unitPriceNormal: 12.345 });
+      assert.equal(r2.status, 400, `【${label}】单价 3 位小数没被拦，拿到 ${r2.status}`);
+      // 布尔
+      const r3 = await callRoute(handler!, ADMIN, { ...base, unitPriceNormal: true });
+      assert.equal(r3.status, 400, `【${label}】单价传布尔没被拦，拿到 ${r3.status}`);
+    }
+  });
+
+  await checkAsync("8) 算出来的总重量/方数溢出也要拦（输入全合法的那种）", async () => {
+    /**
+     * ⚠️ 复核报的一条新的，也是最隐蔽的：**每个输入都合法，算出来的数爆掉**。
+     *   · 单重 99999999.99 × 数量 2 = 199999999.98 →
+     *     totalWeight 是 Decimal(10,2)，数据库实测 `numeric field overflow`
+     *   · 1000×1000×1000cm × 10 件 = 10000 m³ →
+     *     volume 是 Decimal(10,6)，最大只能存 9999.999999 → 裸 500
+     * 只卡输入不卡输出，等于没卡。
+     */
+    const handler = routes.get("POST /client/consolidation/prealerts")!;
+    const goodRow = {
+      productName: "耳机", packageCount: 3, quantityPerBox: 10,
+      unitWeightKg: 1.5, lengthCm: 30, widthCm: 20, heightCm: 10,
+      material: "塑料", cargoValue: "1000",
+    };
+    // 总重量溢出：单重 99999999.99 × (件数 1 × 每箱 2) = 199999999.98
+    const r1 = await callRoute(handler, CLIENT, {
+      taskId: "t_1", mark: "XT001",
+      products: [{ ...goodRow, unitWeightKg: 99999999.99, packageCount: 1, quantityPerBox: 2 }],
+    });
+    assert.equal(r1.status, 400, `总重量溢出没被拦，拿到 ${r1.status}`);
+    assert.ok(/总重量/.test(r1.message), `拦是拦了，但不是总重量那道闸：${r1.message}`);
+
+    // 方数溢出：1000×1000×1000cm ÷ 1e6 × 10 件 = 10000 m³
+    const r2 = await callRoute(handler, CLIENT, {
+      taskId: "t_1", mark: "XT001",
+      products: [{ ...goodRow, lengthCm: 1000, widthCm: 1000, heightCm: 1000, packageCount: 10 }],
+    });
+    assert.equal(r2.status, 400, `方数溢出没被拦，拿到 ${r2.status}`);
+    assert.ok(/体积|方数/.test(r2.message), `拦是拦了，但不是方数那道闸：${r2.message}`);
+
+    // 正向对照：正常大小的货不许被误伤（30×20×10cm × 3 件 = 0.018 m³）
+    const ok = await callRoute(handler, CLIENT, { mark: "XT001", products: [goodRow] });
+    assert.ok(!/总重量|体积|方数/.test(ok.message), `正常的一行被派生值闸拦了：${ok.message}`);
+  });
+
   if (failures.length > 0) {
-    console.error(`\n${failures.length}/6 项不通过：${failures.join("；")}`);
+    console.error(`\n${failures.length}/8 项不通过：${failures.join("；")}`);
     process.exit(1);
   }
-  console.log("算钱数值校验：6 项全部通过");
+  console.log("算钱数值校验：8 项全部通过");
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });
