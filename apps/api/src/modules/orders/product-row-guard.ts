@@ -17,8 +17,22 @@ export interface ProductRowForGuard {
   productQuantity?: unknown;
 }
 
+/**
+ * 数据库那几列是 Prisma 的 `Int`，也就是 PostgreSQL `integer` —— **32 位**，
+ * 最大 2147483647。超过这个数会一路穿过校验，到写库那一刻才炸，
+ * 员工看到的是「服务器繁忙」，根本不知道是自己填的数太大（2026-08-29 第七轮复核报的）。
+ * 在门口就拦住，报一句看得懂的话。
+ */
+const PG_INT_MAX = 2147483647;
+
 function isPositiveInteger(v: unknown): v is number {
-  return typeof v === "number" && Number.isFinite(v) && Number.isInteger(v) && v > 0;
+  return (
+    typeof v === "number" &&
+    Number.isFinite(v) &&
+    Number.isInteger(v) &&
+    v > 0 &&
+    v <= PG_INT_MAX
+  );
 }
 
 /**
@@ -64,6 +78,10 @@ export function validateOrderLevelQuantity(v: unknown): string | null {
   if (v === undefined || v === null) return null;
   if (typeof v !== "number" || !Number.isFinite(v) || !Number.isInteger(v) || v < 0) {
     return "「产品数量」必须是不小于 0 的整数";
+  }
+  if (v > PG_INT_MAX) {
+    // 同上：数据库是 32 位整数，超了要在门口拦，别到写库才炸成「服务器繁忙」
+    return `「产品数量」不能超过 ${PG_INT_MAX}`;
   }
   return null;
 }

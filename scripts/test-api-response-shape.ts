@@ -178,7 +178,14 @@ check("6) 还有没有地方完全绕开 res.json 直接写响应（那种盖不
          * 独立变异把一处改成 `rawRes.write(JSON.stringify(...))`，
          * **6 项照样全绿**。同一件事换个方法名就漏掉了。
          */
-        if (/\.(end|write|send)\(\s*JSON\.stringify/.test(line)) {
+        if (
+          /\.(end|write|send)\(\s*JSON\.stringify/.test(line) ||
+          // ⚠️ 方括号写法（2026-08-29 补，第七轮复核实测能绕过）：
+          //   rawRes["write"](JSON.stringify(...))
+          // 点号那条正则完全看不见它。当前代码里没有这种写法，
+          // 所以这是**测试守卫的缺口**，不是线上行为的错。
+          /\[\s*["'`](end|write|send)["'`]\s*\]\s*\(\s*JSON\.stringify/.test(line)
+        ) {
           offenders.push(`${path.relative(apiRoot, full)}:${i + 1}`);
         }
       });

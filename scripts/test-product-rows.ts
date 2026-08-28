@@ -263,6 +263,43 @@ async function checkAsync(name: string, body: () => Promise<void>): Promise<void
   }
 }
 
+check("9) 超过数据库整数上限的要在门口拦下，别到写库才炸", () => {
+  /**
+   * 第七轮复核报的：前后端都接受 `2147483648` 和 `9007199254740992`，
+   * 但数据库那几列是 Prisma `Int`（PostgreSQL 32 位 integer，最大 2147483647）。
+   * 这种输入会一路穿到写库那一刻才报错，员工只看到「服务器繁忙」，
+   * 根本不知道是自己填的数太大。
+   * ⚠️ 边界两头都测：2147483647 要放行，2147483648 要拦。
+   */
+  assert.equal(apiValidate([{ packageCount: 2147483647, productQuantity: 1 }]), null, "刚好到上限的被误拦了");
+  assert.equal(
+    apiValidate([{ packageCount: 2147483648, productQuantity: 1 }]),
+    "产品行1的箱数必须是正整数",
+    "超过 32 位整数上限的箱数没被拦",
+  );
+  assert.equal(
+    apiValidate([{ packageCount: 1, productQuantity: 9007199254740992 }]),
+    "产品行1的「每箱几个」必须是正整数",
+    "超大的「每箱几个」没被拦",
+  );
+  assert.ok(
+    validateOrderLevelQuantity(2147483648)?.includes("不能超过"),
+    "订单级产品数量超上限没被拦",
+  );
+  assert.equal(validateOrderLevelQuantity(2147483647), null, "刚好到上限的订单级数量被误拦了");
+
+  // 前端同一口径
+  assert.ok(
+    webValidate([{ itemName: "耳机", packageCount: "2147483648", productQuantity: "1" }]),
+    "前端没拦超上限的箱数",
+  );
+  assert.equal(
+    webValidate([{ itemName: "耳机", packageCount: "2147483647", productQuantity: "1" }]),
+    null,
+    "前端把刚好到上限的误拦了",
+  );
+});
+
 check("10) 全仓库不许再有「把箱数兜底成 1」的写法", () => {
   /**
    * 上面第 11 项只查那三个入口。这一项扫全部后端和前端 ——
@@ -409,10 +446,10 @@ async function main(): Promise<void> {
   });
 
   if (failures.length > 0) {
-    console.error(`\n${failures.length}/14 项不通过：${failures.join("；")}`);
+    console.error(`\n${failures.length}/15 项不通过：${failures.join("；")}`);
     process.exit(1);
   }
-  console.log("产品行校验：14 项全部通过");
+  console.log("产品行校验：15 项全部通过");
 }
 
 main().catch((error) => {

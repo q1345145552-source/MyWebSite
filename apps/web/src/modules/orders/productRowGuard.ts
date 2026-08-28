@@ -33,8 +33,17 @@ function toNumberOrBlank(raw: string | number | null | undefined): number | null
   return Number.isNaN(n) ? null : n;
 }
 
+/** 数据库那几列是 32 位整数，超了到写库才炸成「服务器繁忙」，在页面上就拦住 */
+const PG_INT_MAX = 2147483647;
+
 function isPositiveInteger(n: number | null | undefined): n is number {
-  return typeof n === "number" && Number.isFinite(n) && Number.isInteger(n) && n > 0;
+  return (
+    typeof n === "number" &&
+    Number.isFinite(n) &&
+    Number.isInteger(n) &&
+    n > 0 &&
+    n <= PG_INT_MAX
+  );
 }
 
 /**

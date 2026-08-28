@@ -517,7 +517,7 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       // 先获取订单下所有运单，用于级联清理
       const orderShipments = await tx.shipment.findMany({
         where: { orderId },
-        select: { id: true },
+        select: { id: true, parentTrackingNo: true },
       });
       const shipmentIdsToDelete = orderShipments.map((s) => s.id);
       /**
@@ -534,7 +534,25 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       for (const lid of [...lastmileIds].sort()) {
         await tx.$queryRaw`SELECT id FROM admin_lastmile_orders WHERE id = ${lid} FOR UPDATE`;
       }
-      for (const sid of [...shipmentIdsToDelete].sort()) {
+      /**
+       * ⚠️⚠️ **必须「先锁完全部子单，再锁全部父单」**（2026-08-29 第七轮复核之后改的）。
+       *
+       * 上一轮我是把父单子单**混在一起按 id 排序**逐个锁。
+       * 而系统里其它所有路径都是「子单（按 id 排）→ 父单（按单号排）」
+       * （containers/routes.ts ~429/490、admin-ops 建派送单、
+       *   syncParentStatusFromChildren 内部那把）。
+       * 一旦某个父单的 id 恰好排在它子单前面，这条路就先拿父单、别处先拿子单，
+       * **方向相反**。复核在本地库开两个连接实测，PostgreSQL 报 `deadlock detected`。
+       *
+       * 「按 id 全排一遍」看着很整齐，但整齐 ≠ 跟别人一致 —— 锁序只有
+       * **全系统同一个顺序**才有意义，自己一套排法等于没排。
+       */
+      const childIds = orderShipments.filter((r) => r.parentTrackingNo).map((r) => r.id);
+      const parentIds = orderShipments.filter((r) => !r.parentTrackingNo).map((r) => r.id);
+      for (const sid of [...childIds].sort()) {
+        await tx.$queryRaw`SELECT id FROM shipments WHERE id = ${sid} FOR UPDATE`;
+      }
+      for (const sid of [...parentIds].sort()) {
         await tx.$queryRaw`SELECT id FROM shipments WHERE id = ${sid} FOR UPDATE`;
       }
       for (const s of orderShipments) {

@@ -795,11 +795,42 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
        */
       const lockTarget = await tx.shipmentContainerItem.findFirst({
         where: { id: body.itemId, container: { companyId: auth.companyId } },
-        select: { containerId: true },
+        select: { containerId: true, shipmentId: true, shipment: { select: { parentTrackingNo: true } } },
       });
       if (!lockTarget) throw new Error("装柜记录不存在");
+      /**
+       * ⚠️⚠️ **锁序必须是【柜 → 运单 → 柜内记录】**（2026-08-29 第七轮复核之后改的）。
+       *
+       * 原来这里是【柜 → 柜内记录 → 运单】，跟装柜那条路（同文件 ~521/531 行，
+       * 【柜 → 运单 → 柜内记录】）**方向相反**。复核在本地库开两个连接实测，
+       * PostgreSQL 直接报 `deadlock detected`。
+       *
+       * 真实场景：一个人卸柜 item(C,S)，另一个人同时把 S 装进 C ——
+       *   卸柜：拿着 item(C,S) 这一行，去要运单 S
+       *   装柜：拿着运单 S，去 insert item(C,S) —— 撞上唯一索引
+       *         `(container_id, shipment_id)`，于是要等卸柜手里那一行
+       * 两边互等。**装柜那边只是 create，不代表它不拿柜内记录的锁** ——
+       * 唯一索引冲突照样要等对方那一行，这是我上一轮漏掉的一环。
+       *
+       * 为什么统一到「运单在前」而不是「柜内记录在前」：
+       * 装柜插的是**一行还不存在的记录**，没法提前锁它，所以只能让另一边让步。
+       *
+       * ⚠️ 先锁再读：`lockTarget` 是锁之前读的，只拿它做「锁哪几行」的依据；
+       * 真正干活用的 `item` 必须是锁完之后重查的那一份（CLAUDE.md 第 28 条）。
+       */
       await tx.$queryRaw`SELECT id FROM containers WHERE id = ${lockTarget.containerId} FOR UPDATE`;
-      // 锁柜内记录防并发
+      await tx.$queryRaw`SELECT id FROM shipments WHERE id = ${lockTarget.shipmentId} FOR UPDATE`;
+      /**
+       * ⚠️ 父单的锁也要在**柜内记录之前**拿。
+       * 装柜那条路锁的就是父单（同文件 ~531，子运单不许再装柜），顺序是
+       * 【柜 → 父单 → 柜内记录】；这边原来把父单留到最后
+       * （下面 syncParentStatusFromChildren 里才锁），又是一对反向。
+       * 下面那两处 syncParentStatusFromChildren 仍然会再锁一次 ——
+       * 同一个事务里重复锁同一行是免费的，不用去删。
+       */
+      if (lockTarget.shipment?.parentTrackingNo) {
+        await tx.$queryRaw`SELECT id FROM shipments WHERE tracking_no = ${lockTarget.shipment.parentTrackingNo} AND company_id = ${auth.companyId} FOR UPDATE`;
+      }
       await tx.$queryRaw`SELECT id FROM shipment_container_items WHERE id = ${body.itemId} FOR UPDATE`;
       const item = await tx.shipmentContainerItem.findFirst({
         where: { id: body.itemId, container: { companyId: auth.companyId } },
@@ -809,13 +840,7 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
       });
       if (!item) throw new Error("装柜记录不存在");
 
-      /**
-       * ⚠️ 子运单也要锁（2026-08-29 补）。
-       * 下面要改它的件数、体积、重量，原来只锁了柜子和柜内记录 ——
-       * 同一票货正在被「推进柜子状态」改状态时，两边各写各的，后写的盖掉先写的。
-       * 锁序【柜 → 柜内记录 → 运单】，跟本文件装柜那条路和 containers 那边一致。
-       */
-      await tx.$queryRaw`SELECT id FROM shipments WHERE id = ${item.shipment.id} FOR UPDATE`;
+      // 运单的锁已经在上面按【柜 → 运单 → 柜内记录】的顺序拿过了
 
       const totalLoaded = item.loadedPieceCount;
       const reqPieces = typeof body.pieceCount === "number" && body.pieceCount > 0 && body.pieceCount < totalLoaded ? body.pieceCount : totalLoaded;
