@@ -1356,10 +1356,68 @@ async function main() {
     }
   });
 
+  await check("58) 只改数字旁边那句话的意思 → 也必须拦住", async () => {
+    /**
+     * 2026-08-28 第二种改义（第一种是第 57 项那个调换标签）。
+     * 复核实测：模型**一个占位符都没动**，只把普通句子
+     *   「你当前一共查到 ⟦N1⟧。」改成「你当前已完成 ⟦N1⟧。」
+     * 客户看到「你当前已完成 3 单」，而实际只完成 1 单。
+     * 第 57 项那版修法只焊住了「标签：数字」的整行，句子里的说明文字管不到。
+     */
+    const shipments = [
+      shipment({ id: "ae1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "loaded" }),
+      shipment({ id: "ae2", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "loaded" }),
+      shipment({ id: "ae3", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "delivered" }),
+    ];
+    const { answer } = await ask({
+      shipments,
+      message: "我一共有多少单",
+      polish: (draft) => draft.replace(/你当前一共查到/g, "你当前已完成"),
+    });
+    assert.ok(
+      !/你当前已完成\s*3\s*单/.test(answer),
+      `总数被说成了「已完成」（实际只完成 1 单）：\n${answer}`,
+    );
+    assert.ok(/你当前一共查到 3 单/.test(answer), `没退回原始草稿：\n${answer}`);
+    assert.ok(/已完成：1 单/.test(answer), `已完成的数不对：\n${answer}`);
+  });
+
+  await check("59) 换个说法改义（在途说成已完成）→ 一样拦住", async () => {
+    // 别只堵「一共查到」这四个字：能改义的说法堵不完，所以规则是「带数据的行一个字都不许改」
+    const shipments = [
+      shipment({ id: "af1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "loaded" }),
+      shipment({ id: "af2", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "loaded" }),
+      shipment({ id: "af3", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "delivered" }),
+    ];
+    const { answer } = await ask({
+      shipments,
+      message: "我在途有多少单",
+      // 在途 2 单 → 说成「已经送达」
+      polish: (draft) => draft.replace(/你当前在途运输中的有/g, "你当前已经送达的有"),
+    });
+    assert.ok(!/已经送达/.test(answer), `在途被说成送达了：\n${answer}`);
+    assert.ok(/在途运输中的有 2 单/.test(answer), `没退回原始草稿：\n${answer}`);
+  });
+
+  await check("60) 正常润色仍要放行：只在数据行之外加话（防我改过头）", async () => {
+    const shipments = [
+      shipment({ id: "ag1", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "loaded" }),
+      shipment({ id: "ag2", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs, status: "delivered" }),
+    ];
+    const { answer } = await ask({
+      shipments,
+      message: "我一共有多少单",
+      polish: (draft) => `亲，帮你查好了～\n\n${draft}\n\n还有别的需要随时找我。`,
+    });
+    assert.ok(answer.includes("帮你查好了"), `正常润色被误杀了：\n${answer}`);
+    assert.ok(answer.includes("还有别的需要随时找我"), `正常润色被误杀了：\n${answer}`);
+    assert.equal(totalCountOf(answer), 2, `单量不对：\n${answer}`);
+  });
+
   if (failures.length > 0) {
-    throw new Error(`${failures.length}/57 项不通过（TZ=${TZ_LABEL}）：${failures.join("；")}`);
+    throw new Error(`${failures.length}/60 项不通过（TZ=${TZ_LABEL}）：${failures.join("；")}`);
   }
-  console.log(`AI 答复数字校验：57 项全部通过（TZ=${TZ_LABEL}）`);
+  console.log(`AI 答复数字校验：60 项全部通过（TZ=${TZ_LABEL}）`);
 }
 
 main().catch((error) => {

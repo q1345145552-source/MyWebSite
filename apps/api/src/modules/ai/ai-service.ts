@@ -1338,6 +1338,39 @@ export class ClientAiService implements AiService {
       return bail(`占位符顺序被改了（期望 ${expected}，实际 ${order.join(",")}）`);
     }
 
+    /**
+     * ⚠️⚠️ **带数据的那一行，一个字都不许改。**
+     *
+     * 2026-08-28 复核实测的第二种改义（第一种是调换「总单量：」「已完成：」标签）：
+     * 模型**一个占位符都没动**，只把普通句子
+     *   「你当前一共查到 ⟦N1⟧。」 改成 「你当前已完成 ⟦N1⟧。」
+     * 回填之后客户看到「你当前已完成 3 单」——**实际只完成 1 单**。
+     *
+     * 上一版只把「标签：数字」那种整行焊进占位符，句子里的说明文字管不到。
+     * 光靠列举「哪些词不许改」是堵不完的（一共/已完成/在途/共计/总共…），
+     * 所以这里换成白名单思路：**含占位符的行必须和草稿逐字一致**。
+     * 模型要润色，只能在**不含数据的行**上加话（打招呼、结尾寒暄），
+     * 那正是润色该干的事。改到了数据那句话，整段退回原始草稿。
+     *
+     * 只忽略行首尾空白 —— 空白不改变意思，模型爱加空格。
+     */
+    const dataLinesOf = (text: string): string[] =>
+      text.split("\n").map((line) => line.trim()).filter((line) => line.includes("⟦N"));
+    const draftDataLines = dataLinesOf(masked.text);
+    const polishedDataLines = dataLinesOf(polishedMasked);
+    if (draftDataLines.length !== polishedDataLines.length) {
+      return bail(
+        `带数据的行数对不上（草稿 ${draftDataLines.length} 行，润色稿 ${polishedDataLines.length} 行）`,
+      );
+    }
+    for (let i = 0; i < draftDataLines.length; i += 1) {
+      if (draftDataLines[i] !== polishedDataLines[i]) {
+        return bail(
+          `带数据的那句话被改写了：草稿「${draftDataLines[i]}」→ 润色稿「${polishedDataLines[i]}」`,
+        );
+      }
+    }
+
     const withoutPlaceholders = polishedMasked.replace(/⟦N\d+⟧/g, "");
     if (/\d/.test(this.normalizeDigits(withoutPlaceholders))) {
       return bail("模型在占位符之外自己写了数字");
