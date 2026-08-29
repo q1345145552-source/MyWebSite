@@ -17,6 +17,7 @@ import { openShipmentTrack } from "../../modules/shipment/ShipmentTrackModal";
 import LastmileDispatchWorkspace from "../../modules/lastmile/LastmileDispatchWorkspace";
 import type { LastmileOrderItem, LastmileShipmentOption } from "../../modules/lastmile/types";
 import { ShipmentOverviewStrip } from "../../modules/shipment/ShipmentOverviewStrip";
+import LastmileAddressPanel from "../../components/lastmile/LastmileAddressPanel";
 import DetailModal from "../../modules/layout/DetailModal";
 import {
   GridColgroup,
@@ -1997,7 +1998,17 @@ export default function AdminHomePage() {
       {/* 尾端地址 */}
       <section id="lastmile-address" style={{ ...sectionStyle, display: activeSection === "lastmile-address" ? "block" : "none" }}>
         <h2 style={{ margin: "0 0 16px", fontSize: 18 }}>尾端地址</h2>
-        <p style={{ fontSize: 13, color: "var(--t-muted)" }}>客户端注册后自动同步唛头与派送地址。</p>
+        <p style={{ fontSize: 13, color: "var(--t-muted)", marginBottom: 12 }}>客户端注册后自动同步唛头与派送地址。</p>
+        {/*
+          2026-08-29 补上。这一页原来**只有上面这个标题和这句话** ——
+          0 个按钮、0 个输入框、0 个表格（在页面上实测确认过），
+          点进来什么都没有，看着像系统坏了。功能一直只在员工端有。
+          用的是跟员工端同一个组件，不是另抄一份。
+        */}
+        {/* ⚠️ 故意**不传** onToast：管理员端那个全局 message 渲染在页面最底部
+            （admin/page.tsx 约 2423 行），离这一块很远，报错了容易看不见。
+            不传的话面板会把提示显示在自己上方，就在操作的地方。 */}
+        <LastmileAddressPanel />
       </section>
 
       {/* 充值审核 */}
