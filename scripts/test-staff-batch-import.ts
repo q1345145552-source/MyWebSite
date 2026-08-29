@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { parseStaffBatchRows } from "../apps/web/src/modules/staff/batchOrderImport";
+import {
+  formatStaffBatchErrorLocation,
+  parseStaffBatchRows,
+} from "../apps/web/src/modules/staff/batchOrderImport";
 
 function buildRows(orderCount: number): Record<string, unknown>[] {
   const rows: Record<string, unknown>[] = [];
@@ -137,6 +140,45 @@ const conflict = parseStaffBatchRows([
 assert.equal(conflict.orders.length, 0);
 assert.equal(conflict.issues.some((issue) => issue.message.includes("仓库")), true);
 
+// 报错必须让员工一眼看出是哪张单、哪个客户唛头，不用再回 Excel 反查。
+assert.equal(
+  formatStaffBatchErrorLocation("Excel 第7、8、9行", "SZ260802947", "XHH-7752"),
+  "Excel 第7、8、9行（运单号 SZ260802947，唛头 XHH-7752）",
+);
+assert.equal(
+  formatStaffBatchErrorLocation("Excel 第2行", undefined, undefined),
+  "Excel 第2行（运单号 —，唛头 —）",
+);
+assert.equal(conflict.issues[0]?.clientId, "TEST413CLIENT", "解析错误丢了对应唛头");
+
+
+// 不只是客户匹配失败：运输方式、箱数、尺寸等任何解析错误也要带同一组定位信息。
+const otherFieldErrors = parseStaffBatchRows([{
+  "唛头 *": "XHH-OTHER",
+  "运单号 *": "ERR-OTHER-001",
+  "仓库 *": "义乌仓",
+  "品名 *": "测试品",
+  "箱数 *": 0,
+  "长cm（数字）": 10,
+  "到仓日期 *（YYYY-MM-DD）": "2026-08-29",
+  "运输方式 *（海运/陆运）": "空运",
+}]);
+assert.ok(otherFieldErrors.issues.length >= 3, "没有造出多个字段解析错误");
+for (const issue of otherFieldErrors.issues) {
+  assert.equal(issue.trackingNo, "ERR-OTHER-001", `错误没带运单号：${issue.message}`);
+  assert.equal(issue.clientId, "XHH-OTHER", `错误没带唛头：${issue.message}`);
+}
+
+// 就算运单号本身漏填，只要这一行有唛头，提示里也要把唛头保留下来。
+const missingTracking = parseStaffBatchRows([{
+  "唛头 *": "XHH-NO-TRACKING",
+  "运单号 *": "",
+  "品名 *": "测试品",
+  "箱数 *": 1,
+}]);
+assert.equal(missingTracking.issues[0]?.trackingNo, undefined);
+assert.equal(missingTracking.issues[0]?.clientId, "XHH-NO-TRACKING", "缺运单号时把这一行的唛头也丢了");
+
 /**
  * 新旧两个表头都要认，而且都必须**乘箱数**。
  * 模板 2026-08-28 从「产品数量」改成「单箱数量（每箱几个）」，
@@ -244,4 +286,95 @@ for (const [顺序说明, buildRow] of [
   assert.equal(allEmpty.orders[0].productQuantity, undefined, "全空时不该编出一个数");
 }
 
+/* ==========================================================================
+   后端那句中文提示 —— 真调 POST /staff/orders（2026-08-29 加）
+   --------------------------------------------------------------------------
+   为什么非加不可：这句「唛头不存在或不属于当前公司」原来**一条测试都没有**。
+   我把它改回 `invalid clientId` 之后，13 个测试脚本 + 三个类型检查
+   **全都没红**（实测过）。也就是谁哪天顺手改掉，没人会知道，
+   直到员工又在页面上看见一句英文。
+
+   ⚠️ 为什么不扫源码：扫源码只能证明「这几个字出现过」，证明不了路由真的会返回它
+   （test-product-rows.ts 第 11 项那段注释记的就是这个教训 —— 把校验包进
+   `if (false)` 照样全绿）。所以这里真把路由注册进假 app，真调 handler，
+   看它真正吐出来的状态码和提示语。
+
+   ⚠️ 怎么做到不连数据库：这条检查前面**唯一**的数据库调用就是
+   `prisma.user.findUnique`（routes.ts:975）。而 apps/api/src/db/prisma.ts 是
+   `globalThis.__prisma ?? new PrismaClient()` —— 所以只要在 import 之前
+   把 `globalThis.__prisma` 换成假的，PrismaClient 根本不会被 new 出来，
+   全程零连接。下面那行被挡死的 DATABASE_URL 是第二道保险：
+   万一哪天这条路上多了一次真库调用，会当场炸出来，而不是安安静静连上去。
+   ========================================================================== */
+process.env.DATABASE_URL = "postgresql://blocked:blocked@127.0.0.1:1/never?connect_timeout=1";
+process.env.NODE_ENV = "test";   // db/prisma.ts 只在非 production 下认 globalThis.__prisma
+
+async function checkInvalidClientIdMessage(): Promise<void> {
+  let findUniqueCalls = 0;
+  (globalThis as any).__prisma = {
+    user: {
+      async findUnique() { findUniqueCalls += 1; return null; },   // 查无此唛头
+    },
+  };
+
+  type Handler = (req: any, res: any) => Promise<void> | void;
+  const routes = new Map<string, Handler>();
+  const fakeApp = {
+    get(p: string, h: Handler) { routes.set(`GET ${p}`, h); },
+    post(p: string, h: Handler) { routes.set(`POST ${p}`, h); },
+    put(p: string, h: Handler) { routes.set(`PUT ${p}`, h); },
+    patch(p: string, h: Handler) { routes.set(`PATCH ${p}`, h); },
+    delete(p: string, h: Handler) { routes.set(`DELETE ${p}`, h); },
+    listen() {},
+  };
+  const orders = await import("../apps/api/src/modules/orders/routes");
+  (orders as any).registerOrderRoutes(fakeApp);
+
+  const handler = routes.get("POST /staff/orders");
+  assert.ok(handler, "没注册到 POST /staff/orders");
+
+  let status = 0;
+  let payload: { message?: string } = {};
+  const res: any = {
+    status(code: number) { status = code; return res; },
+    json(value: unknown) { payload = value as { message?: string }; },
+  };
+  await handler!({
+    method: "POST", path: "", query: {}, headers: {},
+    auth: { userId: "STAFF_TEST", companyId: "c_001", role: "staff", name: "测试员工" },
+    body: {
+      clientId: "__NOT_A_REAL_MARK__",
+      warehouseId: "wh_yiwu_01",
+      transportMode: "sea",
+      arrivedAt: "2026-08-29",
+      trackingNo: "TEST-NO-CREATE",
+      products: [{ itemName: "测试品", packageCount: 1 }],
+    },
+  }, res);
+
+  assert.equal(findUniqueCalls, 1, "根本没走到查唛头那一步，这条用例白测了");
+  assert.equal(status, 400, `唛头不存在应该 400，实际 ${status}`);
+  /**
+   * ⚠️ 只断言 400 是不够的 —— 这个请求要是缺了别的必填项，
+   * 上面那道「missing required fields」也是 400（product-rows 那边栽过同样的坑）。
+   * 所以必须连提示语一起对，确认是**这道闸**发的。
+   */
+  assert.equal(
+    payload.message,
+    "唛头不存在或不属于当前公司，请核对客户唛头",
+    `提示语不对（别改回英文，员工看不懂）：${JSON.stringify(payload.message)}`,
+  );
+
+  delete (globalThis as any).__prisma;
+}
+
 console.log("staff batch import parser: 100 orders / 300 rows passed");
+
+checkInvalidClientIdMessage()
+  .then(() => {
+    console.log("staff batch import: 后端「无效唛头」中文提示 passed（真调路由，未连库）");
+  })
+  .catch((error) => {
+    console.error(error instanceof Error ? error.message : error);
+    process.exit(1);
+  });

@@ -30,6 +30,7 @@ export interface StaffBatchOrder {
 export interface StaffBatchIssue {
   rowNumber?: number;
   trackingNo?: string;
+  clientId?: string;
   message: string;
 }
 
@@ -37,6 +38,15 @@ export interface StaffBatchParseResult {
   sourceRowCount: number;
   orders: StaffBatchOrder[];
   issues: StaffBatchIssue[];
+}
+
+/** 批量创建的每条错误都同时标出运单号和客户唛头。 */
+export function formatStaffBatchErrorLocation(
+  rowLabel: string,
+  trackingNo?: string,
+  clientId?: string,
+): string {
+  return `${rowLabel}（运单号 ${trackingNo?.trim() || "—"}，唛头 ${clientId?.trim() || "—"}）`;
 }
 
 interface GroupDraft {
@@ -144,11 +154,16 @@ export function parseStaffBatchRows(rows: Record<string, unknown>[]): StaffBatch
 
   rows.forEach((row, index) => {
     const rowNumber = index + 2;
+    const rawClientId = textValue(row, ["唛头"]);
     const explicitTrackingNo = textValue(row, ["运单号"]);
     const trackingNo = explicitTrackingNo || previousTrackingNo;
     if (explicitTrackingNo) previousTrackingNo = explicitTrackingNo;
     if (!trackingNo) {
-      looseIssues.push({ rowNumber, message: "运单号为必填；后续明细行可留空并继承上一行" });
+      looseIssues.push({
+        rowNumber,
+        clientId: rawClientId || undefined,
+        message: "运单号为必填；后续明细行可留空并继承上一行",
+      });
       return;
     }
 
@@ -161,7 +176,6 @@ export function parseStaffBatchRows(rows: Record<string, unknown>[]): StaffBatch
     groups.set(trackingNo, draft);
     draft.sourceRows.push(rowNumber);
 
-    const rawClientId = textValue(row, ["唛头"]);
     const rawWarehouse = textValue(row, ["仓库"]);
     const rawArrivedAt = textValue(row, ["到仓日期"]);
     const rawTransport = textValue(row, ["运输方式"]);
@@ -266,7 +280,11 @@ export function parseStaffBatchRows(rows: Record<string, unknown>[]): StaffBatch
       });
     }
     if (draft.issues.length > 0) {
-      issues.push(...draft.issues);
+      issues.push(...draft.issues.map((issue) => ({
+        ...issue,
+        trackingNo: issue.trackingNo ?? draft.trackingNo,
+        clientId: issue.clientId ?? draft.clientId,
+      })));
       continue;
     }
 

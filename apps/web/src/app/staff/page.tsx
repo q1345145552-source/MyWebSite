@@ -68,7 +68,11 @@ import StaffLastmile from "../../components/staff/StaffLastmile";
 import type { LastmileOrderItem, LastmileShipmentOption } from "../../modules/lastmile/types";
 import FclInquiryPanel from "../../components/client/FclInquiryPanel";
 import { SHIPMENT_STATUS_FILTER_OPTIONS } from "../../modules/shipment/shipment-status";
-import { parseStaffBatchRows, type StaffBatchOrder } from "../../modules/staff/batchOrderImport";
+import {
+  formatStaffBatchErrorLocation,
+  parseStaffBatchRows,
+  type StaffBatchOrder,
+} from "../../modules/staff/batchOrderImport";
 import {
   shipmentStatusZh,
   warehouseLabelFromId,
@@ -951,7 +955,12 @@ export default function StaffHomePage() {
         setBatchProgress({ current: i + 1, success, fail: errors.length });
       } catch (err) {
         const text = err instanceof Error ? err.message : "提交失败";
-        errors.push(`Excel 第${row.sourceRows.join("、")}行（${row.trackingNo}）: ${text}`);
+        const location = formatStaffBatchErrorLocation(
+          `Excel 第${row.sourceRows.join("、")}行`,
+          row.trackingNo,
+          row.clientId,
+        );
+        errors.push(`${location}：${text}`);
         setBatchErrors([...errors]);
         setBatchProgress({ current: i + 1, success, fail: errors.length });
       }
@@ -2624,7 +2633,11 @@ export default function StaffHomePage() {
                     setBatchRows(parsed.orders);
                     setBatchSourceRowCount(parsed.sourceRowCount);
                     setBatchErrors(parsed.issues.map((issue) => {
-                      const location = issue.rowNumber ? `Excel 第${issue.rowNumber}行` : `运单 ${issue.trackingNo ?? "—"}`;
+                      const location = formatStaffBatchErrorLocation(
+                        issue.rowNumber ? `Excel 第${issue.rowNumber}行` : "Excel 数据",
+                        issue.trackingNo,
+                        issue.clientId,
+                      );
                       return `${location}：${issue.message}`;
                     }));
                     setBatchProgress({ current: 0, success: 0, fail: 0 });

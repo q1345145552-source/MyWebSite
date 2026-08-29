@@ -977,7 +977,7 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       select: { id: true, companyId: true, role: true },
     });
     if (!targetClient || targetClient.companyId !== auth.companyId || targetClient.role !== "client") {
-      fail(res, 400, "BAD_REQUEST", "invalid clientId");
+      fail(res, 400, "BAD_REQUEST", "唛头不存在或不属于当前公司，请核对客户唛头");
       return;
     }
 
