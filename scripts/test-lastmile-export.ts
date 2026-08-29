@@ -347,18 +347,18 @@ async function main(): Promise<void> {
     const page1 = await sheetOf("sheet1");
     const page2 = await sheetOf("sheet2");
 
-    // 第一页：25 行，序号 1..25，运单号首尾都要对上
-    assert.equal(cellValue(page1, shared, "A10"), "1", "第一页第一行序号不是 1");
-    assert.equal(cellValue(page1, shared, "A34"), "25", "第一页最后一行序号不是 25");
+    /**
+     * ⚠️ 2026-08-29 起 A 列放的是**唛头**、不再是序号（老板要求，见第 14 项）。
+     * 所以「分页有没有接着排」改由 B 列运单号来保证 —— 它本来就在这测，
+     * 而且比序号更硬：序号是代码自己生成的，运单号是真数据。
+     */
+    assert.equal(cellValue(page1, shared, "A10"), "TESTCLIENT", "第一页第一行 A 列不是唛头");
+    assert.equal(cellValue(page1, shared, "A34"), "TESTCLIENT", "第一页最后一行 A 列不是唛头");
     assert.equal(cellValue(page1, shared, "B10"), "SZ000000001", "第一页第一票运单号不对");
     assert.equal(cellValue(page1, shared, "B34"), "SZ000000025", "第一页最后一票运单号不对");
 
-    // 第二页：序号必须**接着**排（26），不能从 1 重新开始
-    assert.equal(
-      cellValue(page2, shared, "A10"),
-      "26",
-      "第二页序号从头开始了 —— 客户会看到两个「1 号」",
-    );
+    // 第二页：必须**接着**排，不能从第 1 票重新开始
+    assert.equal(cellValue(page2, shared, "A10"), "TESTCLIENT", "第二页第一行 A 列不是唛头");
     assert.equal(cellValue(page2, shared, "B10"), "SZ000000026", "第 26 票没落到第二页第一行");
 
     // 第二页多余的行必须是空的，不能残留模板里的样板数据
@@ -366,6 +366,34 @@ async function main(): Promise<void> {
       !/<(?:\w+:)?v>/.test(cellXmlAnyNs(page2, "A11")),
       `第二页第 11 行还留着值，会被当成一票不存在的货：${cellXmlAnyNs(page2, "A11")}`,
     );
+  });
+
+  await checkAsync("14) A 列放唛头（表头也要改）、备注格只放真备注", async () => {
+    /**
+     * 老板 2026-08-29 反馈：「唛头应该是放在序列号那个位置。备注也是有真实的备注信息的。」
+     *
+     * 原来：A 列写 1、2、3… 序号；N 列写 `唛头：XHH6651；<备注>`。
+     * 于是备注这一列常年只看得到「唛头：XHH6651」，
+     * 司机真正要看的「周一不收货」这种交代被挤在后面。
+     *
+     * 现在：A 列 = 唛头（表头 A9 也从「序列号」改成「唛头」），N 列 = 只放真备注。
+     */
+    const data = buildDataWithLines(2) as any;
+    data.customers[0].shipments[0].remark = "周一不收货";
+    data.customers[0].shipments[1].remark = "";
+    const { sheetOf, shared } = await renderZip(data, TEMPLATE);
+    const page = await sheetOf("sheet1");
+
+    assert.equal(cellValue(page, shared, "A9"), "唛头", "表头还写着「序列号」，列名和内容对不上");
+    assert.equal(cellValue(page, shared, "A10"), "TESTCLIENT", "A 列没放唛头");
+    assert.equal(cellValue(page, shared, "A11"), "TESTCLIENT", "第二行 A 列没放唛头");
+
+    assert.equal(
+      cellValue(page, shared, "N10"),
+      "周一不收货",
+      "备注格不是纯备注 —— 唛头又被拼进去了，司机得从一串系统信息里找交代",
+    );
+    assert.equal(cellValue(page, shared, "N11"), "", "没有备注的那行不该凭空多出内容");
   });
 
   await checkAsync("11) 正好 25 行时不许多开一页（边界）", async () => {

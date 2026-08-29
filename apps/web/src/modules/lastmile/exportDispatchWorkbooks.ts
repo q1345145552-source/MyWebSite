@@ -425,13 +425,27 @@ function patchInternalTemplate(
     xml = setDimensionCell(xml, `I${row}`, line.heightCm, strings);
     xml = setTextCell(xml, `J${row}`, line.receiverPhone, strings);
     xml = setTextCell(xml, `L${row}`, line.receiverAddress, strings);
-    const mark = line.clientId && line.clientId !== "未关联客户" ? `唛头：${line.clientId}` : "";
-    xml = setTextCell(xml, `N${row}`, [mark, line.remark].filter(Boolean).join("；"), strings);
+    /**
+     * ⚠️ 备注格只放**真备注**（2026-08-29 改，老板反馈）。
+     *
+     * 原来这里是 `[「唛头：XXX」, 备注].join("；")` —— 唛头被塞进备注格，
+     * 于是备注这一列常年只看得到「唛头：XHH6651」，而司机真正要看的
+     * 「周一不收货」这类交代要么被挤在唛头后面、要么整格读起来像系统信息。
+     * 唛头已经挪到 A 列（原「序列号」那一格），这里就不该再重复一遍。
+     */
+    xml = setTextCell(xml, `N${row}`, line.remark, strings);
   });
-  // 整柜接口固定一条装柜记录一行，不动模板原有的 J:K、L:M 合并范围。
-  // 这样空白预留行的结构也与用户模板逐项一致。
-  lines.forEach((_line, index) => {
-    xml = setNumberCell(xml, `A${10 + index}`, sequenceStart + index + 1);
+  /**
+   * A 列放**唛头**，不再放序列号（2026-08-29 改，老板反馈）。
+   *
+   * 序列号只是 1、2、3…，看清单的人（司机、仓库）真正要认的是唛头 ——
+   * 哪几票是同一个客户的、该一起卸给谁，全靠它。
+   * 表头 A9 也要跟着从「序列号」改成「唛头」，否则列名和内容对不上。
+   * ⚠️ A9 在模板里，clearRange 只清 10~34 行，所以必须显式写。
+   */
+  xml = setTextCell(xml, "A9", "唛头", strings);
+  lines.forEach((line, index) => {
+    xml = setTextCell(xml, `A${10 + index}`, line.clientId && line.clientId !== "未关联客户" ? line.clientId : "", strings);
   });
   xml = setFormulaCell(xml, "E35", "SUM(E10:E34)", lineTotal(lines, "volumeM3"));
   xml = setFormulaCell(xml, "F35", "SUM(F10:F34)", lineTotal(lines, "weightKg"));
