@@ -11,6 +11,10 @@ import type { StaffShipmentOverview } from "../../services/business-api";
 
    ❌ 不做成彩色卡片，就是纯文字排一行（用户说过不要色块、不要花里胡哨）。
    只有「延迟 / 查验」有数时才变橙 —— 需要动手的那个才跳出来，其余一律黑字。
+
+   2026-08-29 排版：外层不再写内联 style，改用 globals.css 里的
+   `.ship-overview-strip`（四个数字均匀铺满整行，窄屏自动变 2×2）。
+   ⚠️ 别改回内联 style —— 内联写不了 @media，窄屏那套就没了。
    ========================================================================== */
 
 export function ShipmentOverviewStrip({ data }: { data: StaffShipmentOverview | null }) {
@@ -24,7 +28,7 @@ export function ShipmentOverviewStrip({ data }: { data: StaffShipmentOverview | 
   ];
 
   return (
-    <div style={{ display: "flex", gap: 40, flexWrap: "wrap", margin: "2px 0 14px" }}>
+    <div className="ship-overview-strip">
       {items.map((k) => (
         <div key={k.label}>
           <div
