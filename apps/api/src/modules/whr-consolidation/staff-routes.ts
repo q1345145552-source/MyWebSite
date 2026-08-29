@@ -1,3 +1,4 @@
+import { checkTotalsWritable } from "../core/decimal-guard";
 import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
@@ -341,6 +342,20 @@ export function registerWhrConsolidationStaffRoutes(app: MinimalHttpApp): void {
           throw new BusinessError("这张预报单刚刚被别人处理过了，签收没有执行，请刷新后再看");
         }
         const totalFee = calcFeeFromItems(live.items, live.planCustomer);
+        /**
+         * ⚠️⚠️ **签收这条路自己算 totalFee、自己写库，绕过了 recalcPrealertFee**
+         * （2026-08-29 第十二轮补）。
+         * 我第十一轮把金额闸加在 `recalcPrealertFee()` 里，
+         * 复核马上找出这一处 —— 它根本不走那个函数，超大金额照样裸报数据库错误，
+         * 员工看到的是「服务器繁忙」而不是人话。
+         *
+         * ⚠️ 这是**仓库版签收**：金额就是「方数 × 单价」，签收这一下就定了收多少钱。
+         *    写不进去比写错了还糟 —— 货已经签收了，账却没落上。
+         */
+        const feeIssue = checkTotalsWritable({ fees: [["这张预报单的金额", totalFee]] });
+        if (feeIssue) {
+          throw new BusinessError(`${feeIssue}。请检查这张预报单的方数和单价`, 400, "VALIDATION_ERROR");
+        }
 
         await tx.whrConsolidationPrealert.update({
           where: { id: prealert.id },

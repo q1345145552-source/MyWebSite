@@ -291,12 +291,19 @@ export function buildPrealertDraft(item: any): PrealertEditDraft {
  * ⚠️ 别把「空着」翻译成 0 发出去。0 和「没填」在这个系统里是两回事：
  *    0 方会让仓库版集货按「方数 × 单价」算出 0 元。
  */
-export function validateReceiveDraft(draft: {
-  packageCount: number | string;
-  productQuantity?: number | string;
-  weightKg?: number | string;
-  volumeM3?: number | string;
-}): string | null {
+export function validateReceiveDraft(
+  draft: {
+    packageCount: number | string;
+    productQuantity?: number | string;
+    weightKg?: number | string;
+    volumeM3?: number | string;
+  },
+  /**
+   * 这张单**原来**的重量/体积。传进来是为了识别「员工把原有的数清空了」——
+   * 那种情况必须当场说清楚，不能静默保留旧值。不传就跳过那道检查。
+   */
+  original?: { weightKg?: number | string | null; volumeM3?: number | string | null },
+): string | null {
   const pkg = Number(String(draft.packageCount ?? "").trim());
   if (!Number.isFinite(pkg) || !Number.isInteger(pkg) || pkg <= 0) {
     return "箱数必须填正整数（收到的货不可能是 0 件）";
@@ -304,14 +311,10 @@ export function validateReceiveDraft(draft: {
 
   /**
    * ⚠️⚠️ **产品数量：前后端口径必须一样**（2026-08-29 第十一轮改）。
-   *
-   * 上一版这里允许 `0`（判的是 `q < 0`），而后端 `/staff/prealerts/receive`
-   * 要求的是**正整数**。复核实测同一份草稿：
-   *   前端校验通过 → 发出 `productQuantity: 0` → 后端 400「产品数量必须是正整数」
-   * 员工在页面上什么都没做错，点了确认收货却被打回来，还看不懂为什么。
-   *
-   * 「前端放行、后端拒绝」比两边都不管更糟 —— 用户白填一遍。
-   * 现在跟后端对齐：空着 = 不发（后端不改它）；填了就必须是正整数。
+   * 上一版这里允许 `0`，而后端要求**正整数** —— 复核实测：
+   *   前端校验通过 → 发出 `productQuantity: 0` → 后端 400
+   * 员工什么都没做错，点了确认才被打回来，还看不懂为什么。
+   * **「前端放行、后端拒绝」比两边都不管更糟** —— 用户白填一遍。
    */
   const rawQty = draft.productQuantity;
   if (rawQty !== undefined && rawQty !== null && String(rawQty).trim() !== "" && Number(rawQty) !== 0) {
@@ -322,20 +325,64 @@ export function validateReceiveDraft(draft: {
   }
 
   /**
-   * ⚠️ 负数/乱填的重量体积**不许被静默吞掉**（2026-08-29 第十一轮补）。
-   *
-   * 上一版 `optionalNumberForReceive` 对负数返回 `undefined`，
-   * 等于「当没填」—— 于是员工填了 -5kg，页面提示**成功**，
-   * 数据库里还是旧重量。他以为改了，其实没改。
-   * 「空着」和「填错了」是两回事：空着就不发，填错了要当场说。
+   * 重量和体积。三道：
+   *  ① 填了就必须大于 0 —— 负数/乱填**不许被静默吞掉**（第十一轮）：
+   *     上一版 `optionalNumberForReceive` 对负数返回 `undefined` =「当没填」，
+   *     员工填了 -5kg，页面提示**成功**、库里还是旧重量，他以为改了其实没改。
+   *  ② **按数据库精度判**（第十二轮补）：上一版只判「大于 0」，
+   *     复核实测前端放行 `weightKg=0.001` / `volumeM3=0.0001`，
+   *     而后端按 `Decimal(10,2)` / `Decimal(10,3)` 拒绝 —— 又是「前端放行、后端拒绝」。
+   *     ⚠️ 两列精度不一样（重量 2 位、体积 3 位），别拿同一套去卡。
+   *  ③ 舍完变成 0 的也要拦（0.001kg 舍到 2 位就是 0.00）。
+   * ⚠️ 舍入必须跟后端**同一个算法**：`Math.round((n + EPSILON) * 10^s) / 10^s`。
    */
-  for (const [label, raw] of [["重量", draft.weightKg], ["体积", draft.volumeM3]] as Array<[string, unknown]>) {
+  for (const [label, raw, scale] of [
+    ["重量", draft.weightKg, 2],
+    ["体积", draft.volumeM3, 3],
+  ] as Array<[string, unknown, number]>) {
     if (raw === undefined || raw === null) continue;
     const t = String(raw).trim();
     if (t === "" || Number(t) === 0) continue; // 空着 / 0 = 没填，交给 optionalNumberForReceive 省略
     const n = Number(t);
     if (!Number.isFinite(n) || n <= 0) {
       return `${label}填了就必须大于 0（不填就空着）`;
+    }
+    const f = 10 ** scale;
+    const stored = Math.round((n + Number.EPSILON) * f) / f;
+    if (stored !== n) {
+      return `${label}最多只能有 ${scale} 位小数（多的位数会被系统抹掉，跟你填的对不上）`;
+    }
+    if (stored === 0) {
+      return `${label}太小了，存进系统会变成 0 —— 请检查是不是填错了单位`;
+    }
+  }
+
+  /**
+   * ⚠️⚠️ **「把原来的数清空」不许静默保留旧值**（2026-08-29 第十二轮补）。
+   *
+   * 复核实测：员工把原来填着的重量清空 → 页面显示空、提示**保存成功** →
+   * 数据库里**还是旧重量**。他以为改了，其实没改，而且没有任何提示。
+   *
+   * 病根是我上一轮的取舍：「空着 = 不发这个字段」。
+   * 那个取舍对「本来就没填」是对的，对「本来有、现在想清掉」就是错的 ——
+   * 这两种情况在草稿里长得一模一样（都是 0/空）。
+   *
+   * 后端没有「把重量清空」这个能力（`undefined` = 不改），所以真做不到清零。
+   * 既然做不到，就**明说**，别让员工以为做到了。
+   * ⚠️ 以后想要「真的能清空」，得后端加一个显式的清除语义
+   *    （比如传 `null` 表示清空），不是前端糊。
+   */
+  if (original) {
+    for (const [label, now, before] of [
+      ["重量", draft.weightKg, original.weightKg],
+      ["体积", draft.volumeM3, original.volumeM3],
+    ] as Array<[string, unknown, unknown]>) {
+      const nowEmpty = now === undefined || now === null || String(now).trim() === "" || Number(now) === 0;
+      const hadValue = before !== undefined && before !== null && Number(before) > 0;
+      if (nowEmpty && hadValue) {
+        return `${label}原来是 ${before}，你清空了它 —— 但系统没有「把${label}清零」这个操作，` +
+          `保存之后还是 ${before}。请填一个真实的${label}，或者把原来的数填回去。`;
+      }
     }
   }
 

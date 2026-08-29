@@ -176,33 +176,115 @@ check("10) 金额和跨行汇总也要卡 —— 每行都合法，加起来才�
 });
 
 
-check("11) 数字字符串要被规范化，不能校验用一个值、写库用另一个值", () => {
+check("11) 数字字符串要被规范化 —— **真调共用校验函数看它改没改 p**", () => {
   /**
-   * ⚠️ 复核指出：普通版集货接受数字**字符串**（前端经常这么传），
-   * 校验时用 `parseNumericStrict` 转过了，但**写库那三处用的还是原值** ——
-   * 一个合法的 `"3"` 会一路走到 Prisma 才报类型错误，员工看到「服务器繁忙」。
+   * ⚠️ 上一版是扫源码找 `p.packageCount =` —— 复核实测把赋值包进 `if (false)`
+   * 就绕过去了，11/11 照样全绿。**这是它第四轮报「源码扫描是假绿」。**
    *
-   * 共用校验函数现在会**就地把规范化后的数字写回 p**，三处写库自然拿到同一个值。
+   * 不再补正则。这个函数是导出的纯函数，直接调它、看它有没有真的改 p：
+   * 扫源码只能证明「文件里出现过这几个字」，调用能证明「它真的做了」。
    */
-  const fs2 = require("node:fs") as typeof import("node:fs");
-  const path2 = require("node:path") as typeof import("node:path");
-  const src = fs2
-    .readFileSync(
-      path2.join(__dirname, "..", "apps", "api", "src", "modules", "consolidation", "routes.ts"),
-      "utf-8",
-    )
-    .split("\n")
-    .filter((l) => {
-      const t = l.trim();
-      return !t.startsWith("*") && !t.startsWith("//") && !t.startsWith("/*");
-    })
-    .join("\n");
-  for (const f of ["packageCount", "quantityPerBox", "unitWeightKg", "lengthCm", "widthCm", "heightCm"]) {
-    assert.ok(
-      new RegExp(`p\\.${f}\\s*=`).test(src),
-      `共用校验函数没有把 ${f} 规范化后写回 —— 写库拿到的还是原始字符串`,
+  const { validateConsolidationProductRow } = require("../apps/api/src/modules/consolidation/routes") as {
+    validateConsolidationProductRow?: (p: any, i: number) => string | null;
+  };
+  assert.ok(
+    typeof validateConsolidationProductRow === "function",
+    "consolidation/routes.ts 没有导出 validateConsolidationProductRow —— 导出它才测得到",
+  );
+  // 全部用字符串传进去（前端就是这么传的），看它有没有转成 number
+  const row: any = {
+    productName: "耳机", packageCount: "3", quantityPerBox: "10",
+    unitWeightKg: "1.5", lengthCm: "30", widthCm: "20", heightCm: "10",
+    material: "塑料", cargoValue: "1000",
+  };
+  const issue = validateConsolidationProductRow!(row, 0);
+  assert.equal(issue, null, `合法的一行被拦了：${issue}`);
+  for (const [f, want] of [
+    ["packageCount", 3], ["quantityPerBox", 10], ["unitWeightKg", 1.5],
+    ["lengthCm", 30], ["widthCm", 20], ["heightCm", 10],
+  ] as Array<[string, number]>) {
+    assert.strictEqual(
+      row[f],
+      want,
+      `${f} 没有被规范化成数字（还是 ${JSON.stringify(row[f])}）—— 写库会拿到字符串，走到 Prisma 才报错`,
     );
   }
+});
+
+
+
+check("13) 闸用的舍入必须跟生产**一模一样**（两套算法 = 闸是错的）", () => {
+  /**
+   * ⚠️ 复核实测：我上一版闸里用 `toFixed(6)`，生产算方数用
+   *   `Math.round((n + Number.EPSILON) * 1e6) / 1e6`
+   * 两套算法在边界不一样：
+   *   · 9999.9999995 → toFixed 得 9999.999999（放行），实际是 **10000** → 溢出
+   *   · 0.0000005    → toFixed 得 0（误拦），实际存的是 0.000001
+   * **闸和被闸的东西用两套算法，闸就是错的** —— 不是松就是紧。
+   *
+   * 这一项直接拿生产那个算法当基准比对，不是比字面写法。
+   */
+  const prodRound = (n: number, scale: number): number => {
+    const f = 10 ** scale;
+    return Math.round((n + Number.EPSILON) * f) / f;
+  };
+  // ⚠️ 这几个值是复核挑出来专门打两种算法差异的
+  for (const v of [9999.9999995, 0.0000005, 0.0000004, 1.9284565, 0.125, 1.005, 2.675]) {
+    const stored = prodRound(v, 6);
+    const blocked = requireDerivedWithinDecimal(v, "方数", DECIMAL_10_6) !== null;
+    const shouldBlock = stored === 0 ? v !== 0 : Math.abs(stored) >= 10000;
+    assert.equal(
+      blocked,
+      shouldBlock,
+      `${v}：生产算出来存的是 ${stored}，闸${blocked ? "拦了" : "放行"}，` +
+        `但按生产的结果应该${shouldBlock ? "拦" : "放行"} —— 闸和生产用了两套舍入`,
+    );
+  }
+});
+
+
+check("14) ⚠️ 已知守不住的地方（诚实登记，不许假装有守卫）", () => {
+  /**
+   * ⚠️⚠️ 这一项不是守卫，是**一张诚实的清单**。
+   *
+   * 复核连着四轮说同一件事：「源码扫描测试只能证明源码里出现过某些文字，
+   * 守不住真实行为」。他是对的。我这几轮的做法是：
+   *   · 能抽成纯函数的 → 抽出来真调（第 11 项）
+   *   · 能喂假 tx 的   → 喂假 tx 真调（第 12 项）
+   *   · **两样都做不到的 → 老老实实登记在这里，不再写一条扫源码的检查
+   *     去假装它被守住了**
+   *
+   * 写一条扫源码的检查，比什么都不写更糟 —— 它会让下一个人（包括我自己）
+   * 以为这地方有守卫，然后放心去改。
+   *
+   * 下面这些是**真的没有自动化守卫**的地方，改它们必须人工复查：
+   */
+  const KNOWN_UNGUARDED = [
+    "whr-consolidation/staff-routes.ts 仓库签收的金额闸 —— " +
+      "它在路由事务里、拿不到 tx 之外的入口，要连数据库才测得到",
+    "consolidation/routes.ts 三条删除路由的 verdict 接线 —— 同上",
+    "apps/web 那几个 React 页面的提交逻辑 —— 要跑浏览器",
+  ];
+  /**
+   * 这张表**只许变短，不许变长**：
+   * 往里加一条 = 承认又多了一处没人守的地方，要老板知道。
+   */
+  assert.ok(
+    KNOWN_UNGUARDED.length <= 3,
+    `没有自动化守卫的地方从 3 处变成了 ${KNOWN_UNGUARDED.length} 处，请说明为什么`,
+  );
+  // 顺带确认签收那处的闸**现在**还在（改动时至少会被这一句提醒）
+  const fs2 = require("node:fs") as typeof import("node:fs");
+  const path2 = require("node:path") as typeof import("node:path");
+  const src = fs2.readFileSync(
+    path2.join(__dirname, "..", "apps", "api", "src", "modules", "whr-consolidation", "staff-routes.ts"),
+    "utf-8",
+  );
+  assert.ok(
+    /checkTotalsWritable\(\{ fees:/.test(src),
+    "仓库签收那处的金额闸不见了 —— ⚠️ 但请注意这句只是**扫源码**，" +
+      "包进 if(false) 它就抓不到。这地方真正靠的是人工复查。",
+  );
 });
 
 // ══════════════ 第二部分：真调路由（证明闸接上了） ══════════════
@@ -213,6 +295,91 @@ async function main(): Promise<void> {
   const routes = await loadRoutes();
   const ADMIN = { userId: "u_admin", companyId: "c_test", role: "admin", name: "管理员" };
   const CLIENT = { userId: "u_client", companyId: "c_test", role: "client", name: "客户" };
+
+  await checkAsync("12) 四个汇总点的溢出闸 —— **真调那几个 recalc 函数**（喂假 tx，不连库）", async () => {
+    /**
+     * ⚠️ 复核实测：把真实汇总闸移除，金额测试 11/11 照样全绿 ——
+     * 因为我测的是**纯函数** `requireDerivedWithinDecimal`，
+     * 没人问「它有没有被 recalc 那几个函数调用」。
+     * 跟 lockShipmentsChildrenFirst 那次一样，用**假 tx** 就能真测到接线。
+     */
+    const { recalcCustomerTotals, recalcPrealertFee } = require(
+      "../apps/api/src/modules/whr-consolidation/utils",
+    ) as Record<string, any>;
+  
+    /** 假 tx：让汇总算出一个必定溢出的数，看函数抛不抛 */
+    const txOverflowCounts: any = {
+      whrConsolidationPrealert: {
+        findMany: async () => [
+          // 两行各 15 亿 / 16 亿件 —— 每行都合法，合计 31 亿超 Int
+          { totalFee: 0, items: [{ volumeM3: 1, packageCount: 1_500_000_000 }] },
+          { totalFee: 0, items: [{ volumeM3: 1, packageCount: 1_600_000_000 }] },
+        ],
+        findFirst: async () => null,
+      },
+      whrConsolidationPlanCustomer: { update: async () => { throw new Error("不该走到写库"); } },
+    };
+    await assert.rejects(
+      () => recalcCustomerTotals("pc_1", txOverflowCounts),
+      /总件数/,
+      "客户总件数溢出没有被拦住 —— 会一路写到库里炸",
+    );
+  
+    const txOverflowFee: any = {
+      whrConsolidationPrealert: {
+        findMany: async () => [
+          { totalFee: 9_000_000_000, items: [{ volumeM3: 1, packageCount: 1 }] },
+          { totalFee: 9_000_000_000, items: [{ volumeM3: 1, packageCount: 1 }] },
+        ],
+        findFirst: async () => null,
+      },
+      whrConsolidationPlanCustomer: { update: async () => { throw new Error("不该走到写库"); } },
+    };
+    await assert.rejects(
+      () => recalcCustomerTotals("pc_1", txOverflowFee),
+      /总金额/,
+      "客户总金额溢出没有被拦住",
+    );
+  
+    /**
+   * ⚠️ 普通版那个 `recalcTaskTotals` 是**另一个汇总点**（第十二轮复核找出来的）。
+   * 它不在 whr 那个文件里 —— 只测 whr 的话，这一处拿掉闸照样全绿。
+   * 「N 个入口只修了 M 个」我犯过五六次，测试必须把每个入口都覆盖到。
+   */
+  const consolidation = require("../apps/api/src/modules/consolidation/routes") as Record<string, any>;
+  assert.ok(
+    typeof consolidation.recalcTaskTotals === "function",
+    "consolidation/routes.ts 没有导出 recalcTaskTotals —— 导出它才测得到这个汇总点",
+  );
+  const txTaskOverflow: any = {
+    consolidationPrealert: {
+      findMany: async () => [
+        // 两行各 11 亿件 —— 每行都合法，合计 22 亿超 Int
+        { products: [{ packageCount: 1_100_000_000, volume: 1 }] },
+        { products: [{ packageCount: 1_100_000_000, volume: 1 }] },
+      ],
+    },
+    consolidationTask: { update: async () => { throw new Error("不该走到写库"); } },
+  };
+  await assert.rejects(
+    () => consolidation.recalcTaskTotals("t_1", txTaskOverflow),
+    /总件数/,
+    "普通版任务的总件数溢出没有被拦住",
+  );
+
+  // 正常数字要放行、要真的写库
+    let wrote: any = null;
+    const txOk: any = {
+      whrConsolidationPrealert: {
+        findMany: async () => [{ totalFee: 850 * 68, items: [{ volumeM3: 1.928, packageCount: 7 }] }],
+        findFirst: async () => null,
+      },
+      whrConsolidationPlanCustomer: { update: async (a: any) => { wrote = a.data; return a.data; } },
+    };
+    await recalcCustomerTotals("pc_1", txOk);
+    assert.ok(wrote, "正常汇总没有写库 —— 闸把好数据也拦了");
+    assert.equal(wrote.totalPackages, 7, `写进去的总件数不对：${wrote.totalPackages}`);
+  });
 
   await checkAsync("5) 建柜接口：单价 0.001 和总方数超上限都要拦（真调路由）", async () => {
     const handler = routes.get("POST /admin/whr-consolidation/plans");
@@ -356,10 +523,10 @@ async function main(): Promise<void> {
   });
 
   if (failures.length > 0) {
-    console.error(`\n${failures.length}/11 项不通过：${failures.join("；")}`);
+    console.error(`\n${failures.length}/14 项不通过：${failures.join("；")}`);
     process.exit(1);
   }
-  console.log("算钱数值校验：11 项全部通过");
+  console.log("算钱数值校验：14 项全部通过");
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

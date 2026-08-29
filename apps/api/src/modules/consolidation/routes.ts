@@ -1,4 +1,4 @@
-import { DECIMAL_10_2, DECIMAL_10_6, requireDecimal, requireDerivedWithinDecimal } from "../core/decimal-guard";
+import { DECIMAL_10_2, DECIMAL_10_6, checkTotalsWritable, requireDecimal, requireDerivedWithinDecimal } from "../core/decimal-guard";
 import { parseNumericStrict, requirePositiveInt, requireProductWithinInt } from "../core/int-guard";
 import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
@@ -72,7 +72,8 @@ const TASK_LOCKED_FOR_PRODUCT_DELETE = [
  *
  * @returns 有问题时返回给人看的中文提示；合格返回 null。
  */
-function validateConsolidationProductRow(p: any, index: number): string | null {
+// ⚠️ 导出是为了让自测能**真调它**（扫源码证明不了行为，第十二轮的教训）
+export function validateConsolidationProductRow(p: any, index: number): string | null {
   const label = `产品行${index + 1}`;
   const pkgIssue = requirePositiveInt(parseNumericStrict(p.packageCount), `${label}的件数`);
   if (pkgIssue) return pkgIssue;
@@ -205,7 +206,8 @@ async function generateTrackingNo(): Promise<string> {
  * 删成功、重算失败时，任务上会留着一份跟实际货物对不上的数字。
  * 不传时退回全局 prisma，老调用点行为不变。
  */
-async function recalcTaskTotals(
+// ⚠️ 导出是为了让自测能**真调它**（扫源码证明不了行为）
+export async function recalcTaskTotals(
   taskId: string,
   db: Pick<typeof prisma, "consolidationPrealert" | "consolidationTask"> = prisma,
 ): Promise<void> {
@@ -224,6 +226,21 @@ async function recalcTaskTotals(
       totalPackages += p.packageCount;
       totalVolumeM3 += Number(p.volume ?? 0);
     }
+  }
+
+  /**
+   * ⚠️ 普通版任务汇总同样要卡（2026-08-29 第十二轮补）。
+   * 复核实测：两行各 11 亿件都能过单行校验，合计 22 亿，超过 `Int` 上限。
+   * 我上一轮只给仓库版那两个汇总加了闸，这个漏了 ——
+   * 「N 个入口只修了 M 个」这个错我犯过五六次，所以现在四个汇总点
+   * 全部走共用的 checkTotalsWritable。
+   */
+  const overflow = checkTotalsWritable({
+    counts: [["这个任务的总件数", totalPackages]],
+    volumes: [["这个任务的总方数", totalVolumeM3]],
+  });
+  if (overflow) {
+    throw new BusinessError(`${overflow}。请把这个任务下的预报单拆开`, 400, "VALIDATION_ERROR");
   }
 
   await db.consolidationTask.update({

@@ -2387,7 +2387,12 @@ export default function StaffHomePage() {
                  * ⚠️ 提交前先校验（2026-08-29 补）：这个弹窗以前**一道校验都没有**，
                  * draft 里的数字原样发出去。
                  */
-                const draftIssue = validateReceiveDraft(draft);
+                // ⚠️ 第二个参数是**这张单原来的**重量/体积 —— 用来识别
+                //    「员工把原有的数清空了」，那种情况后端做不到清零，必须当场说清楚
+                const draftIssue = validateReceiveDraft(draft, {
+                  weightKg: (item as any).weightKg,
+                  volumeM3: (item as any).volumeM3,
+                });
                 if (draftIssue) { setToast(draftIssue); return; }
                 try {
                   await receiveStaffPrealert({

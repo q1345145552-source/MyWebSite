@@ -90,7 +90,7 @@ check("3) 确认收货那两个弹窗都接了校验，而且失败不许关弹�
   const staff = codeLines(path.join(WEB, "app", "staff", "page.tsx"));
   const staffText = staff.map((l) => l.text).join("\n");
   assert.ok(
-    /validateReceiveDraft\(draft\)/.test(staffText),
+    /validateReceiveDraft\(draft[,)]/.test(staffText),
     "员工端确认收货弹窗没接校验",
   );
   assert.ok(
@@ -142,7 +142,7 @@ check("3) 确认收货那两个弹窗都接了校验，而且失败不许关弹�
 
   const admin = codeLines(path.join(WEB, "app", "admin", "prealerts", "page.tsx"));
   const adminText = admin.map((l) => l.text).join("\n");
-  assert.ok(/validateReceiveDraft\(draft\)/.test(adminText), "管理员端没走共用校验");
+  assert.ok(/validateReceiveDraft\(draft[,)]/.test(adminText), "管理员端没走共用校验");
   assert.ok(
     !/draft\.packageCount\s*<\s*1/.test(adminText),
     "管理员端还在用 `< 1` 判箱数 —— 2.5 箱能过",
@@ -304,8 +304,70 @@ check("9) 两个确认收货入口都不许把产品数量的 0 发出去", () =
   assert.equal(sites, 2, `走 optionalIntegerForReceive 的地方是 ${sites} 处，应该是 2 处（员工端 1 + 管理员端 1）`);
 });
 
+
+check("10) 重量体积要按数据库精度判 —— 又是「前端放行、后端拒绝」", () => {
+  /**
+   * ⚠️ 复核实测：前端放行 `weightKg=0.001` / `volumeM3=0.0001`，
+   * 后端按 `Decimal(10,2)` / `Decimal(10,3)` 拒绝 ——
+   * 员工点了确认才收到 400，前面白填一遍。
+   * **这个病我上一轮才在产品数量上修过，重量体积又犯一次。**
+   * ⚠️ 两列精度不一样（重量 2 位、体积 3 位），别拿同一套去卡。
+   */
+  assert.ok(validateReceiveDraft({ packageCount: 3, weightKg: 0.001 }), "重量 3 位小数被放行");
+  assert.ok(validateReceiveDraft({ packageCount: 3, volumeM3: 0.0001 }), "体积 4 位小数被放行");
+  // 边界两头都测：合法精度不许被误拦
+  assert.equal(validateReceiveDraft({ packageCount: 3, weightKg: 0.01 }), null, "重量 2 位小数被误拦");
+  assert.equal(validateReceiveDraft({ packageCount: 3, weightKg: 12.5 }), null, "正常重量被误拦");
+  assert.equal(validateReceiveDraft({ packageCount: 3, volumeM3: 0.862 }), null, "体积 3 位小数被误拦");
+  assert.equal(validateReceiveDraft({ packageCount: 3, volumeM3: 1.928 }), null, "正常体积被误拦");
+});
+
+check("11) 「把原来的数清空」必须当场说清楚，不许静默保留旧值", () => {
+  /**
+   * ⚠️ 复核实测：员工把原来填着的重量清空 → 页面显示空、提示**保存成功** →
+   * 数据库里**还是旧重量**。他以为改了，其实没改，没有任何提示。
+   *
+   * 病根是我上一轮的取舍「空着 = 不发这个字段」——
+   * 对「本来就没填」是对的，对「本来有、现在想清掉」就是错的，
+   * 而这两种在草稿里长得一模一样。
+   * 后端没有「清零」这个能力，做不到就**明说**，别让员工以为做到了。
+   */
+  const cleared = validateReceiveDraft({ packageCount: 3, weightKg: 0 }, { weightKg: 88 });
+  assert.ok(cleared, "清空了原有重量却没有任何提示 —— 员工会以为改成功了");
+  assert.ok(/88/.test(cleared!), `提示里没说清原来是多少：${cleared}`);
+  assert.ok(/还是/.test(cleared!), `提示里没说清「保存之后还是旧值」这个后果：${cleared}`);
+  // 本来就没填 → 不该报错
+  assert.equal(validateReceiveDraft({ packageCount: 3, weightKg: 0 }, { weightKg: 0 }), null, "本来就没填也被拦了");
+  assert.equal(validateReceiveDraft({ packageCount: 3, weightKg: 0 }, {}), null, "没有原值也被拦了");
+  // 正常改数不许被拦
+  assert.equal(validateReceiveDraft({ packageCount: 3, weightKg: 99 }, { weightKg: 88 }), null, "正常改数被拦了");
+  // 体积同理
+  assert.ok(validateReceiveDraft({ packageCount: 3, volumeM3: 0 }, { volumeM3: 1.928 }), "清空了原有体积没提示");
+});
+
+check("12) 两个入口都要把**原值**传给校验，不然那道检查形同虚设", () => {
+  /**
+   * ⚠️ 光在校验函数里写「清空要报错」没用 —— 调用方不传 original，
+   * 那段代码根本不会执行。这正是「加了闸但没接上」那一类。
+   */
+  for (const file of [
+    path.join(WEB, "app", "staff", "page.tsx"),
+    path.join(WEB, "app", "admin", "prealerts", "page.tsx"),
+  ]) {
+    const text = codeLines(file).map((l) => l.text).join("\n");
+    assert.ok(
+      /validateReceiveDraft\(draft,\s*\{/.test(text),
+      `${path.basename(file)} 调 validateReceiveDraft 时没传原值 —— 「清空了旧值」那道检查形同虚设`,
+    );
+    assert.ok(
+      /weightKg:\s*\(item as any\)\.weightKg/.test(text),
+      `${path.basename(file)} 传的原值里没有 weightKg`,
+    );
+  }
+});
+
 if (failures.length > 0) {
-  console.error(`\n${failures.length}/9 项不通过：${failures.join("；")}`);
+  console.error(`\n${failures.length}/12 项不通过：${failures.join("；")}`);
   process.exit(1);
 }
-console.log("前端数字兜底：9 项全部通过");
+console.log("前端数字兜底：12 项全部通过");

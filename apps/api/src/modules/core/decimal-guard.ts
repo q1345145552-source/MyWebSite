@@ -45,6 +45,26 @@ export const DECIMAL_10_6: DecimalRule = { precision: 10, scale: 6 };
 /** 金额列用的是这个规格（最大 9999999999.99） */
 export const DECIMAL_12_2: DecimalRule = { precision: 12, scale: 2 };
 
+/**
+ * ⚠️⚠️ **舍入必须跟真正写库那一步用同一个算法**（2026-08-29 第十二轮改）。
+ *
+ * 上一版我用的是 `Number(value.toFixed(scale))`，而生产代码算方数/金额用的是
+ *   `Math.round((n + Number.EPSILON) * 10**s) / 10**s`
+ * （whr-consolidation/utils.ts 的 round2 / round3 / calcItemVolumeM3）。
+ * **两套算法在边界上不一样**，复核实测：
+ *   · `9999.9999995` → toFixed 得 9999.999999（闸放行），
+ *     实际算出来是 **10000** → 写 `Decimal(10,6)` 溢出
+ *   · `0.0000005`   → toFixed 得 0（闸误拦），实际存的是 0.000001
+ *
+ * 闸和被闸的东西用两套算法，闸就是错的 —— 不是松就是紧。
+ * 所以这里照抄生产那个算法，一个字都不改。
+ * ⚠️ 哪天 round2/round3 改了算法，**这里必须跟着改**。
+ */
+function roundToScale(n: number, scale: number): number {
+  const f = 10 ** scale;
+  return Math.round((n + Number.EPSILON) * f) / f;
+}
+
 /** 这个精度能表示的最小正数：scale=2 → 0.01，scale=6 → 0.000001 */
 function smallestPositive(scale: number): number {
   return Number((10 ** -scale).toFixed(scale));
@@ -88,8 +108,7 @@ export function requireDecimal(
    * 那正是客户对不上账的原因。
    * 判法：乘以 10^scale 之后必须是整数（用 EPSILON 兜浮点误差）。
    */
-  const scaled = n * 10 ** rule.scale;
-  if (Math.abs(scaled - Math.round(scaled)) > 1e-6) {
+  if (roundToScale(n, rule.scale) !== n) {
     return `${label}最多只能有 ${rule.scale} 位小数（多的位数会被系统抹掉，跟你看到的对不上）`;
   }
 
@@ -140,7 +159,7 @@ export function requireDerivedWithinDecimal(
    *
    * 所以先按列精度舍一次，再拿**舍完的那个数**去判上下界。
    */
-  const stored = Number(value.toFixed(rule.scale));
+  const stored = roundToScale(value, rule.scale);
 
   if (stored === 0 && value !== 0) {
     const min = Number((10 ** -rule.scale).toFixed(rule.scale));
@@ -165,6 +184,44 @@ export function requireDerivedWithinDecimal(
  * **每一行单独都合法，加起来才爆** —— 跟「派生值」是同一类，
  * 都是「只卡输入不卡输出」。
  */
+/**
+ * 「一批汇总值能不能写进库」—— **所有汇总点共用这一个**（2026-08-29 第十二轮抽出）。
+ *
+ * ⚠️ 为什么抽：第十一轮我给 whr 的两个汇总加了闸，
+ * 第十二轮复核马上找出**另外两个漏掉的**（仓库签收直接算 totalFee、
+ * 普通版 recalcTaskTotals）。
+ * 「N 个入口只修了 M 个」这个错我在这个项目里已经犯过五六次 ——
+ * 一份实现、每个汇总点调它，才不会再漏。
+ *
+ * @returns 有问题时返回中文提示；合格返回 null。
+ */
+export function checkTotalsWritable(totals: {
+  /** 件数类（数据库 Int） */
+  counts?: Array<[string, number]>;
+  /** 方数类（Decimal(10,3)） */
+  volumes?: Array<[string, number]>;
+  /** 金额类（Decimal(12,2)） */
+  fees?: Array<[string, number]>;
+}): string | null {
+  for (const [label, v] of totals.counts ?? []) {
+    if (!Number.isFinite(v) || !Number.isInteger(v) || Math.abs(v) > PG_INT_MAX_FOR_TOTALS) {
+      return `${label}算出来是 ${v}，超过了系统能存的上限 ${PG_INT_MAX_FOR_TOTALS}`;
+    }
+  }
+  for (const [label, v] of totals.volumes ?? []) {
+    const issue = requireDerivedWithinDecimal(v, label, DECIMAL_10_3);
+    if (issue) return issue;
+  }
+  for (const [label, v] of totals.fees ?? []) {
+    const issue = requireDerivedWithinDecimal(v, label, DECIMAL_12_2);
+    if (issue) return issue;
+  }
+  return null;
+}
+
+/** PostgreSQL `integer` 上限，跟 int-guard 里那个是同一个数 */
+const PG_INT_MAX_FOR_TOTALS = 2147483647;
+
 export function requireSumWithinDecimal(
   values: number[],
   label: string,

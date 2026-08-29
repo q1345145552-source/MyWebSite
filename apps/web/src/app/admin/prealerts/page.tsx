@@ -128,7 +128,11 @@ export default function AdminPrealertsPage() {
      * 而库里是 Int。员工端那个弹窗以前一道校验都没有，现在两边走同一份。
      */
     {
-      const issue = validateReceiveDraft(draft);
+      // 同上：传原值，识别「清空了原有的数」
+      const issue = validateReceiveDraft(draft, {
+        weightKg: (item as any).weightKg,
+        volumeM3: (item as any).volumeM3,
+      });
       if (issue) { setMessage(issue); return; }
     }
     setLoading(true);
