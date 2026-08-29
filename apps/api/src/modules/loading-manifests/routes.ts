@@ -1,3 +1,4 @@
+import { unloadItemFully } from "../shipments/unload-item";
 import { prisma } from "../../db/prisma";
 import { syncParentStatusFromChildren } from "../shipments/parent-status";
 import { metricByPieceShare, reconcileFamilyMetric } from "../shipments/split-metrics";
@@ -894,31 +895,26 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
           }
         }
       } else {
-        // 全量卸柜
-        await tx.shipmentContainerItem.delete({ where: { id: body.itemId } });
-        if (item.shipment.parentTrackingNo) {
-          await tx.$queryRaw`SELECT id FROM shipments WHERE tracking_no = ${item.shipment.parentTrackingNo} FOR UPDATE`;
-          const parent = await tx.shipment.findFirst({
-            where: { trackingNo: item.shipment.parentTrackingNo, companyId: auth.companyId },
-            select: { id: true, packageCount: true, volumeM3: true, weightKg: true },
-          });
-          if (parent) {
-            // ⚠️ 子单马上要被删掉，它身上的体积和重量必须先全部加回父单，
-            // 否则这两个数随子单一起消失（2026-08-22）。
-            const pv = parent.volumeM3 != null ? Number(parent.volumeM3) : 0;
-            const pw = parent.weightKg != null ? Number(parent.weightKg) : null;
-            await tx.shipment.update({
-              where: { id: parent.id },
-              data: {
-                packageCount: (parent.packageCount ?? 0) + (item.shipment.packageCount ?? 0),
-                volumeM3: Number((pv + childVol).toFixed(3)) as any,
-                ...(pw == null || childWt == null ? {} : { weightKg: Number((pw + childWt).toFixed(2)) as any }),
-                updatedAt: new Date(),
-              },
-            });
-          }
-          await tx.shipment.delete({ where: { id: item.shipment.id } });
-        }
+        /**
+         * 全量卸柜 —— 走共用实现（2026-08-29 抽出去了）。
+         * 「删除柜子」那条路以前完全没做这件事，子单变孤儿、父单数字回不来；
+         * 现在两处同一份代码，改一处不会漏另一处。
+         * 状态退回「已创建」+ 写轨迹也在那个函数里，见 shipments/unload-item.ts。
+         */
+        await unloadItemFully(
+          tx,
+          {
+            id: body.itemId!,
+            shipment: {
+              id: item.shipment.id,
+              parentTrackingNo: item.shipment.parentTrackingNo,
+              packageCount: item.shipment.packageCount,
+              volumeM3: item.shipment.volumeM3,
+              weightKg: item.shipment.weightKg,
+            },
+          },
+          auth.companyId,
+        );
       }
     });
 

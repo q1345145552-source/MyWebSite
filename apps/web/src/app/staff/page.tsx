@@ -1645,10 +1645,6 @@ export default function StaffHomePage() {
             <p style={{ margin: "6px 0 8px", fontSize: 12, color: "var(--t-strong)" }}>
               表格展示运单号、用户、状态、加收金额、运输方式、发货时间、件重体、仓库与地址；点击「详情」打开运单详情与物流轨迹。
             </p>
-        {/* 顶部一排数字（A3 方案 §3.2，用户选定这四个）。
-            2026-08-10 抽成三端共用组件，这里只负责把数据递进去。 */}
-        <ShipmentOverviewStrip data={shipmentOverview} />
-        <ShipmentSearch value={shipmentSearch} onChange={(key, val) => setShipmentSearch((prev) => ({ ...prev, [key]: val }))} onSearch={runShipmentListSearch} warehouseOptions={warehouseOptions} logisticsStatusOptions={logisticsStatusOptions} inputStyle={orderCreateInputStyle} />
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 2, flexWrap: "wrap" }}>
             <input type="date" value={exportDateFrom} onChange={e => setExportDateFrom(e.target.value)}
@@ -1688,6 +1684,16 @@ export default function StaffHomePage() {
             </div>
           </div>
         </div>
+        {/* ⚠️ 顶部数字和搜索条**必须放在标题那一行的外面**（2026-08-29 改）。
+            原来它们被塞在 `<div style={{flex:1}}>` 里面 —— 那是「标题 + 右侧按钮」
+            那个 space-between 弹性行的**左半边**，于是这两块只能用一半宽度：
+            四个数字被挤成 2×2，搜索框（运单号/国内单号/客户名/仓库）竖着排成一条，
+            右边空一大片。老板截图反馈「空太多了」说的就是这个。
+            挪出来之后它们吃满整行宽度，ShipmentSearch 里那个
+            `repeat(auto-fit, minmax(180px, 1fr))` 网格就会自己横着铺开。
+            ⚠️ 只动了位置，没改任何一个组件里面的东西。 */}
+        <ShipmentOverviewStrip data={shipmentOverview} />
+        <ShipmentSearch value={shipmentSearch} onChange={(key, val) => setShipmentSearch((prev) => ({ ...prev, [key]: val }))} onSearch={runShipmentListSearch} warehouseOptions={warehouseOptions} logisticsStatusOptions={logisticsStatusOptions} inputStyle={orderCreateInputStyle} />
           <>
             {shipments.length === 0 ? (
               <EmptyStateCard title="暂无运单数据" description="先创建订单或等待系统分配运单后，这里会展示可操作记录。" />

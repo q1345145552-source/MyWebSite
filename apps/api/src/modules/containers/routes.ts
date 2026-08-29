@@ -10,6 +10,7 @@
 //           → ARRIVED → CUSTOMS → DELIVERING → SIGNED
 //   两个「延迟」是可跳过的中间态：正常走就是 SEALED → IN_TRANSIT → ARRIVED
 
+import { unloadAllItemsOfContainer } from "../shipments/unload-item";
 import { parseNumericStrict, requirePositiveInt } from "../core/int-guard";
 import { lockAndSyncParents, lockShipmentsChildrenFirst } from "../shipments/lock-shipments";
 import { Prisma } from "@prisma/client";
@@ -1048,7 +1049,19 @@ export function registerContainerRoutes(app: MinimalHttpApp): void {
         );
       }
 
-      await tx.shipmentContainerItem.deleteMany({ where: { containerId: id } });
+      /**
+       * ⚠️⚠️ **删柜子之前必须把柜里的货一条条卸下来**（2026-08-29 补）。
+       *
+       * 原来这里只是 `deleteMany` 柜内记录 —— **子单原样留着**：
+       *   · 子单变成孤儿：状态还写着「已装柜」，却不属于任何柜子
+       *   · 父单被扣走的件数/方数/重量**永远回不来**（父单永远 0 件 0 方 0 公斤）
+       * 而「建错柜子删掉重来」是员工很日常的动作，删除按钮就在卸柜按钮旁边，
+       * 确认框还只说「此操作不可恢复」，根本没提会把货的数字弄没。
+       *
+       * 现在走跟「卸柜」同一份实现（shipments/unload-item.ts），
+       * 一份代码两处调用 —— 这个项目里「N 个入口只修了 M 个」已经犯过五六次。
+       */
+      await unloadAllItemsOfContainer(tx, id, auth.companyId);
       await tx.container.delete({ where: { id } });
     });
 

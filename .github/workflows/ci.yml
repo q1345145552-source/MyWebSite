@@ -56,6 +56,12 @@ jobs:
       - name: Test login throttle
         run: npm run test:login-throttle
 
+      # 从柜子里卸货（2026-08-29 加，上线后排查出的两个老 bug）。
+      # ① 卸柜之后父单状态永远冻住 —— 装错柜卸下来，客户还看着「已签收」
+      # ② 删柜子把子单变成孤儿、父单件数方数重量永远回不来
+      - name: Test unload from container
+        run: npm run test:unload
+
       # 前端数字兜底（2026-08-29 加）。
       # 老板从第一天起反复报的就是「箱数没填，系统自己猜成 1」——
       # 后端一轮轮收紧，但前端在发送之前就把空值换成了数字，后端的闸挡不到。
