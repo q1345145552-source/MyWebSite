@@ -70,6 +70,7 @@ import FclInquiryPanel from "../../components/client/FclInquiryPanel";
 import { SHIPMENT_STATUS_FILTER_OPTIONS } from "../../modules/shipment/shipment-status";
 import {
   BATCH_SHEET_TO_JSON_OPTIONS,
+  lastRowWithCells,
   formatStaffBatchErrorLocation,
   parseStaffBatchRows,
   type StaffBatchOrder,
@@ -2649,7 +2650,20 @@ export default function StaffHomePage() {
                      * 系统报「第 4 行」，员工去看那一行是好的，只会以为系统抽风。
                      * 保留空行之后下标和 Excel 行号严格对齐，解析器自己会跳过空行。
                      */
-                    const raw = XLSX.utils.sheet_to_json(ws, BATCH_SHEET_TO_JSON_OPTIONS) as Record<string, unknown>[];
+                    /**
+                     * ⚠️ 必须把读取范围收到「真正有单元格的最后一行」（2026-08-29 加）。
+                     * blankrows:true 是按 !ref 逐行产出的，而 Excel 的已用区域经常被拖到表底：
+                     * 老板真实在用的那份表 !ref 是 A1:AF1048565、实际只有 67 行 ——
+                     * 不收范围就会造出 104 万个空对象、吃掉 1.9GB，浏览器直接崩。
+                     * 收范围不影响行号：起点仍是第 1 行，前面每一行的下标都没变。
+                     */
+                    const lastRow = lastRowWithCells(Object.keys(ws));
+                    const refRange = XLSX.utils.decode_range(ws["!ref"] ?? "A1");
+                    const boundedRange = XLSX.utils.encode_range({
+                      s: { r: 0, c: refRange.s.c },
+                      e: { r: Math.max(lastRow - 1, 0), c: refRange.e.c },
+                    });
+                    const raw = XLSX.utils.sheet_to_json(ws, { ...BATCH_SHEET_TO_JSON_OPTIONS, range: boundedRange }) as Record<string, unknown>[];
                     /**
                      * ⚠️ 行数上限按**非空行**算。保留空行之后 raw.length 会把空行也数进去，
                      * 有些 Excel 的「已用区域」会一直拖到几千行空白，

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   BATCH_SHEET_TO_JSON_OPTIONS,
+  lastRowWithCells,
   formatStaffBatchErrorLocation,
   parseStaffBatchRows,
 } from "../apps/web/src/modules/staff/batchOrderImport";
@@ -585,6 +586,20 @@ assert.ok(
  */
 assert.equal(BATCH_SHEET_TO_JSON_OPTIONS.blankrows, true, "blankrows 被去掉了，报错行号会全部错位");
 assert.equal(BATCH_SHEET_TO_JSON_OPTIONS.defval, "");
+
+/**
+ * 读取范围必须收到「真正有单元格的最后一行」。
+ *
+ * ⚠️ 这条是我自己捅的娄子换来的：加了 blankrows:true 之后按 !ref 逐行产出，
+ * 而老板真实在用的《副本上传系统数据东莞5月》!ref 是 A1:AF1048565、实际只有 67 行。
+ * 实测不收范围：104 万行、**1934 MB**、多花 2.4 秒；收了之后 30 MB、0 毫秒。
+ * 这个表是在浏览器里解析的，1.9GB 足够把标签页搞崩。
+ */
+assert.equal(lastRowWithCells(["!ref", "!cols", "A1", "B1", "A67", "AF68"]), 68, "末行算错了");
+assert.equal(lastRowWithCells(["!ref"]), 0, "一个单元格都没有时应该返回 0");
+assert.equal(lastRowWithCells(["A1", "Z1048565"]), 1048565, "大行号要认得出来");
+// 元信息 key 不许被当成单元格（"!ref" 不能被 /^[A-Z]+(\d+)$/ 之外的方式误认）
+assert.equal(lastRowWithCells(["!merges", "!margins", "C3"]), 3);
 
 console.log("staff batch import parser: 100 orders / 300 rows passed");
 

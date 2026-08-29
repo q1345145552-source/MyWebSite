@@ -398,6 +398,31 @@ function readNumber(
 export const BATCH_SHEET_TO_JSON_OPTIONS = { defval: "", blankrows: true } as const;
 
 /**
+ * 工作表里**真正有单元格**的最后一行（1 起算；没有就返回 0）。
+ *
+ * ⚠️ 为什么非要这个（2026-08-29 加，是我自己上一版捅的娄子）：
+ * 加了 blankrows:true 之后要按 `!ref` 逐行产出。而 Excel 的「已用区域」经常
+ * 被拖到整张表的底 —— 老板真实在用的《副本上传系统数据东莞5月》就是
+ * `!ref = A1:AF1048565`，实际只有 67 行数据。实测：
+ *     默认（丢空行）     67 行，  86 MB
+ *     blankrows:true  1048564 行，**1934 MB**、多花 2.4 秒
+ * 这个表是在**浏览器里**解析的，1.9GB 足够把标签页搞崩。
+ * 所以按真实单元格算出末行，只读到那里为止 —— 行号仍然从第 1 行开始，
+ * 前面的行下标一个都没动，报错行号照样是对的。
+ */
+export function lastRowWithCells(cellKeys: string[]): number {
+  let max = 0;
+  for (const key of cellKeys) {
+    if (key.charCodeAt(0) === 33) continue;   // "!ref" / "!cols" 这类元信息
+    const m = /^[A-Z]+(\d+)$/.exec(key);
+    if (!m) continue;
+    const row = Number(m[1]);
+    if (row > max) max = row;
+  }
+  return max;
+}
+
+/**
  * Excel 一行代表一种产品规格；同一运单号的多行会合并成一张订单。
  * 连续明细行可省略运单号及公共字段，解析时继承上一行所属运单的数据。
  *
