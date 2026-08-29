@@ -366,8 +366,58 @@ check("12) 两个入口都要把**原值**传给校验，不然那道检查形�
   }
 });
 
+
+check("13) 客户看到的轨迹备注里不许出现柜号（两种写法都要抹）", () => {
+  /**
+   * ⚠️ 老板红线：**客户不能看到柜号**。
+   *
+   * 脱敏那道闸原来只认「装入柜子 SELU4640250」这一种写法。
+   * 上线前排查发现**还有一种**：员工事后补建柜子时写的
+   *   「到达凭祥口岸（随柜 L2608219129 补记）」
+   * 柜号夹在这句话里，那道闸认不出来，**原样发给了客户**。
+   * 生产库只读实测（2026-08-29）：**9 条轨迹、3 张运单**正在漏，
+   * 客户在「我的订单」和「查轨迹」两处都看得到。
+   * 这是上线前就存在的老洞，不是这次改动弄坏的。
+   *
+   * ⚠️ 下面这些备注是从**生产库真实数据**里抄出来的，不是我编的。
+   */
+  const { sanitizeRemarkForClient } = require("../apps/api/src/modules/core/client-privacy") as {
+    sanitizeRemarkForClient: (r: string, hide: boolean) => string;
+  };
+  const 真实备注 = [
+    ["到达凭祥口岸（随柜 L2608219129 补记）", "L2608219129"],
+    ["已封柜（随柜 L2608198159 补记）", "L2608198159"],
+    ["正在卸柜（随柜 L2608219129 补记）", "L2608219129"],
+    ["装入柜子 SELU4640250（分装 30件）", "SELU4640250"],
+  ];
+  for (const [remark, 柜号] of 真实备注) {
+    const 客户看到 = sanitizeRemarkForClient(remark, true);
+    assert.ok(
+      !客户看到.includes(柜号),
+      `客户还能看到柜号 ${柜号}：${客户看到}`,
+    );
+    // 员工那边必须原样看得到 —— 别把内部信息也抹了
+    assert.equal(
+      sanitizeRemarkForClient(remark, false),
+      remark,
+      "员工看到的备注被改了 —— 内部要保留柜号",
+    );
+  }
+  // 「随柜补记」这个信息本身要留着：客户需要知道这条是事后补的、不是实时记录
+  assert.ok(
+    sanitizeRemarkForClient("到达凭祥口岸（随柜 L2608219129 补记）", true).includes("随柜补记"),
+    "把「随柜补记」整段删掉了 —— 客户会以为这是实时轨迹",
+  );
+  // 不带柜号的正常备注不许被动
+  assert.equal(
+    sanitizeRemarkForClient("国内仓已收货，等待装柜", true),
+    "国内仓已收货，等待装柜",
+    "正常备注被误改了",
+  );
+});
+
 if (failures.length > 0) {
-  console.error(`\n${failures.length}/12 项不通过：${failures.join("；")}`);
+  console.error(`\n${failures.length}/13 项不通过：${failures.join("；")}`);
   process.exit(1);
 }
-console.log("前端数字兜底：12 项全部通过");
+console.log("前端数字兜底：13 项全部通过");

@@ -29,6 +29,7 @@ import {
   DECIMAL_10_6,
   DECIMAL_12_2,
   requireDecimal,
+  checkTotalsWritable,
   requireDerivedWithinDecimal,
   requireUnitPrice,
 } from "../apps/api/src/modules/core/decimal-guard";
@@ -287,6 +288,46 @@ check("14) ⚠️ 已知守不住的地方（诚实登记，不许假装有守�
   );
 });
 
+
+check("15) 汇总闸不许把「合计很小」当成错 —— 那会让员工签不了收", () => {
+  /**
+   * ⚠️⚠️ **这是我上线前排查抓到的、自己引入的 bug。**
+   *
+   * 第十二轮我给汇总用了 `requireDerivedWithinDecimal`，那个函数带一条
+   * 「舍完变成 0 就报错」—— 那条对**单行**是对的（客户把厘米填成米），
+   * 对**合计**是错的：
+   *   一个 **7×7×7 厘米的样品盒** = 0.000343 方，
+   *   任务汇总方数落在 0~0.0005 之间 → 报 400 → **员工签不了收**，
+   *   报错还是「请检查尺寸是不是填错了单位」这种听不懂的话。
+   *
+   * 为什么合计舍成 0 可以接受：**算钱不看这个汇总值** ——
+   * 费用走 `calcFeeFromItems`，按每一行的方数 × 单价算。
+   * 汇总只用来显示和算「柜子装了几成」。
+   */
+  const 样品盒 = (7 * 7 * 7) / 1_000_000; // 0.000343 方
+  assert.equal(
+    checkTotalsWritable({ volumes: [["总方数", 样品盒]] }),
+    null,
+    `7×7×7cm 的样品盒（${样品盒} 方）被汇总闸拦了 —— 员工签不了收`,
+  );
+  assert.equal(checkTotalsWritable({ volumes: [["总方数", 0.0003]] }), null, "极小的合计方数被拦");
+  assert.equal(checkTotalsWritable({ volumes: [["总方数", 68.5]] }), null, "正常合计被拦");
+  assert.equal(checkTotalsWritable({ fees: [["总金额", 850 * 68]] }), null, "正常合计金额被拦");
+  // 但**溢出**照样要拦（那是真会写库失败的）
+  assert.ok(checkTotalsWritable({ volumes: [["总方数", 10_000_000]] }), "溢出的合计方数被放行");
+  assert.ok(checkTotalsWritable({ fees: [["总金额", 101 * 99999999.99]] }), "溢出的合计金额被放行");
+  assert.ok(checkTotalsWritable({ counts: [["总件数", 3_100_000_000]] }), "溢出的合计件数被放行");
+
+  /**
+   * ⚠️ **单行那道闸不许跟着放宽** —— 「填错单位」必须在填的那一刻拦住。
+   * 这一句是防止有人图省事把两处改成同一个函数。
+   */
+  assert.ok(
+    requireDerivedWithinDecimal(样品盒 / 1000, "单行方数", DECIMAL_10_6),
+    "单行方数小到会被舍成 0 时应该拦住（那是填错单位），这道闸被一起放宽了",
+  );
+});
+
 // ══════════════ 第二部分：真调路由（证明闸接上了） ══════════════
 // ⚠️ 只测「校验层」——合法数据往下走会连库，而本脚本禁了数据库。
 //    所以正向对照一律用「数值合法但故意缺别的必填项」，停在连库之前那道闸。
@@ -523,10 +564,10 @@ async function main(): Promise<void> {
   });
 
   if (failures.length > 0) {
-    console.error(`\n${failures.length}/14 项不通过：${failures.join("；")}`);
+    console.error(`\n${failures.length}/15 项不通过：${failures.join("；")}`);
     process.exit(1);
   }
-  console.log("算钱数值校验：14 项全部通过");
+  console.log("算钱数值校验：15 项全部通过");
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

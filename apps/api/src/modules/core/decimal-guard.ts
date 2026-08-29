@@ -208,13 +208,42 @@ export function checkTotalsWritable(totals: {
       return `${label}算出来是 ${v}，超过了系统能存的上限 ${PG_INT_MAX_FOR_TOTALS}`;
     }
   }
+  /**
+   * ⚠️⚠️ **汇总只查「会不会溢出」，不查「会不会舍成 0」**（2026-08-29 上线前修）。
+   *
+   * 我第十二轮给汇总用了 `requireDerivedWithinDecimal`，那个函数带着一条
+   * 「舍完变成 0 就报错」的检查 —— 那条对**单行**是对的（客户把厘米填成米之类），
+   * 对**合计**是错的：
+   *   上线前排查实测：一个 **7×7×7 厘米的样品盒** = 0.000343 方，
+   *   任务汇总方数落在 0~0.0005 之间 → 我的闸报 400 → **员工签不了收**，
+   *   而且报的是「请检查尺寸是不是填错了单位」这种听不懂的话。
+   *
+   * 为什么合计舍成 0 是可以接受的：**算钱不看这个汇总值**。
+   * 费用走的是 `calcFeeFromItems`，按**每一行**的方数 × 单价算
+   * （whr-consolidation/utils.ts:67-80）。汇总的 totalVolumeM3 只用来
+   * 显示和算「柜子装了几成」。所以它舍成 0.000 只是显示精度，不是钱的问题。
+   *
+   * ⚠️ 单行那道闸（requireDerivedWithinDecimal）保持不变 ——
+   *    「填错单位」要在**填的那一刻**拦住，不是等到汇总。
+   */
   for (const [label, v] of totals.volumes ?? []) {
-    const issue = requireDerivedWithinDecimal(v, label, DECIMAL_10_3);
+    const issue = requireSumUpperBound(v, label, DECIMAL_10_3);
     if (issue) return issue;
   }
   for (const [label, v] of totals.fees ?? []) {
-    const issue = requireDerivedWithinDecimal(v, label, DECIMAL_12_2);
+    const issue = requireSumUpperBound(v, label, DECIMAL_12_2);
     if (issue) return issue;
+  }
+  return null;
+}
+
+/** 汇总值只查上限（溢出）。下限不查 —— 理由见 checkTotalsWritable 里那段。 */
+function requireSumUpperBound(value: number, label: string, rule: DecimalRule): string | null {
+  if (!Number.isFinite(value)) return `${label}算不出有效数字，请检查填写的数值`;
+  const stored = roundToScale(value, rule.scale);
+  const maxValue = 10 ** (rule.precision - rule.scale);
+  if (Math.abs(stored) >= maxValue) {
+    return `${label}算出来是 ${stored}，超过了系统能存的上限 ${maxValue}`;
   }
   return null;
 }
