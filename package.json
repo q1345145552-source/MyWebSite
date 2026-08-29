@@ -23,6 +23,7 @@
     "test:frontend-guards": "tsx scripts/test-frontend-guards.ts",
     "test:money-guards": "tsx scripts/test-money-guards.ts",
     "test:product-rows": "tsx scripts/test-product-rows.ts",
+    "test:address-update": "tsx scripts/test-client-address-update.ts",
     "test:batch-import": "tsx scripts/test-staff-batch-import.ts",
     "test:lock-order": "tsx scripts/test-lock-order.ts",
     "test:api-response": "tsx scripts/test-api-response-shape.ts",

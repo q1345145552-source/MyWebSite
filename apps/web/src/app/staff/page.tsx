@@ -258,6 +258,8 @@ export default function StaffHomePage() {
   const [editingNote, setEditingNote] = useState<{ clientId: string; content: string } | null>(null);
   const [showAddAddress, setShowAddAddress] = useState<string | null>(null);
   const [addrForm, setAddrForm] = useState({ contactName: "", contactPhone: "", addressDetail: "", label: "" });
+  /** 正在编辑的那条地址（2026-08-29 加，老板要求「尾端这要加个编辑」） */
+  const [editingAddr, setEditingAddr] = useState<{ id: string; contactName: string; contactPhone: string; addressDetail: string } | null>(null);
 
   const saveNote = async (clientId: string, content: string) => {
     try {
@@ -289,7 +291,38 @@ export default function StaffHomePage() {
       setToast("地址已添加");
       setShowAddAddress(null);
       setAddrForm({ contactName: "", contactPhone: "", addressDetail: "", label: "" });
-      void loadLastmileAddresses(lastmileKeyword);
+      /**
+       * ⚠️ 这里原来刷的是 loadLastmileAddresses（2026-08-29 修）。
+       * 那个函数填的是 lastmileItems —— 而 lastmileItems **全文件没有任何 JSX 用它**，
+       * 页面上显示的是 addrItems。所以加完地址屏幕上根本不变，
+       * 员工得手动按一下「重置」才看得到。删除那条一模一样的毛病。
+       */
+      void loadAddrAddresses(addrKeyword);
+    } catch (e: any) { setToast(e?.message || "保存失败，请重试"); }
+  };
+
+  /** 保存对某条派送地址的修改（2026-08-29 加） */
+  const updateAddr = async () => {
+    if (!editingAddr) return;
+    if (!editingAddr.contactName.trim() || !editingAddr.contactPhone.trim() || !editingAddr.addressDetail.trim()) {
+      setToast("请填写完整地址信息"); return;
+    }
+    try {
+      const res = await fetch(`${apiBaseUrl()}/staff/client-addresses/update`, {
+        method: "POST",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: editingAddr.id,
+          contactName: editingAddr.contactName,
+          contactPhone: editingAddr.contactPhone,
+          addressDetail: editingAddr.addressDetail,
+        }),
+      });
+      // 走 parseApiResponse：401 自动跳登录页，失败统一抛错（别学老代码不看返回就弹成功）
+      await parseApiResponse(res);
+      setToast("地址已修改");
+      setEditingAddr(null);
+      void loadAddrAddresses(addrKeyword);
     } catch (e: any) { setToast(e?.message || "保存失败，请重试"); }
   };
 
@@ -306,7 +339,7 @@ export default function StaffHomePage() {
       // 【审查问题 3】走 parseApiResponse：401 会自动跳登录页，失败也统一抛错
       await parseApiResponse(resp);
       setToast("地址已删除");
-      void loadLastmileAddresses(lastmileKeyword);
+      void loadAddrAddresses(addrKeyword);   // 同上：原来刷的是没人渲染的那份，删完屏幕上还在
     } catch (e: any) { setMessage("删除失败：" + (e.message ?? "网络错误")); }
   };
 
@@ -2326,16 +2359,35 @@ export default function StaffHomePage() {
                 </div>
                 {client.addresses.length === 0 ? <div style={{ fontSize: 12, color: "var(--t-strong)" }}>暂无地址</div>
                 : client.addresses.map(addr => (
-                  <div key={addr.id} style={{ padding: "6px 8px", background: "var(--s-cool)", borderRadius: 6, marginBottom: 4, border: addr.isDefault ? "1px solid #bbf7d0" : "1px solid var(--s-cool-2)", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 12, color: "var(--t-strong)" }}>{addr.isDefault ? <span style={{ color: "var(--c-green-3)", fontWeight: 600 }}>[默认]</span> : null}{addr.contactName} | {addr.contactPhone}</div>
-                      <div style={{ fontSize: 11, color: "var(--t-strong)", marginTop: 2 }}>{addr.addressDetail}</div>
-                    </div>
-                    <button type="button" onClick={() => { if(!confirm("确定删除该地址？")) return; deleteAddr(addr.id); }} style={{ border: "1px solid #fca5a5", borderRadius: 4, padding: "2px 5px", fontSize: 10, background: "var(--white)", color: "var(--c-red-2)", cursor: "pointer", marginLeft: 8 }}>删除</button>
+                  <div key={addr.id} style={{ padding: "6px 8px", background: "var(--s-cool)", borderRadius: 6, marginBottom: 4, border: addr.isDefault ? "1px solid #bbf7d0" : "1px solid var(--s-cool-2)" }}>
+                    {editingAddr?.id === addr.id ? (
+                      /* 编辑态：就地改，改完保存（2026-08-29 加，老板要求）。
+                         原来只有「删除」—— 电话打错一位就得整条删掉重加，默认地址标记也跟着没了。 */
+                      <div style={{ display: "grid", gap: 4 }}>
+                        <input value={editingAddr.contactName} onChange={e => setEditingAddr(v => v ? {...v, contactName: e.target.value} : null)} placeholder="联系人姓名" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "4px 6px", fontSize: 11 }} />
+                        <input value={editingAddr.contactPhone} onChange={e => setEditingAddr(v => v ? {...v, contactPhone: e.target.value} : null)} placeholder="联系电话" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "4px 6px", fontSize: 11 }} />
+                        <textarea value={editingAddr.addressDetail} onChange={e => setEditingAddr(v => v ? {...v, addressDetail: e.target.value} : null)} rows={2} placeholder="详细地址" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "4px 6px", fontSize: 11, width: "100%", resize: "vertical" }} />
+                        <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
+                          <button type="button" onClick={() => setEditingAddr(null)} style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "3px 8px", fontSize: 11, background: "var(--white)", cursor: "pointer" }}>取消</button>
+                          <button type="button" onClick={() => void updateAddr()} style={{ border: "none", borderRadius: 4, padding: "3px 8px", fontSize: 11, background: "var(--c-blue)", color: "var(--white)", cursor: "pointer" }}>保存</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 12, color: "var(--t-strong)" }}>{addr.isDefault ? <span style={{ color: "var(--c-green-3)", fontWeight: 600 }}>[默认]</span> : null}{addr.contactName} | {addr.contactPhone}</div>
+                          <div style={{ fontSize: 11, color: "var(--t-strong)", marginTop: 2 }}>{addr.addressDetail}</div>
+                        </div>
+                        <div style={{ display: "flex", gap: 4, marginLeft: 8 }}>
+                          <button type="button" onClick={() => { setShowAddAddress(null); setEditingAddr({ id: addr.id, contactName: addr.contactName, contactPhone: addr.contactPhone, addressDetail: addr.addressDetail }); }} style={{ border: "1px solid var(--c-blue)", borderRadius: 4, padding: "2px 5px", fontSize: 10, background: "var(--white)", color: "var(--c-blue)", cursor: "pointer", whiteSpace: "nowrap" }}>编辑</button>
+                          <button type="button" onClick={() => { if(!confirm("确定删除该地址？")) return; deleteAddr(addr.id); }} style={{ border: "1px solid #fca5a5", borderRadius: 4, padding: "2px 5px", fontSize: 10, background: "var(--white)", color: "var(--c-red-2)", cursor: "pointer", whiteSpace: "nowrap" }}>删除</button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))}
                 <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-                  <button type="button" onClick={() => { setShowAddAddress(client.id); setAddrForm({ contactName: "", contactPhone: "", addressDetail: "", label: "" }); }}
+                  <button type="button" onClick={() => { setEditingAddr(null); setShowAddAddress(client.id); setAddrForm({ contactName: "", contactPhone: "", addressDetail: "", label: "" }); }}
                     style={{ border: "1px solid var(--c-blue)", borderRadius: 4, padding: "4px 8px", fontSize: 11, background: "var(--c-blue-bg)", color: "var(--c-blue)", cursor: "pointer" }}>添加地址</button>
                   <button type="button" onClick={() => setEditingNote({ clientId: client.id, content: clientNotes[client.id]?.content ?? "" })}
                     style={{ border: "1px solid #1e3a8a", borderRadius: 4, padding: "4px 8px", fontSize: 11, background: "#EEF2FB", color: "#1e3a8a", cursor: "pointer" }}>编辑备注</button>

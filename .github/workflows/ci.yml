@@ -62,6 +62,13 @@ jobs:
       - name: Test unload from container
         run: npm run test:unload
 
+      # 员工改客户派送地址（2026-08-29 加，老板要求「尾端这要加个编辑」）。
+      # 尾端地址那一栏原来只能加和删 —— 电话打错一位就得整条删掉重加，
+      # 客户的默认地址标记也跟着没了。这个脚本真注册路由、真调 handler，
+      # 用假 prisma 全程不连库，盯：公司隔离、查不到要 404、没传 label 不许清掉。
+      - name: Test client address update
+        run: npm run test:address-update
+
       # 前端数字兜底（2026-08-29 加）。
       # 老板从第一天起反复报的就是「箱数没填，系统自己猜成 1」——
       # 后端一轮轮收紧，但前端在发送之前就把空值换成了数字，后端的闸挡不到。

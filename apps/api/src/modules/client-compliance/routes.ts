@@ -227,4 +227,51 @@ export function registerClientComplianceRoutes(app: MinimalHttpApp): void {
     });
     ok(res, { id: addr.id, created: true });
   });
+
+  /**
+   * 员工改客户的派送地址（2026-08-29 加，老板要求）。
+   *
+   * 原来尾端地址那一栏只能「添加」和「删除」—— 电话打错一位、门牌少一个字，
+   * 员工只能把整条删掉重新加一遍，客户的默认地址标记也跟着没了。
+   *
+   * ⚠️ 用 POST 不是 PATCH：MinimalHttpApp（server.ts:37）只有 get/post/delete，
+   *    没有 patch/put，写了也注册不上。
+   * ⚠️ 必须先按 companyId 查一遍再改（照抄删除那条的做法，
+   *    orders/routes.ts 的 DELETE /staff/lastmile/addresses）——
+   *    只靠 update 的 where 带 companyId 也行，但查不到时要能回 404 而不是静默 0 行。
+   */
+  app.post("/staff/client-addresses/update", async (req, res) => {
+    const auth = requireRole(req, res, ["staff", "admin"]);
+    if (!auth) return;
+    const body = (req.body ?? {}) as {
+      id?: string;
+      contactName?: string;
+      contactPhone?: string;
+      addressDetail?: string;
+      label?: string;
+    };
+    const id = body.id?.trim();
+    if (!id) { fail(res, 400, "BAD_REQUEST", "缺少地址 id"); return; }
+    if (!body.contactName?.trim()) { fail(res, 400, "BAD_REQUEST", "联系人姓名为必填"); return; }
+    if (!body.contactPhone?.trim()) { fail(res, 400, "BAD_REQUEST", "联系电话为必填"); return; }
+    if (!body.addressDetail?.trim()) { fail(res, 400, "BAD_REQUEST", "详细地址为必填"); return; }
+
+    const existing = await prisma.clientAddress.findFirst({
+      where: { id, companyId: auth.companyId },
+      select: { id: true },
+    });
+    if (!existing) { fail(res, 404, "NOT_FOUND", "找不到这条地址，可能已被删除"); return; }
+
+    await prisma.clientAddress.update({
+      where: { id },
+      data: {
+        contactName: body.contactName.trim(),
+        contactPhone: body.contactPhone.trim(),
+        addressDetail: body.addressDetail.trim(),
+        // label 没传就不动（前端编辑框里没有这一项，别把已有的备注名清掉）
+        ...(body.label === undefined ? {} : { label: body.label.trim() || null }),
+      },
+    });
+    ok(res, { id, updated: true });
+  });
 }
