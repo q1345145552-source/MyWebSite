@@ -42,6 +42,8 @@ export const DECIMAL_10_2: DecimalRule = { precision: 10, scale: 2 };
 /** 订单/运单的方数用的是这个规格，别拿 10,2 那套去卡它 */
 export const DECIMAL_10_3: DecimalRule = { precision: 10, scale: 3 };
 export const DECIMAL_10_6: DecimalRule = { precision: 10, scale: 6 };
+/** 金额列用的是这个规格（最大 9999999999.99） */
+export const DECIMAL_12_2: DecimalRule = { precision: 12, scale: 2 };
 
 /** 这个精度能表示的最小正数：scale=2 → 0.01，scale=6 → 0.000001 */
 function smallestPositive(scale: number): number {
@@ -124,9 +126,51 @@ export function requireDerivedWithinDecimal(
   rule: DecimalRule = DECIMAL_10_2,
 ): string | null {
   if (!Number.isFinite(value)) return `${label}算不出有效数字，请检查填写的数值`;
+
+  /**
+   * ⚠️⚠️ **要判断的是「四舍五入之后真正落库的那个值」，不是算出来的原值**
+   * （2026-08-29 第十一轮改）。上一版只比原值，复核当场打穿两头：
+   *
+   *   · 下边界：0.01×0.01×0.01 cm × 1 件 = 1e-12 m³ —— 原值确实大于 0、
+   *     确实小于上限，闸门放行；但 `Decimal(10,6)` 四舍五入之后
+   *     **落库就是 0 方**。而仓库版集货按「方数 × 单价」收费，
+   *     0 方 = 这一票白送。「不能是 0」我又只修了表面。
+   *   · 上边界：9999.9999996 —— 原值小于 10000、放行；
+   *     舍入到 6 位小数变成 **10000**，超出 `Decimal(10,6)` → 写库炸。
+   *
+   * 所以先按列精度舍一次，再拿**舍完的那个数**去判上下界。
+   */
+  const stored = Number(value.toFixed(rule.scale));
+
+  if (stored === 0 && value !== 0) {
+    const min = Number((10 ** -rule.scale).toFixed(rule.scale));
+    return `${label}算出来只有 ${value}，存进系统会变成 0（这一列最小只能记到 ${min}）—— 请检查尺寸/重量是不是填错了单位`;
+  }
+
   const maxValue = 10 ** (rule.precision - rule.scale);
-  if (Math.abs(value) >= maxValue) {
-    return `${label}算出来是 ${value}，超过了系统能存的上限 ${maxValue}，请把这一行拆小一点`;
+  if (Math.abs(stored) >= maxValue) {
+    return `${label}算出来是 ${stored}，超过了系统能存的上限 ${maxValue}，请把这一行拆小一点`;
   }
   return null;
+}
+
+/**
+ * 「一批数加起来」也不许溢出（2026-08-29 第十一轮补）。
+ *
+ * ⚠️ 复核报的：我上一版只卡了**单行**，跨行汇总一个都没卡：
+ *   · `recalcPrealertFee()`：101 方 × 99999999.99 = 10099999998.99，
+ *     而金额列是 `Decimal(12,2)`，最大 9999999999.99 → **写库直接失败**
+ *   · `recalcCustomerTotals()`：两行各 15 亿 / 16 亿件，合计 31 亿，
+ *     而件数列是 `Int`，最大 2147483647 → 溢出
+ * **每一行单独都合法，加起来才爆** —— 跟「派生值」是同一类，
+ * 都是「只卡输入不卡输出」。
+ */
+export function requireSumWithinDecimal(
+  values: number[],
+  label: string,
+  rule: DecimalRule = DECIMAL_10_2,
+): string | null {
+  let sum = 0;
+  for (const v of values) sum += Number.isFinite(v) ? v : 0;
+  return requireDerivedWithinDecimal(sum, label, rule);
 }

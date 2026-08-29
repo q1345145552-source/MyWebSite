@@ -25,8 +25,11 @@ process.env.DATABASE_URL = "postgresql://blocked:blocked@127.0.0.1:1/never?conne
 import assert from "node:assert/strict";
 import {
   DECIMAL_10_2,
+  DECIMAL_10_3,
   DECIMAL_10_6,
+  DECIMAL_12_2,
   requireDecimal,
+  requireDerivedWithinDecimal,
   requireUnitPrice,
 } from "../apps/api/src/modules/core/decimal-guard";
 
@@ -131,6 +134,75 @@ check("4) 布尔/数组/空值不许当成数字", () => {
   }
   // 数字字符串是可以的（前端经常这么传）
   assert.equal(requireDecimal("12.5", "单价", DECIMAL_10_2), null, "数字字符串被误拦");
+});
+
+
+check("9) 派生值要按**舍入之后真正落库的值**判，两头都要卡", () => {
+  /**
+   * ⚠️ 复核实测把我上一版打穿了两头 —— 我只比了算出来的**原值**：
+   *   · 下边界：0.01×0.01×0.01 cm × 1 件 = 1e-12 m³，原值确实 > 0 且 < 上限，
+   *     放行；但 `Decimal(10,6)` 舍完**落库就是 0 方**。
+   *     仓库版按「方数 × 单价」收费 → **0 方 = 白送**。「不能是 0」我又只修了表面。
+   *   · 上边界：9999.9999996 原值 < 10000、放行；舍到 6 位变成 **10000** → 写库炸。
+   */
+  const tiny = (0.01 * 0.01 * 0.01) / 1_000_000;
+  assert.ok(requireDerivedWithinDecimal(tiny, "方数", DECIMAL_10_6), "小到会被舍成 0 的方数被放行了");
+  assert.ok(
+    /变成 0/.test(requireDerivedWithinDecimal(tiny, "方数", DECIMAL_10_6)!),
+    "提示语没说清「会被存成 0」这个后果",
+  );
+  assert.ok(requireDerivedWithinDecimal(9999.9999996, "方数", DECIMAL_10_6), "舍入后会溢出的值被放行了");
+  // ⚠️ 边界两头都测：刚好能存下的不许被误拦
+  assert.equal(requireDerivedWithinDecimal(0.000001, "方数", DECIMAL_10_6), null, "最小可存值被误拦");
+  assert.equal(requireDerivedWithinDecimal(9999.999999, "方数", DECIMAL_10_6), null, "最大可存值被误拦");
+  assert.equal(requireDerivedWithinDecimal(0, "方数", DECIMAL_10_6), null, "真正的 0 不该报错（那是「没有」不是「算错」）");
+  assert.equal(requireDerivedWithinDecimal(1.928, "方数", DECIMAL_10_6), null, "正常方数被误拦");
+});
+
+check("10) 金额和跨行汇总也要卡 —— 每行都合法，加起来才爆", () => {
+  /**
+   * ⚠️ 复核报的：我前几轮只卡了**单行**和**单行的派生值**，跨行汇总一个都没卡。
+   *   · 101 方 × 99999999.99 = 10099999998.99，
+   *     而金额列是 `Decimal(12,2)`（最大 9999999999.99）→ **写库直接失败**
+   *   · 两行各 15 亿 / 16 亿件 → 合计 31 亿，件数列是 `Int` → 溢出
+   */
+  const fee = 101 * 99999999.99;
+  assert.ok(requireDerivedWithinDecimal(fee, "金额", DECIMAL_12_2), `金额 ${fee} 被放行`);
+  assert.equal(requireDerivedWithinDecimal(9999999999.99, "金额", DECIMAL_12_2), null, "刚好到上限的金额被误拦");
+  assert.equal(requireDerivedWithinDecimal(850 * 68, "金额", DECIMAL_12_2), null, "正常一柜的金额被误拦");
+  // 客户总方数那一列是 Decimal(10,3)，规格跟单行方数不一样，别拿同一套去卡
+  assert.equal(requireDerivedWithinDecimal(68.5, "总方数", DECIMAL_10_3), null, "正常总方数被误拦");
+  assert.ok(requireDerivedWithinDecimal(10000000, "总方数", DECIMAL_10_3), "超上限的总方数被放行");
+});
+
+
+check("11) 数字字符串要被规范化，不能校验用一个值、写库用另一个值", () => {
+  /**
+   * ⚠️ 复核指出：普通版集货接受数字**字符串**（前端经常这么传），
+   * 校验时用 `parseNumericStrict` 转过了，但**写库那三处用的还是原值** ——
+   * 一个合法的 `"3"` 会一路走到 Prisma 才报类型错误，员工看到「服务器繁忙」。
+   *
+   * 共用校验函数现在会**就地把规范化后的数字写回 p**，三处写库自然拿到同一个值。
+   */
+  const fs2 = require("node:fs") as typeof import("node:fs");
+  const path2 = require("node:path") as typeof import("node:path");
+  const src = fs2
+    .readFileSync(
+      path2.join(__dirname, "..", "apps", "api", "src", "modules", "consolidation", "routes.ts"),
+      "utf-8",
+    )
+    .split("\n")
+    .filter((l) => {
+      const t = l.trim();
+      return !t.startsWith("*") && !t.startsWith("//") && !t.startsWith("/*");
+    })
+    .join("\n");
+  for (const f of ["packageCount", "quantityPerBox", "unitWeightKg", "lengthCm", "widthCm", "heightCm"]) {
+    assert.ok(
+      new RegExp(`p\\.${f}\\s*=`).test(src),
+      `共用校验函数没有把 ${f} 规范化后写回 —— 写库拿到的还是原始字符串`,
+    );
+  }
 });
 
 // ══════════════ 第二部分：真调路由（证明闸接上了） ══════════════
@@ -284,10 +356,10 @@ async function main(): Promise<void> {
   });
 
   if (failures.length > 0) {
-    console.error(`\n${failures.length}/8 项不通过：${failures.join("；")}`);
+    console.error(`\n${failures.length}/11 项不通过：${failures.join("；")}`);
     process.exit(1);
   }
-  console.log("算钱数值校验：8 项全部通过");
+  console.log("算钱数值校验：11 项全部通过");
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

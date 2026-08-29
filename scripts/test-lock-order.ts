@@ -118,6 +118,31 @@ function isDeadLine(line: string): boolean {
 }
 
 /**
+ * ⚠️⚠️ **加锁语句上不许挂任何条件**（2026-08-29 第十一轮改，换了思路）。
+ *
+ * 我前几轮一直在**枚举写死的假条件**：`false` → 加 `0`/`!true` → 加 `1===2`。
+ * 复核每一轮都能找出新写法，这一轮是 `if (Boolean(0))`。
+ * **枚举是追不完的** —— `if (!!0)`、`if ([].length)`、`if (someConst)`…… 无穷无尽。
+ *
+ * 换个思路：不去判断「这个条件是真是假」（静态分析做不到），
+ * 而是要求**加锁那一行本身不许带 if**。
+ * 锁本来就该无条件拿 —— 「有父单才锁父单」那种真实的条件锁，
+ * 写成 `if (x) { 换行 await ...FOR UPDATE }` 的**块**形式即可，
+ * 那种由下面 `deadBlockEnd` 按大括号配对处理，不受这条影响。
+ *
+ * 于是「同一行里 if + 锁」一律当成可疑：要么是死代码，
+ * 要么是有人图省事写了单行条件锁 —— 后者也该改成块形式，方便下一个人看懂。
+ */
+function isConditionalLockLine(line: string): boolean {
+  const t = line.trim();
+  if (!/FOR UPDATE/.test(t) && !Object.keys(LOCK_HELPERS).some((h) => t.includes(`${h}(`))) {
+    return false;
+  }
+  // 同一行里既有 if( 又有锁，而且 if 没有以 { 收尾（那是块形式，另算）
+  return /\bif\s*\(/.test(t) && !/\{\s*$/.test(t);
+}
+
+/**
  * 从第 i 行开始，往后**整个死代码块**的范围（左闭右开）。
  *
  * ⚠️⚠️ 上一版 `isDeadLine()` **只看当前那一行**，于是
@@ -193,6 +218,8 @@ function scanFile(file: string): TxBlock[] {
          */
         // 写死走不到的分支，**整块**都不算数（不只是 if 那一行）
         if (isDeadLine(l)) { j = deadBlockEnd(lines, j); continue; }
+        // 同一行里 if + 锁：不判断条件真假（判不了），一律不算数
+        if (isConditionalLockLine(l)) { j += 1; continue; }
         const helper = Object.keys(LOCK_HELPERS).find((h) => l.includes(`${h}(`));
         if (helper) {
           for (const t of LOCK_HELPERS[helper]) if (!locks.includes(t)) locks.push(t);
@@ -462,6 +489,16 @@ check("7) 改了运单/柜子/订单/派送单的事务，必须先锁住同一�
         if (l.includes("$transaction") || /app\.(post|get|delete)\("/.test(l)) break;
         const t = l.trim();
         if (t.startsWith("*") || t.startsWith("//") || t.startsWith("/*")) { j += 1; continue; }
+        /**
+         * ⚠️ 死代码和「同一行 if + 锁」这两种，**第 7 项也要跳**
+         * （2026-08-29 第十一轮补）。
+         * 我上一版只在 scanFile 里跳了，第 7 项有**自己一套扫描**、没跟着改 ——
+         * 于是 `if (Boolean(0)) await ...FOR UPDATE` 在第 7 项眼里
+         * 仍然算「锁过了」，7 种假条件全部假绿。
+         * **同一个规则写在两处，改一处就会漏。**
+         */
+        if (isDeadLine(l)) { j = deadBlockEnd(lines, j); continue; }
+        if (isConditionalLockLine(l)) { j += 1; continue; }
         // 先记下这一行拿到的锁
         const helper = Object.keys(LOCK_HELPERS).find((h) => l.includes(`${h}(`));
         if (helper) for (const tb of LOCK_HELPERS[helper]) held.add(tb);

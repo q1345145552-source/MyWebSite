@@ -294,17 +294,51 @@ export function buildPrealertDraft(item: any): PrealertEditDraft {
 export function validateReceiveDraft(draft: {
   packageCount: number | string;
   productQuantity?: number | string;
+  weightKg?: number | string;
+  volumeM3?: number | string;
 }): string | null {
   const pkg = Number(String(draft.packageCount ?? "").trim());
   if (!Number.isFinite(pkg) || !Number.isInteger(pkg) || pkg <= 0) {
     return "箱数必须填正整数（收到的货不可能是 0 件）";
   }
-  if (draft.productQuantity !== undefined && draft.productQuantity !== null && String(draft.productQuantity).trim() !== "") {
-    const q = Number(String(draft.productQuantity).trim());
-    if (!Number.isFinite(q) || !Number.isInteger(q) || q < 0) {
-      return "产品数量必须是不小于 0 的整数";
+
+  /**
+   * ⚠️⚠️ **产品数量：前后端口径必须一样**（2026-08-29 第十一轮改）。
+   *
+   * 上一版这里允许 `0`（判的是 `q < 0`），而后端 `/staff/prealerts/receive`
+   * 要求的是**正整数**。复核实测同一份草稿：
+   *   前端校验通过 → 发出 `productQuantity: 0` → 后端 400「产品数量必须是正整数」
+   * 员工在页面上什么都没做错，点了确认收货却被打回来，还看不懂为什么。
+   *
+   * 「前端放行、后端拒绝」比两边都不管更糟 —— 用户白填一遍。
+   * 现在跟后端对齐：空着 = 不发（后端不改它）；填了就必须是正整数。
+   */
+  const rawQty = draft.productQuantity;
+  if (rawQty !== undefined && rawQty !== null && String(rawQty).trim() !== "" && Number(rawQty) !== 0) {
+    const q = Number(String(rawQty).trim());
+    if (!Number.isFinite(q) || !Number.isInteger(q) || q <= 0) {
+      return "产品数量填了就必须是正整数（不填就空着）";
     }
   }
+
+  /**
+   * ⚠️ 负数/乱填的重量体积**不许被静默吞掉**（2026-08-29 第十一轮补）。
+   *
+   * 上一版 `optionalNumberForReceive` 对负数返回 `undefined`，
+   * 等于「当没填」—— 于是员工填了 -5kg，页面提示**成功**，
+   * 数据库里还是旧重量。他以为改了，其实没改。
+   * 「空着」和「填错了」是两回事：空着就不发，填错了要当场说。
+   */
+  for (const [label, raw] of [["重量", draft.weightKg], ["体积", draft.volumeM3]] as Array<[string, unknown]>) {
+    if (raw === undefined || raw === null) continue;
+    const t = String(raw).trim();
+    if (t === "" || Number(t) === 0) continue; // 空着 / 0 = 没填，交给 optionalNumberForReceive 省略
+    const n = Number(t);
+    if (!Number.isFinite(n) || n <= 0) {
+      return `${label}填了就必须大于 0（不填就空着）`;
+    }
+  }
+
   return null;
 }
 
@@ -313,6 +347,17 @@ export function validateReceiveDraft(draft: {
  * 空着 / 0 / 非数字 → `undefined`（＝这个字段根本不发，后端不改它）。
  * ⚠️ 不许返回 0 —— 见上面那段注释。
  */
+/**
+ * 产品数量专用：空着 / 0 → 不发这个字段。
+ * ⚠️ 单独一个函数是因为它在库里是 `Int`，而重量方数是 `Decimal` ——
+ * 语义一样但列不一样，写在一起以后容易被人改混。
+ */
+export function optionalIntegerForReceive(raw: number | string | null | undefined): number | undefined {
+  const n = optionalNumberForReceive(raw);
+  if (n === undefined) return undefined;
+  return Number.isInteger(n) ? n : undefined;
+}
+
 export function optionalNumberForReceive(raw: number | string | null | undefined): number | undefined {
   if (raw === null || raw === undefined) return undefined;
   const t = String(raw).trim();

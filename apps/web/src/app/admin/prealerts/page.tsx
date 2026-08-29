@@ -1,6 +1,6 @@
 "use client";
 
-import { optionalNumberForReceive, validateReceiveDraft } from "../../../modules/staff/utils";
+import { optionalIntegerForReceive, optionalNumberForReceive, validateReceiveDraft } from "../../../modules/staff/utils";
 import { useEffect, useMemo, useState } from "react";
 import PrealertSearch from "../../../modules/shipment/PrealertSearch";
 import EmptyStateCard from "../../../modules/layout/EmptyStateCard";
@@ -138,7 +138,8 @@ export default function AdminPrealertsPage() {
         itemName: draft.itemName.trim(),
         packageCount: draft.packageCount,
         packageUnit: draft.packageUnit,
-        productQuantity: draft.productQuantity,
+        // 空着或 0 → 不发（后端要求正整数，发 0 会被 400 打回来）
+        productQuantity: optionalIntegerForReceive(draft.productQuantity),
         // 空着或 0 → 不发这个字段（后端语义是「没传 = 不改」）
         weightKg: optionalNumberForReceive(draft.weightKg),
         volumeM3: optionalNumberForReceive(draft.volumeM3),
@@ -203,16 +204,16 @@ export default function AdminPrealertsPage() {
                             {warehouseOptions.map((w) => (<option key={w.id} value={w.id}>{w.label}</option>))}
                           </select>
                           <input value={draft.itemName} onChange={(e) => setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: { ...(prev[item.id] ?? buildPrealertDraft(item)), itemName: e.target.value } }))} placeholder="品名" style={prealertEditInputStyle} />
-                          <input type="number" value={String(draft.packageCount)} onChange={(e) => setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: { ...(prev[item.id] ?? buildPrealertDraft(item)), packageCount: Number(e.target.value || 0) } }))} placeholder="箱数" style={prealertEditInputStyle} />
+                          <input type="number" value={draft.packageCount ? String(draft.packageCount) : ""} onChange={(e) => setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: { ...(prev[item.id] ?? buildPrealertDraft(item)), packageCount: Number(e.target.value || 0) } }))} placeholder="箱数" style={prealertEditInputStyle} />
                           <select value={draft.packageUnit} onChange={(e) => setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: { ...(prev[item.id] ?? buildPrealertDraft(item)), packageUnit: e.target.value as "bag" | "box" } }))} style={prealertEditInputStyle}>
                             <option value="box">箱</option><option value="bag">袋</option>
                           </select>
-                          <input type="number" value={String(draft.productQuantity)} onChange={(e) => setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: { ...(prev[item.id] ?? buildPrealertDraft(item)), productQuantity: Number(e.target.value || 0) } }))} placeholder="产品数量" style={prealertEditInputStyle} />
+                          <input type="number" value={draft.productQuantity ? String(draft.productQuantity) : ""} onChange={(e) => setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: { ...(prev[item.id] ?? buildPrealertDraft(item)), productQuantity: Number(e.target.value || 0) } }))} placeholder="产品数量" style={prealertEditInputStyle} />
                           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                            <input type="number" step="0.01" value={String(draft.weightKg)} onChange={(e) => setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: { ...(prev[item.id] ?? buildPrealertDraft(item)), weightKg: Number(e.target.value || 0) } }))} placeholder="重量" style={{ ...prealertEditInputStyle, marginBottom: 0 }} /><span style={{ fontSize: 12 }}>kg</span>
+                            <input type="number" step="0.01" value={draft.weightKg ? String(draft.weightKg) : ""} onChange={(e) => setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: { ...(prev[item.id] ?? buildPrealertDraft(item)), weightKg: Number(e.target.value || 0) } }))} placeholder="重量" style={{ ...prealertEditInputStyle, marginBottom: 0 }} /><span style={{ fontSize: 12 }}>kg</span>
                           </div>
                           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                            <input type="number" step="0.001" value={String(draft.volumeM3)} onChange={(e) => setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: { ...(prev[item.id] ?? buildPrealertDraft(item)), volumeM3: Number(e.target.value || 0) } }))} placeholder="体积" style={{ ...prealertEditInputStyle, marginBottom: 0 }} /><span style={{ fontSize: 12 }}>m³</span>
+                            <input type="number" step="0.001" value={draft.volumeM3 ? String(draft.volumeM3) : ""} onChange={(e) => setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: { ...(prev[item.id] ?? buildPrealertDraft(item)), volumeM3: Number(e.target.value || 0) } }))} placeholder="体积" style={{ ...prealertEditInputStyle, marginBottom: 0 }} /><span style={{ fontSize: 12 }}>m³</span>
                           </div>
                           <select value={draft.transportMode} onChange={(e) => setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: { ...(prev[item.id] ?? buildPrealertDraft(item)), transportMode: e.target.value as "sea" | "land" } }))} style={prealertEditInputStyle}><option value="sea">海运</option><option value="land">陆运</option></select>
                           <input value={draft.domesticTrackingNo} onChange={(e) => setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: { ...(prev[item.id] ?? buildPrealertDraft(item)), domesticTrackingNo: e.target.value } }))} placeholder="货拉拉" style={prealertEditInputStyle} />

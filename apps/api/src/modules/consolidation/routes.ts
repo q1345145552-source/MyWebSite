@@ -124,6 +124,22 @@ function validateConsolidationProductRow(p: any, index: number): string | null {
   );
   if (volumeIssue) return volumeIssue;
 
+  /**
+   * ⚠️ **顺手把规范化后的数字写回去**（2026-08-29 第十一轮补）。
+   *
+   * 复核指出：这个接口收数字**字符串**（前端经常这么传），校验时我用
+   * `parseNumericStrict` 转过了，但**写库那三处用的还是 `p.packageCount!` 原值** ——
+   * 于是一个合法的 `"3"` 会一路走到 Prisma 才报类型错误，员工看到「服务器繁忙」。
+   *
+   * 校验和写库用的必须是**同一个值**。就地改 p，三处写库自然拿到规范化后的数。
+   */
+  p.packageCount = pkg;
+  p.quantityPerBox = qpb;
+  p.unitWeightKg = parseNumericStrict(p.unitWeightKg);
+  p.lengthCm = parseNumericStrict(p.lengthCm);
+  p.widthCm = parseNumericStrict(p.widthCm);
+  p.heightCm = parseNumericStrict(p.heightCm);
+
   return null;
 }
 

@@ -21,7 +21,7 @@ import {
 } from "../../modules/shipment/ShipmentTableGrid";
 import { splitStaffShipment } from "../../services/business-api";
 import { validateProductRows, packageCountForPayload } from "../../modules/orders/productRowGuard";
-import { optionalNumberForReceive, validateReceiveDraft } from "../../modules/staff/utils";
+import { optionalIntegerForReceive, optionalNumberForReceive, validateReceiveDraft } from "../../modules/staff/utils";
 import EmptyStateCard from "../../modules/layout/EmptyStateCard";
 import RoleShell from "../../modules/layout/RoleShell";
 import DetailModal from "../../modules/layout/DetailModal";
@@ -962,62 +962,18 @@ export default function StaffHomePage() {
   }
 
 
-  const receivePrealert = async (orderId: string) => {
-    const sourceItem = prealerts.find((item) => item.id === orderId);
-    const currentDraft = prealertEditDrafts[orderId] ?? (sourceItem ? buildPrealertDraft(sourceItem) : undefined);
-    const confirmedDraft = prealertConfirmedDrafts[orderId] ?? currentDraft;
-    if (!currentDraft || !confirmedDraft) {
-      setMessage("未找到预报单草稿，请刷新后重试。");
-      return;
-    }
-    const confirmedDraftError = validatePrealertDraft(confirmedDraft);
-    if (confirmedDraftError) {
-      setMessage(`确认收货失败：${confirmedDraftError}`);
-      return;
-    }
-    if (editingPrealertId === orderId && !isSamePrealertDraft(currentDraft, confirmedDraft)) {
-      setMessage("你还有未确认的修改，请先点击“确认修改”。");
-      return;
-    }
+  /**
+   * ⚠️ 这里原来有个 `receivePrealert(orderId)` 函数（约 57 行），**没有任何调用方**。
+   * 第十一轮复核指出它是死代码。
+   *
+   * 我上一轮还专门给它补了校验 —— 补在一段**永远不会执行**的代码上，
+   * 纯属白做，而且会误导下一个人以为「这条路已经加固过了」。
+   * 真正在用的确认收货入口有两个：
+   *   · 本文件 ~2426 那个弹窗
+   *   · apps/web/src/app/admin/prealerts/page.tsx
+   * 删掉它，别留着当摆设。（2026-08-29）
+   */
 
-    const batchNo = (prealertBatchDrafts[orderId] ?? "").trim();
-    /**
-     * ⚠️ **这是第三个确认收货入口**（2026-08-29 补）。
-     * 我本来只改了弹窗那个（同文件 ~2426），是自测第 3 项抓出来
-     * 「文件里有两处 receiveStaffPrealert」才发现还有这一处。
-     * 「三个入口只修一个」这个错我在这个项目里已经犯过好几次了。
-     */
-    if (confirmedDraft) {
-      const draftIssue = validateReceiveDraft(confirmedDraft);
-      if (draftIssue) { setMessage(draftIssue); return; }
-    }
-    setLoading(true);
-    setMessage("");
-    try {
-      const draft = confirmedDraft;
-      await receiveStaffPrealert({
-        orderId,
-        itemName: draft?.itemName,
-        packageCount: draft?.packageCount,
-        packageUnit: draft?.packageUnit,
-        productQuantity: draft?.productQuantity,
-        // 空着或 0 → 不发这个字段（后端语义是「没传 = 不改」，不是「传 0 = 清零」）
-        weightKg: optionalNumberForReceive(draft?.weightKg),
-        volumeM3: optionalNumberForReceive(draft?.volumeM3),
-        domesticTrackingNo: draft?.domesticTrackingNo,
-        transportMode: draft?.transportMode,
-      });
-      setEditingPrealertId((current) => (current === orderId ? null : current));
-      setToast("已确认收货");
-      setMessage(`预报单 ${sourceItem?.orderNo || orderId} 已确认收货${batchNo ? `，柜号 ${batchNo}` : ""}。`);
-      await loadPageData();
-    } catch (error) {
-      const text = error instanceof Error ? error.message : "确认收货失败";
-      setMessage(`确认收货失败：${text}`);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const confirmPrealertEdit = (orderId: string) => {
     const draft = prealertEditDrafts[orderId];
@@ -2439,7 +2395,8 @@ export default function StaffHomePage() {
                     itemName: draft.itemName,
                     packageCount: draft.packageCount,
                     packageUnit: draft.packageUnit,
-                    productQuantity: draft.productQuantity,
+                    // 空着或 0 → 不发（后端要求正整数，发 0 会被 400 打回来）
+                    productQuantity: optionalIntegerForReceive(draft.productQuantity),
                     /**
                      * ⚠️ 重量和方数是**可填可不填**的：空着或 0 就根本不发这个字段。
                      * 后端的语义是「没传 = 不改」，不是「传 0 = 清零」。

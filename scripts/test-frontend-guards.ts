@@ -115,7 +115,13 @@ check("3) 确认收货那两个弹窗都接了校验，而且失败不许关弹�
        i = staffText.indexOf("await receiveStaffPrealert({", i + 1)) {
     submitStarts.push(i);
   }
-  assert.equal(submitStarts.length, 2, `确认收货入口数量变了（现在 ${submitStarts.length} 个），请确认每个都接了校验`);
+  /**
+   * ⚠️ 数量从 2 降到 1（2026-08-29 第十一轮）：
+   * 员工端 ~988 那个 `receivePrealert` 被复核指出是**死代码**（没有任何调用方），
+   * 我上轮还给它补了校验 —— 补在永远不执行的代码上，纯属白做。已经删掉。
+   * 现在员工端只剩弹窗那一个真入口，加上管理员端一共 2 个。
+   */
+  assert.equal(submitStarts.length, 1, `员工端确认收货入口数量变了（现在 ${submitStarts.length} 个），请确认每个都接了校验`);
   for (const st of submitStarts) {
     const body = staffText.slice(st, st + 900);
     assert.ok(
@@ -169,13 +175,23 @@ check("5) 那四个数字框：值是 0 要显示成空框，不能显示成 0",
    * 退一步：让**显示**跟**提交**口径对齐 —— 0 渲染成空框，
    * 提交时 0 当成「没填」。员工看到的是「没填」，不是一个看着像真数据的 0。
    */
-  const file = path.join(WEB, "components", "staff", "StaffPrealertList.tsx");
-  const text = codeLines(file).map((l) => l.text).join("\n");
-  for (const f of ["packageCount", "productQuantity", "weightKg", "volumeM3"]) {
-    assert.ok(
-      new RegExp(`value=\\{draft\\.${f} \\? String\\(draft\\.${f}\\) : ""\\}`).test(text),
-      `${f} 那个框还在把 0 显示成 "0" —— 员工会以为真的是 0`,
-    );
+  /**
+   * ⚠️ **两个页面都有这四个框**（2026-08-29 第十一轮补）。
+   * 上一版我只改了员工端那份，复核指出「管理员页面四个输入框清空后仍立即显示 0」。
+   * 「两个入口只修一个」—— 这个项目里我已经犯过好几次了。
+   */
+  const files = [
+    path.join(WEB, "components", "staff", "StaffPrealertList.tsx"),
+    path.join(WEB, "app", "admin", "prealerts", "page.tsx"),
+  ];
+  for (const file of files) {
+    const text = codeLines(file).map((l) => l.text).join("\n");
+    for (const f of ["packageCount", "productQuantity", "weightKg", "volumeM3"]) {
+      assert.ok(
+        new RegExp(`value=\\{draft\\.${f} \\? String\\(draft\\.${f}\\) : ""\\}`).test(text),
+        `${path.basename(file)} 里 ${f} 那个框还在把 0 显示成 "0" —— 员工会以为真的是 0`,
+      );
+    }
   }
 });
 
@@ -231,8 +247,65 @@ check("6) 全仓库不许再出现「悄悄兜底成一个数字」的写法", (
   assert.deepEqual(bad, [], "下面这些地方还在悄悄替用户填数字：\n     " + bad.join("\n     "));
 });
 
+
+check("7) 前后端口径必须一样 —— 前端放行、后端拒绝比两边都不管更糟", () => {
+  /**
+   * ⚠️ 复核实测同一份草稿：
+   *   前端校验通过 → 发出 `productQuantity: 0` → 后端 400「产品数量必须是正整数」
+   * 员工在页面上什么都没做错，点了确认收货却被打回来，还看不懂为什么。
+   * 上一版我把 0 判成合法（判的是 `q < 0`），而后端要的是**正整数**。
+   */
+  // 0 = 「没填」→ 前端放行，但提交时**根本不发这个字段**（下面第 8 项管）
+  assert.equal(validateReceiveDraft({ packageCount: 3, productQuantity: 0 }), null);
+  // 填了就必须是正整数
+  assert.ok(validateReceiveDraft({ packageCount: 3, productQuantity: 2.5 }), "2.5 个被放行");
+  assert.ok(validateReceiveDraft({ packageCount: 3, productQuantity: -1 }), "-1 个被放行");
+  assert.equal(validateReceiveDraft({ packageCount: 3, productQuantity: 5 }), null, "正常的 5 被误拦");
+});
+
+check("8) 「填错了」不许被静默吞掉（跟「空着」是两回事）", () => {
+  /**
+   * ⚠️ 上一版 `optionalNumberForReceive` 对负数返回 `undefined` = 「当没填」——
+   * 于是员工填了 -5kg，页面提示**成功**，数据库里还是旧重量。
+   * 他以为改了，其实没改。复核点了这条。
+   * 现在：空着 / 0 = 没填（不发）；填了个错的 = 当场拦住说清楚。
+   */
+  assert.ok(validateReceiveDraft({ packageCount: 3, weightKg: -5 }), "负重量被静默吞掉");
+  assert.ok(validateReceiveDraft({ packageCount: 3, volumeM3: -0.5 }), "负体积被静默吞掉");
+  assert.ok(validateReceiveDraft({ packageCount: 3, weightKg: "abc" }), "乱填的重量被静默吞掉");
+  // 空着和 0 仍然算「没填」，不该报错
+  assert.equal(validateReceiveDraft({ packageCount: 3, weightKg: "" }), null);
+  assert.equal(validateReceiveDraft({ packageCount: 3, weightKg: 0 }), null);
+  assert.equal(validateReceiveDraft({ packageCount: 3, weightKg: 12.5 }), null, "正常重量被误拦");
+});
+
+check("9) 两个确认收货入口都不许把产品数量的 0 发出去", () => {
+  /**
+   * ⚠️ 光在校验函数里把 0 当「没填」不够 —— 提交时还是原样发的话，
+   * 后端照样 400。三处都要走 `optionalIntegerForReceive`。
+   * （员工端两处 + 管理员端一处。「三个入口只修一个」我犯过好几次。）
+   */
+  const files = [
+    path.join(WEB, "app", "staff", "page.tsx"),
+    path.join(WEB, "app", "admin", "prealerts", "page.tsx"),
+  ];
+  let sites = 0;
+  for (const file of files) {
+    const text = codeLines(file).map((l) => l.text).join("\n");
+    const raw = text.match(/productQuantity:\s*draft\??\.productQuantity\s*,/g) ?? [];
+    assert.deepEqual(
+      raw,
+      [],
+      `${path.basename(file)} 里还有地方原样发 productQuantity —— 0 会被后端 400 打回来`,
+    );
+    sites += (text.match(/optionalIntegerForReceive\(draft\??\.productQuantity\)/g) ?? []).length;
+  }
+  // 员工端 1（弹窗）+ 管理员端 1 —— 员工端那个死代码入口已删
+  assert.equal(sites, 2, `走 optionalIntegerForReceive 的地方是 ${sites} 处，应该是 2 处（员工端 1 + 管理员端 1）`);
+});
+
 if (failures.length > 0) {
-  console.error(`\n${failures.length}/6 项不通过：${failures.join("；")}`);
+  console.error(`\n${failures.length}/9 项不通过：${failures.join("；")}`);
   process.exit(1);
 }
-console.log("前端数字兜底：6 项全部通过");
+console.log("前端数字兜底：9 项全部通过");

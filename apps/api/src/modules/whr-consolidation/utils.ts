@@ -1,3 +1,5 @@
+import { BusinessError } from "../core/business-error";
+import { DECIMAL_10_3, DECIMAL_12_2, requireDerivedWithinDecimal } from "../core/decimal-guard";
 import { prisma } from "../../db/prisma";
 
 // ============================================================================
@@ -233,6 +235,15 @@ export async function recalcPrealertFee(prealertId: string, tx: any = prisma): P
   if (!pa) return 0;
 
   const totalFee = pa.status === "cancelled" ? 0 : calcFeeFromItems(pa.items, pa.planCustomer);
+  /**
+   * ⚠️ 金额列是 `Decimal(12,2)`（最大 9999999999.99）。
+   * 复核实测：101 方 × 99999999.99 = 10099999998.99 —— **每个输入都合法**，
+   * 算出来的金额爆掉，写库直接失败。（2026-08-29 第十一轮补）
+   */
+  const feeIssue = requireDerivedWithinDecimal(totalFee, "这张预报单的金额", DECIMAL_12_2);
+  if (feeIssue) {
+    throw new BusinessError(`${feeIssue}。请把这张预报单拆开，或者检查单价是不是填错了`, 400, "VALIDATION_ERROR");
+  }
 
   await tx.whrConsolidationPrealert.update({
     where: { id: prealertId },
@@ -301,6 +312,30 @@ export async function recalcCustomerTotals(planCustomerId: string, tx: any = pri
     totalPrealerts: prealerts.length,
     totalFee: round2(totalFee),
   };
+
+  /**
+   * ⚠️⚠️ **汇总也要卡，不能只卡单行**（2026-08-29 第十一轮补）。
+   *
+   * 复核实测：每一行单独都合法，加起来才爆 ——
+   *   · 两行各 15 亿 / 16 亿件 → 合计 31 亿，而 `totalPackages` 是 `Int`
+   *     （最大 2147483647）→ 溢出
+   *   · 101 方 × 99999999.99 = 10099999998.99，而 `totalFee` 是 `Decimal(12,2)`
+   *     （最大 9999999999.99）→ **写库直接失败**
+   * 我前几轮修的都是「单行」和「单行的派生值」，跨行汇总一个都没卡。
+   *
+   * ⚠️ 这里抛的是 BusinessError，会被最外层翻成 400 而不是 500「服务器繁忙」——
+   *    员工至少知道是「数字太大」而不是「系统坏了」。
+   * ⚠️ 放在**写库之前**：写下去就是 Prisma 报错，那时候已经晚了。
+   */
+  const overflow =
+    requireDerivedWithinDecimal(result.totalVolumeM3, "这位客户的总方数", DECIMAL_10_3) ??
+    requireDerivedWithinDecimal(result.totalFee, "这位客户的总金额", DECIMAL_12_2) ??
+    (Number.isInteger(result.totalPackages) && Math.abs(result.totalPackages) <= 2147483647
+      ? null
+      : `这位客户的总件数算出来是 ${result.totalPackages}，超过了系统能存的上限 2147483647`);
+  if (overflow) {
+    throw new BusinessError(`${overflow}。请把这个客户名下的预报单拆开`, 400, "VALIDATION_ERROR");
+  }
 
   await tx.whrConsolidationPlanCustomer.update({
     where: { id: planCustomerId },
