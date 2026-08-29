@@ -69,6 +69,7 @@ import type { LastmileOrderItem, LastmileShipmentOption } from "../../modules/la
 import FclInquiryPanel from "../../components/client/FclInquiryPanel";
 import { SHIPMENT_STATUS_FILTER_OPTIONS } from "../../modules/shipment/shipment-status";
 import {
+  BATCH_SHEET_TO_JSON_OPTIONS,
   formatStaffBatchErrorLocation,
   parseStaffBatchRows,
   type StaffBatchOrder,
@@ -118,6 +119,8 @@ const SHIPMENT_FLEX_COL_INDEX = 14;
 const BATCH_MAX_FILE_MB = 5;
 const BATCH_MAX_FILE_BYTES = BATCH_MAX_FILE_MB * 1024 * 1024;
 const BATCH_MAX_ROWS = 2000;
+/** 错误清单最多显示多少条（其余靠「复制全部」带走）。2026-08-29 加 */
+const BATCH_MAX_SHOWN_ERRORS = 200;
 
 function productDim(
   products: Array<{ lengthCm?: number | null; widthCm?: number | null; heightCm?: number | null }> | undefined,
@@ -908,13 +911,27 @@ export default function StaffHomePage() {
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "员工批量下单模板");
+    /**
+     * ⚠️ 说明这一页 2026-08-29 重写过，因为原来那 5 条跟代码实际行为对不上，
+     * 而对不上的每一条都真的坑过人（详见 batchOrderImport.ts 里各处注释）：
+     *   · 没写「不要自己加列」—— 员工加一列「总箱数」就能把方数从 0.5 算成 9.9
+     *   · 没写仓库只能填哪四个 —— 少打一个「仓」字会静默存进库
+     *   · 没写日期只认哪几种写法 —— 填 2026/8/1 要到提交时才一张张失败
+     *   · 「单箱重量kg *」标着必填，代码却当选填
+     */
     const instructions = XLSX.utils.aoa_to_sheet([
       ["填写说明"],
       ["1. Excel 每一行代表一种产品或一种尺寸；同一运单号的多行会自动合并成一张运单。"],
       ["2. 同一运单的第二行起，运单号、唛头、仓库、到仓日期、运输方式和包装类型可以留空，系统会继承上一行。"],
-      ["3. 同一运单的唛头、仓库、到仓日期、运输方式和包装类型必须一致。"],
+      ["3. 同一运单的唛头、仓库、到仓日期、运输方式和包装类型必须一致，不一致会报错。"],
       ["4. 长宽高按单箱填写；总体积按每行 长×宽×高×箱数 后求和。单箱重量也会乘箱数后求和。"],
       ["5. 如果填写尺寸，同一运单的每条产品都需要填写完整的长、宽、高。"],
+      ["6.〔重要〕请不要自己增加、删除或改名任何一列。多加一列（比如「总箱数」「货物长度」）会让系统认错列，方数和箱数会算成完全不同的数字。要做小计请另开一个工作表。"],
+      ["7. 带 * 的都是必填：唛头、运单号、仓库、品名、箱数、单箱重量kg、到仓日期、运输方式。少填会在上传时当场报错。"],
+      ["8. 仓库只能填这四个之一：义乌仓 / 广州仓 / 东莞仓 / 深圳仓。"],
+      ["9. 到仓日期写成 2026-08-29；2026/08/29、2026.08.29、2026年8月29日 也认。不要写成 29/08/2026。"],
+      ["10.「每箱几个」填的是「一箱里装几个」，不是这一行一共几个。系统会自动乘箱数。举例：5 箱、每箱 7 个，这里填 7，系统算出总数 35。"],
+      ["11. 数字格可以带单位（100cm、10kg、5箱 都认），但不要写成「1米」「40*30」这种，系统会当场报错让你改。"],
     ]);
     instructions["!cols"] = [{ wch: 110 }];
     XLSX.utils.book_append_sheet(wb, instructions, "填写说明");
@@ -2599,9 +2616,12 @@ export default function StaffHomePage() {
             )}
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12, alignItems: "center" }}>
               <button type="button" onClick={downloadStaffBatchTemplate} style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 12px", background: "var(--white)", color: "var(--t-strong)", cursor: "pointer" }}>下载模板</button>
-              <label style={{ border: "1px solid var(--c-blue)", borderRadius: 8, padding: "8px 12px", background: "var(--c-blue-bg)", color: "#1e3a8a", cursor: "pointer" }}>
-                上传 Excel
-                <input type="file" accept=".xlsx,.xls" style={{ display: "none" }} onChange={async (e) => {
+              {/* ⚠️ 提交进行中必须禁掉（2026-08-29 加）。
+                  submitStaffBatch 里的 pending 是**进函数那一刻的快照**，
+                  中途换一份表，正在跑的循环照样按旧表一张张建 —— 员工完全看不出来。 */}
+              <label style={{ border: "1px solid var(--c-blue)", borderRadius: 8, padding: "8px 12px", background: batchLoading ? "var(--s-cool)" : "var(--c-blue-bg)", color: batchLoading ? "var(--t-faint)" : "#1e3a8a", cursor: batchLoading ? "not-allowed" : "pointer" }}>
+                {batchLoading ? "创建中…" : "上传 Excel"}
+                <input type="file" accept=".xlsx,.xls" disabled={batchLoading} style={{ display: "none" }} onChange={async (e) => {
                   const file = e.target.files?.[0];
                   if (!file) return;
                   setBatchFileName(file.name);
@@ -2622,17 +2642,33 @@ export default function StaffHomePage() {
                     const buf = await file.arrayBuffer();
                     const wb = XLSX.read(buf, { type: "array" });
                     const ws = wb.Sheets[wb.SheetNames[0]];
-                    const raw = XLSX.utils.sheet_to_json(ws, { defval: "" });
-                    if (raw.length > BATCH_MAX_ROWS) {
+                    /**
+                     * ⚠️ 必须 blankrows:true（2026-08-29 改）。
+                     * 默认会把完全空白的行**丢掉**，而解析器的行号是「下标+2」——
+                     * 丢一行，下面所有报错的行号全部少 1。实测：错误真实在 Excel 第 5 行，
+                     * 系统报「第 4 行」，员工去看那一行是好的，只会以为系统抽风。
+                     * 保留空行之后下标和 Excel 行号严格对齐，解析器自己会跳过空行。
+                     */
+                    const raw = XLSX.utils.sheet_to_json(ws, BATCH_SHEET_TO_JSON_OPTIONS) as Record<string, unknown>[];
+                    /**
+                     * ⚠️ 行数上限按**非空行**算。保留空行之后 raw.length 会把空行也数进去，
+                     * 有些 Excel 的「已用区域」会一直拖到几千行空白，
+                     * 按 raw.length 判就会把一份正常的表拒之门外。
+                     */
+                    const filledRowCount = raw.filter((r) => Object.values(r).some((v) => String(v ?? "").trim() !== "")).length;
+                    if (filledRowCount > BATCH_MAX_ROWS) {
                       setBatchRows([]); setBatchSourceRowCount(0); setBatchProgress({ current: 0, success: 0, fail: 0 });
-                      setBatchErrors([`这份表有 ${raw.length} 行，超过 ${BATCH_MAX_ROWS} 行上限。请拆成几份分批上传。`]);
+                      setBatchErrors([`这份表有 ${filledRowCount} 行数据，超过 ${BATCH_MAX_ROWS} 行上限。请拆成几份分批上传。`]);
                       e.target.value = "";
                       return;
                     }
-                    const parsed = parseStaffBatchRows(raw as Record<string, unknown>[]);
+                    const parsed = parseStaffBatchRows(raw);
                     setBatchRows(parsed.orders);
                     setBatchSourceRowCount(parsed.sourceRowCount);
                     setBatchErrors(parsed.issues.map((issue) => {
+                      // 整表级的问题（缺了一整列、同名列重复）不属于任何一行，
+                      // 硬套「Excel 数据（运单号 —，唛头 —）：表里找不到「箱数」这一列」读起来是废话
+                      if (issue.kind === "file") return issue.message;
                       const location = formatStaffBatchErrorLocation(
                         issue.rowNumber ? `Excel 第${issue.rowNumber}行` : "Excel 数据",
                         issue.trackingNo,
@@ -2677,11 +2713,38 @@ export default function StaffHomePage() {
               </div>
             )}
             {batchErrors.length > 0 && !batchLoading && (
+              /**
+               * ⚠️ 错误清单要封顶（2026-08-29 加）。
+               * 一份 2000 行的表填错一列就能刷出几千条，原来全部堆在弹窗里，
+               * 页面卡、也看不完，而且没法带走去改表。
+               * 现在只列前 200 条，并给一个「复制全部」把完整清单送进剪贴板。
+               */
               <div style={{ marginBottom: 12, padding: 12, borderRadius: 8, background: "#fef2f2", border: "1px solid #fecaca" }}>
-                <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4, color: "var(--c-red-deep)" }}>需要修正：</div>
-                <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, color: "var(--c-red-deep)" }}>
-                  {batchErrors.map((e, i) => <li key={i}>{e}</li>)}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4, gap: 8 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13, color: "var(--c-red-deep)" }}>
+                    需要修正{batchErrors.length > 1 ? `（共 ${batchErrors.length} 条${batchErrors.length > BATCH_MAX_SHOWN_ERRORS ? `，下面只列前 ${BATCH_MAX_SHOWN_ERRORS} 条` : ""}）` : ""}：
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void navigator.clipboard?.writeText(batchErrors.join("\n"))
+                        .then(() => setToast(`已复制 ${batchErrors.length} 条错误，可以粘到 Excel 或微信里对着改`))
+                        .catch(() => setToast("这个浏览器不让复制，请手动选中复制"));
+                    }}
+                    style={{ border: "1px solid #fecaca", borderRadius: 6, padding: "4px 10px", fontSize: 12, background: "var(--white)", color: "var(--c-red-deep)", cursor: "pointer", whiteSpace: "nowrap" }}
+                  >复制全部</button>
+                </div>
+                <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, color: "var(--c-red-deep)", maxHeight: 260, overflowY: "auto" }}>
+                  {batchErrors.slice(0, BATCH_MAX_SHOWN_ERRORS).map((e, i) => <li key={i}>{e}</li>)}
                 </ul>
+                {/* ⚠️ 2026-08-29 加这一句。只要有一条错，「确认创建」按钮就不显示 ——
+                    原来是**凭空消失**，员工只看到按钮没了，不知道是系统坏了还是自己错了。
+                    规则本身不改（有错就整份表不建，避免建一半留个烂摊子），但要把话说明白。 */}
+                {batchProgress.current === 0 && (
+                  <div style={{ marginTop: 8, fontSize: 12, color: "var(--c-red-deep)" }}>
+                    有问题的时候不能创建，避免建一半留个烂摊子。请在 Excel 里按上面的提示改好，再重新上传这份表。
+                  </div>
+                )}
               </div>
             )}
             {!batchLoading && batchProgress.current > 0 && batchErrors.length === 0 && (
@@ -2691,7 +2754,12 @@ export default function StaffHomePage() {
             )}
             {batchRows.length > 0 && (
               <div style={{ overflowX: "auto", marginBottom: 12 }}>
-                <div style={{ fontSize: 13, marginBottom: 4, color: "var(--t-strong)" }}>预览：{batchRows.length} 个运单 / {batchSourceRowCount} 行产品明细</div>
+                <div style={{ fontSize: 13, marginBottom: 4, color: "var(--t-strong)" }}>
+                  预览：{batchRows.length} 个运单 / {batchSourceRowCount} 行产品明细
+                  {"　"}合计 {batchRows.reduce((sum, r) => sum + r.packageCount, 0)} 箱
+                  {"　"}{batchRows.reduce((sum, r) => sum + (r.volumeM3 ?? 0), 0).toFixed(3)} m³
+                  {"　"}{batchRows.reduce((sum, r) => sum + (r.weightKg ?? 0), 0).toFixed(2)} kg
+                </div>
                 <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                   <thead>
                     <tr style={{ borderBottom: "1px solid var(--l-cool)", background: "var(--s-cool)" }}>
@@ -2701,6 +2769,13 @@ export default function StaffHomePage() {
                       <th style={{ textAlign: "left", padding: "6px 4px" }}>仓库</th>
                       <th style={{ textAlign: "left", padding: "6px 4px" }}>品名</th>
                       <th style={{ textAlign: "left", padding: "6px 4px" }}>箱数</th>
+                      {/* ⚠️ 方数 / 重量 / 总数三列 2026-08-29 补（老板要求）。
+                          原来预览只有箱数、品名、日期、运输 —— 方数和重量**根本不显示**，
+                          所以「表头串列把方数从 0.5 算成 9.9」这种错误在页面上完全看不见，
+                          而方数是算钱的。摆出来才有可能在确认前发现不对。 */}
+                      <th style={{ textAlign: "right", padding: "6px 4px" }}>方数 m³</th>
+                      <th style={{ textAlign: "right", padding: "6px 4px" }}>重量 kg</th>
+                      <th style={{ textAlign: "right", padding: "6px 4px" }}>总数</th>
                       <th style={{ textAlign: "left", padding: "6px 4px" }}>到仓日期</th>
                       <th style={{ textAlign: "left", padding: "6px 4px" }}>运输</th>
                     </tr>
@@ -2713,7 +2788,10 @@ export default function StaffHomePage() {
                         <td style={{ padding: "6px 4px" }}>{row.trackingNo}</td>
                         <td style={{ padding: "6px 4px" }}>{{"wh_yiwu_01":"义乌仓","wh_guangzhou_01":"广州仓","wh_dongguan_01":"东莞仓","wh_shenzhen_01":"深圳仓"}[row.warehouseId] ?? row.warehouseId}</td>
                         <td style={{ padding: "6px 4px" }}>{row.itemName}（{row.products.length}行）</td>
-                        <td style={{ padding: "6px 4px" }}>{row.packageCount} {row.packageUnit}</td>
+                        <td style={{ padding: "6px 4px" }}>{row.packageCount} {row.packageUnit === "bag" ? "袋" : "箱"}</td>
+                        <td style={{ padding: "6px 4px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{row.volumeM3 === undefined ? "—" : row.volumeM3.toFixed(3)}</td>
+                        <td style={{ padding: "6px 4px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{row.weightKg === undefined ? "—" : row.weightKg.toFixed(2)}</td>
+                        <td style={{ padding: "6px 4px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{row.productQuantity === undefined ? "—" : row.productQuantity}</td>
                         <td style={{ padding: "6px 4px" }}>{row.arrivedAt}</td>
                         <td style={{ padding: "6px 4px" }}>{row.transportMode === "sea" ? "海运" : "陆运"}</td>
                       </tr>
@@ -2723,7 +2801,16 @@ export default function StaffHomePage() {
               </div>
             )}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-              <button type="button" onClick={() => { setShowBatchImport(false); setBatchRows([]); setBatchSourceRowCount(0); setBatchErrors([]); setBatchProgress({ current: 0, success: 0, fail: 0 }); setBatchFileName(""); setBatchConfirmed(false); }} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: "var(--white)", cursor: "pointer", color: "var(--t-strong)" }}>关闭</button>
+              {/* ⚠️ 提交进行中不许关（2026-08-29 加）。
+                  原来关掉弹窗只是把 state 清了，后台那个 for 循环照样一张张建下去，
+                  员工以为取消了，实际还在建。 */}
+              <button
+                type="button"
+                disabled={batchLoading}
+                title={batchLoading ? "正在创建，关掉也不会停下来，请等它跑完" : undefined}
+                onClick={() => { setShowBatchImport(false); setBatchRows([]); setBatchSourceRowCount(0); setBatchErrors([]); setBatchProgress({ current: 0, success: 0, fail: 0 }); setBatchFileName(""); setBatchConfirmed(false); }}
+                style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: "var(--white)", cursor: batchLoading ? "not-allowed" : "pointer", color: batchLoading ? "var(--t-faint)" : "var(--t-strong)" }}
+              >{batchLoading ? "创建中，请勿关闭" : "关闭"}</button>
             </div>
           </div>
         </div>

@@ -960,16 +960,27 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       return s;
     }, 0);
 
-    if (
-      !body.clientId ||
-      (!prName && !body.itemName) ||
-      !body.transportMode ||
-      !body.warehouseId ||
-      !body.arrivedAt?.trim()
-    ) {
-      fail(res, 400, "BAD_REQUEST", "missing required fields");
+    /**
+     * ⚠️ 2026-08-29：原来这里只回一句英文 "missing required fields"，
+     * 批量建单时员工看到的就是这一句，既看不懂也不知道到底缺了什么。
+     * 改成中文并且**点名缺的是哪几项**。
+     */
+    const arrivedAtText = body.arrivedAt?.trim() ?? "";
+    const missingFields = [
+      !body.clientId ? "唛头" : "",
+      !prName && !body.itemName ? "品名" : "",
+      !body.transportMode ? "运输方式" : "",
+      !body.warehouseId ? "仓库" : "",
+      !arrivedAtText ? "到仓日期" : "",
+    ].filter(Boolean);
+    if (missingFields.length > 0) {
+      fail(res, 400, "BAD_REQUEST", `缺少必填项：${missingFields.join("、")}`);
       return;
     }
+    // 上面已经逐项挡过空值了，这里取出来让类型也确定下来（原来是靠一个大 if 收窄的）
+    const clientId = body.clientId!;
+    const warehouseId = body.warehouseId!;
+    const transportMode = body.transportMode!;
 
     // Verify clientId belongs to the same company and is a client role
     const targetClient = await prisma.user.findUnique({
@@ -981,9 +992,24 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    const arrivedAtDate = new Date(`${body.arrivedAt}T00:00:00`);
-    if (Number.isNaN(arrivedAtDate.getTime())) {
-      fail(res, 400, "BAD_REQUEST", "invalid arrivedAt");
+    /**
+     * ⚠️ 必须先卡格式，再交给 new Date（2026-08-29 加）。
+     * 只判 `Number.isNaN(new Date(x).getTime())` 挡不住半截日期 ——
+     * 实测 "2026"、"2026-08"、"2026-02-31"、"2026-02-30" **全都被认为合法**
+     * （2月31号会被滚成3月2号），而下面 shipDate 存的是 `body.arrivedAt` 原文，
+     * 于是数据库里就真的躺着 shipDate="2026" 或 "2026-02-31" 这种东西。
+     * 只有 "2026-13-01" 这种月份越界才会 Invalid Date。
+     */
+    const dateParts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(arrivedAtText);
+    const arrivedAtDate = dateParts ? new Date(`${arrivedAtText}T00:00:00`) : new Date(NaN);
+    const sameDay =
+      dateParts !== null &&
+      !Number.isNaN(arrivedAtDate.getTime()) &&
+      arrivedAtDate.getFullYear() === Number(dateParts[1]) &&
+      arrivedAtDate.getMonth() + 1 === Number(dateParts[2]) &&
+      arrivedAtDate.getDate() === Number(dateParts[3]);
+    if (!sameDay) {
+      fail(res, 400, "BAD_REQUEST", `到仓日期「${arrivedAtText}」不是有效日期，请写成 2026-08-29 这种格式`);
       return;
     }
 
@@ -1059,8 +1085,8 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
         data: {
           id: orderId,
           companyId: auth.companyId,
-          clientId: body.clientId,
-          warehouseId: body.warehouseId,
+          clientId,
+          warehouseId,
           batchNo,
           orderNo: null,
           approvalStatus: "approved",
@@ -1071,9 +1097,9 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
           weightKg: prWeight > 0 ? (prWeight as unknown as Prisma.Decimal) : (weightKg as unknown as Prisma.Decimal | null),
           volumeM3: prVol > 0 ? (prVol as unknown as Prisma.Decimal) : (volumeM3 as unknown as Prisma.Decimal | null),
           receivableCurrency: "CNY",
-          shipDate: body.arrivedAt.trim(),
+          shipDate: arrivedAtText,
           domesticTrackingNo: body.domesticTrackingNo ?? null,
-          transportMode: body.transportMode,
+          transportMode,
           cargoType: body.cargoType?.trim() || "normal",
           receiverNameTh: "",
           receiverPhoneTh: "",
@@ -1094,9 +1120,9 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
           volumeM3: prVol > 0 ? (prVol as unknown as Prisma.Decimal) : (volumeM3 as unknown as Prisma.Decimal | null),
           packageCount: packageCountNum,
           packageUnit,
-          transportMode: body.transportMode,
+          transportMode,
           domesticTrackingNo: body.domesticTrackingNo ?? null,
-          warehouseId: body.warehouseId,
+          warehouseId,
           remark: body.remark?.trim() || null,
         },
       }),

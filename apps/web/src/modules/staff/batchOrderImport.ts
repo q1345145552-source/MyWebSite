@@ -32,6 +32,8 @@ export interface StaffBatchIssue {
   trackingNo?: string;
   clientId?: string;
   message: string;
+  /** "file" = 整份表的问题（比如缺了一整列），不属于某一行，界面上不加「第N行」前缀 */
+  kind?: "file";
 }
 
 export interface StaffBatchParseResult {
@@ -59,41 +61,266 @@ interface GroupDraft {
   products: StaffBatchProduct[];
   sourceRows: number[];
   issues: StaffBatchIssue[];
+  /**
+   * 已经就某个公共字段报过行级错误的字段名。
+   * 用来压掉最后那轮「X为必填」的重复提示 —— 仓库填了「义乌」时，
+   * 原来会同时报「只能填义乌仓/广州仓/…」和「仓库为必填」，
+   * 员工明明填了东西却被说没填，比不报还糟。
+   */
+  reported: Set<string>;
 }
 
-const WAREHOUSE_NAME_MAP: Record<string, string> = {
+export const WAREHOUSE_NAME_MAP: Record<string, string> = {
   义乌仓: "wh_yiwu_01",
   广州仓: "wh_guangzhou_01",
   东莞仓: "wh_dongguan_01",
   深圳仓: "wh_shenzhen_01",
 };
+const WAREHOUSE_IDS = new Set(Object.values(WAREHOUSE_NAME_MAP));
+const WAREHOUSE_NAMES = Object.keys(WAREHOUSE_NAME_MAP);
 
-function findValue(row: Record<string, unknown>, keywords: string[]): unknown {
-  const key = Object.keys(row).find((candidate) => keywords.some((keyword) => candidate.includes(keyword)));
-  return key ? row[key] : undefined;
+/* ==========================================================================
+   全角 → 半角
+   --------------------------------------------------------------------------
+   2026-08-29 加。员工用中文输入法打数字时很容易打出全角，
+   实测「１2」（全角1+半角2）原来被读成 **2 箱**（应该 12 箱），一声不吭；
+   而整串全角「１２」会报「箱数必须是正整数」——员工盯着单元格里明明写着 12，
+   完全看不懂为什么说它不是正整数。两种都得先正规化掉。
+   ========================================================================== */
+function toHalfWidth(input: string): string {
+  return input
+    .replace(/[！-～]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0))
+    .replace(/[　 ]/g, " ")
+    .replace(/[，、]/g, ",")
+    .replace(/[．。]/g, ".");
 }
 
-function textValue(row: Record<string, unknown>, keywords: string[]): string {
-  return String(findValue(row, keywords) ?? "").trim();
+/* ==========================================================================
+   表头匹配：**精确匹配别名表**，不再用「包含」
+   --------------------------------------------------------------------------
+   ⚠️ 这是 2026-08-29 这次改动里最要紧的一条，起因是实测出来的：
+
+   原来 findValue 是 `Object.keys(row).find(c => keywords.some(k => c.includes(k)))`
+   —— 在所有列里找**第一个**名字里含关键词的列。于是员工只要自己加一列，
+   就能把整票货的数字全算错，而且预览页面一条提示都没有：
+
+     基准：5箱 × 每箱7个 × 100×50×20cm × 单箱10kg  →  箱数5 总数35 重量50 方数0.5
+     在「箱数」左边加一列「总箱数」=99  →  箱数99 总数693 重量990 方数9.9（差 19.8 倍）
+     同一列加在右边                      →  完全正常
+     左边加一列「货物长度cm」=999        →  方数 4.995
+     左边加一列「客户品名备注」          →  品名被顶替成客户写的那串
+
+   **对错取决于列的先后顺序**，而方数是算钱的。
+
+   现在的做法：把表头正规化（去空格/星号/括号及括号里的说明/全角转半角），
+   再跟下面这张别名表**全等**比对。员工自己加的列一律不认，也就碰不到。
+
+   ⚠️ 别名表只收「确实是同一个意思」的写法。像「总箱数」这种是员工自己做小计用的，
+      **绝对不能**收进「箱数」的别名，否则等于把上面那个 bug 原样搬回来。
+   ⚠️ 同一个字段命中了两列（比如表里有两列都叫「箱数」）→ 直接报错让员工确认，
+      不许自己挑一个。
+   ========================================================================== */
+function normalizeHeader(raw: string): string {
+  return toHalfWidth(String(raw))
+    .replace(/[（(【\[][^）)】\]]*[）)】\]]/g, "")  // 去掉括号和括号里的说明文字
+    .replace(/[*＊]/g, "")
+    .replace(/\s+/g, "")
+    .toLowerCase();
 }
 
-function numericValue(row: Record<string, unknown>, keywords: string[]): { value?: number; invalid: boolean } {
-  const raw = findValue(row, keywords);
-  if (raw === undefined || raw === null || String(raw).trim() === "") return { invalid: false };
-  if (typeof raw === "number") return Number.isFinite(raw) ? { value: raw, invalid: false } : { invalid: true };
-  const cleaned = String(raw).replace(/[^0-9.\-]/g, "");
-  if (!cleaned) return { invalid: true };
-  const value = Number(cleaned);
-  return Number.isFinite(value) ? { value, invalid: false } : { invalid: true };
-}
+type FieldKey =
+  | "clientId" | "trackingNo" | "warehouse" | "itemName" | "packageCount"
+  | "packageUnit" | "lengthCm" | "widthCm" | "heightCm" | "weightKg"
+  | "arrivedAt" | "transportMode" | "domesticTrackingNo" | "perBoxQty" | "legacyQty";
 
-function normalizeDate(raw: string): string {
-  if (!raw) return "";
-  if (/^\d{5}$/.test(raw)) {
-    const date = new Date((Number(raw) - 25569) * 86_400_000);
-    return Number.isNaN(date.getTime()) ? raw : date.toISOString().slice(0, 10);
+/** 每个字段认哪些表头（正规化之后全等比对）。 */
+const FIELD_ALIASES: Record<FieldKey, string[]> = {
+  clientId:           ["唛头", "客户唛头"],
+  trackingNo:         ["运单号", "运单号码"],
+  warehouse:          ["仓库", "仓库名称", "发货仓库"],
+  itemName:           ["品名", "货名", "货物名称", "商品名称"],
+  packageCount:       ["箱数"],
+  packageUnit:        ["包装类型", "包装"],
+  lengthCm:           ["长cm", "长", "长度", "长度cm"],
+  widthCm:            ["宽cm", "宽", "宽度", "宽度cm"],
+  heightCm:           ["高cm", "高", "高度", "高度cm"],
+  weightKg:           ["单箱重量kg", "单箱重量", "每箱重量kg", "每箱重量"],
+  arrivedAt:          ["到仓日期", "入仓日期", "到仓时间"],
+  transportMode:      ["运输方式"],
+  domesticTrackingNo: ["国内单号", "国内快递单号", "国内物流单号"],
+  // 「每箱几个」是现行模板的列名。「单箱数量」以前不敢用（含「箱数」会被包含匹配认错列），
+  // 现在改成精确匹配之后可以安全地收进来。
+  perBoxQty:          ["每箱几个", "单箱数量", "每箱数量"],
+  // 老模板的列名。只在没有新列时才回落——顺序由 resolveColumns 保证，跟列的先后无关。
+  legacyQty:          ["产品数量"],
+};
+
+/** 自检：别名不许在两个字段之间重复，否则匹配结果取决于遍历顺序。 */
+(() => {
+  const seen = new Map<string, FieldKey>();
+  for (const [field, names] of Object.entries(FIELD_ALIASES) as [FieldKey, string[]][]) {
+    for (const name of names) {
+      const owner = seen.get(name);
+      if (owner) throw new Error(`表头别名「${name}」同时属于 ${owner} 和 ${field}，请改掉其中一个`);
+      seen.set(name, field);
+    }
   }
-  return raw;
+})();
+
+/** 这些列必须存在，缺了整份表都没法用，直接报一条整表错误，不要刷 2000 行。 */
+const REQUIRED_COLUMNS: { field: FieldKey; label: string }[] = [
+  { field: "clientId", label: "唛头" },
+  { field: "trackingNo", label: "运单号" },
+  { field: "warehouse", label: "仓库" },
+  { field: "itemName", label: "品名" },
+  { field: "packageCount", label: "箱数" },
+  // 2026-08-29 老板拍板：单箱重量**必填**（模板本来就标了 *，只有代码当选填）
+  { field: "weightKg", label: "单箱重量kg" },
+  { field: "arrivedAt", label: "到仓日期" },
+  { field: "transportMode", label: "运输方式" },
+];
+
+type ColumnMap = Partial<Record<FieldKey, string>>;
+
+function resolveColumns(rows: Record<string, unknown>[]): { columns: ColumnMap; issues: StaffBatchIssue[] } {
+  const headers = new Set<string>();
+  for (const row of rows) for (const key of Object.keys(row)) headers.add(key);
+
+  const columns: ColumnMap = {};
+  const issues: StaffBatchIssue[] = [];
+
+  // 报过「这一列重复了」的字段，后面就别再报「找不到这一列」—— 同一个毛病报两遍只会让人更懵
+  const duplicated = new Set<FieldKey>();
+  for (const [field, names] of Object.entries(FIELD_ALIASES) as [FieldKey, string[]][]) {
+    const hits = [...headers].filter((h) => names.includes(normalizeHeader(h)));
+    if (hits.length === 1) columns[field] = hits[0];
+    else if (hits.length > 1) {
+      duplicated.add(field);
+      issues.push({
+        kind: "file",
+        message: `表里有 ${hits.length} 列都被认成「${names[0]}」（${hits.join("、")}），请只保留一列`,
+      });
+    }
+  }
+
+  for (const { field, label } of REQUIRED_COLUMNS) {
+    if (!columns[field] && !duplicated.has(field)) {
+      issues.push({
+        kind: "file",
+        message: `表里找不到「${label}」这一列。请用系统的模板，或者把这一列的表头改成「${label}」`,
+      });
+    }
+  }
+
+  return { columns, issues };
+}
+
+function cellOf(row: Record<string, unknown>, columns: ColumnMap, field: FieldKey): unknown {
+  const key = columns[field];
+  return key === undefined ? undefined : row[key];
+}
+
+function textOf(row: Record<string, unknown>, columns: ColumnMap, field: FieldKey): string {
+  const raw = cellOf(row, columns, field);
+  if (raw === undefined || raw === null) return "";
+  return toHalfWidth(String(raw)).trim();
+}
+
+/* ==========================================================================
+   数字：只认「数字」和「数字+单位」，其余一律报错并把原文回显
+   --------------------------------------------------------------------------
+   2026-08-29 改。原来是 `String(raw).replace(/[^0-9.\-]/g, "")` ——
+   把所有非数字字符抹掉，剩下什么就当什么数。实测（宽50 高20 箱数5，正确方数 0.5）：
+     长cm 填「1米」   → 读成 1cm，方数 0.005，**差 100 倍**，无提示
+     长cm 填「40*30」 → 读成 4030，方数 20.15，无提示
+     箱数 填「2箱半」 → 读成 2，无提示
+   方数是算钱的，这种静默算错比直接报错严重得多。
+
+   现在：全角转半角 → 去空格 → 去千分位逗号 → 去掉一个**结尾**的单位 →
+   必须整串是纯数字，否则报错，并且把员工填的原文写进提示里。
+   「100cm」「100 厘米」「5箱」「12,000」这些原来能蒙对的写法照样能用。
+   ========================================================================== */
+const UNIT_SUFFIX = /(cm|厘米|公分|kg|千克|公斤|箱|个|件|袋|条|包|方)$/i;
+
+function parseNumberCell(raw: unknown): { value?: number; badText?: string } {
+  if (raw === undefined || raw === null) return {};
+  if (typeof raw === "number") return Number.isFinite(raw) ? { value: raw } : { badText: String(raw) };
+  if (typeof raw === "boolean") return { badText: String(raw) };
+  const original = String(raw).trim();
+  if (original === "") return {};
+  let t = toHalfWidth(original).replace(/\s+/g, "").replace(/,/g, "");
+  t = t.replace(UNIT_SUFFIX, "");
+  if (!/^-?\d+(\.\d+)?$/.test(t)) return { badText: original };
+  const value = Number(t);
+  return Number.isFinite(value) ? { value } : { badText: original };
+}
+
+/* ==========================================================================
+   日期：认全常见写法，认不出**在解析阶段就报错**
+   --------------------------------------------------------------------------
+   2026-08-29 改。原来只认「5 位数字的 Excel 序列号」，别的一律原样透传、
+   而且不产生任何 issue。实测后果：
+     填 2026/08/29、2026-8-9、2026.08.29、20260829、或者日期带了时分秒
+     → 解析阶段全绿放行 → 点「确认创建」之后 100 张单排队跑完才一张张失败，
+       员工看到的还是后端的英文 invalid arrivedAt
+     填 2026 或 2026-02-31 → 后端居然认，原样存进 Order.shipDate
+   现在全部在解析阶段解决：认得出的统一转成 YYYY-MM-DD，认不出的当场中文报错。
+
+   ⚠️ 「29/08/2026」这种日/月/年**故意不猜**——猜错就是把 8 月 29 号存成 8 月 29 日
+      还是 29 月？两可的东西宁可让员工改，不要替他决定。
+   ========================================================================== */
+function serialToDate(serial: number): string | undefined {
+  // Excel 的 0 号是 1899-12-30（含那个著名的 1900 闰年 bug 补偿）
+  const ms = Date.UTC(1899, 11, 30) + Math.floor(serial) * 86_400_000;
+  const d = new Date(ms);
+  return Number.isNaN(d.getTime()) ? undefined : d.toISOString().slice(0, 10);
+}
+
+function isRealDate(y: number, m: number, d: number): boolean {
+  if (m < 1 || m > 12 || d < 1) return false;
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return d <= last;
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+function parseDateCell(raw: unknown): { value?: string; badText?: string } {
+  if (raw === undefined || raw === null) return {};
+  if (raw instanceof Date) {
+    return Number.isNaN(raw.getTime())
+      ? { badText: String(raw) }
+      : { value: `${raw.getFullYear()}-${pad2(raw.getMonth() + 1)}-${pad2(raw.getDate())}` };
+  }
+  if (typeof raw === "number") {
+    // 带时分秒的单元格序列号是小数（46265.5），取整数部分就是那一天
+    const iso = Number.isFinite(raw) ? serialToDate(raw) : undefined;
+    return iso ? { value: iso } : { badText: String(raw) };
+  }
+  const original = String(raw).trim();
+  if (original === "") return {};
+  const t = toHalfWidth(original).replace(/\s+/g, "");
+
+  // 纯数字 = Excel 序列号（可能带小数）。20000≈1954年，60000≈2064年，超出这个范围当写错处理。
+  if (/^\d+(\.\d+)?$/.test(t) && !/^\d{8}$/.test(t)) {
+    const n = Number(t);
+    if (n >= 20_000 && n <= 60_000) {
+      const iso = serialToDate(n);
+      if (iso) return { value: iso };
+    }
+    return { badText: original };
+  }
+
+  // 2026-08-29 / 2026/8/9 / 2026.08.29 / 2026年8月29日
+  const m1 = /^(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})日?$/.exec(t);
+  // 20260829
+  const m2 = /^(\d{4})(\d{2})(\d{2})$/.exec(t);
+  const m = m1 ?? m2;
+  if (!m) return { badText: original };
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  if (!isRealDate(y, mo, d)) return { badText: original };
+  return { value: `${y}-${pad2(mo)}-${pad2(d)}` };
 }
 
 function normalizeTransport(raw: string): "sea" | "land" | undefined {
@@ -126,36 +353,86 @@ function setSharedField<K extends "clientId" | "warehouseId" | "arrivedAt" | "tr
   (draft[key] as GroupDraft[K]) = rawValue;
 }
 
-function positiveNumber(
+/** 读一个数字格：看不懂就报错（带原文），负数/零/非整数按规矩报错，必填空着也报错。 */
+function readNumber(
   draft: GroupDraft,
   rowNumber: number,
   label: string,
-  parsed: { value?: number; invalid: boolean },
+  raw: unknown,
   options: { required?: boolean; integer?: boolean } = {},
 ): number | undefined {
-  if (parsed.invalid || (parsed.value !== undefined && parsed.value <= 0) || (options.integer && parsed.value !== undefined && !Number.isInteger(parsed.value))) {
-    draft.issues.push({ rowNumber, trackingNo: draft.trackingNo, message: `${label}必须是${options.integer ? "正整数" : "正数"}` });
+  const parsed = parseNumberCell(raw);
+  if (parsed.badText !== undefined) {
+    draft.issues.push({
+      rowNumber,
+      trackingNo: draft.trackingNo,
+      message: `${label}填的是「${parsed.badText}」，看不懂，这一格只能填数字`,
+    });
     return undefined;
   }
-  if (options.required && parsed.value === undefined) {
-    draft.issues.push({ rowNumber, trackingNo: draft.trackingNo, message: `${label}为必填` });
+  if (parsed.value === undefined) {
+    if (options.required) {
+      draft.issues.push({ rowNumber, trackingNo: draft.trackingNo, message: `${label}为必填` });
+    }
+    return undefined;
+  }
+  if (parsed.value <= 0 || (options.integer && !Number.isInteger(parsed.value))) {
+    draft.issues.push({
+      rowNumber,
+      trackingNo: draft.trackingNo,
+      message: `${label}必须是${options.integer ? "正整数" : "正数"}`,
+    });
+    return undefined;
   }
   return parsed.value;
 }
 
 /**
+ * 页面读 Excel 时必须用这组参数。
+ *
+ * ⚠️ blankrows:true 不能去掉：默认会把完全空白的行丢掉，而行号是「下标+2」——
+ * 丢一行，下面所有报错的行号全部少 1（实测错误在第 5 行、系统报第 4 行）。
+ * ⚠️ 提取成常量是为了让测试能盯住它。但要说清楚：这只挡得住「有人把 blankrows 删了」，
+ *    挡不住「有人不用这个常量、自己再写一份参数」—— 后者只能靠 code review。
+ */
+export const BATCH_SHEET_TO_JSON_OPTIONS = { defval: "", blankrows: true } as const;
+
+/**
  * Excel 一行代表一种产品规格；同一运单号的多行会合并成一张订单。
  * 连续明细行可省略运单号及公共字段，解析时继承上一行所属运单的数据。
+ *
+ * ⚠️ 入参必须是**保留空行**的行数组（页面用 sheet_to_json 的 blankrows:true）。
+ * 2026-08-29 之前空行会被 sheet_to_json 丢掉，导致 rowNumber = 下标+2 全部错位：
+ * 实测错误真实在 Excel 第 5 行，系统报的是「第 4 行」，员工去看那一行是好的。
  */
 export function parseStaffBatchRows(rows: Record<string, unknown>[]): StaffBatchParseResult {
+  const { columns, issues: fileIssues } = resolveColumns(rows);
+  // 缺列/重列这种整表问题，再往下解析只会刷出几千条无意义的行级错误
+  if (fileIssues.length > 0) return { sourceRowCount: 0, orders: [], issues: fileIssues };
+
   const groups = new Map<string, GroupDraft>();
   const looseIssues: StaffBatchIssue[] = [];
   let previousTrackingNo = "";
+  let dataRowCount = 0;
 
   rows.forEach((row, index) => {
     const rowNumber = index + 2;
-    const rawClientId = textValue(row, ["唛头"]);
-    const explicitTrackingNo = textValue(row, ["运单号"]);
+
+    /**
+     * 整行都是空的就直接跳过 —— 不继承运单号、不产生任何错误。
+     * 2026-08-29 加。原来只要这一行还留着单元格（员工敲了个空格、留了个旧值、
+     * 写了行「小计」），它就会继承上一行的运单号，然后因为没品名没箱数
+     * 产生两条错误挂到**上一张单**头上，把那张完全填对的单整个作废。
+     * 实测：T001 / T002 / 一行空白 / T003 → T002 直接消失，
+     * 报「第4行 T002：品名为必填、箱数为必填」，而员工看第 4 行 T002 明明是填好的。
+     */
+    const anyValue = (Object.keys(FIELD_ALIASES) as FieldKey[])
+      .some((field) => textOf(row, columns, field) !== "");
+    if (!anyValue) return;
+    dataRowCount += 1;
+
+    const rawClientId = textOf(row, columns, "clientId");
+    const explicitTrackingNo = textOf(row, columns, "trackingNo");
     const trackingNo = explicitTrackingNo || previousTrackingNo;
     if (explicitTrackingNo) previousTrackingNo = explicitTrackingNo;
     if (!trackingNo) {
@@ -172,66 +449,102 @@ export function parseStaffBatchRows(rows: Record<string, unknown>[]): StaffBatch
       products: [],
       sourceRows: [],
       issues: [],
+      reported: new Set<string>(),
     };
     groups.set(trackingNo, draft);
     draft.sourceRows.push(rowNumber);
 
-    const rawWarehouse = textValue(row, ["仓库"]);
-    const rawArrivedAt = textValue(row, ["到仓日期"]);
-    const rawTransport = textValue(row, ["运输方式"]);
-    const rawPackageUnit = textValue(row, ["包装类型"]);
+    const rawWarehouse = textOf(row, columns, "warehouse");
+    const rawTransport = textOf(row, columns, "transportMode");
+    const rawPackageUnit = textOf(row, columns, "packageUnit");
 
     setSharedField(draft, "clientId", rawClientId || undefined, "唛头", rowNumber);
-    setSharedField(draft, "warehouseId", rawWarehouse ? (WAREHOUSE_NAME_MAP[rawWarehouse] || rawWarehouse) : undefined, "仓库", rowNumber);
-    setSharedField(draft, "arrivedAt", rawArrivedAt ? normalizeDate(rawArrivedAt) : undefined, "到仓日期", rowNumber);
+
+    /**
+     * 仓库必须是这四个之一（2026-08-29 加）。
+     * 原来认不出的名字**原样透传**给后端，而后端只检查「仓库不为空」、
+     * 数据库那一列也没有外键 —— 少打一个「仓」字就会静默存进库，
+     * 运单列表那一格显示的是填错的原文，按仓库筛选时这张单还不出现。
+     */
+    if (rawWarehouse) {
+      const warehouseId = WAREHOUSE_NAME_MAP[rawWarehouse] ?? (WAREHOUSE_IDS.has(rawWarehouse) ? rawWarehouse : undefined);
+      if (warehouseId) setSharedField(draft, "warehouseId", warehouseId, "仓库", rowNumber);
+      else {
+        draft.reported.add("仓库");
+        draft.issues.push({
+          rowNumber,
+          trackingNo,
+          message: `仓库填的是「${rawWarehouse}」，只能填：${WAREHOUSE_NAMES.join(" / ")}`,
+        });
+      }
+    }
+
+    const parsedDate = parseDateCell(cellOf(row, columns, "arrivedAt"));
+    if (parsedDate.badText !== undefined) {
+      draft.reported.add("到仓日期");
+      draft.issues.push({
+        rowNumber,
+        trackingNo,
+        message: `到仓日期填的是「${parsedDate.badText}」，看不懂，请写成 2026-08-29 这种格式`,
+      });
+    } else if (parsedDate.value) {
+      setSharedField(draft, "arrivedAt", parsedDate.value, "到仓日期", rowNumber);
+    }
+
     if (rawTransport) {
       const transportMode = normalizeTransport(rawTransport);
       if (transportMode) setSharedField(draft, "transportMode", transportMode, "运输方式", rowNumber);
-      else draft.issues.push({ rowNumber, trackingNo, message: "运输方式必须是海运或陆运" });
+      else {
+        draft.reported.add("运输方式");
+        draft.issues.push({ rowNumber, trackingNo, message: `运输方式填的是「${rawTransport}」，只能填海运或陆运` });
+      }
     }
     if (rawPackageUnit) {
       const packageUnit = normalizePackageUnit(rawPackageUnit);
       if (packageUnit) setSharedField(draft, "packageUnit", packageUnit, "包装类型", rowNumber);
-      else draft.issues.push({ rowNumber, trackingNo, message: "包装类型必须是箱或袋" });
+      else draft.issues.push({ rowNumber, trackingNo, message: `包装类型填的是「${rawPackageUnit}」，只能填箱或袋` });
     } else if (!draft.packageUnit) {
       // 模板约定空值默认“箱”；第一条明细一旦采用默认值，后续显式填“袋”应当报冲突，
       // 不能把前面已经按箱填写的行静默改成袋。
       draft.packageUnit = "box";
     }
 
-    const itemName = textValue(row, ["品名"]);
+    const itemName = textOf(row, columns, "itemName");
     if (!itemName) draft.issues.push({ rowNumber, trackingNo, message: "品名为必填" });
-    const packageCount = positiveNumber(draft, rowNumber, "箱数", numericValue(row, ["箱数"]), { required: true, integer: true });
-    const lengthCm = positiveNumber(draft, rowNumber, "长cm", numericValue(row, ["长cm", "长"]));
-    const widthCm = positiveNumber(draft, rowNumber, "宽cm", numericValue(row, ["宽cm", "宽"]));
-    const heightCm = positiveNumber(draft, rowNumber, "高cm", numericValue(row, ["高cm", "高"]));
-    const weightKg = positiveNumber(draft, rowNumber, "单箱重量kg", numericValue(row, ["单箱重量"]));
+    const packageCount = readNumber(draft, rowNumber, "箱数", cellOf(row, columns, "packageCount"), { required: true, integer: true });
+    const issuesBeforeDimensions = draft.issues.length;
+    const lengthCm = readNumber(draft, rowNumber, "长cm", cellOf(row, columns, "lengthCm"));
+    const widthCm = readNumber(draft, rowNumber, "宽cm", cellOf(row, columns, "widthCm"));
+    const heightCm = readNumber(draft, rowNumber, "高cm", cellOf(row, columns, "heightCm"));
+    // 三格里已经有一格「看不懂」了，就别再补一句「长宽高需要同时填写」——
+    // 员工三格都填了，被告知没填全只会更糊涂。
+    const dimensionHadError = draft.issues.length > issuesBeforeDimensions;
+    /**
+     * 2026-08-29 老板拍板：单箱重量**必填**。
+     * 模板那一列本来就写着「单箱重量kg *（数字）」带星号，只有代码一直当选填 ——
+     * 整列留空照样建单、重量存 null、一句提示都没有，两边口径终于对上了。
+     * ⚠️ 必填之后原来那条「同一运单的单箱重量要么全填要么全空」就没用了（不可能只填一半），
+     *    留着只会在漏填时多报一条重复的错，所以删掉了。
+     */
+    const weightKg = readNumber(draft, rowNumber, "单箱重量kg", cellOf(row, columns, "weightKg"), { required: true });
     /**
      * ⚠️ 两个表头都要认。
      * 模板原来这一列叫「产品数量」，跟旁边的「**单箱**重量kg」口径不一致，
      * 员工很容易当成「这一行一共几个」来填 —— 而代码要的是「每箱几个」。
      * 2026-08-28 把模板表头改成「每箱几个」，
      * 但**老模板下载过、正在用的文件还认「产品数量」**，两个都得收。
-     */
-    /**
-     * ⚠️ 两个表头要**分两次查**，不能写成 `["单箱数量","产品数量"]` 一次查。
-     * findValue 是「按列顺序找第一个包含任一关键词的列」——
-     * 表里同时存在旧列「产品数量」和新列「每箱几个」时，
-     * 取哪一列**取决于列的先后顺序**。2026-08-28 复核实测：同一份数据
-     * 因为列序不同能算出 10 或 200，**有报大风险**。
-     * 现在固定「新列优先，没有新列才回落到旧列」，跟列顺序无关。
      *
-     * ⚠️⚠️ 新表头**绝对不能**叫「单箱数量」：那四个字里含有「箱数」，
-     * 而表头是包含匹配，`numericValue(row, ["箱数"])` 会把这一列认成**箱数**列。
-     * 实测：5 箱、每箱 7 个，箱数被读成 7，总数算出 49 而不是 35。
-     * 所以定成「每箱几个」—— 跟现有任何一个表头都不含相同子串。
+     * ⚠️ 新列优先、没有新列才回落到老列。改成精确匹配之后这个优先级由
+     *    FIELD_ALIASES 的 perBoxQty / legacyQty 两个字段各自解析，
+     *    跟列在表里的先后顺序无关（原来用包含匹配时，同一份数据因为列序不同
+     *    能算出 10 或 200，2026-08-28 实测过，有报大风险）。
      */
-    const perBoxRaw = numericValue(row, ["每箱几个"]);
-    const legacyRaw = numericValue(row, ["产品数量"]);
-    const quantityRaw = perBoxRaw.value !== undefined || perBoxRaw.invalid ? perBoxRaw : legacyRaw;
-    const productQuantity = positiveNumber(draft, rowNumber, "每箱几个", quantityRaw, { integer: true });
+    const quantityRaw = columns.perBoxQty !== undefined
+      ? cellOf(row, columns, "perBoxQty")
+      : cellOf(row, columns, "legacyQty");
+    const productQuantity = readNumber(draft, rowNumber, "每箱几个", quantityRaw, { integer: true });
     const dimensionCount = [lengthCm, widthCm, heightCm].filter((value) => value !== undefined).length;
-    if (dimensionCount > 0 && dimensionCount < 3) {
+    if (!dimensionHadError && dimensionCount > 0 && dimensionCount < 3) {
       draft.issues.push({ rowNumber, trackingNo, message: "长、宽、高需要同时填写" });
     }
 
@@ -245,7 +558,7 @@ export function parseStaffBatchRows(rows: Record<string, unknown>[]): StaffBatch
         productQuantity,
         weightKg,
         cargoType: "normal",
-        domesticTrackingNo: textValue(row, ["国内单号"]) || undefined,
+        domesticTrackingNo: textOf(row, columns, "domesticTrackingNo") || undefined,
       });
     }
   });
@@ -253,22 +566,19 @@ export function parseStaffBatchRows(rows: Record<string, unknown>[]): StaffBatch
   const orders: StaffBatchOrder[] = [];
   const issues: StaffBatchIssue[] = [...looseIssues];
   for (const draft of groups.values()) {
-    if (!draft.clientId) draft.issues.push({ trackingNo: draft.trackingNo, message: "唛头为必填" });
-    if (!draft.warehouseId) draft.issues.push({ trackingNo: draft.trackingNo, message: "仓库为必填" });
-    if (!draft.arrivedAt) draft.issues.push({ trackingNo: draft.trackingNo, message: "到仓日期为必填" });
-    if (!draft.transportMode) draft.issues.push({ trackingNo: draft.trackingNo, message: "运输方式为必填" });
+    if (!draft.clientId && !draft.reported.has("唛头")) draft.issues.push({ trackingNo: draft.trackingNo, message: "唛头为必填" });
+    if (!draft.warehouseId && !draft.reported.has("仓库")) draft.issues.push({ trackingNo: draft.trackingNo, message: "仓库为必填" });
+    if (!draft.arrivedAt && !draft.reported.has("到仓日期")) draft.issues.push({ trackingNo: draft.trackingNo, message: "到仓日期为必填" });
+    if (!draft.transportMode && !draft.reported.has("运输方式")) draft.issues.push({ trackingNo: draft.trackingNo, message: "运输方式为必填" });
     if (draft.products.length === 0) draft.issues.push({ trackingNo: draft.trackingNo, message: "至少需要一条有效产品明细" });
 
     const weights = draft.products.map((product) => product.weightKg);
     const dimensions = draft.products.map((product) => product.lengthCm !== undefined && product.widthCm !== undefined && product.heightCm !== undefined);
-    if (weights.some((weight) => weight !== undefined) && weights.some((weight) => weight === undefined)) {
-      draft.issues.push({ trackingNo: draft.trackingNo, message: "同一运单的产品单箱重量需要全部填写或全部留空" });
-    }
     if (dimensions.some(Boolean) && dimensions.some((complete) => !complete)) {
       draft.issues.push({ trackingNo: draft.trackingNo, message: "同一运单的产品尺寸需要全部填写或全部留空" });
     }
     /**
-     * ⚠️ 「要么全填、要么全空」——跟上面单箱重量、尺寸同一个规矩（2026-08-28 补）。
+     * ⚠️ 「要么全填、要么全空」——跟上面尺寸同一个规矩（2026-08-28 补）。
      * 原来只要有**一行**填了数量，其余空行就按 0 静默计入，总数偏小而且没人知道。
      * 数字算错比导入失败严重得多，宁可拦住让他补齐。
      */
@@ -303,9 +613,6 @@ export function parseStaffBatchRows(rows: Record<string, unknown>[]): StaffBatch
      * 口径见 apps/api/src/modules/orders/routes.ts:833 的注释：
      * 同一个字段名在产品行上是「单箱数量」、在订单上才是「总数」。
      * 上面重量和体积两行都乘了 packageCount，唯独这一行漏了。
-     *
-     * ⚠️ 那条注释里还写着「批量导入那条路不受影响，解析器本来就会把合计算好」——
-     * **那句话是错的**，就是这里没算对。注释已一并更正。
      */
     const hasProductQuantity = draft.products.some((product) => product.productQuantity !== undefined);
     const productQuantity = hasProductQuantity
@@ -335,5 +642,5 @@ export function parseStaffBatchRows(rows: Record<string, unknown>[]): StaffBatch
     });
   }
 
-  return { sourceRowCount: rows.length, orders, issues };
+  return { sourceRowCount: dataRowCount, orders, issues };
 }

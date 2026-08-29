@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  BATCH_SHEET_TO_JSON_OPTIONS,
   formatStaffBatchErrorLocation,
   parseStaffBatchRows,
 } from "../apps/web/src/modules/staff/batchOrderImport";
@@ -160,6 +161,9 @@ const otherFieldErrors = parseStaffBatchRows([{
   "品名 *": "测试品",
   "箱数 *": 0,
   "长cm（数字）": 10,
+  // 2026-08-29 起「单箱重量kg」是必填列 —— 整列不存在会先报一条整表错误，
+  // 行级错误根本走不到，所以这里必须把列摆上（值故意留空，另有用例盯必填）。
+  "单箱重量kg *（数字）": 3,
   "到仓日期 *（YYYY-MM-DD）": "2026-08-29",
   "运输方式 *（海运/陆运）": "空运",
 }]);
@@ -173,8 +177,12 @@ for (const issue of otherFieldErrors.issues) {
 const missingTracking = parseStaffBatchRows([{
   "唛头 *": "XHH-NO-TRACKING",
   "运单号 *": "",
+  "仓库 *": "义乌仓",
   "品名 *": "测试品",
   "箱数 *": 1,
+  "单箱重量kg *（数字）": 1,
+  "到仓日期 *（YYYY-MM-DD）": "2026-08-29",
+  "运输方式 *（海运/陆运）": "海运",
 }]);
 assert.equal(missingTracking.issues[0]?.trackingNo, undefined);
 assert.equal(missingTracking.issues[0]?.clientId, "XHH-NO-TRACKING", "缺运单号时把这一行的唛头也丢了");
@@ -311,9 +319,17 @@ process.env.NODE_ENV = "test";   // db/prisma.ts 只在非 production 下认 glo
 
 async function checkInvalidClientIdMessage(): Promise<void> {
   let findUniqueCalls = 0;
+  /**
+   * ⚠️ 假 prisma 必须**从头到尾是同一个对象**。
+   * routes.ts 是 `import { prisma } from "../../db/prisma"`，模块第一次被 import 时
+   * 就把这个对象抓走了 —— 后面再给 globalThis.__prisma 赋一个新对象，路由里拿到的
+   * 还是旧的那个（我第一版就是这么写的，结果日期用例全被唛头那道闸拦下）。
+   * 所以换行为只能换这个 clientRow 变量，不能换对象。
+   */
+  let clientRow: unknown = null;   // null = 查无此唛头
   (globalThis as any).__prisma = {
     user: {
-      async findUnique() { findUniqueCalls += 1; return null; },   // 查无此唛头
+      async findUnique() { findUniqueCalls += 1; return clientRow; },
     },
   };
 
@@ -365,8 +381,210 @@ async function checkInvalidClientIdMessage(): Promise<void> {
     `提示语不对（别改回英文，员工看不懂）：${JSON.stringify(payload.message)}`,
   );
 
+  /* ------------------------------------------------------------------
+     日期这道闸（2026-08-29 加）
+     原来只判 `Number.isNaN(new Date(x+"T00:00:00").getTime())`，
+     实测 "2026"、"2026-08"、"2026-02-31"、"2026-02-30" **全都被认为合法**
+     （2月31号会滚成3月2号），而 shipDate 存的是原文，
+     数据库里就真躺着 shipDate="2026" 这种东西。
+     ⚠️ 唛头改成能查到，好让请求走过唛头那道闸、真正落到日期这道闸上。
+     ------------------------------------------------------------------ */
+  clientRow = { id: "C1", companyId: "c_001", role: "client" };
+  async function callWith(body: Record<string, unknown>): Promise<{ status: number; message: string }> {
+    let st = 0;
+    let pl: { message?: string } = {};
+    const r: any = { status(c: number) { st = c; return r; }, json(v: unknown) { pl = v as { message?: string }; } };
+    await handler!({
+      method: "POST", path: "", query: {}, headers: {},
+      auth: { userId: "STAFF_TEST", companyId: "c_001", role: "staff", name: "测试员工" },
+      body: {
+        clientId: "C1", warehouseId: "wh_yiwu_01", transportMode: "sea",
+        arrivedAt: "2026-08-29", trackingNo: "TEST-NO-CREATE",
+        products: [{ itemName: "测试品", packageCount: 1 }],
+        ...body,
+      },
+    }, r);
+    return { status: st, message: pl.message ?? "" };
+  }
+
+  for (const bad of ["2026", "2026-08", "2026-02-31", "2026-02-30", "2026/08/29", "2026-8-9", "20260829"]) {
+    const out = await callWith({ arrivedAt: bad });
+    assert.equal(out.status, 400, `到仓日期「${bad}」居然被放行了（status ${out.status}）`);
+    assert.ok(
+      out.message.includes("不是有效日期"),
+      `到仓日期「${bad}」是被别的闸拦下的，不是日期这道：${JSON.stringify(out.message)}`,
+    );
+  }
+
+  /* 缺必填项要中文而且点名（原来是英文 "missing required fields"） */
+  const missing = await callWith({ warehouseId: "", transportMode: undefined });
+  assert.equal(missing.status, 400);
+  assert.ok(missing.message.includes("缺少必填项"), `没换成中文：${JSON.stringify(missing.message)}`);
+  assert.ok(missing.message.includes("仓库"), `没点名缺哪一项：${JSON.stringify(missing.message)}`);
+  assert.ok(missing.message.includes("运输方式"), `没点名缺哪一项：${JSON.stringify(missing.message)}`);
+
   delete (globalThis as any).__prisma;
 }
+
+/* ==========================================================================
+   2026-08-29 加固：老板拍板「全部修」的六类问题，每一类都在这里钉住
+   --------------------------------------------------------------------------
+   下面每一条对应一个**实测出来**的老毛病，不是设想的。
+   ========================================================================== */
+const FULL: Record<string, unknown> = {
+  "唛头 *": "MK001",
+  "运单号 *": "T001",
+  "仓库 *": "义乌仓",
+  "品名 *": "玩具",
+  "箱数 *": 5,
+  "长cm（数字）": 100,
+  "宽cm（数字）": 50,
+  "高cm（数字）": 20,
+  "单箱重量kg *（数字）": 10,
+  "到仓日期 *（YYYY-MM-DD）": "2026-08-29",
+  "运输方式 *（海运/陆运）": "海运",
+  "每箱几个": 7,
+};
+/** 基准答案：5 箱 / 每箱7个×5箱=35 / 10kg×5=50 / 1×0.5×0.2×5=0.5 m³ */
+function one(row: Record<string, unknown>) {
+  return parseStaffBatchRows([row]);
+}
+function assertBaseline(label: string, r: ReturnType<typeof parseStaffBatchRows>): void {
+  assert.deepEqual(r.issues, [], `${label}：不该报错，实际报了 ${JSON.stringify(r.issues.map((i) => i.message))}`);
+  const o = r.orders[0];
+  assert.ok(o, `${label}：没建出订单`);
+  assert.equal(o.packageCount, 5, `${label}：箱数错了`);
+  assert.equal(o.productQuantity, 35, `${label}：总数错了`);
+  assert.equal(o.weightKg, 50, `${label}：重量错了`);
+  assert.equal(o.volumeM3, 0.5, `${label}：方数错了`);
+}
+
+assertBaseline("原模板", one({ ...FULL }));
+
+/**
+ * ① 员工自己往表里加一列，不许影响任何数字。
+ *
+ * 原来表头是**包含匹配**、取第一个命中的列，所以加在模板列**左边**的自造列会把它顶掉。
+ * 实测（就是这几个数）：加一列「总箱数」=99 → 箱数 99、总数 693、重量 990、方数 9.9，
+ * 差 19.8 倍，而且一条提示都没有；同一列加在右边则完全正常。方数是算钱的。
+ */
+for (const [label, extra] of [
+  ["总箱数", { "总箱数": 99 }],
+  ["货物长度cm", { "货物长度cm": 999 }],
+  ["客户品名备注", { "客户品名备注": "客户瞎写的" }],
+  ["运输方式备注", { "运输方式备注": "空运" }],
+  ["单箱重量备注", { "单箱重量备注": 888 }],
+  ["到仓日期备注", { "到仓日期备注": "2020-01-01" }],
+] as [string, Record<string, unknown>][]) {
+  assertBaseline(`左边加一列「${label}」`, one({ ...extra, ...FULL }));
+  assertBaseline(`右边加一列「${label}」`, one({ ...FULL, ...extra }));
+}
+
+/** 同一个字段命中两列 → 报整表错误让员工自己删，不许自己挑一个 */
+const dupCol = one({ ...FULL, "箱数": 99 });
+assert.equal(dupCol.orders.length, 0, "两列都叫箱数还照样建单了");
+assert.equal(dupCol.issues.length, 1, `重复列应该只报一条，实际 ${JSON.stringify(dupCol.issues.map((i) => i.message))}`);
+assert.equal(dupCol.issues[0].kind, "file");
+assert.ok(dupCol.issues[0].message.includes("请只保留一列"), dupCol.issues[0].message);
+
+/** 缺一整列 → 一条整表错误，不许刷几千行 */
+const missingCol = parseStaffBatchRows([{ "唛头 *": "MK", "运单号 *": "T", "品名 *": "甲", "箱数 *": 1 }]);
+assert.ok(missingCol.issues.every((i) => i.kind === "file"), "缺列应该全是整表级错误");
+assert.ok(missingCol.issues.some((i) => i.message.includes("单箱重量kg")), "没报缺「单箱重量kg」这一列");
+assert.equal(missingCol.orders.length, 0);
+
+/**
+ * ② 数字：带单位照认，看不懂的当场报错并回显原文，全角先转半角。
+ * 原来是把非数字字符全抹掉：「1米」→1cm（方数差 100 倍）、「40*30」→4030、「１2」→2（少 6 倍），全部静默。
+ */
+for (const good of [100, "100", "100cm", "100 厘米", "１００", "100.0"]) {
+  assertBaseline(`长cm=${good}`, one({ ...FULL, "长cm（数字）": good }));
+}
+for (const bad of ["1米", "40*30", "一百", "100~120"]) {
+  const r = one({ ...FULL, "长cm（数字）": bad });
+  assert.equal(r.orders.length, 0, `长cm=「${bad}」不该放行`);
+  assert.ok(
+    r.issues.some((i) => i.message.includes(`「${bad}」`) && i.message.includes("只能填数字")),
+    `长cm=「${bad}」的提示没回显原文：${JSON.stringify(r.issues.map((i) => i.message))}`,
+  );
+  assert.ok(!r.issues.some((i) => i.message.includes("同时填写")), `长cm=「${bad}」多报了一条「长宽高需要同时填写」`);
+}
+for (const [raw, want] of [["12", 12], ["１2", 12], ["1２", 12], ["１２", 12], ["5箱", 5], ["1,200", 1200]] as [string, number][]) {
+  const o = one({ ...FULL, "箱数 *": raw }).orders[0];
+  assert.ok(o, `箱数=「${raw}」没建出订单`);
+  assert.equal(o.packageCount, want, `箱数=「${raw}」读成了 ${o.packageCount}`);
+}
+
+/**
+ * ③ 日期：常见写法全认，认不出**在解析阶段**就报中文错。
+ * 原来只认 5 位序列号，别的一律透传 → 100 张单排队跑完才一张张失败，还是英文 invalid arrivedAt。
+ */
+for (const [raw, want] of [
+  ["2026-08-29", "2026-08-29"], ["2026/08/29", "2026-08-29"], ["2026.08.29", "2026-08-29"],
+  ["2026-8-9", "2026-08-09"], ["2026年8月29日", "2026-08-29"], ["20260829", "2026-08-29"],
+  [46265, "2026-08-31"], [46265.5, "2026-08-31"],
+] as [string | number, string][]) {
+  const o = one({ ...FULL, "到仓日期 *（YYYY-MM-DD）": raw }).orders[0];
+  assert.ok(o, `日期「${raw}」没认出来`);
+  assert.equal(o.arrivedAt, want, `日期「${raw}」转成了 ${o.arrivedAt}`);
+}
+for (const bad of ["2026", "2026-08", "2026-02-31", "29/08/2026", "下周三", ""]) {
+  const r = one({ ...FULL, "到仓日期 *（YYYY-MM-DD）": bad });
+  assert.equal(r.orders.length, 0, `日期「${bad}」不该放行到后端`);
+  assert.ok(r.issues.length > 0, `日期「${bad}」一条错都没报`);
+}
+
+/** ④ 仓库：只认那四个（名字或 id），别的当场报错并列出可选值 */
+for (const good of ["义乌仓", "广州仓", "东莞仓", "深圳仓", "wh_yiwu_01"]) {
+  const r = one({ ...FULL, "仓库 *": good });
+  assert.equal(r.issues.length, 0, `仓库「${good}」被误伤：${JSON.stringify(r.issues.map((i) => i.message))}`);
+}
+for (const bad of ["义乌", "義烏倉", "杭州仓", "wh_hangzhou_01"]) {
+  const r = one({ ...FULL, "仓库 *": bad });
+  assert.equal(r.orders.length, 0, `仓库「${bad}」被静默存进去了`);
+  assert.ok(r.issues.some((i) => i.message.includes("只能填")), `仓库「${bad}」没列出可选值`);
+  assert.equal(r.issues.length, 1, `仓库「${bad}」重复报错：${JSON.stringify(r.issues.map((i) => i.message))}`);
+}
+
+/** ⑤ 单箱重量必填（老板 2026-08-29 拍板；模板本来就标了 *，只有代码当选填） */
+const noWeight = one({ ...FULL, "单箱重量kg *（数字）": "" });
+assert.equal(noWeight.orders.length, 0, "单箱重量留空还建单了");
+assert.equal(noWeight.issues.length, 1, `重量漏填只该报一条：${JSON.stringify(noWeight.issues.map((i) => i.message))}`);
+assert.ok(noWeight.issues[0].message.includes("单箱重量kg为必填"), noWeight.issues[0].message);
+
+/**
+ * ⑥ 中间夹一行空白：跳过，不继承运单号、不产生错误、不拖废上一张单。
+ * 原来那一行会继承上一行的运单号，然后因为没品名没箱数把**上一张完全填对的单**整个作废，
+ * 报错还挂在那张单上（实测 T002 直接消失）。
+ */
+const blank = Object.fromEntries(Object.keys(FULL).map((k) => [k, ""]));
+const withBlank = parseStaffBatchRows([
+  { ...FULL, "运单号 *": "T001", "品名 *": "甲" },
+  { ...FULL, "运单号 *": "T002", "品名 *": "乙" },
+  blank,
+  { ...FULL, "运单号 *": "T003", "品名 *": "丙" },
+]);
+assert.deepEqual(withBlank.issues, [], "空行产生了错误");
+assert.deepEqual(withBlank.orders.map((o) => o.trackingNo), ["T001", "T002", "T003"], "空行把单弄丢了");
+
+/** 空行不许打乱行号：错误在数组第 4 个位置（Excel 第 5 行）就得说第 5 行 */
+const rowNo = parseStaffBatchRows([
+  { ...FULL, "运单号 *": "T001", "品名 *": "甲" },
+  { ...FULL, "运单号 *": "T002", "品名 *": "乙" },
+  blank,
+  { ...FULL, "运单号 *": "T003", "品名 *": "丙", "箱数 *": "" },
+]);
+assert.ok(
+  rowNo.issues.some((i) => i.rowNumber === 5 && i.message.includes("箱数")),
+  `行号错了：${JSON.stringify(rowNo.issues.map((i) => ({ 行: i.rowNumber, 错: i.message })))}`,
+);
+
+/**
+ * 读表参数：blankrows 一旦被删掉，空行会被 sheet_to_json 丢掉，上面那条行号就又错了。
+ * ⚠️ 这一条只挡得住「有人把 blankrows 删了」，挡不住「有人绕开这个常量自己写参数」。
+ */
+assert.equal(BATCH_SHEET_TO_JSON_OPTIONS.blankrows, true, "blankrows 被去掉了，报错行号会全部错位");
+assert.equal(BATCH_SHEET_TO_JSON_OPTIONS.defval, "");
 
 console.log("staff batch import parser: 100 orders / 300 rows passed");
 

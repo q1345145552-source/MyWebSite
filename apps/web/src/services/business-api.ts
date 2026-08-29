@@ -511,18 +511,46 @@ export interface FinanceSummary {
   rows: FinanceRow[];
 }
 
+/**
+ * ⚠️ 超时（2026-08-29 加）。
+ * 批量建单是**一张一张顺序发**的，中间任何一张卡住（服务器僵住、网络半死不活），
+ * 整批就停在那里，员工只看到「正在创建第 37/100 个运单…」一直不动，
+ * 也不知道该等还是该重来。给一个上限，卡住的那张按失败处理，后面继续跑。
+ *
+ * ⚠️ 超时**不等于没建成**：请求可能已经到服务器并且建好了，只是回话没回来。
+ * 所以提示语里必须让员工先去运单列表搜一下再重试，
+ * 不能让他闭着眼睛点「继续建剩下的」（那样会撞「运单号已存在」）。
+ */
+const STAFF_ORDER_TIMEOUT_MS = 30_000;
+
 export async function createStaffOrder(payload: StaffCreateOrderPayload): Promise<{
   orderId: string;
   createdAt: string;
 }> {
-  const response = await fetch(`${apiBaseUrl()}/staff/orders`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeaders(),
-    },
-    body: JSON.stringify(payload),
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), STAFF_ORDER_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(`${apiBaseUrl()}/staff/orders`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(),
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error(
+        `服务器 ${STAFF_ORDER_TIMEOUT_MS / 1000} 秒没有回应。这张单**可能已经建好了**，` +
+        `请先去运单列表搜一下这个运单号，确认没有再重试`,
+      );
+    }
+    throw new Error("网络中断，这张单可能已经建好了，请先去运单列表搜一下这个运单号，确认没有再重试");
+  } finally {
+    clearTimeout(timer);
+  }
   return parseApiResponse(response);
 }
 
