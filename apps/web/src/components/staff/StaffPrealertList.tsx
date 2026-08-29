@@ -8,6 +8,25 @@ import EmptyStateCard from "../../modules/layout/EmptyStateCard";
 import PrealertSearch from "../../modules/shipment/PrealertSearch";
 import StaffProductImagesPanel from "./StaffProductImagesPanel";
 
+/**
+ * ⚠️ 这四个数字框的口径（2026-08-29 第十轮之后定的）：
+ *
+ * onChange 是 `Number(e.target.value || 0)` —— 清空就变 0。
+ * 复核指出「前端没有保留『未填写』」，这是对的。
+ * 但把 `PrealertEditDraft` 那四个字段改成 string 要动 40 多处引用，
+ * 这个项目里我因为「顺手大改」引入新 bug 已经好几次了，**不值得**。
+ *
+ * 所以退一步，让**显示**和**提交**两边口径对齐：
+ *   · 显示：值是 0 就渲染成**空框**（`draft.x ? String(draft.x) : ""`），
+ *     员工看到的是「没填」，不是一个看着像真数据的 0
+ *   · 提交：`optionalNumberForReceive` 把 0 当成「没填」，**根本不发这个字段**
+ *     （后端语义是「没传 = 不改」）；箱数是必填的，0 会被 validateReceiveDraft
+ *     当场拦住并说人话
+ *
+ * ⚠️ 别把这里改回 `String(draft.x)` —— 那样 0 会显示成 "0"，
+ *    员工会以为重量真的是 0 公斤。
+ */
+
 /** 预报单搜索状态 */
 export type PrealertSearchState = {
   keyword: string;
@@ -150,18 +169,18 @@ export default function StaffPrealertList(props: StaffPrealertListProps) {
                           {props.warehouseOptions.map((w) => <option key={w.id} value={w.id}>仓库：{w.label}</option>)}
                         </select>
                         <input value={draft.itemName} onChange={(e) => props.setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: { ...(prev[item.id] ?? buildPrealertDraft(item)), itemName: e.target.value } }))} placeholder="品名" style={prealertEditInputStyle} />
-                        <input type="number" value={String(draft.packageCount)} onChange={(e) => props.setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: { ...(prev[item.id] ?? buildPrealertDraft(item)), packageCount: Number(e.target.value || 0) } }))} placeholder="箱数/袋数" style={prealertEditInputStyle} />
+                        <input type="number" value={draft.packageCount ? String(draft.packageCount) : ""} onChange={(e) => props.setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: { ...(prev[item.id] ?? buildPrealertDraft(item)), packageCount: Number(e.target.value || 0) } }))} placeholder="箱数/袋数" style={prealertEditInputStyle} />
                         <select value={draft.packageUnit} onChange={(e) => props.setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: { ...(prev[item.id] ?? buildPrealertDraft(item)), packageUnit: e.target.value as "bag" | "box" } }))} style={prealertEditInputStyle}>
                           <option value="box">箱（box）</option>
                           <option value="bag">袋（bag）</option>
                         </select>
-                        <input type="number" value={String(draft.productQuantity)} onChange={(e) => props.setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: { ...(prev[item.id] ?? buildPrealertDraft(item)), productQuantity: Number(e.target.value || 0) } }))} placeholder="产品数量" style={prealertEditInputStyle} />
+                        <input type="number" value={draft.productQuantity ? String(draft.productQuantity) : ""} onChange={(e) => props.setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: { ...(prev[item.id] ?? buildPrealertDraft(item)), productQuantity: Number(e.target.value || 0) } }))} placeholder="产品数量" style={prealertEditInputStyle} />
                         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                          <input type="number" step="0.01" min="0.01" value={String(draft.weightKg)} onChange={(e) => props.setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: { ...(prev[item.id] ?? buildPrealertDraft(item)), weightKg: Number(e.target.value || 0) } }))} placeholder="重量" style={{ ...prealertEditInputStyle, marginBottom: 0 }} />
+                          <input type="number" step="0.01" min="0.01" value={draft.weightKg ? String(draft.weightKg) : ""} onChange={(e) => props.setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: { ...(prev[item.id] ?? buildPrealertDraft(item)), weightKg: Number(e.target.value || 0) } }))} placeholder="重量" style={{ ...prealertEditInputStyle, marginBottom: 0 }} />
                           <span style={{ color: "var(--t-strong)", fontSize: 13, minWidth: 26 }}>kg</span>
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                          <input type="number" step="0.001" min="0.001" value={String(draft.volumeM3)} onChange={(e) => props.setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: { ...(prev[item.id] ?? buildPrealertDraft(item)), volumeM3: Number(e.target.value || 0) } }))} placeholder="体积" style={{ ...prealertEditInputStyle, marginBottom: 0 }} />
+                          <input type="number" step="0.001" min="0.001" value={draft.volumeM3 ? String(draft.volumeM3) : ""} onChange={(e) => props.setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: { ...(prev[item.id] ?? buildPrealertDraft(item)), volumeM3: Number(e.target.value || 0) } }))} placeholder="体积" style={{ ...prealertEditInputStyle, marginBottom: 0 }} />
                           <span style={{ color: "var(--t-strong)", fontSize: 13, minWidth: 30 }}>m3</span>
                         </div>
                         <input value={draft.domesticTrackingNo} onChange={(e) => props.setPrealertEditDrafts((prev) => ({ ...prev, [item.id]: { ...(prev[item.id] ?? buildPrealertDraft(item)), domesticTrackingNo: e.target.value } }))} placeholder="国内快递单号" style={prealertEditInputStyle} />

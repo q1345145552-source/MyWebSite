@@ -56,6 +56,13 @@ jobs:
       - name: Test login throttle
         run: npm run test:login-throttle
 
+      # 前端数字兜底（2026-08-29 加）。
+      # 老板从第一天起反复报的就是「箱数没填，系统自己猜成 1」——
+      # 后端一轮轮收紧，但前端在发送之前就把空值换成了数字，后端的闸挡不到。
+      # 这个脚本盯：空着不许被翻译成 0、失败不许关弹窗、总方数不许静默变 68。
+      - name: Test frontend number guards
+        run: npm run test:frontend-guards
+
       # 算钱数值校验（2026-08-29 加，第九轮复核确认的 5 组）。
       # 这一批的共同点是**不会报错、只会安安静静算错钱**：
       # 单价 0.001 被 Decimal(10,2) 存成 0.00（这一柜白送）、

@@ -263,3 +263,61 @@ export function buildPrealertDraft(item: any): PrealertEditDraft {
     shipDate: item.shipDate?.slice(0, 10) ?? "",
   };
 }
+
+/**
+ * 确认收货前的校验 + 组装请求体 —— **员工端和管理员端共用一份**。
+ *
+ * ════════════════════════════════════════════════════════════════════
+ * 2026-08-29（第十轮之后）为什么要有这个
+ * ════════════════════════════════════════════════════════════════════
+ *
+ * 三件事凑在一起，把「确认收货」这个每天都在用的动作变成了雷：
+ *
+ * 1. **弹窗里一道校验都没有**，draft 里的数字原样发出去。
+ *
+ * 2. 编辑框的 onChange 是 `Number(e.target.value || 0)` ——
+ *    员工把重量框**清空**，草稿里当场变成 `0`，界面上也显示 0。
+ *
+ * 3. 我上一轮把后端收紧成「传了就必须大于 0」。于是前端那个 `0`
+ *    会被后端 400 打回来 —— 而 `buildPrealertDraft` 对**本来就没填重量**的单子
+ *    也是给 `0`。生产库只读查过：**有 8 张待确认收货的单子没填重量/方数**，
+ *    也就是说这 8 张**根本确认不了收货**。这是我上一轮改后端引入的。
+ *
+ * 所以这里的规矩是：
+ *   · 箱数是必填的业务字段 → 必须是正整数，当场拦住并说人话
+ *   · 重量/方数是**可填可不填**的 → 空着或 0 就**根本不发这个字段**
+ *     （后端的语义是「没传 = 不改」，而不是「传 0 = 清零」）
+ *
+ * ⚠️ 别把「空着」翻译成 0 发出去。0 和「没填」在这个系统里是两回事：
+ *    0 方会让仓库版集货按「方数 × 单价」算出 0 元。
+ */
+export function validateReceiveDraft(draft: {
+  packageCount: number | string;
+  productQuantity?: number | string;
+}): string | null {
+  const pkg = Number(String(draft.packageCount ?? "").trim());
+  if (!Number.isFinite(pkg) || !Number.isInteger(pkg) || pkg <= 0) {
+    return "箱数必须填正整数（收到的货不可能是 0 件）";
+  }
+  if (draft.productQuantity !== undefined && draft.productQuantity !== null && String(draft.productQuantity).trim() !== "") {
+    const q = Number(String(draft.productQuantity).trim());
+    if (!Number.isFinite(q) || !Number.isInteger(q) || q < 0) {
+      return "产品数量必须是不小于 0 的整数";
+    }
+  }
+  return null;
+}
+
+/**
+ * 把可填可不填的数字字段转成请求体里的值：
+ * 空着 / 0 / 非数字 → `undefined`（＝这个字段根本不发，后端不改它）。
+ * ⚠️ 不许返回 0 —— 见上面那段注释。
+ */
+export function optionalNumberForReceive(raw: number | string | null | undefined): number | undefined {
+  if (raw === null || raw === undefined) return undefined;
+  const t = String(raw).trim();
+  if (t === "") return undefined;
+  const n = Number(t);
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  return n;
+}

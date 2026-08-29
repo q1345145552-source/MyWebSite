@@ -21,6 +21,7 @@ import {
 } from "../../modules/shipment/ShipmentTableGrid";
 import { splitStaffShipment } from "../../services/business-api";
 import { validateProductRows, packageCountForPayload } from "../../modules/orders/productRowGuard";
+import { optionalNumberForReceive, validateReceiveDraft } from "../../modules/staff/utils";
 import EmptyStateCard from "../../modules/layout/EmptyStateCard";
 import RoleShell from "../../modules/layout/RoleShell";
 import DetailModal from "../../modules/layout/DetailModal";
@@ -980,6 +981,16 @@ export default function StaffHomePage() {
     }
 
     const batchNo = (prealertBatchDrafts[orderId] ?? "").trim();
+    /**
+     * ⚠️ **这是第三个确认收货入口**（2026-08-29 补）。
+     * 我本来只改了弹窗那个（同文件 ~2426），是自测第 3 项抓出来
+     * 「文件里有两处 receiveStaffPrealert」才发现还有这一处。
+     * 「三个入口只修一个」这个错我在这个项目里已经犯过好几次了。
+     */
+    if (confirmedDraft) {
+      const draftIssue = validateReceiveDraft(confirmedDraft);
+      if (draftIssue) { setMessage(draftIssue); return; }
+    }
     setLoading(true);
     setMessage("");
     try {
@@ -990,8 +1001,9 @@ export default function StaffHomePage() {
         packageCount: draft?.packageCount,
         packageUnit: draft?.packageUnit,
         productQuantity: draft?.productQuantity,
-        weightKg: draft?.weightKg,
-        volumeM3: draft?.volumeM3,
+        // 空着或 0 → 不发这个字段（后端语义是「没传 = 不改」，不是「传 0 = 清零」）
+        weightKg: optionalNumberForReceive(draft?.weightKg),
+        volumeM3: optionalNumberForReceive(draft?.volumeM3),
         domesticTrackingNo: draft?.domesticTrackingNo,
         transportMode: draft?.transportMode,
       });
@@ -2415,6 +2427,12 @@ export default function StaffHomePage() {
                 const item = approvingPrealert;
                 const draft = prealertEditDrafts[item.id] ?? buildPrealertDraft(item);
                 const batchNo = (prealertBatchDrafts[item.id] ?? "").trim();
+                /**
+                 * ⚠️ 提交前先校验（2026-08-29 补）：这个弹窗以前**一道校验都没有**，
+                 * draft 里的数字原样发出去。
+                 */
+                const draftIssue = validateReceiveDraft(draft);
+                if (draftIssue) { setToast(draftIssue); return; }
                 try {
                   await receiveStaffPrealert({
                     orderId: item.id,
@@ -2422,18 +2440,28 @@ export default function StaffHomePage() {
                     packageCount: draft.packageCount,
                     packageUnit: draft.packageUnit,
                     productQuantity: draft.productQuantity,
-                    weightKg: draft.weightKg,
-                    volumeM3: draft.volumeM3,
+                    /**
+                     * ⚠️ 重量和方数是**可填可不填**的：空着或 0 就根本不发这个字段。
+                     * 后端的语义是「没传 = 不改」，不是「传 0 = 清零」。
+                     * 生产库里有 8 张待确认收货的单子本来就没填重量/方数 ——
+                     * 原来前端把它们当成 0 发出去，后端收紧之后这 8 张**确认不了收货**。
+                     */
+                    weightKg: optionalNumberForReceive(draft.weightKg),
+                    volumeM3: optionalNumberForReceive(draft.volumeM3),
                     domesticTrackingNo: draft.domesticTrackingNo,
                     transportMode: draft.transportMode,
                   });
                   setToast(`预报单 ${item.id} 确认收货`);
                   await loadPageData();
+                  // ⚠️ **只有成功才关弹窗**（2026-08-29 改）。
+                  // 原来这句在 try/catch 外面，失败也照样关 —— 员工只看到一闪而过的
+                  // 提示，弹窗没了、填的东西也没了，根本不知道该改哪里。
+                  setApprovingPrealert(null);
                 } catch (error) {
                   const text = error instanceof Error ? error.message : "确认收货失败";
                   setToast("确认收货失败：" + text);
+                  // 失败时**保留弹窗和已填内容**，让员工照着提示改
                 }
-                setApprovingPrealert(null);
               }} style={{ border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: "var(--c-blue)", color: "var(--white)", fontWeight: 500, cursor: "pointer" }}>确认收货</button>
             </div>
           </div>

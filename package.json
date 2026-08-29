@@ -19,6 +19,7 @@
     "db:seed": "tsx apps/api/prisma/seed.ts",
     "db:reset": "prisma migrate reset --schema=apps/api/prisma/schema.prisma",
     "test:login-throttle": "tsx scripts/test-login-throttle.ts",
+    "test:frontend-guards": "tsx scripts/test-frontend-guards.ts",
     "test:money-guards": "tsx scripts/test-money-guards.ts",
     "test:product-rows": "tsx scripts/test-product-rows.ts",
     "test:batch-import": "tsx scripts/test-staff-batch-import.ts",

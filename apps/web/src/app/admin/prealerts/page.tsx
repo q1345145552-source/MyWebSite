@@ -1,5 +1,6 @@
 "use client";
 
+import { optionalNumberForReceive, validateReceiveDraft } from "../../../modules/staff/utils";
 import { useEffect, useMemo, useState } from "react";
 import PrealertSearch from "../../../modules/shipment/PrealertSearch";
 import EmptyStateCard from "../../../modules/layout/EmptyStateCard";
@@ -122,7 +123,14 @@ export default function AdminPrealertsPage() {
     const draft = prealertConfirmedDrafts[item.id] ?? buildPrealertDraft(item);
     if (!draft.warehouseId) { setMessage("请选择仓库"); return; }
     if (!draft.itemName.trim()) { setMessage("请输入品名"); return; }
-    if (!draft.packageCount || draft.packageCount < 1) { setMessage("请输入箱数"); return; }
+    /**
+     * ⚠️ 换成共用校验（2026-08-29）：原来是 `< 1`，**2.5 箱能过**，
+     * 而库里是 Int。员工端那个弹窗以前一道校验都没有，现在两边走同一份。
+     */
+    {
+      const issue = validateReceiveDraft(draft);
+      if (issue) { setMessage(issue); return; }
+    }
     setLoading(true);
     try {
       await receiveStaffPrealert({
@@ -131,8 +139,9 @@ export default function AdminPrealertsPage() {
         packageCount: draft.packageCount,
         packageUnit: draft.packageUnit,
         productQuantity: draft.productQuantity,
-        weightKg: draft.weightKg || undefined,
-        volumeM3: draft.volumeM3 || undefined,
+        // 空着或 0 → 不发这个字段（后端语义是「没传 = 不改」）
+        weightKg: optionalNumberForReceive(draft.weightKg),
+        volumeM3: optionalNumberForReceive(draft.volumeM3),
         domesticTrackingNo: draft.domesticTrackingNo.trim() || undefined,
         transportMode: draft.transportMode,
       });

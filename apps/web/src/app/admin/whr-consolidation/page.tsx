@@ -417,6 +417,25 @@ export default function AdminWhrConsolidationPage() {
   const handleCreate = async () => {
     if (!newDestinationTh.trim()) { setToast("请输入目的地"); return; }
     if (selectedCustomers.length === 0) { setToast("请至少选择一位客户"); return; }
+    /**
+     * ⚠️ 总方数不许静默变成 68（2026-08-29 补）。
+     * 这个框的初值就是 68、界面上看得见，正常情况没问题；
+     * 但**手动清空**时下面那句 `Number(newTotalVolume) || 68` 会悄悄又变回 68，
+     * 而柜总方数是「本柜已用方数不许超上限」那道闸的依据 —— 填错了闸就形同虚设。
+     * 清空了就当场说清楚，别替他猜。
+     */
+    {
+      const v = Number(String(newTotalVolume).trim());
+      if (!String(newTotalVolume).trim() || !Number.isFinite(v) || v <= 0) {
+        setToast("请填写柜子总方数（这个数是「已用方数不许超上限」那道闸的依据，不能空着）");
+        return;
+      }
+      // 库里是 Decimal(10,2)，多的小数位会被抹掉，跟你填的对不上
+      if (Math.abs(v * 100 - Math.round(v * 100)) > 1e-6) {
+        setToast("柜子总方数最多只能有 2 位小数");
+        return;
+      }
+    }
     for (let i = 0; i < selectedCustomers.length; i++) {
       const c = selectedCustomers[i];
       if (!c.unitPriceNormal || Number(c.unitPriceNormal) <= 0) { setToast(`第${i + 1}位客户普货单价必须大于0`); return; }
@@ -434,7 +453,8 @@ export default function AdminWhrConsolidationPage() {
             warehouse: newWarehouse,
             containerType: newContainerType,
             destinationTh: newDestinationTh.trim(),
-            totalVolumeM3: Number(newTotalVolume) || 68,
+            // ⚠️ 不许 `|| 68`：上面已经卡死必须填，这里再兜一次等于把校验抹掉
+            totalVolumeM3: Number(String(newTotalVolume).trim()),
             customers: selectedCustomers.map(c => ({
               clientId: c.clientId,
               unitPriceNormal: Number(c.unitPriceNormal),
