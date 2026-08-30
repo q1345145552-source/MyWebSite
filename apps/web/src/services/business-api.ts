@@ -1133,8 +1133,8 @@ export async function patchStaffShipmentOrderBundle(payload: {
   shipDate?: string | null;
   receiverAddressTh: string;
   containerNo?: string | null;
-  receivableAmountCny?: number | null;
-  receivableCurrency?: "CNY" | "THB";
+  /* 2026-08-31：应收金额/币种从这个「写」载荷里拆除——后端 2026-08-07 起就不收，
+     一直是发了也白发的死字段（钱只在集货里）。列表展示用的读字段在 OrderItem 上，不受影响。 */
   warehouseId?: string;
   remark?: string | null;
 }): Promise<{ shipmentId: string; orderId: string; updatedAt: string }> {
@@ -1202,8 +1202,6 @@ export async function updateAdminOrder(payload: {
   packageUnit?: "bag" | "box";
   weightKg?: number | null;
   volumeM3?: number | null;
-  receivableAmountCny?: number | null;
-  receivableCurrency?: "CNY" | "THB";
   paymentStatus?: "paid" | "unpaid";
   shipDate?: string;
   products?: Array<{

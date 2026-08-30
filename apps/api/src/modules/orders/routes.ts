@@ -1701,8 +1701,6 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       shipDate?: string | null;
       receiverAddressTh?: string;
       containerNo?: string | null;
-      receivableAmountCny?: number | null;
-      receivableCurrency?: "CNY" | "THB";
       /** 同步更新订单与运单的归属仓库（员工须对新仓库有编辑权限）。 */
       warehouseId?: string;
       remark?: string;

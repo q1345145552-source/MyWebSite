@@ -423,8 +423,6 @@ export default function AdminHomePage() {
     packageUnit: "box" as "bag" | "box",
     weightKg: "",
     volumeM3: "",
-    receivableAmountCny: "",
-    receivableCurrency: "CNY" as "CNY" | "THB",
     paymentStatus: "unpaid" as "paid" | "unpaid",
     shipDate: "",
     cargoType: "normal",
@@ -610,9 +608,6 @@ export default function AdminHomePage() {
         weightKg: order.weightKg === null || order.weightKg === undefined ? "" : String(order.weightKg),
         volumeM3: order.volumeM3 === null || order.volumeM3 === undefined ? "" : String(order.volumeM3),
         cargoType: order.cargoType ?? "normal",
-        receivableAmountCny:
-          order.receivableAmountCny === null || order.receivableAmountCny === undefined ? "" : String(order.receivableAmountCny),
-        receivableCurrency: order.receivableCurrency === "THB" ? "THB" : "CNY",
         paymentStatus: order.paymentStatus === "paid" ? "paid" : "unpaid",
         shipDate: order.shipDate ?? "",
         remark: order.remark ?? "",
@@ -635,9 +630,6 @@ export default function AdminHomePage() {
       weightKg: order.weightKg === null || order.weightKg === undefined ? "" : String(order.weightKg),
       volumeM3: order.volumeM3 === null || order.volumeM3 === undefined ? "" : String(order.volumeM3),
       cargoType: order.cargoType ?? "normal",
-      receivableAmountCny:
-        order.receivableAmountCny === null || order.receivableAmountCny === undefined ? "" : String(order.receivableAmountCny),
-      receivableCurrency: order.receivableCurrency === "THB" ? "THB" : "CNY",
       paymentStatus: order.paymentStatus === "paid" ? "paid" : "unpaid",
       shipDate: order.shipDate ?? "",
       remark: order.remark ?? "",

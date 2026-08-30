@@ -50,8 +50,6 @@ function buildPrealertDraft(item: OrderItem): PrealertEditDraft {
     productQuantity: item.productQuantity ?? 0,
     weightKg: item.weightKg ?? 0,
     volumeM3: item.volumeM3 ?? 0,
-    // 应收金额/币种不进 draft（2026-08-31 排查条目30）：应收改成必填输入框、走字符串状态，
-    // draft 兜底成 0 会让必填校验形同虚设
     domesticTrackingNo: (firstProduct?.domesticTrackingNo || item.domesticTrackingNo) ?? "",
     transportMode: (item.transportMode as "sea" | "land") ?? "sea",
     shipDate: item.shipDate?.slice(0, 10) ?? "",
@@ -72,13 +70,8 @@ export default function AdminPrealertsPage() {
   const [prealertEditDrafts, setPrealertEditDrafts] = useState<Record<string, PrealertEditDraft>>({});
   const [prealertConfirmedDrafts, setPrealertConfirmedDrafts] = useState<Record<string, PrealertEditDraft>>({});
   const [editingPrealertId, setEditingPrealertId] = useState<string | null>(null);
-  /**
-   * 应收金额 / 柜号（2026-08-31 排查条目30）：老板已拍板「收货时录应收金额」，
-   * 员工端弹窗改完了，这个页面走同一个接口收货却不传 —— 从这条路确认的单应收是空的，
-   * 对账少收钱的口子在管理员端还开着。现在跟员工端对齐：应收必填、柜号选填。
-   * ⚠️ 应收金额用**字符串**存输入框原始值，不进 PrealertEditDraft ——
-   *    draft 会把「没填」兜底成 0，必填校验就形同虚设（见 validateReceiveDraft 注释）。
-   */
+  /* 柜号草稿（收货时可选录入）。应收金额录入 2026-08-31 深夜按老板拍板拆除——
+     钱只在集货里，普通运单不录钱。 */
   const [prealertBatchDrafts, setPrealertBatchDrafts] = useState<Record<string, string>>({});
 
   const loadPrealerts = async (cancelled?: { current: boolean }) => {

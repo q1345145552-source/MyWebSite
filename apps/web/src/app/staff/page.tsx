@@ -376,8 +376,6 @@ export default function StaffHomePage() {
     a.productQuantity === b.productQuantity &&
     a.weightKg === b.weightKg &&
     a.volumeM3 === b.volumeM3 &&
-    a.receivableAmountCny === b.receivableAmountCny &&
-    a.receivableCurrency === b.receivableCurrency &&
     a.domesticTrackingNo === b.domesticTrackingNo &&
     a.transportMode === b.transportMode &&
     a.shipDate === b.shipDate;
@@ -580,11 +578,6 @@ export default function StaffHomePage() {
       setMessage("体积请输入有效数字。");
       return;
     }
-    const recv = draft.receivableAmountCny.trim() === "" ? 0 : Number(draft.receivableAmountCny);
-    if (!Number.isFinite(recv) || recv < 0) {
-      setMessage("加收金额请输入有效数字。");
-      return;
-    }
     setLoading(true);
     setMessage("");
     try {
@@ -604,8 +597,6 @@ export default function StaffHomePage() {
         shipDate: draft.shipLocal.trim() ? draft.shipLocal.trim().slice(0, 10) : null,
         receiverAddressTh: draft.receiverAddressTh,
         containerNo: draft.containerNo.trim() || null,
-        receivableAmountCny: recv,
-        receivableCurrency: draft.receivableCurrency,
         warehouseId: draft.warehouseId.trim(),
         remark: draft.remark?.trim() || null,
       });

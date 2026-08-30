@@ -34,8 +34,6 @@ export type ShipmentOrderEditDraft = {
   shipLocal: string;
   receiverAddressTh: string;
   containerNo: string;
-  receivableAmountCny: string;
-  receivableCurrency: "CNY" | "THB";
   paymentStatus: "paid" | "unpaid";
   destinationCountry: string;
   customsDeclaration: "none" | "declare";
@@ -63,8 +61,6 @@ export type PrealertEditDraft = {
   productQuantity: number;
   weightKg: number;
   volumeM3: number;
-  receivableAmountCny: number;
-  receivableCurrency: "CNY" | "THB";
   domesticTrackingNo: string;
   transportMode: "sea" | "land";
   shipDate: string;
