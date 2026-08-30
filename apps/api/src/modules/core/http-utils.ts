@@ -1,5 +1,6 @@
 import type { ApiResponse } from "../../../../../packages/shared-types/common-response";
 import type { HttpRequest, HttpResponse } from "../../server";
+import { isAuthHeaderRevoked } from "./token-blacklist";
 
 export type ErrorCode = Exclude<ApiResponse<unknown>["code"], "OK">;
 
@@ -35,6 +36,17 @@ export function requireAuth(req: HttpRequest, res: HttpResponse): NonNullable<Ht
     fail(res, 401, "UNAUTHORIZED", "missing auth context");
     return null;
   }
+  /**
+   * 退出登录的令牌不能再用（2026-08-31，排查报告第 58 条）。
+   * 签名对、没过期、账号也正常，但这张令牌已经通过 /auth/logout 主动作废了。
+   * ⚠️ server.ts 的 parseAuth 里**已经有同样一道**（同一个摘要口径），拉黑令牌
+   *    在那边就被拦成 undefined 了，正常情况下走不到这里 —— 这里是双保险，
+   *    兜「请求进行中另一个标签页刚好退出」那种毫秒级竞态，别删（2026-08-31 复查确认）。
+   */
+  if (isAuthHeaderRevoked(req.headers.authorization)) {
+    fail(res, 401, "UNAUTHORIZED", "登录已退出，请重新登录");
+    return null;
+  }
   return req.auth;
 }
 
@@ -50,14 +62,4 @@ export function requireRole(
     return null;
   }
   return auth;
-}
-
-export function parseJsonArray(text: string | null | undefined): string[] {
-  if (!text) return [];
-  try {
-    const parsed = JSON.parse(text) as unknown;
-    return Array.isArray(parsed) ? parsed.map((v) => String(v)) : [];
-  } catch {
-    return [];
-  }
 }

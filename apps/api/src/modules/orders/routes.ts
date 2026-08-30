@@ -1,7 +1,7 @@
 // B-3 ~ B-7: 已从 node:sqlite 迁移到 Prisma + PostgreSQL（2026-05-18）
-import { DECIMAL_10_2, DECIMAL_10_3, requireDecimal } from "../core/decimal-guard";
+import { DECIMAL_10_2, DECIMAL_10_3, DECIMAL_12_2, requireDecimal } from "../core/decimal-guard";
 import { parseNumericStrict, requirePositiveInt } from "../core/int-guard";
-import { lockShipmentsChildrenFirst } from "../shipments/lock-shipments";
+import { ShipmentsNotFoundError, lockShipmentsChildrenFirst } from "../shipments/lock-shipments";
 import { validateProductRows, validateOrderLevelQuantity } from "./product-row-guard";
 import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
@@ -15,7 +15,9 @@ import type { MinimalHttpApp } from "../../server";
    从 2026-06 起就一直算不出来。用户决定：运单金额线下算，系统不再参与，
    钱只在两个集货拼柜板块里算。整段删除，不留半死不活的代码。 */
 
-import { fail, ok, parseJsonArray, requireRole } from "../core/http-utils";
+// parseJsonArray 不再用了：/staff/prealerts 的仓库过滤已删（2026-08-31，排查报告第 7 条）；
+// 全仓库引用归零后，http-utils 里的函数本体也已删除（2026-08-31 复查第 16 条收尾）
+import { fail, ok, requireRole } from "../core/http-utils";
 import { loadProductImagesForOrders, MAX_ORDER_PRODUCT_IMAGES } from "./product-images";
 import { saveImageToDisk, deleteImageFile } from "./image-storage";
 import { sanitizeRemarkForClient } from "../core/client-privacy";
@@ -44,8 +46,29 @@ export async function loadOrderProducts(companyId: string, orderIds: string[]): 
   return map;
 }
 
-import { COMPLETED_STATUSES as COMPLETED } from "../shipments/status-flow";
+import { EXCEPTION_STATUSES } from "../shipments/status-flow";
 import { BusinessError } from "../core/business-error";
+
+/**
+ * 客户端订单四分类（2026-08-31，排查报告第 23 条拍板口径）。
+ * 按运单 currentStatus 算：
+ *   · 没有运单，或还在国内仓没发出（created / holdLoading）→ pending（未发出）
+ *   · delivered → delivered（已签收）
+ *   · returned / cancelled / exception → closed（退回/取消/异常）
+ *   · 其余一律 → transit（在途）
+ * 原来只有「完成/没完成」两分：刚建单没发走的、暂缓装柜的全被算成「在途」，
+ * 「已完成」又把退回、取消混进去，按钮名字和查出来的东西对不上。
+ * ⚠️ 客户首页状态分布图（client/page.tsx 的 clientStatusData）直接按这个字段画，
+ *    改这里的口径要两边一起看。
+ */
+function classifyClientStatusGroup(
+  currentStatus: string | null | undefined,
+): "pending" | "transit" | "delivered" | "closed" {
+  if (!currentStatus || currentStatus === "created" || currentStatus === "holdLoading") return "pending";
+  if (currentStatus === "delivered") return "delivered";
+  if (EXCEPTION_STATUSES.has(currentStatus)) return "closed";
+  return "transit";
+}
 
 /** Prisma 的 Decimal | null 转 number | null（用于返回前端）。 */
 function decToNumber(value: Prisma.Decimal | null | undefined): number | null {
@@ -123,30 +146,32 @@ function prealertPrefix(warehouseId: string): string {
   return "YWYB";
 }
 
-async function generatePrealertNo(warehouseId: string): Promise<string> {
+/**
+ * 2026-08-31（排查报告第 5 条）改成「在调用方的事务里取号」：
+ * 原来它自己开一个事务，advisory 锁在**取完号就放掉**了，订单行还没写进去——
+ * 下一个请求这时进来读到同一个最大号，两张单就会拿到同一个 GZYB 号。
+ * 现在锁跟着调用方的事务走（pg_advisory_xact_lock 到提交才释放），
+ * 「取号 → 写订单」全程持锁，真正做到排队生成。
+ */
+async function generatePrealertNo(tx: Prisma.TransactionClient, warehouseId: string): Promise<string> {
   const prefix = prealertPrefix(warehouseId);
-  // Use $transaction to keep advisory lock active during read+compute
-  const result = await prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${PREALERT_LOCK_KEY})`;
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(${PREALERT_LOCK_KEY})`;
 
-    const last = await tx.order.findFirst({
-      where: { orderNo: { startsWith: prefix } },
-      orderBy: { orderNo: "desc" },
-      select: { orderNo: true },
-    });
-
-    let nextSeq = 1;
-    if (last?.orderNo) {
-      const numPart = parseInt(last.orderNo.replace(prefix, ""), 10);
-      if (!Number.isNaN(numPart)) {
-        nextSeq = numPart + 1;
-      }
-    }
-
-    return `${prefix}${String(nextSeq).padStart(7, "0")}`;
+  const last = await tx.order.findFirst({
+    where: { orderNo: { startsWith: prefix } },
+    orderBy: { orderNo: "desc" },
+    select: { orderNo: true },
   });
 
-  return result;
+  let nextSeq = 1;
+  if (last?.orderNo) {
+    const numPart = parseInt(last.orderNo.replace(prefix, ""), 10);
+    if (!Number.isNaN(numPart)) {
+      nextSeq = numPart + 1;
+    }
+  }
+
+  return `${prefix}${String(nextSeq).padStart(7, "0")}`;
 }
 
 export function registerOrderRoutes(app: MinimalHttpApp): void {
@@ -272,88 +297,106 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
     }
     const manualWeightKg = body.weightKg === undefined || body.weightKg === null ? null : Number(body.weightKg);
     const manualVolumeM3 = body.volumeM3 === undefined || body.volumeM3 === null ? null : Number(body.volumeM3);
-    const orderId = `o_${Date.now()}`;
+    /* 2026-08-31（排查报告第 5 条）：内部编号加随机后缀。
+       原来 orderId / shipmentId 只用当前毫秒数，两个客户（或一个客户双击提交）
+       撞同一毫秒就撞主键报错；同文件写轨迹编号（sl_）和派送单号（admin-ops 的 lm_）
+       早就是「时间戳 + 随机后缀」的写法，这里对齐。 */
+    const orderId = `o_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
-    const orderNo = await generatePrealertNo(body.warehouseId.trim());
+    /* 2026-08-31（排查报告第 5 条）：取号、订单、产品行、运单、首条轨迹
+       全部包进同一个事务。原来是四次各写各的，中间任何一步失败前面的不回滚，
+       会留下「有订单没运单、没轨迹」的半套数据——客户列表里看得到这张单，
+       但没运单号、装不了柜，只能找技术手工补。写法照同文件「确认收货」那条路；
+       这里全是新建行、没有并发改同一行的问题，所以不需要行锁和锁后重读
+       （取号的排队靠 generatePrealertNo 里的 advisory 锁，锁到提交才放）。 */
+    const orderNo = await prisma.$transaction(async (tx) => {
+      const newOrderNo = await generatePrealertNo(tx, body.warehouseId!.trim());
+      await tx.order.create({
+        data: {
+          id: orderId,
+          companyId: auth.companyId,
+          clientId: auth.userId,
+          warehouseId: body.warehouseId!.trim(),
+          batchNo: null,
+          orderNo: newOrderNo,
+          approvalStatus: "shipped",
+          itemName: primaryName,
+          productQuantity: 0,
+          packageCount: totalPkg,
+          packageUnit: body.packageUnit ?? "box",
+          weightKg: totalWeight > 0 ? (totalWeight as unknown as Prisma.Decimal) : (manualWeightKg as unknown as Prisma.Decimal | null),
+          volumeM3: totalVol > 0 ? totalVol : (manualVolumeM3 as unknown as Prisma.Decimal | null),
+          receivableAmountCny: null,
+          receivableCurrency: "CNY",
+          shipDate: shipDateText,
+          domesticTrackingNo: body.domesticTrackingNo ?? null,
+          transportMode: body.transportMode!,
+          receiverNameTh: body.receiverNameTh?.trim() || "",
+          receiverPhoneTh: body.receiverPhoneTh?.trim() || "",
+          receiverAddressTh: body.receiverAddressTh?.trim() || "",
+          statusGroup: "unfinished",
+        },
+      });
 
-    await prisma.order.create({
-      data: {
-        id: orderId,
-        companyId: auth.companyId,
-        clientId: auth.userId,
-        warehouseId: body.warehouseId.trim(),
-        batchNo: null,
-        orderNo,
-        approvalStatus: "shipped",
-        itemName: primaryName,
-        productQuantity: 0,
-        packageCount: totalPkg,
-        packageUnit: body.packageUnit ?? "box",
-        weightKg: totalWeight > 0 ? (totalWeight as unknown as Prisma.Decimal) : (manualWeightKg as unknown as Prisma.Decimal | null),
-        volumeM3: totalVol > 0 ? totalVol : (manualVolumeM3 as unknown as Prisma.Decimal | null),
-        receivableAmountCny: null,
-        receivableCurrency: "CNY",
-        shipDate: shipDateText,
-        domesticTrackingNo: body.domesticTrackingNo ?? null,
-        transportMode: body.transportMode,
-        receiverNameTh: body.receiverNameTh?.trim() || "",
-        receiverPhoneTh: body.receiverPhoneTh?.trim() || "",
-        receiverAddressTh: body.receiverAddressTh?.trim() || "",
-        statusGroup: "unfinished",
-      },
-    });
+      // Create product records (批量插入)
+      if (products.length > 0) {
+        await tx.orderProduct.createMany({
+          data: products.map((p, i) => ({
+            companyId: auth.companyId,
+            orderId,
+            itemName: p.itemName,
+            packageCount: p.packageCount,
+            lengthCm: p.lengthCm ?? null,
+            widthCm: p.widthCm ?? null,
+            heightCm: p.heightCm ?? null,
+            productQuantity: p.productQuantity ?? null,
+            cargoType: p.cargoType,
+            domesticTrackingNo: p.domesticTrackingNo,
+            // 2026-08-31（排查报告第 6 条）：客户逐行填的单箱重量原来漏写这一列，
+            // 总重算对了、明细行全存成空，员工端打开看重量列全空。员工建单那条路
+            // （下面 /staff/orders）一直是存的，这里补齐对齐。
+            weightKg: p.weightKg,
+            sortOrder: i,
+          })),
+        });
+      }
 
-    // Create product records (批量插入)
-    if (products.length > 0) {
-      await prisma.orderProduct.createMany({
-        data: products.map((p, i) => ({
+      // 同步创建运单（预报单=运单号）
+      const shipmentId = `s_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      await tx.shipment.create({
+        data: {
+          id: shipmentId,
           companyId: auth.companyId,
           orderId,
-          itemName: p.itemName,
-          packageCount: p.packageCount,
-          lengthCm: p.lengthCm ?? null,
-          widthCm: p.widthCm ?? null,
-          heightCm: p.heightCm ?? null,
-          productQuantity: p.productQuantity ?? null,
-          cargoType: p.cargoType,
-          domesticTrackingNo: p.domesticTrackingNo,
-          sortOrder: i,
-        })),
+          trackingNo: newOrderNo,
+          batchNo: null,
+          currentStatus: "created",
+          weightKg: totalWeight > 0 ? (totalWeight as unknown as Prisma.Decimal) : (manualWeightKg as unknown as Prisma.Decimal | null),
+          volumeM3: totalVol > 0 ? (totalVol as unknown as Prisma.Decimal) : (manualVolumeM3 as unknown as Prisma.Decimal | null),
+          packageCount: totalPkg,
+          packageUnit: body.packageUnit ?? "box",
+          transportMode: body.transportMode!,
+          domesticTrackingNo: body.domesticTrackingNo ?? null,
+          warehouseId: body.warehouseId!.trim(),
+        },
       });
-    }
 
-    // 同步创建运单（预报单=运单号）
-    const shipmentId = `s_${Date.now()}`;
-    await prisma.shipment.create({
-      data: {
-        id: shipmentId,
-        companyId: auth.companyId,
-        orderId,
-        trackingNo: orderNo,
-        batchNo: null,
-        currentStatus: "created",
-        weightKg: totalWeight > 0 ? (totalWeight as unknown as Prisma.Decimal) : (manualWeightKg as unknown as Prisma.Decimal | null),
-        volumeM3: totalVol > 0 ? (totalVol as unknown as Prisma.Decimal) : (manualVolumeM3 as unknown as Prisma.Decimal | null),
-        packageCount: totalPkg,
-        packageUnit: body.packageUnit ?? "box",
-        transportMode: body.transportMode,
-        domesticTrackingNo: body.domesticTrackingNo ?? null,
-        warehouseId: body.warehouseId.trim(),
-      },
-    });
+      // 2026-08-06：轨迹的起点。原来建单不写任何轨迹，客户查件最早只能看到「已装柜」，
+      // 前面从预报到装柜的十天半个月是空白（生产实测「已创建」轨迹条数为 0）。
+      await tx.statusLog.create({
+        data: {
+          id: `sl_new_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          companyId: auth.companyId, shipmentId,
+          operatorId: auth.userId, operatorRole: auth.role, operatorName: auth.name ?? "",
+          fromStatus: "created", toStatus: "created",
+          remark: "客户已提交预报，等待国内仓收货",
+          nextStop: "国内仓",
+          changedAt: new Date(),
+        },
+      });
 
-    // 2026-08-06：轨迹的起点。原来建单不写任何轨迹，客户查件最早只能看到「已装柜」，
-    // 前面从预报到装柜的十天半个月是空白（生产实测「已创建」轨迹条数为 0）。
-    await prisma.statusLog.create({
-      data: {
-        id: `sl_new_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        companyId: auth.companyId, shipmentId,
-        operatorId: auth.userId, operatorRole: auth.role, operatorName: auth.name ?? "",
-        fromStatus: "created", toStatus: "created",
-        remark: "客户已提交预报，等待国内仓收货",
-        nextStop: "国内仓",
-        changedAt: new Date(),
-      },
+      // ⚠️ 事务回调必须 return，外层才拿得到值（CLAUDE.md 强制检查第 7 条）
+      return newOrderNo;
     });
 
     ok(res, { prealertId: orderId, trackingNo: orderNo, createdAt: now });
@@ -377,6 +420,10 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       domesticTrackingNo?: string;
       transportMode?: "sea" | "land";
       cargoType?: string;
+      // 2026-08-31（排查报告第 1 条）：确认收货弹窗里的「应收金额」「柜号」
+      // 原来前端根本没上送、这里也不认识，员工填了等于白填。现在随收货一起保存。
+      receivableAmountCny?: number;
+      batchNo?: string;
     };
     const orderId = body.orderId?.trim();
     if (!orderId) { fail(res, 400, "BAD_REQUEST", "orderId is required"); return; }
@@ -439,6 +486,22 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       if (issue) { fail(res, 400, "VALIDATION_ERROR", issue); return; }
       receiveVolumeM3 = parseNumericStrict(body.volumeM3);
     }
+    /**
+     * 应收金额（2026-08-31，排查报告第 1 条）：
+     *   · 列是 Decimal(12,2)，按 12,2 卡上限和小数位，跟别的字段一个规矩；
+     *   · 跟重量方数不同，金额**允许填 0**（免收的单确实存在），
+     *     所以用 min: 0 覆盖 requireDecimal 默认的「最小 0.01」；
+     *   · 没传就不动订单上原有的值——弹窗之外的入口不受影响。
+     */
+    let receiveReceivableAmountCny: number | undefined;
+    if (body.receivableAmountCny !== undefined && body.receivableAmountCny !== null) {
+      const issue = requireDecimal(body.receivableAmountCny, "应收金额(元)", { ...DECIMAL_12_2, min: 0 });
+      if (issue) { fail(res, 400, "VALIDATION_ERROR", issue); return; }
+      receiveReceivableAmountCny = parseNumericStrict(body.receivableAmountCny);
+    }
+    // 柜号：trim 后存；传空串当「没填」，不去清掉订单上已有的柜号
+    const receiveBatchNo =
+      typeof body.batchNo === "string" && body.batchNo.trim() ? body.batchNo.trim() : undefined;
 
     const order = await prisma.order.findFirst({
       where: { id: orderId, companyId: auth.companyId },
@@ -466,6 +529,9 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
     if (body.transportMode) updateData.transportMode = body.transportMode;
     if (body.cargoType) updateData.cargoType = body.cargoType;
     if (body.domesticTrackingNo) updateData.domesticTrackingNo = body.domesticTrackingNo;
+    // 2026-08-31（排查报告第 1 条）：传了才写，没传不动
+    if (receiveReceivableAmountCny !== undefined) updateData.receivableAmountCny = receiveReceivableAmountCny as any;
+    if (receiveBatchNo !== undefined) updateData.batchNo = receiveBatchNo;
 
     /**
      * ⚠️⚠️ **订单 + 运单 + 轨迹必须在同一个事务里**（2026-08-29 第九轮改）。
@@ -522,6 +588,10 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
         if (body.packageUnit) sUpdate.packageUnit = body.packageUnit;
         if (body.transportMode) sUpdate.transportMode = body.transportMode;
         if (body.itemName?.trim()) sUpdate.itemName = body.itemName.trim();
+        // 柜号要同步写到运单上：运单列表显示的是 shipment.batchNo（shipments/routes.ts），
+        // 只写订单的话，收货时填的柜号在运单列表里看不到——「订单详情」编辑那条路
+        // （patch-shipment-bundle）也是两边一起写的，口径保持一致（2026-08-31）
+        if (receiveBatchNo !== undefined) sUpdate.batchNo = receiveBatchNo;
         await tx.shipment.update({ where: { id: shipment.id }, data: sUpdate });
 
         // 2026-08-06：国内仓收到货是客户最关心的一步，原来一条轨迹都不写。
@@ -767,20 +837,6 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       raw === undefined || raw === null || raw === "" ? undefined : (raw as T);
 
     const now = new Date();
-    const data = {
-      itemName: itemName ?? order.itemName,
-      packageCount: packageCount ?? order.packageCount,
-      packageUnit: enumVal<"bag" | "box">(body.packageUnit) ?? order.packageUnit,
-      weightKg: weightKg !== undefined ? (weightKg as unknown as Prisma.Decimal) : order.weightKg,
-      volumeM3: volumeM3 !== undefined ? (volumeM3 as unknown as Prisma.Decimal) : order.volumeM3,
-      shipDate: shipDate ?? order.shipDate,
-      domesticTrackingNo: domesticTrackingNo ?? order.domesticTrackingNo,
-      transportMode: enumVal<"sea" | "land">(body.transportMode) ?? order.transportMode,
-      receiverNameTh: receiverNameTh ?? order.receiverNameTh,
-      receiverPhoneTh: receiverPhoneTh ?? order.receiverPhoneTh,
-      receiverAddressTh: receiverAddressTh ?? order.receiverAddressTh,
-      updatedAt: now,
-    };
 
     // 值是否等价。Decimal / number / string 混着来，先按字符串比，
     // 再按数值比一次，避免 17.06 与 "17.060" 这种同值不同形被当成改动。
@@ -805,25 +861,62 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
     //       body 里的 null / "" 在上面已经被判定为「本次不改」，
     //       拿原始值比会把「没改」误判成「改了」，同样拦错人。
     //    所以这段放在 data 组装完之后，比的是「真正要写进去的值」vs「库里的值」。
-    const billingLocked =
-      order.approvalStatus === "shipped" || order.paymentStatus === "paid";
-    if (billingLocked) {
-      const LOCKED_WHEN_BILLED = [
-        "itemName", "packageCount", "packageUnit", "weightKg",
-        "volumeM3", "transportMode", "shipDate", "domesticTrackingNo",
-      ] as const;
-      const changedLocked = LOCKED_WHEN_BILLED.filter(
-        (f) => !sameValue(data[f], (order as unknown as Record<string, unknown>)[f]),
-      );
-      if (changedLocked.length > 0) {
-        const why = order.paymentStatus === "paid" ? "该订单已付款" : "该订单已发货";
-        fail(res, 400, "VALIDATION_ERROR",
-          `${why}，不能再修改计费与报关信息（${changedLocked.join("、")}）。需要更正请联系客服。`);
-        return;
+    /* 2026-08-31（排查报告第 53 条）：包进事务，先锁订单行、锁完重读再决定写不写。
+       原来「能不能改」的检查（已收货、计费锁定）全在事务外面——客户点保存和
+       仓库点「确认收货」撞在同一瞬间时，这边照样把仓库核实过的重量、体积、箱数
+       改回客户自己填的数。系统里别的写路径早都改成「锁住 → 复查 → 再写」了，
+       就这条漏了。规矩照 CLAUDE.md 第 28 条：锁只保证不同时、不保证数据没变，
+       所以 data 的「本次不改就回落原值」也必须用锁内重读的那份，
+       不能用事务外的旧快照——不然会把别人刚写进去的值又盖回旧值。
+       上面事务外那道「已确认收货」检查保留，只当早一点的友好提示。 */
+    const { freshOrder, data } = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM orders WHERE id = ${orderId} AND company_id = ${auth.companyId} FOR UPDATE`;
+      const fresh = await tx.order.findFirst({
+        where: { id: orderId, companyId: auth.companyId, clientId: auth.userId },
+      });
+      if (!fresh) throw new BusinessError("订单不存在", 404, "NOT_FOUND");
+      if (fresh.approvalStatus === "received") {
+        throw new BusinessError("这张单刚刚被确认收货了，本次修改没有保存，请刷新后再看", 400, "VALIDATION_ERROR");
       }
-    }
 
-    await prisma.order.update({ where: { id: orderId }, data });
+      const data = {
+        itemName: itemName ?? fresh.itemName,
+        packageCount: packageCount ?? fresh.packageCount,
+        packageUnit: enumVal<"bag" | "box">(body.packageUnit) ?? fresh.packageUnit,
+        weightKg: weightKg !== undefined ? (weightKg as unknown as Prisma.Decimal) : fresh.weightKg,
+        volumeM3: volumeM3 !== undefined ? (volumeM3 as unknown as Prisma.Decimal) : fresh.volumeM3,
+        shipDate: shipDate ?? fresh.shipDate,
+        domesticTrackingNo: domesticTrackingNo ?? fresh.domesticTrackingNo,
+        transportMode: enumVal<"sea" | "land">(body.transportMode) ?? fresh.transportMode,
+        receiverNameTh: receiverNameTh ?? fresh.receiverNameTh,
+        receiverPhoneTh: receiverPhoneTh ?? fresh.receiverPhoneTh,
+        receiverAddressTh: receiverAddressTh ?? fresh.receiverAddressTh,
+        updatedAt: now,
+      };
+
+      const billingLocked =
+        fresh.approvalStatus === "shipped" || fresh.paymentStatus === "paid";
+      if (billingLocked) {
+        const LOCKED_WHEN_BILLED = [
+          "itemName", "packageCount", "packageUnit", "weightKg",
+          "volumeM3", "transportMode", "shipDate", "domesticTrackingNo",
+        ] as const;
+        const changedLocked = LOCKED_WHEN_BILLED.filter(
+          (f) => !sameValue(data[f], (fresh as unknown as Record<string, unknown>)[f]),
+        );
+        if (changedLocked.length > 0) {
+          const why = fresh.paymentStatus === "paid" ? "该订单已付款" : "该订单已发货";
+          throw new BusinessError(
+            `${why}，不能再修改计费与报关信息（${changedLocked.join("、")}）。需要更正请联系客服。`,
+            400,
+            "VALIDATION_ERROR",
+          );
+        }
+      }
+
+      await tx.order.update({ where: { id: orderId }, data });
+      return { freshOrder: fresh, data };
+    });
 
     // 留痕：只记真正变了的字段，改前改后都留。
     // audit_logs 表建好很久了但一直零写入，从这个接口开始用起来。
@@ -832,7 +925,8 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       const changed: Record<string, { before: unknown; after: unknown }> = {};
       for (const [k, after] of Object.entries(data)) {
         if (k === "updatedAt") continue;
-        const before = (order as unknown as Record<string, unknown>)[k];
+        // 「改前」取锁内重读的那份，跟真正写库时比较的是同一个基准（2026-08-31）
+        const before = (freshOrder as unknown as Record<string, unknown>)[k];
         if (!sameValue(before, after)) changed[k] = { before, after };
       }
       if (Object.keys(changed).length > 0) {
@@ -1014,8 +1108,12 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
     }
 
     const now = arrivedAtDate.toISOString();
-    const orderId = `o_${Date.now()}`;
-    const shipmentId = `s_${Date.now()}`;
+    /* 2026-08-31（排查报告第 5 条同病根）：内部编号加随机后缀。
+       原来只用当前毫秒数，两个员工（或一个员工双击提交）撞同一毫秒
+       就撞主键报错；批量建单更是一毫秒里连发好几张。
+       写法照上面客户预报那条路（o_/s_ + 4 位随机尾巴）。 */
+    const orderId = `o_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const shipmentId = `s_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const manualTrackingNo = body.trackingNo?.trim();
     if (manualTrackingNo) {
       const clash = await prisma.shipment.findFirst({
@@ -1179,6 +1277,19 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
     const page = parseInt(req.query.page as string) || 1;
     const pageSize = Math.min(parseInt(req.query.pageSize as string) || 50, 500);
     const statusGroup = req.query.statusGroup?.trim();
+    /* 2026-08-31（排查报告第 23 条）：查询参数改收四分类。
+       老值兼容：老页面缓存还会发 unfinished / completed ——
+       unfinished = pending + transit，completed = delivered + closed。
+       不认识的值跟原来一样当「不过滤」。 */
+    const GROUP_ALIAS: Record<string, Array<"pending" | "transit" | "delivered" | "closed">> = {
+      pending: ["pending"],
+      transit: ["transit"],
+      delivered: ["delivered"],
+      closed: ["closed"],
+      unfinished: ["pending", "transit"],
+      completed: ["delivered", "closed"],
+    };
+    const wantedGroups = statusGroup ? GROUP_ALIAS[statusGroup] : undefined;
     const itemName = req.query.itemName?.trim();
     const transportMode = req.query.transportMode?.trim();
     const trackingNo = req.query.trackingNo?.trim();
@@ -1187,7 +1298,11 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
 
     const where: Prisma.OrderWhereInput = {
       companyId: auth.companyId,
-      approvalStatus: { in: ["approved", "shipped"] },
+      /* 2026-08-31（排查报告第 23 条）：加上 received。
+         员工点「确认收货」后订单变成 received，全系统没有任何代码再把它改回来——
+         原来这里只认 approved/shipped，单子一被确认到仓就从客户的订单列表、
+         三个分组按钮和首页统计里全部消失，客户会以为单丢了。 */
+      approvalStatus: { in: ["approved", "shipped", "received"] },
       clientId: auth.userId,
       // 运单号搜索下推到数据库：父单、子单任一命中都算，且 count 与列表口径一致
       ...(trackingNo ? { shipments: { some: { trackingNo } } } : {}),
@@ -1243,12 +1358,9 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       .filter((o) => !orderNo || o.orderNo === orderNo)
       .filter((o) => !domesticTrackingNo || o.domesticTrackingNo === domesticTrackingNo)
       .filter((o) => {
-        // shipments 已用 take:1 限制为 1 条（父单优先），直接取其状态
-        const cur = o.shipments[0]?.currentStatus ?? null;
-        const completed = cur ? COMPLETED.has(cur) : false;
-        if (statusGroup === "completed") return completed;
-        if (statusGroup === "unfinished") return !completed;
-        return true;
+        // shipments 已用 take:1 限制为 1 条（父单优先），直接取其状态算四分类
+        if (!wantedGroups) return true;
+        return wantedGroups.includes(classifyClientStatusGroup(o.shipments[0]?.currentStatus));
       });
 
     const items = filtered.map((o) => {
@@ -1282,6 +1394,10 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
         approvalStatus: o.approvalStatus,
         trackingNo: ship?.trackingNo ?? null,
         currentStatus: ship?.currentStatus ?? null,
+        // 2026-08-31（排查报告第 23 条）：每张单都带算好的四分类，
+        // 分组按钮和首页状态分布图都按它来，别再各自发明算法。
+        // ⚠️ 不是订单表里那个 statusGroup 列（那个只有 unfinished/completed 两种老值）。
+        statusGroup: classifyClientStatusGroup(ship?.currentStatus),
         productQuantity: o.productQuantity,
         packageCount: o.packageCount,
         packageUnit: o.packageUnit,
@@ -1322,23 +1438,35 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
     const auth = requireRole(req, res, ["client"]);
     if (!auth) return;
     const statusFilter = req.query.status?.trim();
+    /* 2026-08-31（排查报告第 23 条）：加真分页。
+       原来一次全量返回、total 写的是本次返回条数——前端把列表砍到前 50 条时
+       连「后面还有」都看不出来（排查报告第 47 条）。默认 50、上限 500，
+       total 是过滤后的真实总数，前端按它翻页。 */
+    const page = Math.max(parseInt(req.query.page as string) || 1, 1);
+    const pageSize = Math.min(Math.max(parseInt(req.query.pageSize as string) || 50, 1), 500);
     const approvalFilter = statusFilter === "all"
       ? undefined
       : statusFilter === "approved" || statusFilter === "shipped"
         ? statusFilter
         : "pending";
-    const orders = await prisma.order.findMany({
-      where: {
-        companyId: auth.companyId,
-        approvalStatus: approvalFilter,
-        clientId: auth.userId,
-      },
-      orderBy: { createdAt: "desc" },
-      include: {
-        client: { select: { name: true } },
-        shipments: { orderBy: { createdAt: "desc" }, take: 1, select: { trackingNo: true, currentStatus: true } },
-      },
-    });
+    const prealertWhere: Prisma.OrderWhereInput = {
+      companyId: auth.companyId,
+      approvalStatus: approvalFilter,
+      clientId: auth.userId,
+    };
+    const [prealertTotal, orders] = await Promise.all([
+      prisma.order.count({ where: prealertWhere }),
+      prisma.order.findMany({
+        where: prealertWhere,
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: {
+          client: { select: { name: true } },
+          shipments: { orderBy: { createdAt: "desc" }, take: 1, select: { trackingNo: true, currentStatus: true } },
+        },
+      }),
+    ]);
     const items = orders.map((o) => ({
       id: o.id,
       warehouseId: o.warehouseId,
@@ -1376,9 +1504,10 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
     }));
     ok(res, {
       items: prealertItemsWithImages,
-      page: 1,
-      pageSize: prealertItemsWithImages.length,
-      total: prealertItemsWithImages.length,
+      page,
+      pageSize,
+      // 过滤后的真实总数，不再是「本次返回了几条」（2026-08-31，排查报告第 23 条）
+      total: prealertTotal,
     });
   });
 
@@ -1386,12 +1515,11 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
     const auth = requireRole(req, res, ["staff", "admin"]);
     if (!auth) return;
 
-    const user = await prisma.user.findUnique({
-      where: { id: auth.userId },
-      select: { warehouseIds: true },
-    });
-    const editableWarehouses = parseJsonArray(user?.warehouseIds);
-
+    /* 2026-08-31（排查报告第 7 条）：删掉按「授权仓库」过滤的老代码。
+       2026-08-22 已拍板「不分仓库管」（见本文件 staffCanEditOrderWarehouse 的注释），
+       改单、传图、确认收货都照办放行了，唯独这个列表漏改——
+       授权仓库为空的员工账号（干活最多的「可爱」正是空的）打开预报单审核页
+       会一张单都看不到。现在跟其他入口一样：全体员工看全部预报单。 */
     const orders = await prisma.order.findMany({
       where: {
         companyId: auth.companyId,
@@ -1404,7 +1532,6 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
     });
 
     const items = orders
-      .filter((o) => auth.role === "admin" || editableWarehouses.includes(o.warehouseId))
       .map((o) => ({
         id: o.id,
         clientId: o.clientId,
@@ -1727,14 +1854,77 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
        不换算直接写的话，改一张拆过柜的单就会把整单箱数冲成剩余数
        （YW0001342 那种：整单 101 会被写成 71，真值就找不回来了）。
        没拆过柜的单已装走为 0，两个数相等，行为跟原来完全一样。 */
-    const loadedForOrder = await prisma.shipment.aggregate({
-      where: { parentTrackingNo: shipment.trackingNo, companyId: auth.companyId },
-      _sum: { packageCount: true },
-    });
-    const alreadyLoadedPkg = loadedForOrder._sum.packageCount ?? 0;
+    /* 2026-08-31（排查报告第 52 条同款）：「已经装走多少」原来在事务**外面**
+       算完才进事务 —— 查完到真正写库之间没有排队，装柜恰好插进来的话，
+       这里用的还是装柜前的旧数，订单的整单箱数/总重/总体积就会加少
+       （CLAUDE.md 第 28 条：锁只保证不同时，不保证数据没变；
+       拿来做决定的数字必须锁后重读）。照管理员端编辑那条路的修法：
+       先把本运单锁住（跟装柜/分柜排同一个队），锁到手再查子单合计、再算、再写。 */
+    await prisma.$transaction(async (tx) => {
+      // 锁序【订单 → 运单】，跟本文件确认收货 / 客户改单那几条路一致（549→571 那段）。
+      // 这个事务下面要 update orders，先把订单行锁住，两个编辑入口同时保存才会排队。
+      await tx.$queryRaw`SELECT id FROM orders WHERE id = ${curOrder.id} AND company_id = ${auth.companyId} FOR UPDATE`;
+      await lockShipmentsChildrenFirst(tx, [shipmentId], auth.companyId);
+      // 锁后重读运单号（CLAUDE.md 第 28 条）：拿锁之前那份快照里的
+      // trackingNo 可能已被并发编辑改掉，查子单合计要用锁内的值
+      const lockedShipment = await tx.shipment.findFirst({
+        where: { id: shipmentId, companyId: auth.companyId },
+        select: { trackingNo: true },
+      });
+      if (!lockedShipment) {
+        // 预读到拿锁之间被并发硬删了 —— 跟锁函数内部一个语义，按 404 报
+        throw new ShipmentsNotFoundError([shipmentId]);
+      }
+      const loadedForOrder = await tx.shipment.aggregate({
+        where: { parentTrackingNo: lockedShipment.trackingNo, companyId: auth.companyId },
+        _sum: { packageCount: true, weightKg: true, volumeM3: true },
+        _count: true,
+      });
+      const alreadyLoadedPkg = loadedForOrder._sum.packageCount ?? 0;
 
-    await prisma.$transaction([
-      prisma.order.update({
+      /* 2026-08-31（复查第 5 条）：拆过柜的单不许改运单号。
+         子单全靠 parentTrackingNo = 父单运单号这根线认亲 —— 父单一改号，
+         子单当场失联：下次保存时上面这份子单合计查出来是 0，
+         订单的箱数/重量/体积又会被冲成剩余数（正是第 4 条刚堵上的丢数），
+         卸柜还货、父单状态同步这些按 parentTrackingNo 走的流程也全断。
+         同步改子单动静太大（还要连带轨迹/装柜记录逐个核），先一律拦住。 */
+      if (loadedForOrder._count > 0 && trackingNo !== lockedShipment.trackingNo) {
+        throw new BusinessError(
+          `这张运单已经拆过柜（有 ${loadedForOrder._count} 张子单挂在原单号下），不能修改运单号，本次修改都没有保存。请先把单号改回 ${lockedShipment.trackingNo} 再保存其他修改。`,
+        );
+      }
+
+      /* 2026-08-31（排查报告第 4 条）：重量和体积也要做跟箱数一模一样的换算。
+         原来只有箱数加回了「已装走的」，重量体积却把编辑框里的剩余数直接写进订单——
+         拆过柜的单打开编辑框点一下保存（啥都不改），订单总重就从 100 冲成 30，
+         跟当年 YW0001342 整单箱数被冲成 0 是同一类毛病，当时只修了箱数这一半。
+
+         子单的重量/体积是分柜时按件数精确分摊过去的（split-metrics.ts 保证
+         「子单合计 + 父单余量 = 拆分前总量」），所以「剩余 + 子单合计」就是原总量。
+         历史手工分柜的子单可能没存这两列，_sum 会跳过 null——那种单加回来的会偏少，
+         但也远好过原来把已装走部分整个抹掉。
+
+         舍入位数跟数据库列一致（重量 Decimal(10,2)、体积 Decimal(10,3)），
+         算法照抄 decimal-guard 的 roundToScale，免得浮点相加带出一串尾数。 */
+      const roundToScale = (n: number, scale: number): number => {
+        const f = 10 ** scale;
+        return Math.round((n + Number.EPSILON) * f) / f;
+      };
+      const alreadyLoadedWeightKg =
+        loadedForOrder._sum.weightKg == null ? null : Number(loadedForOrder._sum.weightKg.toString());
+      const alreadyLoadedVolumeM3 =
+        loadedForOrder._sum.volumeM3 == null ? null : Number(loadedForOrder._sum.volumeM3.toString());
+      // 两边都没数（没拆过柜、编辑框也没填）时保持 null，别把「没填」写成 0
+      const orderWeightKg =
+        weightKg === null && alreadyLoadedWeightKg === null
+          ? null
+          : roundToScale((weightKg ?? 0) + (alreadyLoadedWeightKg ?? 0), 2);
+      const orderVolumeM3 =
+        volumeM3 === null && alreadyLoadedVolumeM3 === null
+          ? null
+          : roundToScale((volumeM3 ?? 0) + (alreadyLoadedVolumeM3 ?? 0), 3);
+
+      await tx.order.update({
         where: { id: curOrder.id },
         data: {
           warehouseId: nextWarehouseId,
@@ -1743,16 +1933,17 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
           productQuantity: Math.floor(productQuantity),
           packageCount: Math.floor(packageCount) + alreadyLoadedPkg,
           packageUnit,
-          weightKg: weightKg as unknown as Prisma.Decimal | null,
-          volumeM3: (volumeM3 as unknown as Prisma.Decimal | null),
+          // 订单上存「剩余 + 已装走」的合计，跟上面箱数同一个规矩（2026-08-31）
+          weightKg: orderWeightKg as unknown as Prisma.Decimal | null,
+          volumeM3: (orderVolumeM3 as unknown as Prisma.Decimal | null),
           domesticTrackingNo,
           transportMode,
           shipDate,
           receiverAddressTh,
           createdAt: arrived,
         },
-      }),
-      prisma.shipment.update({
+      });
+      await tx.shipment.update({
         where: { id: shipmentId },
         data: {
           warehouseId: nextWarehouseId,
@@ -1780,8 +1971,8 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
           containerNo,
           remark: body.remark !== undefined ? body.remark?.trim() || null : undefined,
         },
-      }),
-    ]);
+      });
+    });
 
     ok(res, {
       shipmentId,

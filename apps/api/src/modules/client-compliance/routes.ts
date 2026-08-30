@@ -84,7 +84,9 @@ export function registerClientComplianceRoutes(app: MinimalHttpApp): void {
     }
     const recharge = await prisma.walletRecharge.create({
       data: {
-        id: `rcg_${Date.now()}`,
+        // 2026-08-31：单号加随机后缀（照抄 admin-ops 里 lm_ 的写法）。
+        // 原来只用时间戳，两笔申请撞同一毫秒会撞号，第二笔被数据库拒收报「服务器错误」。
+        id: `rcg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
         companyId: auth.companyId,
         clientId: auth.userId,
         currency,
@@ -184,13 +186,21 @@ export function registerClientComplianceRoutes(app: MinimalHttpApp): void {
     ok(res, map);
   });
 
-  // 保存客户备注（仅管理员）
+  // 保存客户备注（员工和管理员都在用；路径里的 admin 是历史遗留，别被名字骗了）
   app.post("/admin/shipping/notes", async (req, res) => {
     const auth = requireRole(req, res, ["staff", "admin"]);
     if (!auth) return;
     const body = (req.body ?? {}) as { clientId?: string; content?: string };
     const clientId = body.clientId?.trim();
     if (!clientId) { fail(res, 400, "BAD_REQUEST", "clientId required"); return; }
+    // 2026-08-31：先核对客户是不是本公司的（照抄 whr-consolidation 的写法）。
+    // 原来只认客户编号不看公司，将来接了第二家公司，对方员工传我们客户的编号
+    // 就能把我们写的备注整个覆盖掉。现在只有一家公司在用，属于提前补闸。
+    const client = await prisma.user.findFirst({
+      where: { id: clientId, companyId: auth.companyId, role: "client" },
+      select: { id: true },
+    });
+    if (!client) { fail(res, 404, "NOT_FOUND", "客户不存在或不属于本公司"); return; }
     await prisma.clientNote.upsert({
       where: { clientId },
       create: { companyId: auth.companyId, clientId, content: body.content ?? "" },
@@ -214,9 +224,17 @@ export function registerClientComplianceRoutes(app: MinimalHttpApp): void {
     if (!body.contactName?.trim()) { fail(res, 400, "BAD_REQUEST", "contactName required"); return; }
     if (!body.contactPhone?.trim()) { fail(res, 400, "BAD_REQUEST", "contactPhone required"); return; }
     if (!body.addressDetail?.trim()) { fail(res, 400, "BAD_REQUEST", "addressDetail required"); return; }
+    // 2026-08-31 收尾补：跟上面保存备注同一道闸——客户必须是本公司的，
+    // 否则将来接了第二家公司，能拿别家客户的编号往咱们库里挂地址。
+    const addrClient = await prisma.user.findFirst({
+      where: { id: clientId, companyId: auth.companyId, role: "client" },
+      select: { id: true },
+    });
+    if (!addrClient) { fail(res, 404, "NOT_FOUND", "客户不存在或不属于本公司"); return; }
     const addr = await prisma.clientAddress.create({
       data: {
-        id: `addr_${Date.now()}`,
+        // 2026-08-31：同上，加随机后缀防止同一毫秒两条地址撞号
+        id: `addr_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
         companyId: auth.companyId,
         clientId,
         contactName: body.contactName.trim(),

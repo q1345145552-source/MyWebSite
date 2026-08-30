@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { URL } from "node:url";
 import { describeTokenFailure, verifyAuthToken } from "./modules/auth/token";
 import { isSessionStillValid } from "./modules/auth/session-guard";
+import { isTokenRevoked } from "./modules/core/token-blacklist";
 import { logger } from "./modules/core/logger";
 import { isBusinessError } from "./modules/core/business-error";
 import { fail } from "./modules/core/http-utils";
@@ -60,6 +61,16 @@ async function parseAuth(headers: IncomingMessage["headers"], path?: string): Pr
   const payload = verifyAuthToken(match[1].trim());
   if (!payload) {
     logger.warn("认证失败：令牌没通过", { path, 原因: describeTokenFailure(match[1].trim()) });
+    return undefined;
+  }
+  /**
+   * 退出登录的令牌当场作废（2026-08-31，排查报告第 58 条收尾）。
+   * requireAuth 里已有同样一道，但 ai/client-ai-routes.ts 那批接口是直接读
+   * req.auth、不走 requireAuth 的 —— 只有加在这里才罩得住全部路由。
+   * 顺带省一次 session-guard 的数据库查询：拉黑的令牌不用再查账号状态。
+   */
+  if (isTokenRevoked(match[1].trim())) {
+    logger.warn("认证失败：令牌已退出作废", { path, 用户: payload.userId });
     return undefined;
   }
   /**

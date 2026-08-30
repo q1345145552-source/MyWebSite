@@ -563,24 +563,53 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    const count = await prisma.whrConsolidationPlanCustomer.count({
-      where: { planId: plan.id, companyId: auth.companyId },
-    });
-    if (count >= MAX_CUSTOMERS_PER_PLAN) {
-      fail(res, 400, "BAD_REQUEST", `一个计划最多 ${MAX_CUSTOMERS_PER_PLAN} 个客户`);
-      return;
-    }
+    /**
+     * ⚠️ 查重 + 插入放进同一个事务并先锁计划行（2026-08-31 补，排查报告第 27 条）。
+     * 原来是「事务外查他在不在 → 直接插」两步走：两个员工同时给同一个柜加
+     * 同一个客户（或一个人开两个页面），两边都查到「不在」，就会插出两行 ——
+     * 客户的预报单会随机挂在其中一行上，「我的详情」页只显示一行，改价也只改到一行。
+     * 上面事务外那道查重只配当「早点给个好看的提示」，说了算的是锁里这一道。
+     * 数据库层的「柜 + 客户」唯一约束要动表结构，另行安排，这里先用锁把口子堵上。
+     */
+    const created = await prisma.$transaction(async (tx) => {
+      // 锁序第一环：先锁计划行（跟本文件其它写操作同一套锁法），顺便拦已取消的柜
+      await lockPlanAliveById(tx, plan.id);
 
-    const created = await prisma.whrConsolidationPlanCustomer.create({
-      data: {
-        planId: plan.id,
-        companyId: auth.companyId,
-        clientId,
-        unitPriceNormal: Number(body.unitPriceNormal),
-        unitPriceInspection: Number(body.unitPriceInspection),
-        unitPriceSensitive: Number(body.unitPriceSensitive),
-      },
-      select: { id: true },
+      // 锁完重读计划状态：事务外那道「不能再新增客户」的检查只配当提示
+      const freshPlan = await tx.whrConsolidationPlan.findUnique({
+        where: { id: plan.id },
+        select: { status: true },
+      });
+      if (!freshPlan || !["planning", "collecting"].includes(freshPlan.status)) {
+        throw new BusinessError("该计划刚刚被别人操作过（已开始装柜或已发运），不能再新增客户，请刷新后再看");
+      }
+
+      const dup = await tx.whrConsolidationPlanCustomer.findFirst({
+        where: { planId: plan.id, clientId, companyId: auth.companyId },
+        select: { id: true },
+      });
+      if (dup) {
+        throw new BusinessError("该客户已在这个计划里，不能重复添加");
+      }
+
+      const liveCount = await tx.whrConsolidationPlanCustomer.count({
+        where: { planId: plan.id, companyId: auth.companyId },
+      });
+      if (liveCount >= MAX_CUSTOMERS_PER_PLAN) {
+        throw new BusinessError(`一个计划最多 ${MAX_CUSTOMERS_PER_PLAN} 个客户`);
+      }
+
+      return tx.whrConsolidationPlanCustomer.create({
+        data: {
+          planId: plan.id,
+          companyId: auth.companyId,
+          clientId,
+          unitPriceNormal: Number(body.unitPriceNormal),
+          unitPriceInspection: Number(body.unitPriceInspection),
+          unitPriceSensitive: Number(body.unitPriceSensitive),
+        },
+        select: { id: true },
+      });
     });
 
     ok(res, { customerId: created.id });
@@ -1149,10 +1178,35 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    const fromZh = CARGO_TYPE_ZH[item.cargoType] ?? item.cargoType;
     const toZh = CARGO_TYPE_ZH[body.cargoType]!;
 
     await prisma.$transaction(async (tx) => {
+      // ⚠️ 整柜取消了就不该再动这张单；锁序【计划 → 预报单】，
+      // 照紧挨着的 9c 删货物接口的锁法（2026-08-31 补，排查报告第 28 条）
+      await lockPlanAliveByPrealert(tx, item.prealert.id);
+
+      /**
+       * ⚠️ 这张单的状态和这件货的货型也要**锁完重查**（2026-08-31 补，排查报告第 28 条）。
+       * 上面那道「已付款不能改」的检查在事务外面：客户点付款的同一瞬间管理员点改货型，
+       * 两边都拿进门时那份旧状态判断，一张已付款的单子货型照样被改掉 ——
+       * 客户付的是普货的钱，单子上却写着商检，对账时说不清。
+       * 货型也重读：另一个管理员刚改过的话，日志里的「由X改为Y」才不会写错。
+       */
+      const freshItem = await tx.whrConsolidationPrealertItem.findUnique({
+        where: { id: item.id },
+        select: { cargoType: true, prealert: { select: { status: true } } },
+      });
+      if (!freshItem) {
+        throw new BusinessError("货物明细刚刚被别人删除了，货型没有改，请刷新后再看", 404, "NOT_FOUND");
+      }
+      if (!ITEM_EDITABLE_STATUSES.includes(freshItem.prealert.status)) {
+        throw new BusinessError("这张预报单刚刚被别人处理过了（已付款或已进入装柜流程），货型没有改，请刷新后再看");
+      }
+      if (freshItem.cargoType === body.cargoType) {
+        throw new BusinessError("货型没有变化（可能刚被别人改过），请刷新后再看");
+      }
+      const fromZh = CARGO_TYPE_ZH[freshItem.cargoType] ?? freshItem.cargoType;
+
       await tx.whrConsolidationPrealertItem.update({
         where: { id: item.id },
         data: { cargoType: body.cargoType! },
@@ -1165,8 +1219,8 @@ export function registerWhrConsolidationRoutes(app: MinimalHttpApp): void {
           operatorId: auth.userId,
           operatorRole: auth.role,
           operatorName: auth.name || auth.userId,
-          fromStatus: item.prealert.status,
-          toStatus: item.prealert.status,
+          fromStatus: freshItem.prealert.status,
+          toStatus: freshItem.prealert.status,
           remark: `管理员把「${item.productName}」的货型由${fromZh}改为${toZh}`,
         },
       });

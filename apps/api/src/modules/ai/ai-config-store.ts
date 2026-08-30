@@ -28,6 +28,14 @@ export const DEFAULT_STATUS_LABELS: StatusLabelConfig[] = [
   { status: "deliveryBooked", labelZh: "预约派送" },
   { status: "outForDelivery", labelZh: "派送中" },
   { status: "delivered", labelZh: "已签收" },
+  // 2026-08-31：补上 2026-08-06 新增的 5 个陆运环节。之前 delayInTransit 漏配
+  // 让客户看过英文状态名，这次陆运整批漏掉，客户问 AI 会看到「inVietnam」这种代码。
+  // 中文名照抄前端唯一对照表（apps/web/src/modules/shipment/shipment-status.ts），一字不差。
+  { status: "atPortCn", labelZh: "到达凭祥口岸" },
+  { status: "inVietnam", labelZh: "过境越南" },
+  { status: "laosCleared", labelZh: "老挝边境已放行" },
+  { status: "borderDelay", labelZh: "口岸滞留" },
+  { status: "customsInspect", labelZh: "海关查验" },
   { status: "exception", labelZh: "异常" },
   { status: "returned", labelZh: "已退回" },
   { status: "cancelled", labelZh: "已取消" },

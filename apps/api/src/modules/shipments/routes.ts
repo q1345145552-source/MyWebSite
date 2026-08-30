@@ -3,11 +3,12 @@ import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
-import { fail, ok, parseJsonArray, requireRole } from "../core/http-utils";
+import { fail, ok, requireRole } from "../core/http-utils";
 import { logger } from "../core/logger";
 import { loadProductImagesForOrders } from "../orders/product-images";
+import { checkRateLimit, rateLimitKey } from "../core/rate-limit";
 import { STATUS_FLOW, STATUS_FLOW_LAND, EXCEPTION_STATUSES, DELAY_STATUSES, COMPLETED_STATUSES } from "./status-flow";
-import { allocateSplitMetric, reconcileFamilyMetric } from "./split-metrics";
+import { syncParentStatusFromChildren } from "./parent-status";
 import { loadOrderTotalMetrics } from "./total-metrics";
 
 interface Kuaidi100QueryPayload {
@@ -221,6 +222,19 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
     const companyCode = req.query.companyCode?.trim();
     if (!trackingNo) {
       fail(res, 400, "BAD_REQUEST", "trackingNo is required");
+      return;
+    }
+
+    // 2026-08-31（排查报告第56条）：这个接口背后是快递100 —— 按查询次数收费的服务，
+    // 原来登录用户能无限刷，单号还可以随便填，写个循环就能把付费额度刷光。
+    // 照 AI 聊天（client-ai-routes.ts）的做法按账号限流：每分钟 10 次 + 每 24 小时 100 次。
+    // 先限流再往下走，被拦下的请求一次都不会打到快递100。
+    if (checkRateLimit(rateLimitKey(auth.userId, "express-query"), 10, 60_000)) {
+      fail(res, 429, "BAD_REQUEST", "快递查询太频繁了，请稍等一分钟再查（每分钟最多 10 次）");
+      return;
+    }
+    if (checkRateLimit(rateLimitKey(auth.userId, "express-query-day"), 100, 24 * 60 * 60_000)) {
+      fail(res, 429, "BAD_REQUEST", "快递查询次数已达上限（24 小时内最多 100 次），请稍后再查");
       return;
     }
 
@@ -580,225 +594,18 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
     ok(res, { images: imageMap.get(orderId) ?? [] });
   });
 
-  app.post("/staff/shipments/split", async (req, res) => {
-    const auth = requireRole(req, res, ["staff", "admin"]);
-    if (!auth) return;
-
-    const body = (req.body ?? {}) as {
-      parentShipmentId?: string;
-      splits?: Array<{
-        trackingNo: string;
-        batchNo: string;
-        itemName: string;
-        packageCount: number;
-      }>;
-    };
-
-    const parentId = body.parentShipmentId?.trim();
-    const splits = body.splits ?? [];
-    if (!parentId || splits.length === 0) {
-      fail(res, 400, "BAD_REQUEST", "parentShipmentId and at least one split are required");
-      return;
-    }
-    if (splits.some((s) => !s.trackingNo?.trim())) {
-      fail(res, 400, "BAD_REQUEST", "每一条分柜运单号均为必填");
-      return;
-    }
-    if (splits.some((s) => !Number.isInteger(s.packageCount) || s.packageCount <= 0)) {
-      fail(res, 400, "BAD_REQUEST", "每一条分柜件数必须是大于 0 的整数");
-      return;
-    }
-    // 检查分柜运单号是否重复
-    const splitNos = splits.map((s) => s.trackingNo.trim());
-    if (new Set(splitNos).size !== splitNos.length) {
-      fail(res, 400, "BAD_REQUEST", "分柜运单号不可重复");
-      return;
-    }
-    const existingNos = await prisma.shipment.findMany({
-      where: { trackingNo: { in: splitNos }, companyId: auth.companyId },
-      select: { trackingNo: true },
-    });
-    if (existingNos.length > 0) {
-      fail(res, 409, "VALIDATION_ERROR", `运单号 ${existingNos.map((s) => s.trackingNo).join(", ")} 已存在`);
-      return;
-    }
-
-    const parent = await prisma.shipment.findUnique({
-      where: { id: parentId },
-      include: { order: { select: { id: true, companyId: true } } },
-    });
-    if (!parent || parent.companyId !== auth.companyId) {
-      fail(res, 404, "NOT_FOUND", "parent shipment not found");
-      return;
-    }
-    if (parent.parentTrackingNo) {
-      fail(res, 400, "BAD_REQUEST", "cannot split a child shipment");
-      return;
-    }
-
-    const totalSplitCount = splits.reduce((sum, s) => sum + s.packageCount, 0);
-    if (totalSplitCount <= 0) {
-      fail(res, 400, "BAD_REQUEST", "split total must be greater than zero");
-      return;
-    }
-    const parentPackageCount = parent.packageCount ?? 0;
-    if (totalSplitCount > parentPackageCount) {
-      fail(res, 400, "BAD_REQUEST", `split total (${totalSplitCount}) exceeds parent package count (${parentPackageCount})`);
-      return;
-    }
-
-    const results: Array<{ trackingNo: string; shipmentId: string }> = [];
-
-    const runSplitTransaction = () => prisma.$transaction(async (tx) => {
-      // 行级锁：防止并发分柜
-      await tx.$queryRaw`SELECT id FROM shipments WHERE id = ${parentId} FOR UPDATE`;
-
-      // 重新读取父单件数（加锁后最新值）
-      const locked = await tx.shipment.findUnique({
-        where: { id: parentId },
-        select: {
-          packageCount: true,
-          volumeM3: true,
-          weightKg: true,
-          order: { select: { packageCount: true, volumeM3: true, weightKg: true } },
-        },
-      });
-      const currentPkg = locked?.packageCount ?? 0;
-      if (totalSplitCount > currentPkg) {
-        throw new Error(`split total (${totalSplitCount}) exceeds current package count (${currentPkg})`);
-      }
-
-      const existingChildren = await tx.shipment.findMany({
-        where: { parentTrackingNo: parent.trackingNo, companyId: auth.companyId },
-        select: { trackingNo: true, packageCount: true, volumeM3: true, weightKg: true },
-      });
-      // 有既有子单时按整个父子家族检查订单总量守恒：空子指标按件数补算，
-      // 父单被编辑回整票或其它原因导致不守恒时，由父单吸收差额后再执行本次拆分。
-      const familyBase = [{
-        key: parent.trackingNo,
-        pieceCount: currentPkg,
-        volumeM3: locked?.volumeM3,
-        weightKg: locked?.weightKg,
-        isParent: true,
-      }, ...existingChildren.map((child) => ({
-        key: child.trackingNo,
-        pieceCount: child.packageCount,
-        volumeM3: child.volumeM3,
-        weightKg: child.weightKg,
-        isParent: false,
-      }))];
-      const volumeFamily = reconcileFamilyMetric(
-        locked?.order.volumeM3,
-        locked?.order.packageCount,
-        familyBase.map((part) => ({ ...part, value: part.volumeM3 })),
-        3,
-      );
-      const weightFamily = reconcileFamilyMetric(
-        locked?.order.weightKg,
-        locked?.order.packageCount,
-        familyBase.map((part) => ({ ...part, value: part.weightKg })),
-        2,
-      );
-      const currentVolume = volumeFamily[parent.trackingNo] ?? locked?.volumeM3;
-      const currentWeight = weightFamily[parent.trackingNo] ?? locked?.weightKg;
-      const splitPieceCounts = splits.map((split) => split.packageCount);
-      const volumeAllocation = allocateSplitMetric(currentVolume, currentPkg, splitPieceCounts, 3);
-      const weightAllocation = allocateSplitMetric(currentWeight, currentPkg, splitPieceCounts, 2);
-
-      // 更新父单：件数、体积、重量一起扣减，三者始终保持同一个“当前剩余”口径。
-      await tx.shipment.update({
-        where: { id: parent.id },
-        data: {
-          packageCount: currentPkg - totalSplitCount,
-          volumeM3: volumeAllocation.remaining,
-          weightKg: weightAllocation.remaining,
-        },
-      });
-
-      // 创建子单
-      const childMap = new Map<string, { id: string; packageCount: number }>();
-      for (let i = 0; i < splits.length; i++) {
-        const split = splits[i];
-        const childId = `s_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`;
-        const childTrackingNo = split.trackingNo.trim();
-
-        await tx.shipment.create({
-          data: {
-            id: childId,
-            companyId: auth.companyId,
-            orderId: parent.orderId,
-            trackingNo: childTrackingNo,
-            parentTrackingNo: parent.trackingNo,
-            batchNo: split.batchNo,
-            itemName: split.itemName,
-            currentStatus: parent.currentStatus,
-            packageCount: split.packageCount,
-            packageUnit: parent.packageUnit,
-            volumeM3: volumeAllocation.children[i],
-            weightKg: weightAllocation.children[i],
-            transportMode: parent.transportMode,
-            warehouseId: parent.warehouseId,
-          },
-        });
-
-        childMap.set(childId, { id: childId, packageCount: split.packageCount });
-        results.push({ trackingNo: childTrackingNo, shipmentId: childId });
-      }
-
-      // 同步柜内数据：按件数比例精确分配体积和件数
-      const containerItems = await tx.shipmentContainerItem.findMany({
-        where: { shipmentId: parent.id },
-      });
-
-      for (const item of containerItems) {
-        const itemVol = Number(item.loadedVolumeM3);
-        const itemPcs = item.loadedPieceCount;
-
-        // 父单保留的件数比例
-        const parentRatio = (currentPkg - totalSplitCount) / currentPkg;
-        const parentVolume = Number((itemVol * parentRatio).toFixed(6));
-        const parentPieces = Math.round(itemPcs * parentRatio);
-
-        await tx.shipmentContainerItem.update({
-          where: { id: item.id },
-          data: {
-            loadedVolumeM3: parentVolume,
-            loadedPieceCount: parentPieces,
-          },
-        });
-
-        // 为每个子单分配对应的柜内数据
-        for (const [childId, child] of childMap) {
-          const childRatio = child.packageCount / currentPkg;
-          const childVolume = Number((itemVol * childRatio).toFixed(6));
-          const childPieces = Math.round(itemPcs * childRatio);
-
-          if (childPieces > 0) {
-            await tx.shipmentContainerItem.create({
-              data: {
-                shipmentId: childId,
-                containerId: item.containerId,
-                loadedVolumeM3: childVolume,
-                loadedPieceCount: childPieces,
-              },
-            });
-          }
-        }
-      }
-    });
-
-    try {
-      await runSplitTransaction();
-    } catch (error) {
-      if (error instanceof RangeError) {
-        fail(res, 400, "BAD_REQUEST", "分柜件数和体积重量对不上，请核对后重试");
-        return;
-      }
-      throw error;
-    }
-
-    ok(res, { parentTrackingNo: parent.trackingNo, children: results });
-  });
+  /**
+   * ⚠️ 这里原来有一条员工分柜接口（POST /staff/shipments/split），2026-08-31 删掉了。
+   * 分柜功能早就搬到装柜管理页去了（/staff/loading-manifests/add-shipment 装柜时
+   * 按件数自动切子单），这条老路唯一的前端入口是员工工作台里那个永远打不开的
+   * 分柜弹窗（排查报告第 41 条）—— 弹窗和 business-api.ts 里的 splitStaffShipment
+   * 封装函数已在同批一并删掉，grep 全仓库（apps/、scripts/、docs）无任何调用方残留。
+   * 按 CLAUDE.md 第 35 条「给旧代码打补丁前，先问它该不该活着」：没人走的路直接下线，
+   * 免得两套分柜算法各改各的、越走越远。
+   * 要恢复：git 历史里有完整实现（含行级锁、reconcileFamilyMetric 家族守恒、
+   * allocateSplitMetric 柜内记录同步分摊 —— 那两个函数还活在 split-metrics.ts，
+   * 装柜/派送那几条路照常在用）。
+   */
 
   /**
    * 历史「修复运单关联订单」接口：SQLite 时代的兼容补丁。
@@ -867,6 +674,24 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
           where: { id: log.shipmentId },
           data: { currentStatus: latest.toStatus, updatedAt: new Date() },
         });
+
+        /**
+         * 2026-08-31（排查报告第21条）：删的是**子单**的轨迹时，上面把子单状态退回去了，
+         * 父单的大状态却还挂着按旧子单状态推出来的值 —— 例：3 个子单全签收后父单自动
+         * 「已签收」，员工删掉其中一个点错的签收记录，子单退回「派送中」，父单还挂着
+         * 「已签收」，客户看到订单状态和轨迹两边打架。跟签收、删派送单那些入口保持一致，
+         * 子单状态改完再按全部子单重算一次父单。
+         * · parentTrackingNo 在锁内重读（CLAUDE.md 第 28 条：用锁内数据做决定）；
+         * · 锁序 = 子单 → 父单，跟全系统「先子后父」的规矩一致（见 lock-shipments.ts）；
+         * · 父单自己还留着货的那几张特例，syncParentStatusFromChildren 内部本来就不动它。
+         */
+        const lockedShipment = await tx.shipment.findUnique({
+          where: { id: log.shipmentId },
+          select: { parentTrackingNo: true },
+        });
+        if (lockedShipment?.parentTrackingNo) {
+          await syncParentStatusFromChildren(tx, lockedShipment.parentTrackingNo, auth.companyId);
+        }
       }
       return { newStatus: latest?.toStatus ?? log.shipment.currentStatus, hasLogsLeft: !!latest };
     });

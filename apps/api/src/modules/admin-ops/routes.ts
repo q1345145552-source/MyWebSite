@@ -552,6 +552,13 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
       fail(res, 400, "BAD_REQUEST", "at least one shipmentId is required");
       return;
     }
+    // 2026-08-31（排查 #33）：状态只认 DELIVERING / SIGNED 两个值。
+    // 原来传什么存什么，乱码状态会让签收单导出和「不能重复派送」的判断失灵。
+    // 页面不传 status（默认 DELIVERING），这里只挡直接调接口的。
+    if (status !== "DELIVERING" && status !== "SIGNED") {
+      fail(res, 400, "VALIDATION_ERROR", `状态不合法：${status}。只允许 DELIVERING（派送中）或 SIGNED（已签收）`);
+      return;
+    }
     // 2026-08-06：派送日期在库里是纯文本，原来填什么存什么 ——
     // 生产上真出现过 WD000199 的日期是「20206-08-06」（年份多打一个 0）。
     // 前端那个 <input type="date"> 拦不住五位数年份，只能在这里卡。
@@ -567,31 +574,19 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
         return;
       }
     }
-    // 生成或复用派送单号
-    let deliveryNo: string;
+    // 复用已有派送单号（追加模式）；新号在下面写单的事务里再算
+    let deliveryNo = existingDeliveryNo ?? "";
     if (existingDeliveryNo) {
       // 追加到已有派送单，继承司机信息
       const exist = await prisma.adminLastmileOrder.findFirst({ where: { deliveryNo: existingDeliveryNo, companyId: auth.companyId }, select: { deliveryNo: true, driverName: true, licensePlate: true, phoneNumber: true, deliveryDate: true } });
       if (!exist) { fail(res, 404, "NOT_FOUND", "deliveryNo not found"); return; }
-      deliveryNo = existingDeliveryNo;
       // 追加时不传司机信息则继承已有值
       if (!driverName) driverName = exist.driverName ?? "";
       if (!licensePlate) licensePlate = exist.licensePlate ?? "";
       if (!phoneNumber) phoneNumber = exist.phoneNumber ?? "";
       if (!deliveryDate) deliveryDate = exist.deliveryDate ?? "";
-    } else {
-      deliveryNo = await prisma.$transaction(async (tx) => {
-        await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(2901)');
-        const last = await tx.adminLastmileOrder.findFirst({
-          where: { deliveryNo: { startsWith: "WD" } },
-          orderBy: { deliveryNo: "desc" },
-          select: { deliveryNo: true },
-        });
-        const num = last ? parseInt(last.deliveryNo.replace("WD", ""), 10) || 0 : 0;
-        return `WD${String(num + 1).padStart(6, "0")}`;
-      });
     }
-    
+
     // 2026-08-06：原来是「一个运单一个事务」，循环里第 N 个失败时，前 N-1 个已经提交了 ——
     // 运单状态被改成「派送中」、派送单却没建成，留下查不到派送单的孤儿运单（生产实测 3 张）。
     // 现在整车放进**同一个事务**：要么全部成功，要么一条都不写。
@@ -599,13 +594,35 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
     // 「司机【张三 - 0993176818】正在为您派送，请注意查收」。
     // ⚠️ 司机信息不是必填 —— 没填就退回原来的写法，别弄出「司机【】」这种东西。
     const driverLabel = [driverName, phoneNumber].filter(Boolean).join(" - ");
-    const departRemark = driverLabel
-      ? `司机【${driverLabel}】正在为您派送，请注意查收`
-      : `正在为您派送，请注意查收（${deliveryNo}）`;
 
     const results: Array<{ id: string; shipmentId: string }> = [];
     try {
       await prisma.$transaction(async (tx) => {
+        if (!existingDeliveryNo) {
+          /**
+           * ⚠️ 算号必须和写单在**同一个事务**里（2026-08-31 改，排查 #13）。
+           *
+           * 原来是先开一个小事务专门算号：advisory 锁跟着那个小事务一提交就放了，
+           * 可这时记录还没写进库 —— 第二个员工紧跟着进来算号，看到的最大号
+           * 和第一个人一样，两张派送单拿到同一个 WD 号，两车货混成一车。
+           * 现在锁拿到手后算号、写单、一起提交，锁到提交才放，
+           * 第二个人必须等第一张单真正落库之后才能算号。
+           *
+           * ⚠️ 锁序：advisory 锁 2901 放在锁运单之前拿，固定成「2901 → 运单行锁」，
+           * 全库只有这一处拿 2901，不会跟别的路径成环。
+           */
+          await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(2901)');
+          const last = await tx.adminLastmileOrder.findFirst({
+            where: { deliveryNo: { startsWith: "WD" } },
+            orderBy: { deliveryNo: "desc" },
+            select: { deliveryNo: true },
+          });
+          const num = last ? parseInt(last.deliveryNo.replace("WD", ""), 10) || 0 : 0;
+          deliveryNo = `WD${String(num + 1).padStart(6, "0")}`;
+        }
+        const departRemark = driverLabel
+          ? `司机【${driverLabel}】正在为您派送，请注意查收`
+          : `正在为您派送，请注意查收（${deliveryNo}）`;
         /**
          * ⚠️⚠️ **锁序：先把这批运单按 id 排序全部锁完，再逐个干活**（2026-08-29 改）。
          *
@@ -692,7 +709,15 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
          * 同一事务重锁是免费的，不用去删。
          */
         await lockAndSyncParents(tx, [...parentNosToSync], auth.companyId, syncParentStatusFromChildren);
-      });
+      },
+      /**
+       * ⚠️ 超时放宽到 30 秒（2026-08-31 复查 #17）。
+       * 算号挪进这个事务后，2901 那把号码锁要握到整车运单全写完才放；
+       * 第二个员工同时建单时，等锁的时间算在他自己事务的预算里 ——
+       * Prisma 默认只给 5 秒，第一车票数多就会等超时报「服务器繁忙」。
+       * 数值跟 containers/routes.ts 推进柜子状态那个事务保持一致。
+       */
+      { timeout: 30000, maxWait: 10000 });
     } catch (e: any) {
       /**
        * ⚠️ 共用的批量锁函数查不到运单时抛的是 ShipmentsNotFoundError，
@@ -730,6 +755,13 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
     if (!auth) return;
     const body = (req.body ?? {}) as { id?: string; status?: string; signImageBase64?: string };
     if (!body.id || !body.status) { fail(res, 400, "BAD_REQUEST", "id and status required"); return; }
+    // 2026-08-31（排查 #33）：状态只认 DELIVERING / SIGNED 两个值。
+    // 原来收到什么存什么，存进乱码状态会让签收单导出的状态判断失灵。
+    // 页面只发 SIGNED，这里只挡直接调接口的。
+    if (body.status !== "DELIVERING" && body.status !== "SIGNED") {
+      fail(res, 400, "VALIDATION_ERROR", `状态不合法：${body.status}。只允许 DELIVERING（派送中）或 SIGNED（已签收）`);
+      return;
+    }
     const updateData: any = { status: body.status };
     if (body.signImageBase64) updateData.signImageBase64 = body.signImageBase64;
     const now = new Date();
@@ -747,7 +779,9 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
      * ⚠️ 顺带补上 companyId 过滤 —— 原来只按 id 查，等于别家公司的派送单也能改。
      * 目前生产只有一家公司，暂时没影响，但接第二家之前必须是现在这样。
      */
-    const updated = await prisma.$transaction(async (tx) => {
+    let updated: { id: string; status: string } | null = null;
+    try {
+      updated = await prisma.$transaction(async (tx) => {
       const own = await tx.adminLastmileOrder.findFirst({
         where: { id: body.id, companyId: auth.companyId },
         select: { id: true },
@@ -774,6 +808,18 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
       if (!fresh) return null;
       // 拿**锁后**的状态判断，不是事务外那份
       const alreadySigned = fresh.status === "SIGNED";
+
+      /**
+       * ⚠️ 已签收的单不许改回派送中（2026-08-31 补，排查 #33）。
+       *
+       * 改回去的话：运单还停在「已到手」，两边对不上；而且这票货会被
+       * 「不能重复派送」的检查当成正在派送，想再派一趟反而派不了。
+       * 真要再派一趟是正常业务 —— 走「重新建派送单」那条路，不走这里。
+       * 判断用的是锁后重读的状态（CLAUDE.md 第 28 条）。
+       */
+      if (alreadySigned && body.status === "DELIVERING") {
+        throw new LastmileConflictError("这张派送单已经签收，不能改回派送中。要再派一趟请重新建一张派送单。");
+      }
 
       const row = await tx.adminLastmileOrder.update({ where: { id: own.id }, data: updateData });
       if (body.status !== "SIGNED") return row;
@@ -813,7 +859,16 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
         }
       }
       return row;
-    });
+      });
+    } catch (e) {
+      // 事务里抛出来的「已签收不能改回」要说人话，别掉进 500「服务器繁忙」
+      // （ApiCode 里没有 CONFLICT，同建单接口一样用 VALIDATION_ERROR，2026-08-31）
+      if (e instanceof LastmileConflictError) {
+        fail(res, 409, "VALIDATION_ERROR", e.message);
+        return;
+      }
+      throw e;
+    }
 
     if (!updated) { fail(res, 404, "NOT_FOUND", "派送单不存在"); return; }
     ok(res, { id: updated.id, status: updated.status });

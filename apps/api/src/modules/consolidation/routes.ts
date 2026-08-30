@@ -1,4 +1,4 @@
-import { DECIMAL_10_2, DECIMAL_10_6, checkTotalsWritable, requireDecimal, requireDerivedWithinDecimal } from "../core/decimal-guard";
+import { DECIMAL_10_2, DECIMAL_10_6, DECIMAL_12_2, checkTotalsWritable, requireDecimal, requireDerivedWithinDecimal } from "../core/decimal-guard";
 import { parseNumericStrict, requirePositiveInt, requireProductWithinInt } from "../core/int-guard";
 import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
@@ -163,35 +163,42 @@ export function checkConsolidationDeletable(input: {
 
 /**
  * 生成任务编号 JH + 7位数字（如 JH0000001）
- * 使用数据库事务锁防止并发冲突
+ *
+ * ⚠️ 必须传**正在插入的那个事务**（2026-08-31 改，排查报告第54条）。
+ * 原来这里自己开一个小事务：领完号锁就放了，插入却在外面单独做 ——
+ * 两个客户几乎同时操作会领到同一个号，后插入的撞唯一约束，
+ * 客户看到的是「服务器繁忙」。仓库版 8 月已改成「咨询锁 + 插入绑在同一个事务里」
+ * （whr-consolidation/client-routes.ts 83011 那段），这里照抄同一个修法：
+ * 锁要一直握到插入提交，后来的排队拿下一个号，而不是撞号报错。
  */
-async function generateTaskNo(): Promise<string> {
-  return prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(83001)`;
-    const last = await tx.consolidationTask.findFirst({
-      where: { taskNo: { startsWith: "JH" } },
-      orderBy: { taskNo: "desc" },
-      select: { taskNo: true },
-    });
-    const nextNum = last ? parseInt(last.taskNo.replace("JH", ""), 10) + 1 : 1;
-    return `JH${String(nextNum).padStart(7, "0")}`;
+async function generateTaskNo(
+  tx: Pick<typeof prisma, "$executeRaw" | "consolidationTask">,
+): Promise<string> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(83001)`;
+  const last = await tx.consolidationTask.findFirst({
+    where: { taskNo: { startsWith: "JH" } },
+    orderBy: { taskNo: "desc" },
+    select: { taskNo: true },
   });
+  const nextNum = last ? parseInt(last.taskNo.replace("JH", ""), 10) + 1 : 1;
+  return `JH${String(nextNum).padStart(7, "0")}`;
 }
 
 /**
  * 生成预报单运单号 JH-YW + 7位数字（如 JH-YW0000001）
+ * ⚠️ 同 generateTaskNo：必须传插入用的那个事务，锁握到插入完成（2026-08-31 改）
  */
-async function generateTrackingNo(): Promise<string> {
-  return prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(83002)`;
-    const last = await tx.consolidationPrealert.findFirst({
-      where: { trackingNo: { startsWith: "JH-YW" } },
-      orderBy: { trackingNo: "desc" },
-      select: { trackingNo: true },
-    });
-    const nextNum = last ? parseInt(last.trackingNo.replace("JH-YW", ""), 10) + 1 : 1;
-    return `JH-YW${String(nextNum).padStart(7, "0")}`;
+async function generateTrackingNo(
+  tx: Pick<typeof prisma, "$executeRaw" | "consolidationPrealert">,
+): Promise<string> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(83002)`;
+  const last = await tx.consolidationPrealert.findFirst({
+    where: { trackingNo: { startsWith: "JH-YW" } },
+    orderBy: { trackingNo: "desc" },
+    select: { trackingNo: true },
   });
+  const nextNum = last ? parseInt(last.trackingNo.replace("JH-YW", ""), 10) + 1 : 1;
+  return `JH-YW${String(nextNum).padStart(7, "0")}`;
 }
 
 /**
@@ -383,18 +390,22 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    const taskNo = await generateTaskNo();
-    const task = await prisma.consolidationTask.create({
-      data: {
-        taskNo,
-        companyId: auth.companyId,
-        clientId: auth.userId,
-        destinationTh: body.destinationTh.trim(),
-        status: "collecting",
-        maxVolumeM3: 68,
-        currency: "CNY",
-        paymentStatus: "unpaid",
-      },
+    // ⚠️ 取号和插入必须在同一个事务里（2026-08-31 改，排查报告第54条）：
+    // 原来是先领号、放锁、再插入，两个客户同时点会领到同一个号，后一个撞唯一约束报「服务器繁忙」
+    const task = await prisma.$transaction(async (tx) => {
+      const taskNo = await generateTaskNo(tx);
+      return tx.consolidationTask.create({
+        data: {
+          taskNo,
+          companyId: auth.companyId,
+          clientId: auth.userId,
+          destinationTh: body.destinationTh!.trim(),
+          status: "collecting",
+          maxVolumeM3: 68,
+          currency: "CNY",
+          paymentStatus: "unpaid",
+        },
+      });
     });
 
     ok(res, formatTaskForClient(task));
@@ -583,8 +594,6 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    const trackingNo = await generateTrackingNo();
-
     const productData = body.products.map((p, idx) => {
       const totalQuantity = p.packageCount! * p.quantityPerBox!;
       const totalWeightKg = parseFloat((p.unitWeightKg! * totalQuantity).toFixed(2));
@@ -658,6 +667,12 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
         );
       }
 
+      // ⚠️ 取号也在这个事务里做（2026-08-31 改，排查报告第54条）：
+      // 原来在事务外面领号、放锁、再进来插入，两个客户同时提交会领到同一个号，
+      // 后插入的撞唯一约束报「服务器繁忙」。锁序是【任务行锁 → 取号咨询锁】，
+      // 跟仓库版（先锁计划再取号）一致；咨询锁 83002 只有这一处在用，不会跟别的路互相等。
+      const trackingNo = await generateTrackingNo(tx);
+
       const created = await tx.consolidationPrealert.create({
         data: {
           taskId: body.taskId!,
@@ -718,6 +733,17 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       fail(res, 400, "BAD_REQUEST", "prealertId 为必填");
       return;
     }
+    /**
+     * ⚠️ 传了清单但是空的要当场拦（2026-08-31 补，排查报告第26条）。
+     * 下面的校验循环是「有货才逐行查」，空数组会整个跳过；
+     * 可事务里 `if (body.products)` 对空数组照样成立 —— 老行全删、新行一件不补，
+     * 留下一张没有任何货物的空预报单。正常页面点不出这种请求（删行不让删到零），
+     * 但接口直接调就能触发。跟新建时「至少一个产品行」的规矩对齐。
+     */
+    if (body.products && body.products.length === 0) {
+      fail(res, 400, "BAD_REQUEST", "至少需要一个产品行");
+      return;
+    }
 
     const pa = await prisma.consolidationPrealert.findFirst({
       // ⚠️ 必须带 companyId（2026-08-27 补）：原来只按 id 查，实测能跨公司拿到别家数据
@@ -730,6 +756,19 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
     }
     if (pa.status !== "pending") {
       fail(res, 400, "BAD_REQUEST", "已签收的预报单不能修改");
+      return;
+    }
+    /**
+     * ⚠️ 任务离开「收货中」后，客户就不能再改预报单了（2026-08-31 补，排查报告第9条）。
+     * 原来只看预报单自己签没签收，不看任务走到哪一步 —— 任务已报价、客户已付款后，
+     * 还没签收的那几张单客户照样能改（1 箱改成 50 箱），仓库照单签收，
+     * 员工又改不了价（付款后不许改价），等于客户付一份钱多运货。
+     * 「删除预报单」这个口子 8-28 已经堵了（付款后不许删），「修改」当时漏了没跟着补。
+     * 口径跟「新增预报单」一致：任务必须还在收货中、且没付款。
+     * 这道是事务外的友好提示，真正说了算的是下面锁内那道复查。
+     */
+    if (pa.task.status !== "collecting" || pa.task.paymentStatus !== "unpaid") {
+      fail(res, 400, "BAD_REQUEST", "该任务已不在收货中（可能已满柜、已报价或已付款），预报单内容不能再修改");
       return;
     }
     // 校验产品
@@ -764,6 +803,21 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
        */
       await tx.$queryRaw`SELECT id FROM consolidation_tasks WHERE id = ${pa.taskId} FOR UPDATE`;
       await tx.$queryRaw`SELECT id FROM consolidation_prealerts WHERE id = ${pa.id} FOR UPDATE`;
+      // ⚠️ 任务状态锁后复查（2026-08-31 补，排查报告第9条）：
+      // 上面那道「任务必须在收货中」是事务外的快照，员工正好在这一瞬间确认满柜/报价、
+      // 客户正好付款，这边照样改得进去。锁住之后用重读的值说了算。
+      const freshTask = await tx.consolidationTask.findUnique({
+        where: { id: pa.taskId },
+        select: { status: true, paymentStatus: true },
+      });
+      if (!freshTask) throw new BusinessError("集货任务不存在", 404, "NOT_FOUND");
+      if (freshTask.status !== "collecting" || freshTask.paymentStatus !== "unpaid") {
+        throw new BusinessError(
+          "这个任务刚刚已经不在收货中了（可能已满柜、已报价或已付款），修改没有保存，请刷新后再看",
+          409,
+          "VALIDATION_ERROR",
+        );
+      }
       const freshPa = await tx.consolidationPrealert.findUnique({
         where: { id: pa.id },
         select: { status: true },
@@ -1339,6 +1393,18 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
      */
     const received = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM consolidation_tasks WHERE id = ${pa.taskId} FOR UPDATE`;
+      /**
+       * ⚠️ 顺手看一眼任务付没付款（2026-08-31 补，排查报告第9条）。
+       * 报价是按签收时点的货算的：任务已付款之后才到仓签收的单，
+       * 它的货不在当初报价的账里。修改那条路已经堵死（付款后客户改不了货），
+       * 这里再给员工提个醒，让他知道这张是「付款后补签收」的，方便回头核对报价。
+       * 只提醒不拦：货真到了仓库总得签收，拦了就没法收货了。
+       * 用锁内重读的值，不吃事务外的快照。
+       */
+      const freshTask = await tx.consolidationTask.findUnique({
+        where: { id: pa.taskId },
+        select: { paymentStatus: true },
+      });
       const done = await tx.consolidationPrealert.updateMany({
         where: { id: body.prealertId, companyId: auth.companyId, status: "pending" },
         data: {
@@ -1349,16 +1415,30 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
           receivedProofBase64: proofPath,
         },
       });
-      if (done.count === 0) return done;
+      if (done.count === 0) return { count: done.count, paidBeforeReceive: false };
       await recalcTaskTotals(pa.taskId, tx);
-      return done;
+      return { count: done.count, paidBeforeReceive: freshTask?.paymentStatus !== "unpaid" };
     });
     if (received.count === 0) {
       fail(res, 400, "BAD_REQUEST", "这张预报单刚刚已经被签收了，请刷新后再看");
       return;
     }
+    if (received.paidBeforeReceive) {
+      // 留一条日志：万一前端没把提醒显示出来，事后也能查到这张单是付款后签收的
+      logger.warn("集货预报单在任务付款后才签收，请核对报价", {
+        预报单: body.prealertId, 任务: pa.taskId, 操作人: auth.userId,
+      });
+    }
 
-    ok(res, { success: true, prealertId: body.prealertId, status: "received" });
+    ok(res, {
+      success: true,
+      prealertId: body.prealertId,
+      status: "received",
+      // 前端没读这个字段也不碍事；读了就能把提醒弹出来
+      ...(received.paidBeforeReceive
+        ? { warning: "这张预报单是任务付款之后才签收的，这批货不在当初报价的账里，请核对报价是否需要调整" }
+        : {}),
+    });
   });
 
   // 4) 确认满柜
@@ -1482,6 +1562,18 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       }
       if (n > 10_000_000) {
         fail(res, 400, "BAD_REQUEST", `${label}超出合理范围，请核对后重填`);
+        return;
+      }
+      /**
+       * ⚠️ 小数位也要卡死（2026-08-31 补，排查报告第25条）。
+       * 这三列在库里是 Decimal(12,2)：填 10.994 会被各自抹成 10.99，
+       * 总价却是先相加再抹 —— 两种抹法差一分钱，客户拿计算器一对就对不上。
+       * 走本文件已经在用的 requireDecimal 统一检查；min 设 0 是保住
+       * 原有「0 或正数」的口径（装柜费经常就是 0），别的入口不受影响。
+       */
+      const decIssue = requireDecimal(n, label, { ...DECIMAL_12_2, min: 0 });
+      if (decIssue) {
+        fail(res, 400, "BAD_REQUEST", decIssue);
         return;
       }
       cleanFee[label] = n;
@@ -1712,7 +1804,7 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
     const auth = requireRole(req, res, ["staff", "admin"]);
     if (!auth) return;
 
-    const body = (req.body ?? {}) as { taskId?: string };
+    const body = (req.body ?? {}) as { taskId?: string; confirmPassword?: string };
     if (!body.taskId?.trim()) {
       fail(res, 400, "BAD_REQUEST", "taskId 为必填");
       return;
@@ -1735,7 +1827,45 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    await prisma.$transaction(async (tx) => {
+    /**
+     * ⚠️ 有已签收的货，取消必须带管理员密码（2026-08-31 补，排查报告第2条）。
+     * 取消会把这个任务的全部预报单、货物明细、签收凭证、状态历史**物理删光**——
+     * 签收凭证就存在预报单上，删预报单等于销毁签收证据：货还堆在仓库里，
+     * 系统里却查无此货。同一批数据走「管理员删除任务」那条路，只要有已收货的单
+     * 就必须输管理员密码（2026-08-07 定的规矩），取消这条路原来一道保护都没有。
+     * 现在两条路用同一把尺子：没签收货的照旧两下点掉；有签收货的要输密码。
+     * 密码验证照 tasks/delete 那套（passwordVerified），差别只有一点：
+     * 这个接口员工也能调，验员工自己的密码不算「管理员拍板」，
+     * 所以密码要对得上本公司**管理员**账号里的一个才算数。
+     */
+    let passwordVerified = false;
+    if (body.confirmPassword?.trim()) {
+      const admins = await prisma.user.findMany({
+        where: { companyId: auth.companyId, role: "admin", status: "active" },
+        select: { passwordHash: true },
+      });
+      if (!admins.some((a) => verifyPassword(body.confirmPassword!, a.passwordHash ?? ""))) {
+        // ⚠️ 密码错也要留痕（2026-08-31 补，复查报告）：这里没有登录那边的锁号机制，
+        // 谁在拿谁的任务反复试管理员密码，事后只能靠这条日志查。
+        logger.warn("取消集货任务：管理员密码验证失败", {
+          操作人: auth.userId, 操作角色: auth.role, 任务号: task.taskNo,
+        });
+        fail(res, 403, "FORBIDDEN", "管理员密码不对，没有取消");
+        return;
+      }
+      passwordVerified = true;
+    }
+    const receivedCount = await prisma.consolidationPrealert.count({
+      where: { taskId: body.taskId, status: "received" },
+    });
+    if (receivedCount > 0 && !passwordVerified) {
+      fail(res, 409, "VALIDATION_ERROR",
+        `这个集货任务不能直接取消：有 ${receivedCount} 张预报单已签收，取消会把签收记录一并删掉。确实要取消请输入管理员密码。`);
+      return;
+    }
+
+    // 事务回调最后 return 锁内数出来的已签收张数，取消成功后写日志要用（CLAUDE.md 第7条：回调必须 return）
+    const deletedReceivedCount = await prisma.$transaction(async (tx) => {
       /**
        * ⚠️ 锁住再复查（2026-08-27 补）。上面那道状态检查在事务外面：
        * 客户正好在这一瞬间付了款，员工这边照样能把任务取消掉，而且**一分钱不退** ——
@@ -1753,6 +1883,23 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       }
       if (!cancellable.includes(fresh.status)) {
         throw new BusinessError("这个任务的状态刚刚变了，取消没有执行，请刷新后再看");
+      }
+
+      /**
+       * ⚠️ 「有没有签收货」也要锁后重查（2026-08-31 补，排查报告第2条）。
+       * 上面那次 count 是事务外的快照：员工点取消的那一刻还没人签收、不用密码，
+       * 等事务真跑起来时仓库刚签了一张 —— 签收记录就这么被无密码删掉了。
+       * 照 tasks/delete 锁内重查那套：情况变了就拦下来，让他刷新后带密码重来。
+       */
+      const nowReceived = await tx.consolidationPrealert.count({
+        where: { taskId: body.taskId, status: "received" },
+      });
+      if (nowReceived > 0 && !passwordVerified) {
+        throw new BusinessError(
+          "这个任务刚刚有预报单被签收了，取消没有执行。请刷新后确认，确实要取消请输入管理员密码。",
+          409,
+          "VALIDATION_ERROR",
+        );
       }
 
       // 删除产品行
@@ -1784,7 +1931,18 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
           toStatus: "cancelled",
         },
       });
-      return null;
+      return nowReceived;
+    });
+
+    /**
+     * ⚠️ 取消也要在服务器日志里留一笔（2026-08-31 补，复查报告）。
+     * 照 tasks/delete 那套：取消会把签收凭证、货物明细物理删光，
+     * 状态日志表里只剩一条「变 cancelled」，事后想查「是谁、删了几张已签收的单」
+     * 全靠这条日志。已签收张数用的是锁内重数的那份，不是事务外的旧快照。
+     */
+    logger.warn("取消集货任务", {
+      操作人: auth.userId, 操作角色: auth.role, 任务号: task.taskNo,
+      是否带密码强取消: passwordVerified, 删掉的已签收预报单张数: deletedReceivedCount,
     });
 
     ok(res, { success: true, taskId: body.taskId, status: "cancelled" });
@@ -2075,6 +2233,13 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
 
     if (!body.prealertId?.trim()) {
       fail(res, 400, "BAD_REQUEST", "prealertId 为必填");
+      return;
+    }
+    // ⚠️ 空清单要当场拦（2026-08-31 补，排查报告第26条）：
+    // 空数组会跳过下面的逐行校验，却照样走事务里的删行逻辑，把整张单的货清空。
+    // 跟客户端 update 那条同一把尺子，详细说明见那边的注释。
+    if (body.products && body.products.length === 0) {
+      fail(res, 400, "BAD_REQUEST", "至少需要一个产品行");
       return;
     }
 

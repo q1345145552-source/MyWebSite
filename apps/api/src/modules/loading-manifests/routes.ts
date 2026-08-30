@@ -5,6 +5,7 @@ import { metricByPieceShare, reconcileFamilyMetric } from "../shipments/split-me
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
 import { BusinessError } from "../core/business-error";
+import { requirePositiveInt } from "../core/int-guard";
 import { loadOrderProductDims } from "../orders/routes";
 // 柜子状态流程只在 containers/status-flow.ts 定义一处，本文件不再自己抄
 import {
@@ -504,6 +505,17 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
     if (!containerId) { fail(res, 400, "BAD_REQUEST", "container id is required"); return; }
     const body = (req.body ?? {}) as { trackingNo?: string; pieceCount?: number };
     if (!body.trackingNo?.trim()) { fail(res, 400, "BAD_REQUEST", "运单号不能为空"); return; }
+    /**
+     * 装柜件数必须是正整数（2026-08-31 收尾补）。
+     * 原来只判 typeof === "number" && > 0，填 2.5 能一路穿进事务：
+     * 子单 packageCount 和柜内 loadedPieceCount 在 schema 里都是 Int，
+     * 写库那一刻才炸 500，员工只看到「服务器繁忙」——正是 int-guard 点名要拦的那类。
+     * pieceCount 可以不填（不填走整票），所以 undefined 要先放过。
+     */
+    if (body.pieceCount !== undefined) {
+      const pieceErr = requirePositiveInt(body.pieceCount, "装柜件数");
+      if (pieceErr) { fail(res, 400, "VALIDATION_ERROR", pieceErr); return; }
+    }
 
     try {
       const result = await prisma.$transaction(async (tx) => {
@@ -532,10 +544,22 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
       await tx.$queryRaw`SELECT id FROM shipments WHERE id = ${shipment.id} FOR UPDATE`;
       const locked = await tx.shipment.findUnique({
         where: { id: shipment.id },
-        select: { packageCount: true, volumeM3: true, parentTrackingNo: true, orderId: true, batchNo: true, packageUnit: true, weightKg: true, transportMode: true, domesticTrackingNo: true, warehouseId: true, itemName: true },
+        select: { currentStatus: true, packageCount: true, volumeM3: true, parentTrackingNo: true, orderId: true, batchNo: true, packageUnit: true, weightKg: true, transportMode: true, domesticTrackingNo: true, warehouseId: true, itemName: true },
       });
       if (!locked) throw new Error("未找到该运单号");
       if (locked.parentTrackingNo) throw new Error("子运单不能再次装柜，请使用父运单号");
+      /**
+       * ⚠️ 终态运单不许再装柜（2026-08-31 补）。
+       * 员工批量粘贴运单号时手滑输错一个（比如输成上个月已签收的单），
+       * 原来这里照单全收：切出子单塞进柜子，客户看到的状态从「已签收」
+       * 倒退回「已装柜」，已取消的废货也被算进柜子的件数方数。
+       * 管理员端老装柜接口（containers/routes.ts ~857）早就有这道拦截，
+       * 名单和它保持一致；用锁内重读的 currentStatus 判断（CLAUDE.md 第 28 条）。
+       */
+      const TERMINAL_ZH: Record<string, string> = { delivered: "已签收", returned: "已退回", cancelled: "已取消", exception: "异常" };
+      if (TERMINAL_ZH[locked.currentStatus]) {
+        throw new Error(`这张单已经「${TERMINAL_ZH[locked.currentStatus]}」，已完结的运单不能再装柜`);
+      }
       const totalPkg = locked?.packageCount ?? 0;
       const reqPieces = typeof body.pieceCount === "number" && body.pieceCount > 0 ? body.pieceCount : totalPkg;
       if (reqPieces > totalPkg) throw new Error(`装柜件数(${reqPieces})超过运单总件数(${totalPkg})`);
@@ -581,7 +605,10 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
           if (match) { const n = parseInt(match[1]); if (n >= nextSeq) nextSeq = n + 1; }
         }
         const childTrackingNo = `${shipment.trackingNo}-${nextSeq}`;
-        const childId = `s_${Date.now()}`;
+        // 子单 id 补随机后缀（2026-08-31）：只用毫秒时间戳的话，两个员工同一毫秒
+        // 各自装柜会撞出一模一样的 id，后写的整单回滚报数据库错。
+        // 写法对齐同文件的 sci_ / 运单模块拆单的 s_（shipments/routes.ts 的手工分柜路由（2026-08-31 已删，见该文件注释）当年的同款写法）。
+        const childId = `s_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
         // 按「父单当前剩余」的比例切分；全部拆完时直接给剩余量，避免除法留下零头
         const childVolume: number = reqPieces === totalPkg
           ? Number(vol.toFixed(3))
@@ -784,6 +811,17 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
     if (!auth) return;
     const body = (req.body ?? {}) as { itemId?: string; pieceCount?: number };
     if (!body.itemId) { fail(res, 400, "BAD_REQUEST", "itemId required"); return; }
+    /**
+     * 卸柜件数也必须是正整数（2026-08-31 收尾补，跟装柜那条 ~515 同一批）。
+     * 原来只靠下面 typeof === "number" && > 0 那句：填 2.5 能一路穿进事务，
+     * 算出 newLoaded=7.5 这种小数，写 Int 字段（loadedPieceCount / packageCount）
+     * 时 Prisma 才炸，员工看到的是英文报错。
+     * pieceCount 可以不填（不填走全量卸柜），所以 undefined 要先放过。
+     */
+    if (body.pieceCount !== undefined) {
+      const pieceErr = requirePositiveInt(body.pieceCount, "卸柜件数");
+      if (pieceErr) { fail(res, 400, "VALIDATION_ERROR", pieceErr); return; }
+    }
 
     try {
       await prisma.$transaction(async (tx) => {
@@ -849,49 +887,92 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
       const childVol = item.shipment.volumeM3 ? Number(item.shipment.volumeM3) : 0;
       const childWt = item.shipment.weightKg != null ? Number(item.shipment.weightKg) : null;
 
-      // 部分卸柜：减子运单件数 + 减装柜件数 + 恢复父运单
+      // 部分卸柜：减装柜件数；有父单的再减子运单本身、把卸掉的还给父运单
       if (reqPieces < totalLoaded) {
         const newLoaded = totalLoaded - reqPieces;
-        const newPkg = childPkg - reqPieces;
-        const newVol = Number((newPkg > 0 && childPkg > 0 ? (childVol * newPkg) / childPkg : 0).toFixed(3));
-        // 卸下这部分对应的体积/重量 —— 要原样加回父单，不能凭空消失
-        const backVol = Number((childVol - newVol).toFixed(3));
-        const newWt = childWt == null ? null
-          : Number((newPkg > 0 && childPkg > 0 ? (childWt * newPkg) / childPkg : 0).toFixed(2));
-        const backWt = childWt == null || newWt == null ? null : Number((childWt - newWt).toFixed(2));
-
+        /**
+         * ⚠️ 装柜记录的「已装体积」按**记录自己的已装量**等比缩（2026-08-31 修）。
+         * 原来这里写的是按运单总体积重算出来的数 —— 对管理员端「只装了
+         * 一部分体积」的整票记录来说，loadedVolumeM3 本来就比运单总体积小，
+         * 一次部分卸柜就把它覆盖成按总体积算的错数。
+         */
+        const itemVol = Number(item.loadedVolumeM3);
+        const newItemVol = Number((totalLoaded > 0 ? (itemVol * newLoaded) / totalLoaded : 0).toFixed(3));
         await tx.shipmentContainerItem.update({
           where: { id: body.itemId },
-          data: { loadedPieceCount: newLoaded, loadedVolumeM3: newVol },
+          data: { loadedPieceCount: newLoaded, loadedVolumeM3: newItemVol },
         });
-        await tx.shipment.update({
-          where: { id: item.shipment.id },
-          data: {
-            packageCount: newPkg,
-            volumeM3: newVol as any,
-            ...(newWt == null ? {} : { weightKg: newWt as any }),
-            updatedAt: new Date(),
-          },
-        });
-        // 恢复父运单
+
+        /**
+         * ⚠️ 没有父单 = 整票直接装柜的记录（老数据有，管理员端今天还能造）——
+         * 只减装柜记录，**不许动运单自己的件数/体积/重量**（2026-08-31 修）。
+         * 原来不分这两种：先把运单本身砍小，又因为没父单跳过「还回去」那步，
+         * 砍掉的货在系统里凭空消失。全量卸柜（shipments/unload-item.ts ~47）
+         * 早就这么区分了，这里照着补齐。
+         */
         if (item.shipment.parentTrackingNo) {
+          const newPkg = childPkg - reqPieces;
+          const newVol = Number((newPkg > 0 && childPkg > 0 ? (childVol * newPkg) / childPkg : 0).toFixed(3));
+          // 卸下这部分对应的体积/重量 —— 要原样加回父单，不能凭空消失
+          const backVol = Number((childVol - newVol).toFixed(3));
+          const newWt = childWt == null ? null
+            : Number((newPkg > 0 && childPkg > 0 ? (childWt * newPkg) / childPkg : 0).toFixed(2));
+          const backWt = childWt == null || newWt == null ? null : Number((childWt - newWt).toFixed(2));
+
+          await tx.shipment.update({
+            where: { id: item.shipment.id },
+            data: {
+              packageCount: newPkg,
+              volumeM3: newVol as any,
+              ...(newWt == null ? {} : { weightKg: newWt as any }),
+              updatedAt: new Date(),
+            },
+          });
+          // 恢复父运单（把卸下来的件数/体积/重量还回去）
           await tx.$queryRaw`SELECT id FROM shipments WHERE tracking_no = ${item.shipment.parentTrackingNo} FOR UPDATE`;
           const parent = await tx.shipment.findFirst({
             where: { trackingNo: item.shipment.parentTrackingNo, companyId: auth.companyId },
-            select: { id: true, packageCount: true, volumeM3: true, weightKg: true },
+            select: { id: true, packageCount: true, volumeM3: true, weightKg: true, currentStatus: true },
           });
           if (parent) {
             const pv = parent.volumeM3 != null ? Number(parent.volumeM3) : 0;
             const pw = parent.weightKg != null ? Number(parent.weightKg) : null;
+            const parentNewPkg = (parent.packageCount ?? 0) + reqPieces;
+            /**
+             * ⚠️ 状态也要退回来（2026-08-31 补，抄的是全量卸柜 unload-item.ts 的口径）。
+             * 装柜时父单件数被扣到 0，状态跟着子单走；这里把货还回去之后
+             * 父单又「自己有货」了，syncParentStatusFromChildren 就不再接管它 ——
+             * 不退的话状态永远冻在还货前那一刻（比如已发运），货其实躺在仓库。
+             * 同样只在父单确实拿回了货、且状态确实往前走过时才退。
+             */
+            const 要退状态 = parentNewPkg > 0 && parent.currentStatus !== "created";
             await tx.shipment.update({
               where: { id: parent.id },
               data: {
-                packageCount: (parent.packageCount ?? 0) + reqPieces,
+                packageCount: parentNewPkg,
                 volumeM3: Number((pv + backVol).toFixed(3)) as any,
                 ...(pw == null || backWt == null ? {} : { weightKg: Number((pw + backWt).toFixed(2)) as any }),
+                ...(要退状态 ? { currentStatus: "created" } : {}),
                 updatedAt: new Date(),
               },
             });
+            if (要退状态) {
+              // 写一条轨迹，让客户看得懂「货为什么退回去了」，措辞跟全量卸柜一致
+              await tx.statusLog.create({
+                data: {
+                  id: `sl_unld_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+                  companyId: auth.companyId,
+                  shipmentId: parent.id,
+                  operatorId: "system",
+                  operatorRole: "system",
+                  operatorName: "系统",
+                  fromStatus: parent.currentStatus,
+                  toStatus: "created",
+                  remark: "已从柜子卸下，退回仓库等待重新装柜",
+                  changedAt: new Date(),
+                },
+              });
+            }
           }
         }
       } else {

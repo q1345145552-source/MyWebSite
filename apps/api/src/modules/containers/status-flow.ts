@@ -153,7 +153,10 @@ export const CONTAINER_NEXT_STOP_LAND: Record<string, string> = {
   IN_VIETNAM: "老挝",
   LAOS_CLEARED: "泰国边境",
   BORDER_DELAY: "排队出关口",
-  CUSTOMS_INSPECT: "泰国仓库",
+  // 海关查验指**越南口岸抽查**（2026-08-13 已挪到「过境越南」后面），下一步是老挝 ——
+  // 原来还写着挪位置之前的「泰国仓库」，客户看到的下一站隔了两个国家（2026-08-31 修）。
+  // 口径跟上面 IN_VIETNAM 那行一致：下一站写下一个环节所在的地方。
+  CUSTOMS_INSPECT: "老挝",
   CUSTOMS_CLEARED: "泰国仓库",
 };
 

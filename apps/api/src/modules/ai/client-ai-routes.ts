@@ -261,7 +261,15 @@ export function registerClientAiRoutes(app: MinimalHttpApp): void {
         res.status(403).json(jsonError("FORBIDDEN", "only client role can use ai chat"));
         return;
       }
-      res.status(500).json(jsonError("INTERNAL_ERROR", message));
+      // 2026-08-31：这里以前把程序内部的英文报错原文直接发到客户聊天框
+      //（可能带表名等内部细节）。真实报错只进服务器日志，给客户一句固定中文。
+      logger.error("[ai] 聊天接口内部错误", {
+        userId: req.auth?.userId,
+        companyId: req.auth?.companyId,
+        error: message,
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      res.status(500).json(jsonError("INTERNAL_ERROR", "系统开小差了，请稍后再试"));
     }
   });
 

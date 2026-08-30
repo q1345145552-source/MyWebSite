@@ -1,4 +1,5 @@
 import { PG_INT_MAX, requireSumWithinInt } from "../core/int-guard";
+import { DECIMAL_10_2, requireDecimal, requireSumWithinDecimal } from "../core/decimal-guard";
 
 /**
  * 建单时产品行的校验（纯函数，方便单测）。
@@ -17,6 +18,7 @@ import { PG_INT_MAX, requireSumWithinInt } from "../core/int-guard";
 export interface ProductRowForGuard {
   packageCount?: unknown;
   productQuantity?: unknown;
+  weightKg?: unknown;
 }
 
 function isPositiveInteger(v: unknown): v is number {
@@ -61,6 +63,18 @@ export function validateProductRows(rows: ProductRowForGuard[]): string | null {
     }
   }
 
+  /* 2026-08-31（复查第 7 条）：单箱重量填了就要过精度闸。
+     这一列是 Decimal(10,2)，原来完全不校验 —— 客户直调接口传 99999999999
+     或者 NaN，要到写库那步才炸，看到的是「服务器繁忙」而不是哪里填错了。
+     跟本模块确认收货那条路的规矩对齐：参数不合法要在碰数据库之前拦、给中文提示。
+     没填（undefined/null）跳过 —— 重量本来就是选填的。 */
+  for (let i = 0; i < rows.length; i += 1) {
+    const w = rows[i].weightKg;
+    if (w === undefined || w === null) continue;
+    const issue = requireDecimal(w, `产品行${i + 1}的单箱重量(kg)`, DECIMAL_10_2);
+    if (issue) return issue;
+  }
+
   /**
    * ⚠️ **合计也要卡**（2026-08-29 第八轮补）。
    * 单行都合法不代表合计合法：两行各 15 亿箱，每行都 < 21 亿，
@@ -80,6 +94,18 @@ export function validateProductRows(rows: ProductRowForGuard[]): string | null {
     "产品数量",
   );
   if (qtySum) return qtySum;
+  // 总重同理：单行各自合法，乘上箱数加起来才超 Decimal(10,2) 的要在门口拦，
+  // 不然到写 Order.weightKg 那步才溢出，又是一句「服务器繁忙」（2026-08-31 复查第 7 条）
+  const wtSum = requireSumWithinDecimal(
+    rows.map((r) =>
+      typeof r.packageCount === "number" && typeof r.weightKg === "number"
+        ? r.weightKg * r.packageCount
+        : 0,
+    ),
+    "总重量(kg)",
+    DECIMAL_10_2,
+  );
+  if (wtSum) return wtSum;
 
   return null;
 }

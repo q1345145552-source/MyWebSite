@@ -311,9 +311,9 @@ export function registerWhrConsolidationStaffRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    let signedFee = 0;
+    let signResult = { totalFee: 0, volumeM3: 0 };
     try {
-      signedFee = await prisma.$transaction(async (tx) => {
+      signResult = await prisma.$transaction(async (tx) => {
         // ⚠️ 整柜取消了就不该再签收计费（2026-08-27 第二版：挪进事务并加锁）。
         // 放在事务第一句 = 锁序【计划 → 预报单】的第一环；
         // 第一版放在事务外面，读到「柜还活着」之后柜被取消了，账单照样生成。
@@ -341,6 +341,34 @@ export function registerWhrConsolidationStaffRoutes(app: MinimalHttpApp): void {
         if (live.status !== "pending") {
           throw new BusinessError("这张预报单刚刚被别人处理过了，签收没有执行，请刷新后再看");
         }
+
+        /**
+         * ⚠️ 「货还在不在」也要锁完重查（2026-08-31 补，排查报告第 10 条）。
+         * 事务外那两道「无货品 / 方数为 0」的检查只配当提示：客户在待签收状态
+         * 可以清空货品，赶在存凭证照片那零点几秒里清掉，这里不复查就会签出一张
+         * ¥0 的账单 —— 单子进「待付款」但付款接口不收 0 元，客户也改不了货，
+         * 这张单就卡死了，只能找管理员处理。
+         */
+        const liveVolume = live.items.reduce((s, it) => s + toNum(it.volumeM3), 0);
+        if (live.items.length === 0 || liveVolume <= 0) {
+          throw new BusinessError("货品刚被客户改过（已清空或方数为 0），签收没有执行，请刷新后重新核对再签收");
+        }
+        // 货品跟本次请求进门时读的那份对不上也拦下来（2026-08-31 补：货型构成也算进比对，
+        // 普货改成商检这种「尺寸不变、单价变了」的改法以前溜得过去）。
+        // 说清楚这道闸的斤两：它只拦「这个请求处理中那零点几秒」里发生的改动 ——
+        // 师傅几分钟前打开页面、客户中途改货、师傅再点签收，这里两次读到的都是改后数据，
+        // 照样放行。要拦那种得让前端把页面上那份货品快照随请求带上来，目前还没做。
+        // 钱不会算错（金额用的是锁里重读的最新数据），这里只是尽力提醒。
+        const cargoMix = (items: { cargoType: string }[]) =>
+          items.map((it) => it.cargoType).sort().join(",");
+        if (
+          live.items.length !== prealert.items.length ||
+          round3(liveVolume) !== round3(totalVolume) ||
+          cargoMix(live.items) !== cargoMix(prealert.items)
+        ) {
+          throw new BusinessError("货品刚被客户改过，签收没有执行，请刷新后重新核对再签收");
+        }
+
         const totalFee = calcFeeFromItems(live.items, live.planCustomer);
         /**
          * ⚠️⚠️ **签收这条路自己算 totalFee、自己写库，绕过了 recalcPrealertFee**
@@ -376,12 +404,14 @@ export function registerWhrConsolidationStaffRoutes(app: MinimalHttpApp): void {
             operatorName: auth.name || auth.userId,
             fromStatus: "pending",
             toStatus: "received_pending_payment",
-            remark: `仓库签收，${round3(totalVolume)} 方，系统自动计费 ¥${totalFee}`,
+            // 方数用锁里重读的那份写，别用事务外的旧数字 —— 金额是新算的，
+            // 方数写旧的会让同一条记录自己对不上（2026-08-31，排查报告第 10 条）
+            remark: `仓库签收，${round3(liveVolume)} 方，系统自动计费 ¥${totalFee}`,
           },
         });
         await recalcCustomerTotals(prealert.customerId, tx);
         await syncPlanStatus(body.planId!, tx);
-        return totalFee;
+        return { totalFee, volumeM3: round3(liveVolume) };
       });
     } catch (e) {
       for (const pf of receiptProofs) {
@@ -398,8 +428,9 @@ export function registerWhrConsolidationStaffRoutes(app: MinimalHttpApp): void {
     ok(res, {
       prealertId: prealert.id,
       status: "received_pending_payment",
-      totalFee: signedFee,
-      volumeM3: round3(totalVolume),
+      totalFee: signResult.totalFee,
+      // 方数返回锁里重读的那份，跟入账口径一致（2026-08-31，排查报告第 10 条）
+      volumeM3: signResult.volumeM3,
       signedAt: now.toISOString(),
     });
   });

@@ -437,7 +437,9 @@ export class ClientAiService implements AiService {
     };
 
     const auditLog: AiQueryAuditLog = {
-      id: `aiq_${Date.now()}`,
+      // 2026-08-31：只用时间戳做编号，两条对话撞同一毫秒会撞主键，第二条整个 500
+      //（答案已算出、DeepSeek 的钱已花，白白作废）。照下面 gap_ 的写法加随机后缀防撞。
+      id: `aiq_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       userId: auth.userId,
       companyId: auth.companyId,
       sessionId: response.sessionId,

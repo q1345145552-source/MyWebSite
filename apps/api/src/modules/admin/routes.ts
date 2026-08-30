@@ -15,6 +15,8 @@ import { IN_TRANSIT_STATUSES } from "../../../../../packages/shared-types/shipme
 // 由接口直接下发中文 —— 抄第二份就一定会漏掉后加的状态。
 import { CONTAINER_STATUS_LABEL } from "../containers/status-flow";
 import { checkPasswordStrength } from "../auth/password-policy";
+// 重置密码成功后要清登录失败计数（2026-08-31，排查报告第34条），键跟登录接口同一口径
+import { clearLoginFailures } from "../core/rate-limit";
 import { loadOrderTotalMetrics } from "../shipments/total-metrics";
 import { BusinessError } from "../core/business-error";
 import { loadOrderProductDims } from "../orders/routes";
@@ -670,12 +672,18 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
     const domesticTrackingNo = has("domesticTrackingNo") ? (body.domesticTrackingNo?.trim() || null) : undefined; // 传空字符串 = 主动清空
     const weightKg = has("weightKg") ? (body.weightKg === null ? null : Number(body.weightKg)) : undefined;
     const volumeM3 = has("volumeM3") ? (body.volumeM3 === null ? null : Number(body.volumeM3)) : undefined;
-    if (weightKg !== undefined && weightKg !== null && !Number.isFinite(weightKg)) {
-      fail(res, 400, "BAD_REQUEST", "invalid weightKg");
+    /**
+     * ⚠️ 负数也要挡（2026-08-31，排查报告第36条）：同一个接口里箱数、产品数量
+     * 都有「不能是负数」的把关，唯独重量体积原来只判了 isFinite —— 填 -5 照样
+     * 收下并同步到关联运单，一路流进首页方数合计、签收单打印和分柜分摊，
+     * 全程没有任何报错。这两个字段是小数，不能套 requireNonNegativeInt（那是整数用的）。
+     */
+    if (weightKg !== undefined && weightKg !== null && (!Number.isFinite(weightKg) || weightKg < 0)) {
+      fail(res, 400, "BAD_REQUEST", "重量必须是不小于 0 的数字");
       return;
     }
-    if (volumeM3 !== undefined && volumeM3 !== null && !Number.isFinite(volumeM3)) {
-      fail(res, 400, "BAD_REQUEST", "invalid volumeM3");
+    if (volumeM3 !== undefined && volumeM3 !== null && (!Number.isFinite(volumeM3) || volumeM3 < 0)) {
+      fail(res, 400, "BAD_REQUEST", "体积必须是不小于 0 的数字");
       return;
     }
 
@@ -726,6 +734,25 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
       }
     }
 
+    /**
+     * ⚠️ 改「唛头归属」前必须核对目标账号（2026-08-31，排查报告第55条）。
+     * 员工建单那条路早就有这道检查，唯独管理员编辑这里漏了：
+     * 打错成员工账号，客户的单就挂到员工名下、原客户再也看不到；
+     * 打一个不存在的号，外键报错只显示「服务器繁忙」，管理员不知道是自己打错。
+     * 规则跟员工建单保持一致：必须存在、属于本公司、角色是客户。
+     */
+    const nextClientId = body.clientId?.trim();
+    if (nextClientId) {
+      const targetClient = await prisma.user.findUnique({
+        where: { id: nextClientId },
+        select: { id: true, companyId: true, role: true },
+      });
+      if (!targetClient || targetClient.companyId !== auth.companyId || targetClient.role !== "client") {
+        fail(res, 400, "BAD_REQUEST", "唛头不存在或不属于当前公司，请核对客户唛头");
+        return;
+      }
+    }
+
     const now = new Date();
 
     /* ==================================================================
@@ -741,38 +768,97 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
 
        正确算法：还剩多少没装 = 整张单的箱数 − 已经装走的件数。
        没拆过柜的运单（绝大多数）子单合计为 0，结果跟原来一模一样。
+
+       ⚠️ 2026-08-31（排查报告第52条）：「已经装走多少件」原来是在事务**外面**
+       查的 —— 查完到真正写库之间没有排队，装柜恰好插进来的话，这里用的还是
+       装柜前的旧数，父单「还剩多少没装」就会被写多（CLAUDE.md 第 28 条：
+       锁只保证不同时，不保证数据没变；拿来做决定的数字必须锁后重读）。
+       所以整段挪进了下面的事务里：先把这张单的父运单行锁住（跟装柜那条路
+       排同一个队），锁到手再查子单合计、再算剩余。
        ================================================================== */
-    let parentPackageCount = packageCount;
-    if (packageCount !== undefined) {
-      const parents = await prisma.shipment.findMany({
-        where: { orderId, companyId: auth.companyId, parentTrackingNo: null },
-        select: { trackingNo: true },
-      });
-      if (parents.length > 0) {
-        const loadedRows = await prisma.shipment.groupBy({
-          by: ["parentTrackingNo"],
-          where: {
-            companyId: auth.companyId,
-            parentTrackingNo: { in: parents.map((p) => p.trackingNo) },
-          },
-          _sum: { packageCount: true },
+
+    // 事务：锁父运单 → 锁内重算剩余件数 → 订单 + 关联运单 + 产品行一致更新
+    await prisma.$transaction(async (tx) => {
+      // 锁序【订单 → 运单】，跟 orders/routes.ts 确认收货那条路一致。
+      // 这个事务下面要 update orders，先锁订单行，两个入口同时改同一张单才会排队。
+      await tx.$queryRaw`SELECT id FROM orders WHERE id = ${orderId} AND company_id = ${auth.companyId} FOR UPDATE`;
+      let parentPackageCount = packageCount;
+      let parentWeightKg = weightKg;
+      let parentVolumeM3 = volumeM3;
+      /* ⚠️ 2026-08-31（复查）：重量/体积也要做跟箱数一模一样的「整单减已装走」。
+         原来只有箱数换算了，weightKg/volumeM3 却把整单值原样写进父运单 ——
+         而全系统口径是「运单存剩余、订单存整单」。管理员编辑一张 100kg、
+         已装走 70kg 的单，父运单重量会被写成 100（应为 30）；之后员工端
+         编辑再按「剩余 + 子单合计」回算订单总重，就成了 100 + 70 = 170，
+         凭空多出 70kg。修法跟员工端 orders/routes.ts 那条路对齐。
+         注意：前端「只改手填的总重量/总体积」时可以不带箱数，所以查子单
+         合计的条件不能只看 packageCount。 */
+      if (
+        packageCount !== undefined ||
+        (weightKg !== undefined && weightKg !== null) ||
+        (volumeM3 !== undefined && volumeM3 !== null)
+      ) {
+        const parents = await tx.shipment.findMany({
+          where: { orderId, companyId: auth.companyId, parentTrackingNo: null },
+          select: { id: true, trackingNo: true },
         });
-        const alreadyLoaded = loadedRows.reduce((s, r) => s + (r._sum.packageCount ?? 0), 0);
-        if (alreadyLoaded > 0) {
-          parentPackageCount = Math.max(0, packageCount - alreadyLoaded);
+        if (parents.length > 0) {
+          // 这批全是父单（parentTrackingNo: null），锁的是父单层，
+          // 锁序跟全系统「子单先、父单后、层内按 id 排」一致
+          await lockShipmentsChildrenFirst(tx, parents.map((p) => p.id), auth.companyId);
+          // 锁后重读运单号（CLAUDE.md 第 28 条）：拿锁之前那份快照里的
+          // trackingNo 可能已经被并发编辑改掉，查子单合计要用锁内的值
+          const lockedParents = await tx.shipment.findMany({
+            where: { id: { in: parents.map((p) => p.id) }, companyId: auth.companyId },
+            select: { trackingNo: true },
+          });
+          const loadedRows = await tx.shipment.groupBy({
+            by: ["parentTrackingNo"],
+            where: {
+              companyId: auth.companyId,
+              parentTrackingNo: { in: lockedParents.map((p) => p.trackingNo) },
+            },
+            _sum: { packageCount: true, weightKg: true, volumeM3: true },
+          });
+          const alreadyLoaded = loadedRows.reduce(
+            (s: number, r: { _sum: { packageCount: number | null } }) => s + (r._sum.packageCount ?? 0),
+            0,
+          );
+          if (packageCount !== undefined && alreadyLoaded > 0) {
+            parentPackageCount = Math.max(0, packageCount - alreadyLoaded);
+          }
+          // 舍入位数跟数据库列一致（重量 Decimal(10,2)、体积 Decimal(10,3)），
+          // 算法照抄 decimal-guard 的 roundToScale，免得浮点相减带出一串尾数。
+          // 历史手工分柜的子单可能没存这两列，null 按 0 算 —— 那种单减掉的会偏少，
+          // 但也远好过把整单值原样写进父运单。
+          const roundToScale = (n: number, scale: number): number => {
+            const f = 10 ** scale;
+            return Math.round((n + Number.EPSILON) * f) / f;
+          };
+          let alreadyLoadedWeightKg = 0;
+          let alreadyLoadedVolumeM3 = 0;
+          for (const r of loadedRows) {
+            alreadyLoadedWeightKg += r._sum.weightKg == null ? 0 : Number(r._sum.weightKg.toString());
+            alreadyLoadedVolumeM3 += r._sum.volumeM3 == null ? 0 : Number(r._sum.volumeM3.toString());
+          }
+          if (typeof weightKg === "number" && alreadyLoadedWeightKg > 0) {
+            parentWeightKg = Math.max(0, roundToScale(weightKg - alreadyLoadedWeightKg, 2));
+          }
+          if (typeof volumeM3 === "number" && alreadyLoadedVolumeM3 > 0) {
+            parentVolumeM3 = Math.max(0, roundToScale(volumeM3 - alreadyLoadedVolumeM3, 3));
+          }
         }
       }
-    }
 
-    const txOps: any[] = [
-      prisma.order.update({
+      await tx.order.update({
         where: { id: orderId },
         data: {
           warehouseId,
           batchNo,
           // clientId 在库里是必填，给 null 会直接抛错。
           // 传了非空值才改归属，传空串/不传就保持原样。
-          ...(body.clientId?.trim() ? { clientId: body.clientId.trim() } : {}),
+          // （非空值在事务外面已经核对过：本公司、client 角色 —— 见上面第55条那段）
+          ...(nextClientId ? { clientId: nextClientId } : {}),
           itemName,
           cargoType: body.cargoType?.trim() || undefined,
           transportMode,
@@ -786,10 +872,10 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
           shipDate,
           updatedAt: now,
         },
-      }),
+      });
       // 同步所有关联运单（按 order_id 关联的那些）
       // data 里凡是 undefined 的键，Prisma 会跳过不写 —— 也就是「本次没改就不碰」
-      prisma.shipment.updateMany({
+      await tx.shipment.updateMany({
         where: { orderId, companyId: auth.companyId, parentTrackingNo: null },
         data: {
           warehouseId,
@@ -801,66 +887,60 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
           // 订单上那个 packageCount 仍然是整张单的总箱数，两者不是一回事。
           packageCount: parentPackageCount,
           packageUnit,
-          weightKg,
-          volumeM3,
+          // ⚠️ 重量/体积同上：父运单存「整单减已装走」的剩余数（2026-08-31 复查补齐）
+          weightKg: parentWeightKg,
+          volumeM3: parentVolumeM3,
           containerNo,
           remark: body.remark !== undefined ? body.remark?.trim() || null : undefined,
           updatedAt: now,
         },
-      }),
-    ];
-    // 产品行按行增量同步：带 id 的改、不带 id 的新增、本次没提交的才删。
-    // 不再整批删除重建 —— 重建一旦漏字段（曾漏过 weightKg）就会静默丢数据。
-    if (body.products && body.products.length > 0) {
-      const keepIds = body.products
-        .map((p) => p.id?.trim())
-        .filter((v): v is string => Boolean(v));
+      });
+      // 产品行按行增量同步：带 id 的改、不带 id 的新增、本次没提交的才删。
+      // 不再整批删除重建 —— 重建一旦漏字段（曾漏过 weightKg）就会静默丢数据。
+      if (body.products && body.products.length > 0) {
+        const keepIds = body.products
+          .map((p) => p.id?.trim())
+          .filter((v): v is string => Boolean(v));
 
-      txOps.push(
-        prisma.orderProduct.deleteMany({
+        await tx.orderProduct.deleteMany({
           where: {
             orderId,
             companyId: auth.companyId,
             ...(keepIds.length > 0 ? { id: { notIn: keepIds } } : {}),
           },
-        }),
-      );
+        });
 
-      body.products.forEach((p, i) => {
-        const data = {
-          itemName: p.itemName.trim(),
-          // ⚠️ 不许 `|| 1`：上面已经卡死必须是正整数（2026-08-29 去掉兜底）
-          packageCount: p.packageCount,
-          lengthCm: p.lengthCm ?? null,
-          widthCm: p.widthCm ?? null,
-          heightCm: p.heightCm ?? null,
-          productQuantity: p.productQuantity ?? null,
-          cargoType: p.cargoType?.trim() || "normal",
-          domesticTrackingNo: p.domesticTrackingNo?.trim() || "货拉拉",
-          weightKg: p.weightKg ?? null,
-          sortOrder: i,
-        };
-        const rowId = p.id?.trim();
-        if (rowId) {
-          // 用 updateMany 而不是 update：where 里带上 orderId + companyId，
-          // 传了别的订单的行号也只会匹配不到，不会被改动
-          txOps.push(
-            prisma.orderProduct.updateMany({
+        for (let i = 0; i < body.products.length; i++) {
+          const p = body.products[i];
+          const data = {
+            itemName: p.itemName.trim(),
+            // ⚠️ 不许 `|| 1`：上面已经卡死必须是正整数（2026-08-29 去掉兜底）
+            packageCount: p.packageCount,
+            lengthCm: p.lengthCm ?? null,
+            widthCm: p.widthCm ?? null,
+            heightCm: p.heightCm ?? null,
+            productQuantity: p.productQuantity ?? null,
+            cargoType: p.cargoType?.trim() || "normal",
+            domesticTrackingNo: p.domesticTrackingNo?.trim() || "货拉拉",
+            weightKg: p.weightKg ?? null,
+            sortOrder: i,
+          };
+          const rowId = p.id?.trim();
+          if (rowId) {
+            // 用 updateMany 而不是 update：where 里带上 orderId + companyId，
+            // 传了别的订单的行号也只会匹配不到，不会被改动
+            await tx.orderProduct.updateMany({
               where: { id: rowId, orderId, companyId: auth.companyId },
               data,
-            }),
-          );
-        } else {
-          txOps.push(
-            prisma.orderProduct.create({
+            });
+          } else {
+            await tx.orderProduct.create({
               data: { companyId: auth.companyId, orderId, ...data },
-            }),
-          );
+            });
+          }
         }
-      });
-    }
-    // 事务：订单 + 关联运单 + 产品行一致更新
-    await prisma.$transaction(txOps);
+      }
+    });
 
     ok(res, {
       orderId,
@@ -1046,6 +1126,12 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
       select: { id: true, name: true, companyName: true, phone: true, email: true, createdAt: true },
     });
 
+    // 这条路也能给客户重置密码 —— 跟 set-password 一样，重置成功就把
+    // 登录失败计数清掉（2026-08-31，排查报告第34条），不然新密码照样被计数挡住。
+    if (updateData.passwordHash) {
+      clearLoginFailures(id);
+    }
+
     ok(res, {
       id: updated.id,
       name: updated.name,
@@ -1111,8 +1197,17 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
       fail(res, 403, "FORBIDDEN", "cannot update user of another company");
       return;
     }
-    if (row.role !== "staff" && row.role !== "client") {
-      fail(res, 403, "FORBIDDEN", "only staff or client password can be set here");
+    /**
+     * ⚠️ 2026-08-31（复查）：白名单放开 admin —— 管理员锁号原来无解才加的。
+     * 管理员账号被连错 20 次锁 30 分钟时，登录提示照样说「找管理员重置密码」，
+     * 但这条路原来写死只收 staff/client，client/update 又只收客户 ——
+     * 系统里没有任何一条路能给管理员账号重置密码顺带清计数，唯一逃生口
+     * 是他恰好在别处还留着已登录的会话去自助改密码。现在另一个管理员
+     * 可以在这里救他。操作者必须是 admin 这一层，上面的 requireRole 已经保证；
+     * 且只能动本公司账号（上面的 companyId 检查）。
+     */
+    if (row.role !== "staff" && row.role !== "client" && row.role !== "admin") {
+      fail(res, 403, "FORBIDDEN", "only staff, client or admin password can be set here");
       return;
     }
 
@@ -1120,7 +1215,9 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
     // 是「888888」「跟账号名一样」这种，员工端能看到全部客户和运单，风险比客户账号大。
     // ⚠️ 客户账号沿用旧规则（不校验强度）—— 用户明确要求先不动客户那边，
     //    他们的密码普遍就是唛头本身，一刀切会让 66 个客户当场登不进去。
-    if (row.role === "staff") {
+    // 2026-08-31：admin 走这条路后也要卡强度 —— 管理员能看到的比员工还多，
+    // 不能反过来允许给管理员账号设弱口令。
+    if (row.role === "staff" || row.role === "admin") {
       const weakReason = checkPasswordStrength(password, undefined, id);
       if (weakReason) {
         fail(res, 400, "BAD_REQUEST", weakReason);
@@ -1130,6 +1227,14 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
 
     const passwordHash = hashPassword(password);
     await prisma.user.update({ where: { id }, data: { passwordHash } });
+    /**
+     * ⚠️ 重置成功要顺手把登录失败计数清零（2026-08-31，排查报告第34条）。
+     * 账号被连错 20 次锁 30 分钟时，登录提示让人「找管理员重置密码」——
+     * 但原来重置只换密码不清计数，拿着新密码来还是被计数挡回去，
+     * 提示指的是条死路。计数的键就是登录账号原样（见 core/rate-limit.ts），
+     * 和这里的 id 同一口径，清的正是这个人的桶。
+     */
+    clearLoginFailures(id);
     ok(res, { updated: true, id });
   });
 

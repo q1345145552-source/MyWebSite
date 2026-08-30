@@ -49,8 +49,10 @@ const DEFAULT_PRICES: Array<{ transportMode: string; cargoType: string; unitPric
 
 export function registerShippingConfigRoutes(app: MinimalHttpApp): void {
   // 获取计费配置（低消）
+  // 2026-08-31：去掉 client——低消是计费规则的一部分，按「价格不让客户看」的既定规矩
+  // 收回客户权限（运费单价接口 2026-08-07 已收回，这个当时漏了）。客户端没有调用方，不影响页面。
   app.get("/admin/shipping/config", async (req, res) => {
-    const auth = requireRole(req, res, ["admin", "staff", "client"]);
+    const auth = requireRole(req, res, ["admin", "staff"]);
     if (!auth) return;
     const config = await getConfig();
     ok(res, config);

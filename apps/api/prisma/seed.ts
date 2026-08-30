@@ -49,6 +49,12 @@ const DEFAULT_STATUS_LABELS: Array<{ status: string; labelZh: string }> = [
   { status: "customsTH", labelZh: "泰国清关中" },
   { status: "outForDelivery", labelZh: "派送中" },
   { status: "delivered", labelZh: "已签收" },
+  // 2026-08-31：补上 2026-08-06 新增的 5 个陆运环节，与 ai-config-store.ts 的名单逐字保持一致
+  { status: "atPortCn", labelZh: "到达凭祥口岸" },
+  { status: "inVietnam", labelZh: "过境越南" },
+  { status: "laosCleared", labelZh: "老挝边境已放行" },
+  { status: "borderDelay", labelZh: "口岸滞留" },
+  { status: "customsInspect", labelZh: "海关查验" },
   { status: "exception", labelZh: "异常" },
   { status: "returned", labelZh: "已退回" },
   { status: "cancelled", labelZh: "已取消" },

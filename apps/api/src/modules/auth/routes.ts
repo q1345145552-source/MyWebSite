@@ -10,7 +10,8 @@ import {
   rateLimitKey,
   recordLoginFailure,
 } from "../core/rate-limit";
-import { signAuthToken } from "./token";
+import { signAuthToken, verifyAuthToken } from "./token";
+import { revokeToken } from "../core/token-blacklist";
 import { hashPassword, verifyPassword } from "./crypto-utils";
 import { checkPasswordStrength } from "./password-policy";
 
@@ -133,6 +134,31 @@ export function registerAuthRoutes(app: MinimalHttpApp): void {
   });
 
   /**
+   * 退出登录：把这张令牌在服务器上作废（2026-08-31 新增，排查报告第 58 条）。
+   *
+   * 原来「退出账号」只是前端删本机凭证，服务器不知道 —— 令牌要是在退出前
+   * 被人抄走，退出之后最长还能用 7 天。现在退出时先调这个接口，
+   * 把令牌记进内存黑名单（TTL = 令牌自己的剩余有效期），之后再拿它来就是 401。
+   *
+   * ⚠️ 黑名单在进程内存里，API 一重启就清空 —— 这是有意的轻量方案，
+   *    取舍写在 core/token-blacklist.ts 的文件头注释里。
+   * ⚠️ 前端就算调它失败（断网等）也照样本地清凭证，退出流程不被卡住。
+   */
+  app.post("/auth/logout", async (req, res) => {
+    const auth = requireAuth(req, res);
+    if (!auth) return;
+    // 能走到这里说明令牌刚通过认证，这里再解一次只是为了拿原始令牌和它的 exp
+    const authHeader = typeof req.headers.authorization === "string" ? req.headers.authorization.trim() : "";
+    const token = authHeader.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() ?? "";
+    const payload = token ? verifyAuthToken(token) : null;
+    if (payload) {
+      revokeToken(token, payload.exp);
+      logger.info("退出登录，令牌已作废", { 账号: auth.userId, 角色: auth.role });
+    }
+    ok(res, { loggedOut: true });
+  });
+
+  /**
    * 改自己的密码（三端通用：管理员 / 员工 / 客户都能用）。
    *
    * 2026-08-07 新增。原来只有 /admin/users/set-password，而那个接口写死了
@@ -185,6 +211,13 @@ export function registerAuthRoutes(app: MinimalHttpApp): void {
       where: { id: auth.userId },
       data: { passwordHash: hashPassword(newPassword) },
     });
+
+    /**
+     * 改成功顺手把登录失败计数清零（2026-08-31，跟 /admin/users/set-password 同一口径）。
+     * 不清的话：账号被连错锁着的人自己改完密码，拿新密码登录还是被旧计数挡回去。
+     * 计数的键就是登录账号原样（登录按 user.id 查库），auth.userId 正是同一个桶。
+     */
+    clearLoginFailures(auth.userId);
 
     logger.warn("改密码成功", { 账号: auth.userId, 角色: auth.role });
     ok(res, { changed: true });

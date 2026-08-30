@@ -83,7 +83,8 @@ export function registerClientAddressRoutes(app: MinimalHttpApp): void {
     }
     const lat = normalizeCoord(body.lat);
     const lng = normalizeCoord(body.lng);
-    const id = `addr_${Date.now()}`;
+    // 2026-08-31：加随机后缀防止同一毫秒两条地址撞号（与员工端建地址的写法保持一致）
+    const id = `addr_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const isDefault = body.isDefault ? 1 : 0;
 
     // 事务：若设为默认地址，先把同一客户的所有地址 isDefault 置 0，再插入新地址
