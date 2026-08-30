@@ -855,8 +855,7 @@ export async function receiveStaffPrealert(payload: {
   domesticTrackingNo?: string;
   transportMode?: "sea" | "land";
   cargoType?: string;
-  // 2026-08-31：确认收货弹窗里的应收金额（必填）和柜号原来根本没上送，白填。现在随收货一起保存。
-  receivableAmountCny?: number;
+  /* 2026-08-31：柜号随收货保存；应收金额一度接过、当晚按老板拍板拆除（钱只在集货里）。 */
   batchNo?: string;
 }): Promise<{ orderId: string; status: string; updatedAt: string }> {
   const response = await fetch(`${apiBaseUrl()}/staff/prealerts/receive`, {

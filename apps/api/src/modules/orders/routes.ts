@@ -420,9 +420,9 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       domesticTrackingNo?: string;
       transportMode?: "sea" | "land";
       cargoType?: string;
-      // 2026-08-31（排查报告第 1 条）：确认收货弹窗里的「应收金额」「柜号」
-      // 原来前端根本没上送、这里也不认识，员工填了等于白填。现在随收货一起保存。
-      receivableAmountCny?: number;
+      /* 2026-08-31（排查报告第 1 条 → 深夜老板重申「钱只在集货里」）：
+         弹窗里的柜号随收货保存；「应收金额」一度接进来过，当晚按老板拍板拆除 ——
+         普通运单不录钱，跟 2026-08-07「运单不再涉及金额」保持一致。 */
       batchNo?: string;
     };
     const orderId = body.orderId?.trim();
@@ -486,19 +486,6 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       if (issue) { fail(res, 400, "VALIDATION_ERROR", issue); return; }
       receiveVolumeM3 = parseNumericStrict(body.volumeM3);
     }
-    /**
-     * 应收金额（2026-08-31，排查报告第 1 条）：
-     *   · 列是 Decimal(12,2)，按 12,2 卡上限和小数位，跟别的字段一个规矩；
-     *   · 跟重量方数不同，金额**允许填 0**（免收的单确实存在），
-     *     所以用 min: 0 覆盖 requireDecimal 默认的「最小 0.01」；
-     *   · 没传就不动订单上原有的值——弹窗之外的入口不受影响。
-     */
-    let receiveReceivableAmountCny: number | undefined;
-    if (body.receivableAmountCny !== undefined && body.receivableAmountCny !== null) {
-      const issue = requireDecimal(body.receivableAmountCny, "应收金额(元)", { ...DECIMAL_12_2, min: 0 });
-      if (issue) { fail(res, 400, "VALIDATION_ERROR", issue); return; }
-      receiveReceivableAmountCny = parseNumericStrict(body.receivableAmountCny);
-    }
     // 柜号：trim 后存；传空串当「没填」，不去清掉订单上已有的柜号
     const receiveBatchNo =
       typeof body.batchNo === "string" && body.batchNo.trim() ? body.batchNo.trim() : undefined;
@@ -529,8 +516,7 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
     if (body.transportMode) updateData.transportMode = body.transportMode;
     if (body.cargoType) updateData.cargoType = body.cargoType;
     if (body.domesticTrackingNo) updateData.domesticTrackingNo = body.domesticTrackingNo;
-    // 2026-08-31（排查报告第 1 条）：传了才写，没传不动
-    if (receiveReceivableAmountCny !== undefined) updateData.receivableAmountCny = receiveReceivableAmountCny as any;
+    // 2026-08-31（排查报告第 1 条）：柜号传了才写，没传不动
     if (receiveBatchNo !== undefined) updateData.batchNo = receiveBatchNo;
 
     /**

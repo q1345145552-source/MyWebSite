@@ -169,13 +169,6 @@ export default function StaffHomePage() {
   const [shipments, setShipments] = useState<ShipmentItem[]>([]);
   const [prealerts, setPrealerts] = useState<OrderItem[]>([]);
   const [prealertBatchDrafts, setPrealertBatchDrafts] = useState<Record<string, string>>({});
-  /**
-   * 2026-08-31 排查条目1（复查补丁）：确认收货弹窗的「应收金额」单独用字符串草稿，
-   * 照柜号 prealertBatchDrafts 那套。不能复用 prealertEditDrafts —— 那份是页面加载时
-   * 用 buildPrealertDraft 预填的，它会把「没填」兜底成 0：输入框预填着 0、
-   * 清空又立刻变回 0，「必填」校验就永远拦不住。字符串草稿里「没填」才真的是空串。
-   */
-  const [prealertReceivableDrafts, setPrealertReceivableDrafts] = useState<Record<string, string>>({});
   const [prealertEditDrafts, setPrealertEditDrafts] = useState<Record<string, PrealertEditDraft>>({});
   const [prealertConfirmedDrafts, setPrealertConfirmedDrafts] = useState<Record<string, PrealertEditDraft>>({});
   const [editingPrealertId, setEditingPrealertId] = useState<string | null>(null);
@@ -467,17 +460,6 @@ export default function StaffHomePage() {
       prealertItems.forEach((item) => {
         if (!(item.id in next)) {
           next[item.id] = item.batchNo ?? "";
-        }
-      });
-      return next;
-    });
-    // 2026-08-31 排查条目1（复查补丁）：应收金额草稿——有数则显示原数，
-    // 没数就是真空串，「没填」不许被翻译成 0（否则必填校验形同虚设）
-    setPrealertReceivableDrafts((prev) => {
-      const next: Record<string, string> = { ...prev };
-      prealertItems.forEach((item) => {
-        if (!(item.id in next)) {
-          next[item.id] = item.receivableAmountCny != null ? String(item.receivableAmountCny) : "";
         }
       });
       return next;
@@ -2323,13 +2305,6 @@ export default function StaffHomePage() {
               <div>运输方式：{(prealertEditDrafts[approvingPrealert.id]?.transportMode ?? approvingPrealert.transportMode) === "sea" ? "海运" : "陆运"}</div>
               <div>发货日期：{prealertEditDrafts[approvingPrealert.id]?.shipDate ?? approvingPrealert.shipDate ?? approvingPrealert.createdAt.slice(0, 10)}</div>
               <div style={{ marginTop: 8, borderTop: "1px solid var(--l-soft)", paddingTop: 8 }}>
-                <div style={{ fontSize: 12, color: "var(--t-strong)", marginBottom: 4 }}>应收金额（必填）</div>
-                {/* 2026-08-31 排查条目1（复查补丁）：绑定字符串草稿、onChange 存原始字符串。
-                    原来绑的是 prealertEditDrafts（buildPrealertDraft 预填 0）+ `+e.target.value`——
-                    输入框预填 0、清空立刻变回 0，「必填」永远拦不住。 */}
-                <input type="number" step="0.01" value={prealertReceivableDrafts[approvingPrealert.id] ?? ""} onChange={(e) => setPrealertReceivableDrafts((prev) => ({ ...prev, [approvingPrealert.id]: e.target.value }))} placeholder="输入应收金额" style={prealertEditInputStyle} />
-              </div>
-              <div>
                 <div style={{ fontSize: 12, color: "var(--t-strong)", marginBottom: 4 }}>柜号（可选）</div>
                 <input value={prealertBatchDrafts[approvingPrealert.id] ?? ""} onChange={(e) => setPrealertBatchDrafts((prev) => ({ ...prev, [approvingPrealert.id]: e.target.value }))} placeholder="柜号（装柜时填写）" style={prealertEditInputStyle} />
               </div>
@@ -2347,23 +2322,15 @@ export default function StaffHomePage() {
                 const batchNo = (prealertBatchDrafts[item.id] ?? "").trim();
                 setReceiveModalError("");
                 /**
-                 * ⚠️ 应收金额取**单独的字符串草稿**（2026-08-31 排查条目1 复查补丁）——
-                 * 不能取 prealertEditDrafts：那份是 buildPrealertDraft 预填的，
-                 * 会把「没填」兜底成 0，必填校验就形同虚设。
-                 * 这个表达式必须和上面输入框的 value 是同一份。
-                 */
-                const rawReceivable = prealertReceivableDrafts[item.id] ?? "";
-                /**
                  * ⚠️ 提交前先校验（2026-08-29 补）：这个弹窗以前**一道校验都没有**，
                  * draft 里的数字原样发出去。
                  */
                 // ⚠️ 第二个参数是**这张单原来的**重量/体积 —— 用来识别
                 //    「员工把原有的数清空了」，那种情况后端做不到清零，必须当场说清楚
-                // ⚠️ 第三个参数是应收金额（2026-08-31 排查条目1）：标着「必填」就真的必填
                 const draftIssue = validateReceiveDraft(draft, {
                   weightKg: (item as any).weightKg,
                   volumeM3: (item as any).volumeM3,
-                }, { amount: rawReceivable });
+                });
                 // 报错写进弹窗常驻红字，不用 Toast（2026-08-31 排查条目43：2.2 秒读不完长提示）
                 if (draftIssue) { setReceiveModalError(draftIssue); return; }
                 try {
@@ -2384,12 +2351,8 @@ export default function StaffHomePage() {
                     volumeM3: optionalNumberForReceive(draft.volumeM3),
                     domesticTrackingNo: draft.domesticTrackingNo,
                     transportMode: draft.transportMode,
-                    /**
-                     * 2026-08-31 排查条目1：应收金额和柜号原来根本没随请求上送，
-                     * 弹窗里填了等于白填。应收金额已在上面校验过（必填、≥0、最多两位小数）。
-                     */
-                    receivableAmountCny: Number(rawReceivable.trim()),
-                    // 柜号选填：trim 后上送，空着就不发这个字段（后端语义「没传 = 不改」）
+                    /* 2026-08-31 排查条目1 → 深夜老板重申「钱只在集货里」：
+                       弹窗一度接过「应收金额」，当晚拆除——普通运单不录钱。柜号保留。 */
                     batchNo: batchNo || undefined,
                   });
                   setToast(`预报单 ${item.id} 确认收货`);
