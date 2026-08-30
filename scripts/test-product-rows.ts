@@ -36,7 +36,14 @@ import {
 } from "../apps/web/src/modules/orders/productRowGuard";
 
 const failures: string[] = [];
+/**
+ * 跑过的项数（2026-08-31 复查补）。原来收尾那句写死「22 项全部通过」，
+ * 而实际是 23 项 —— 写死的总数没人核对，差一了都不知道。改成计数器自动数，
+ * 以后加减用例总数跟着走，不用记得回来改这句话。
+ */
+let totalChecks = 0;
 function check(name: string, body: () => void): void {
+  totalChecks += 1;
   try {
     body();
     console.log(`  ✅ ${name}`);
@@ -228,10 +235,13 @@ async function loadRoutes(): Promise<Map<string, Handler>> {
   const admin = await import("../apps/api/src/modules/admin/routes");
   const containers = await import("../apps/api/src/modules/containers/routes");
   const adminOps = await import("../apps/api/src/modules/admin-ops/routes");
+  // 2026-08-31 复查补：第 17 项要真调活着的装柜入口，所以把这套路由也注册进来
+  const loadingManifests = await import("../apps/api/src/modules/loading-manifests/routes");
   (orders as any).registerOrderRoutes(fakeApp);
   (admin as any).registerAdminRoutes(fakeApp);
   (containers as any).registerContainerRoutes(fakeApp);
   (adminOps as any).registerAdminOpsRoutes(fakeApp);
+  (loadingManifests as any).registerLoadingManifestRoutes(fakeApp);
   return routes;
 }
 
@@ -240,6 +250,8 @@ async function callRoute(
   handler: Handler,
   auth: { userId: string; companyId: string; role: string; name: string },
   body: unknown,
+  // 有的路由（装柜 add-shipment）从 query 里拿 id，不传就默认空
+  query: Record<string, string> = {},
 ): Promise<{ status: number; message: string }> {
   let status = 0;
   let payload: { message?: string } = {};
@@ -247,7 +259,7 @@ async function callRoute(
     status(code: number) { status = code; return res; },
     json(value: unknown) { payload = value as { message?: string }; },
   };
-  await handler({ method: "POST", path: "", query: {}, headers: {}, body, auth }, res);
+  await handler({ method: "POST", path: "", query, headers: {}, body, auth }, res);
   return { status, message: payload.message ?? "" };
 }
 
@@ -270,6 +282,7 @@ function assertIsProductRowError(label: string, message: string): void {
 let routeTable: Map<string, Handler>;
 
 async function checkAsync(name: string, body: () => Promise<void>): Promise<void> {
+  totalChecks += 1;
   try {
     await body();
     console.log(`  ✅ ${name}`);
@@ -553,20 +566,30 @@ async function main(): Promise<void> {
     assert.ok(/missing required|必填/.test(ok2.message), `没停在「缺必填项」那道闸，而是：${ok2.message}`);
   });
 
-  await checkAsync("17) 装柜件数不许是小数", async () => {
+  await checkAsync("17) 装柜件数不许是小数（真调 /staff/loading-manifests/add-shipment）", async () => {
     /**
      * 复核实测 loadedPieceCount=2.5 能进事务。
      * ShipmentContainerItem.loadedPieceCount 是 Int，小数要么写库 500，
      * 要么先把「已装几件 / 还剩几件」算成小数。
+     *
+     * ⚠️ 靶子换回真实路由（2026-08-31 复查改）。上一版改成只单测
+     * core/int-guard.ts 的函数本身，理由写的是「add-shipment 一进 handler
+     * 就开事务，没法调」——去读 loading-manifests/routes.ts 就知道这话不对：
+     * pieceCount 校验排在 prisma.$transaction **前面**，坏件数在碰库之前
+     * 就被 400 弹回来，跟第 11 项是同一个模式。只单测函数的话，
+     * 把路由里那段校验整段删掉这里照样全绿 —— 正是上面第 11 项注释里
+     * 记过的「它们测的是函数本身，没人问这个函数有没有被调用」。
      */
-    const handler = routeTable.get("POST /admin/containers/load");
-    assert.ok(handler, "没注册 /admin/containers/load");
-    /**
-     * ⚠️ 第一版只断言「拿到 400」，**没看报错内容、也没有正向对照** ——
-     * 第九轮复核实测：把这个接口改成无条件返回 400，这一项照样全绿。
-     * 这正是本文件 252-259 行写着「光看 400 是不够的」并为此加了
-     * assertIsProductRowError 的那条教训，第 17 项当时忘了用。
-     */
+    const handler = routeTable.get("POST /staff/loading-manifests/add-shipment");
+    assert.ok(handler, "没注册 /staff/loading-manifests/add-shipment");
+
+    // 顺手盯一眼：删掉的老接口不许被谁注册回来（它不查父子关系，是个危险入口）
+    assert.equal(
+      routeTable.get("POST /admin/containers/load"),
+      undefined,
+      "/admin/containers/load 2026-08-31 已删，谁把它注册回来了？",
+    );
+
     const BAD_PIECES: Array<[string, unknown]> = [
       ["2.5", 2.5],
       ["0", 0],
@@ -577,27 +600,32 @@ async function main(): Promise<void> {
       ["数组 [5]", [5]],
     ];
     for (const [label, pieces] of BAD_PIECES) {
-      const r = await callRoute(handler!, ADMIN, {
-        containerId: "c_1", shipmentId: "s_1", loadedVolumeM3: 1.2, loadedPieceCount: pieces,
-      });
-      assert.equal(r.status, 400, `装柜件数【${label}】没被拦，拿到 ${r.status}`);
+      const r = await callRoute(
+        handler!,
+        STAFF,
+        { trackingNo: "TH0001", pieceCount: pieces },
+        { id: "ct_test" }, // 柜子 id 走 query，校验在锁柜子之前，所以全程不连库
+      );
+      assert.equal(r.status, 400, `装柜件数【${label}】没被拦下，拿到 ${r.status} —— 坏件数要进事务了`);
       assert.ok(
-        /件数/.test(r.message),
-        `装柜件数【${label}】是被 400 了，但报错不是件数那道闸发的：${JSON.stringify(r.message)}`,
+        /装柜件数/.test(r.message),
+        `装柜件数【${label}】是被 400 了，但报错不是件数闸发的：${JSON.stringify(r.message)}`,
       );
     }
 
     /**
-     * **正向对照**：合法件数不许被这道闸拦。
-     * ⚠️ 故意不给 containerId，让它停在「参数缺失」那道闸（也在连库之前），
-     * 拿到的报错**不该**提「件数」—— 这就证明合法的 3 件放行了。
+     * **正向对照**：合法件数不许被这道闸拦（边界值也要放行）。
+     * ⚠️ 这两条保留单测写法：真调路由的话合法件数会穿过校验进事务连库，
+     * 被开头那道「连不通的数据库地址」硬闸炸掉。
      */
-    const good = await callRoute(handler!, ADMIN, {
-      shipmentId: "s_1", loadedVolumeM3: 1.2, loadedPieceCount: 3,
-    });
-    assert.ok(
-      !/件数必须/.test(good.message),
-      `合法的 3 件被件数闸拦住了：${good.message}`,
+    const { requirePositiveInt, parseNumericStrict, PG_INT_MAX } = await import(
+      "../apps/api/src/modules/core/int-guard"
+    );
+    assert.equal(requirePositiveInt(parseNumericStrict(3), "件数"), null, "合法的 3 件被件数闸拦住了");
+    assert.equal(
+      requirePositiveInt(parseNumericStrict(PG_INT_MAX), "件数"),
+      null,
+      "刚好到 32 位上限的件数被误拦了",
     );
   });
 
@@ -798,10 +826,10 @@ async function main(): Promise<void> {
   });
 
   if (failures.length > 0) {
-    console.error(`\n${failures.length}/22 项不通过：${failures.join("；")}`);
+    console.error(`\n${failures.length}/${totalChecks} 项不通过：${failures.join("；")}`);
     process.exit(1);
   }
-  console.log("产品行校验：22 项全部通过");
+  console.log(`产品行校验：${totalChecks} 项全部通过`);
 }
 
 main().catch((error) => {

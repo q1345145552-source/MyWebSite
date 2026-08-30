@@ -146,8 +146,7 @@ npm run dev:web:public
 - `GET /admin/containers` — 柜列表
 - `POST /admin/containers` — 新建柜子
 - `POST /admin/containers/status` — 变更柜子状态
-- `POST /admin/containers/load` — 装柜
-- `DELETE /admin/containers/load?id=xxx` — 卸柜
+  （老的 `POST/DELETE /admin/containers/load` 装柜/卸柜接口已于 2026-08-31 下线，装柜统一走上面员工端的 `/staff/loading-manifests` 那套）
 - `GET /admin/finance/summary` — 财务汇总
 - `GET /admin/lmp/rates` — 运价管理
 - `GET /admin/customs/cases` — 清关案件

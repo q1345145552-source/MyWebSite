@@ -66,6 +66,16 @@ const LOCK_HELPERS: Record<string, string[]> = {
   lockShipmentsChildrenFirst: ["shipments"],
   lockParentsByTrackingNo: ["shipments"],
   lockAndSyncParents: ["shipments"],
+  /**
+   * ⚠️ 2026-08-31 新增：这两个取号函数第一件事就是 pg_advisory_xact_lock
+   * （排队锁握到事务提交），是「客户建预报单 / 建集货任务」两条纯插入事务
+   * 里真正的那把锁。不登记的话第 1 项会把它们当成「没锁就写」误报。
+   * 用的是假表名（advisory_ 前缀），不参与第 2/3 项的表顺序比对。
+   * ⚠️ 别把 orders/routes.ts:124 那个同名 generateTrackingNo 登进来 ——
+   * 它不带 tx、没有锁，登了就是给它白发绿灯（所以这里只登这两个独名的）。
+   */
+  generatePrealertNo: ["advisory_prealert_no"],
+  generateTaskNo: ["advisory_consolidation_task_no"],
 };
 
 const WRITE_RE = /\btx\.\w+\.(create|update|updateMany|delete|deleteMany|upsert|createMany)\b/;
@@ -297,7 +307,9 @@ const NO_LOCK_NEEDED: Array<[string, string]> = [
 
 /**
  * 第 7 项的豁免：**新建**一行热表数据不需要先锁它（那行还不存在，锁不到）。
- * ⚠️ 只放「纯 create」，凡是 update / delete 一律不许进这张表。
+ * ⚠️ 只放「纯 create」，凡是 update / delete 一律不许进这张表 ——
+ * 2026-08-31 起这条不再靠人守：违规文案带上了写库方法，
+ * 豁免串写死「create了」，同一条路由里冒出 update / delete 会自动变红。
  */
 const WRITE_WITHOUT_LOCK_OK: string[] = [
   /**
@@ -307,10 +319,20 @@ const WRITE_WITHOUT_LOCK_OK: string[] = [
    * ⚠️ 这里**故意不写行号**（2026-08-29 改）：上一版写的是
    * `"admin-ops/routes.ts:663"`，我在同一个文件上面插了几行注释，
    * 行号就漂到 668，豁免当场失效、测试变红。
-   * 豁免按「文件 + 路由 + 表名」匹配，代码挪位置不受影响；
+   * 豁免按「文件 + 路由 + 动词 + 表名」匹配，代码挪位置不受影响；
    * 而真要是**换了一处**地方漏锁，路由或表名就对不上，照样会红。
    */
-  "admin-ops/routes.ts:%d /admin/lastmile/orders（改了 admin_lastmile_orders",
+  "admin-ops/routes.ts:%d /admin/lastmile/orders（create了 admin_lastmile_orders",
+  /**
+   * 客户建预报单（2026-08-31 排查报告第 5 条改成了单事务）：
+   * order.create / shipment.create 插的都是**全新的行**，那行还不存在、锁不到；
+   * 并发那面靠 generatePrealertNo 的 advisory 取号锁排队（见 LOCK_HELPERS）。
+   * ⚠️ 豁免串写死「create了」（2026-08-31 复查改）：这条路哪天改成
+   * update / delete，动词对不上、豁免自动失效变红，不用指望人记得来删。
+   * （createMany 也对不上 —— 真改成那种写法就来这里重审一次。）
+   */
+  "orders/routes.ts:%d /client/prealerts（create了 orders",
+  "orders/routes.ts:%d /client/prealerts（create了 shipments",
 ];
 
 /**
@@ -506,11 +528,21 @@ check("7) 改了运单/柜子/订单/派送单的事务，必须先锁住同一�
           const tb = /FROM\s+(\w+)/.exec(l)?.[1];
           if (tb) held.add(tb);
         }
-        // 再看这一行有没有写热表
+        /**
+         * 再看这一行有没有写热表。
+         * ⚠️ 违规文案要带上**写库方法**（2026-08-31 复查改）：
+         * 原来一律写「改了 orders」，create / update / delete 分不出来，
+         * 豁免串按「文件 + 路由 + 表名」一吃就是一整条路由 ——
+         * 以后有人在被豁免的事务里加一条没锁行的 tx.order.update，
+         * 也被同一条豁免吃掉，绿灯全靠人记得来删豁免。
+         * 现在动词写进文案，豁免串写死成「create了 xxx」：
+         * update / delete 一出现动词对不上，豁免失效、自动变红。
+         */
         for (const [model, table] of Object.entries(HOT_TABLES)) {
           const re = new RegExp(`\\btx\\.${model}\\.(create|update|updateMany|delete|deleteMany|upsert|createMany)\\b`);
-          if (re.test(l) && !held.has(table)) {
-            bad.push(`${rel(file)}:${j + 1} ${b.route}（改了 ${table}，但之前没锁过它）`);
+          const wm = re.exec(l);
+          if (wm && !held.has(table)) {
+            bad.push(`${rel(file)}:${j + 1} ${b.route}（${wm[1]}了 ${table}，但之前没锁过它）`);
           }
         }
         j += 1;
@@ -537,8 +569,9 @@ check("7) 改了运单/柜子/订单/派送单的事务，必须先锁住同一�
  *   · 建派送单 —— 尾端页面取候选运单走 `/staff/shipments?all=1`，
  *     后端 `all=1` 就是**明确不过滤父子**（shipments/routes.ts:427-429）。
  *     测试库里有 5 组父子单同时可派送，双连接实测出真死锁。
- *   · 柜子那两条 —— `/admin/containers/load` **根本不检查父子关系**，
- *     父单和它的子单可以分别装进同一个柜。
+ *   · 柜子那两条 —— 老的 `/admin/containers/load` 当时**根本不检查父子关系**，
+ *     父单和它的子单可以分别装进同一个柜（这条接口 2026-08-31 已删，
+ *     见 containers/routes.ts 里的注释；这里留着当「人工推理靠不住」的证据）。
  *
  * 三条理由，三条全错。**靠人工推理的白名单，可靠性就等于那个人的推理。**
  * 所以整张表删掉，换成一条不需要推理的规矩：
