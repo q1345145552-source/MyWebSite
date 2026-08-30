@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { clearAuthSession, getOptionalSession, type AuthRole, type AuthSession } from "../../auth/auth-session";
+import { clearAuthSession, clearClientOrderCaches, getOptionalSession, type AuthRole, type AuthSession } from "../../auth/auth-session";
 import { changeOwnPassword } from "../../services/auth-api";
+import { apiBaseUrl, apiRequest } from "../../services/core-api";
 import { globalMenus, roleFunctionGroups, roleMenus } from "./menu-config";
 
 const EXPANDED_GROUPS_KEY = "xt_sidebar_expanded_groups";
@@ -51,6 +52,9 @@ function saveCollapsed(collapsed: boolean): void {
     /* 记不住就算了 */
   }
 }
+
+// 「清运单缓存」直接用 auth-session.ts 导出的那份（2026-08-31 复查 #19）——
+// 原来这里私下抄了一份同名同体的，两套实现改一漏一，删掉本地这份统一走导入。
 
 export default function RoleShell(props: {
   allowedRole: AuthRole | AuthRole[];
@@ -137,6 +141,9 @@ export default function RoleShell(props: {
       setNewPwd("");
       setConfirmPwd("");
       window.setTimeout(() => {
+        // 改密码这条路不用调 /auth/logout：后端靠令牌里的密码指纹已把旧令牌全作废了。
+        // 但运单清单缓存同样要清（2026-08-31，排查报告第 57 条）。
+        clearClientOrderCaches();
         clearAuthSession();
         window.location.href = "/login";
       }, 1500);
@@ -415,7 +422,27 @@ export default function RoleShell(props: {
           <button
             type="button"
             className="dashboard-logout-button"
-            onClick={() => {
+            onClick={async () => {
+              // 先告诉服务器把这张令牌作废（2026-08-31，排查报告第 58 条）——
+              // 不然退出前被抄走的令牌还能用最长 7 天。
+              // ⚠️ 必须在清本地凭证**之前**调：清完就没有令牌可发了。
+              // ⚠️ 调失败（断网、后端没起）也照样往下走本地清理，退出不能被卡住。
+              // ⚠️ 最多等 3 秒（2026-08-31 复查 #20）：服务器连得上却不响应时，
+              //    apiRequest 单次超时要 30 秒，用户点了退出会干等半分钟以为死机。
+              //    3 秒等不到就不等了，本地清理照做。
+              try {
+                const revoke = apiRequest(`${apiBaseUrl()}/auth/logout`, { method: "POST" });
+                // 兜底超时后它才失败的话，别在控制台冒「未处理的 Promise 错误」
+                revoke.catch(() => {});
+                await Promise.race([
+                  revoke,
+                  new Promise((_, reject) => window.setTimeout(() => reject(new Error("logout timeout")), 3000)),
+                ]);
+              } catch {
+                /* 服务器侧作废失败/超时就算了，本地清理照做 */
+              }
+              // 共用电脑场景：运单清单缓存也得清（排查报告第 57 条）
+              clearClientOrderCaches();
               clearAuthSession();
               window.location.href = "/login";
             }}

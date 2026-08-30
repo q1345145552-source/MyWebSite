@@ -19,7 +19,6 @@ import {
   gridThStyle,
   gridTdStyle,
 } from "../../modules/shipment/ShipmentTableGrid";
-import { splitStaffShipment } from "../../services/business-api";
 import { validateProductRows, packageCountForPayload } from "../../modules/orders/productRowGuard";
 import { optionalIntegerForReceive, optionalNumberForReceive, validateReceiveDraft } from "../../modules/staff/utils";
 import EmptyStateCard from "../../modules/layout/EmptyStateCard";
@@ -52,6 +51,7 @@ import {
   fetchStaffWalletBalances,
   type StaffWalletBalanceItem,
   fetchLastmileShipments,
+  fetchShippingConfig,
 } from "../../services/business-api";
 import {
   type OrderProductImagesPanelProps,
@@ -169,6 +169,13 @@ export default function StaffHomePage() {
   const [shipments, setShipments] = useState<ShipmentItem[]>([]);
   const [prealerts, setPrealerts] = useState<OrderItem[]>([]);
   const [prealertBatchDrafts, setPrealertBatchDrafts] = useState<Record<string, string>>({});
+  /**
+   * 2026-08-31 排查条目1（复查补丁）：确认收货弹窗的「应收金额」单独用字符串草稿，
+   * 照柜号 prealertBatchDrafts 那套。不能复用 prealertEditDrafts —— 那份是页面加载时
+   * 用 buildPrealertDraft 预填的，它会把「没填」兜底成 0：输入框预填着 0、
+   * 清空又立刻变回 0，「必填」校验就永远拦不住。字符串草稿里「没填」才真的是空串。
+   */
+  const [prealertReceivableDrafts, setPrealertReceivableDrafts] = useState<Record<string, string>>({});
   const [prealertEditDrafts, setPrealertEditDrafts] = useState<Record<string, PrealertEditDraft>>({});
   const [prealertConfirmedDrafts, setPrealertConfirmedDrafts] = useState<Record<string, PrealertEditDraft>>({});
   const [editingPrealertId, setEditingPrealertId] = useState<string | null>(null);
@@ -222,8 +229,12 @@ export default function StaffHomePage() {
   const [orderImageFiles, setOrderImageFiles] = useState<File[]>([]);
   const [orderImagePreviews, setOrderImagePreviews] = useState<string[]>([]);
   const [approvingPrealert, setApprovingPrealert] = useState<OrderItem | null>(null);
-  const [splittingShipment, setSplittingShipment] = useState<ShipmentItem | null>(null);
-  const [splitRows, setSplitRows] = useState<Array<{ trackingNo: string; batchNo: string; itemName: string; packageCount: string }>>([]);
+  // 确认收货弹窗内的常驻报错（2026-08-31 排查条目43）：原来用 2.2 秒就消失的 Toast，
+  // 60 多字的校验提示根本读不完；改成弹窗里一直显示的红字，改好并提交成功前不消失。
+  const [receiveModalError, setReceiveModalError] = useState("");
+  // 2026-08-31（排查报告 41）：原来这里有 splittingShipment / splitRows 两个状态和配套的
+  // 「运单分柜」弹窗——但全页没有任何入口能打开它（开关只被关过、从没被打开过），
+  // 分柜功能早已搬到装柜管理页，这里是搬家漏删的死代码，整块删掉。
 
   // 尾端地址那一整块（state / 加载 / 增删改 / 备注）2026-08-29 抽到了
   // components/lastmile/LastmileAddressPanel.tsx —— 员工端和管理员端共用一份，
@@ -265,6 +276,28 @@ export default function StaffHomePage() {
         next.volumeM3 = formatVolumeM3String(Number.isFinite(pkg) && pkg > 0 ? singleVolume * pkg : singleVolume);
       } else {
         next.volumeM3 = "";
+      }
+      return next;
+    });
+  };
+
+  /**
+   * 弹窗版尺寸输入（2026-08-31 排查条目15 复查补丁）：弹窗的「总体积」允许手填，
+   * 而 updateOrderDimensions 在长宽高没填全时会把体积直接清空 —— 员工手填了总体积、
+   * 随手在「长」里补个数，总体积当场被清。这里照弹窗「包裹数量」框那套守卫：
+   * 长宽高填全了才重算体积，没填全就只更新那一格、不动 volumeM3。
+   * ⚠️ 守卫按**本次输入后**的值判断（不能拿闭包里的旧 form 判，否则填完最后一格不会触发重算）。
+   */
+  const updateModalOrderDimension = (patch: Partial<Pick<typeof form, "lengthCm" | "widthCm" | "heightCm">>) => {
+    setForm((prev) => {
+      const next = { ...prev, ...patch };
+      const l = Number(String(next.lengthCm).trim());
+      const w = Number(String(next.widthCm).trim());
+      const h = Number(String(next.heightCm).trim());
+      if (Number.isFinite(l) && Number.isFinite(w) && Number.isFinite(h) && l > 0 && w > 0 && h > 0) {
+        const pkg = Number(String(next.packageCount).trim());
+        const singleVolume = volumeM3FromDimensionsCm(l, w, h);
+        next.volumeM3 = formatVolumeM3String(Number.isFinite(pkg) && pkg > 0 ? singleVolume * pkg : singleVolume);
       }
       return next;
     });
@@ -425,12 +458,26 @@ export default function StaffHomePage() {
     setStaffClients(clientItems);
     setShipments(shipmentItems.filter(s => !s.parentTrackingNo));
     setPrealerts(prealertItems);
-    loadLmOrders();
+    // 2026-08-31（排查报告 44）：这里原来还调了一次 loadLmOrders() —— 页面一打开会和下面那个
+    // useEffect 各拉一遍派送订单，而且之后每次保存订单/传图（loadPageData 的所有调用方）都会
+    // 把几百条派送单白拉一遍。派送订单跟本函数刷新的数据无关：首次加载走 useEffect，
+    // 尾端派送页签内用 StaffLastmile 的 onReloadOrders 自己刷，所以删掉。
     setPrealertBatchDrafts((prev) => {
       const next: Record<string, string> = { ...prev };
       prealertItems.forEach((item) => {
         if (!(item.id in next)) {
           next[item.id] = item.batchNo ?? "";
+        }
+      });
+      return next;
+    });
+    // 2026-08-31 排查条目1（复查补丁）：应收金额草稿——有数则显示原数，
+    // 没数就是真空串，「没填」不许被翻译成 0（否则必填校验形同虚设）
+    setPrealertReceivableDrafts((prev) => {
+      const next: Record<string, string> = { ...prev };
+      prealertItems.forEach((item) => {
+        if (!(item.id in next)) {
+          next[item.id] = item.receivableAmountCny != null ? String(item.receivableAmountCny) : "";
         }
       });
       return next;
@@ -853,8 +900,15 @@ export default function StaffHomePage() {
     // 已经建成功的直接跳过：重试时不会重复创建，也不会再报「运单号已存在」
     const pending = batchRows.filter((row) => !done.has(row.trackingNo));
     success = batchRows.length - pending.length;
+    /**
+     * 2026-08-31 排查条目42：「继续创建」时进度不能从 1 重新数。
+     * 已成功 60 再点继续，显示「第 1/100」会让员工以为在从头重建
+     * （之前正好出过重传全报「运单号已存在」的吓人事，容易中途乱操作）。
+     * 把已跳过的成功数加进「第几个」，显示成「第 61/100」。
+     */
+    const alreadyDone = success;
     for (let i = 0; i < pending.length; i++) {
-      setBatchProgress({ current: i + 1, success, fail: errors.length });
+      setBatchProgress({ current: alreadyDone + i + 1, success, fail: errors.length });
       const row = pending[i];
       try {
         await createStaffOrder({
@@ -875,7 +929,7 @@ export default function StaffHomePage() {
         success++;
         done.add(row.trackingNo);
         setBatchDoneNos(new Set(done));
-        setBatchProgress({ current: i + 1, success, fail: errors.length });
+        setBatchProgress({ current: alreadyDone + i + 1, success, fail: errors.length });
       } catch (err) {
         const text = err instanceof Error ? err.message : "提交失败";
         const location = formatStaffBatchErrorLocation(
@@ -885,7 +939,7 @@ export default function StaffHomePage() {
         );
         errors.push(`${location}：${text}`);
         setBatchErrors([...errors]);
-        setBatchProgress({ current: i + 1, success, fail: errors.length });
+        setBatchProgress({ current: alreadyDone + i + 1, success, fail: errors.length });
       }
     }
     setBatchLoading(false);
@@ -922,7 +976,9 @@ export default function StaffHomePage() {
     setPrealertConfirmedDrafts((prev) => ({ ...prev, [orderId]: draft }));
     setEditingPrealertId(null);
     setToast("修改已确认");
-    setMessage(`预报单 ${source?.orderNo || orderId} 修改已确认。`);
+    // 2026-08-31 排查条目15（复查补丁）：页面级提示改成「带成功才绿」之后，
+    // 这条是全页唯一不带「成功」二字的成功提示，补上字样免得被染红
+    setMessage(`预报单 ${source?.orderNo || orderId} 修改确认成功。`);
   };
 
   const FieldCard = ({
@@ -1133,7 +1189,7 @@ export default function StaffHomePage() {
   const [exportDateFrom, setExportDateFrom] = useState("");
   const [exportDateTo, setExportDateTo] = useState("");
 
-  const exportShipmentsToExcel = () => {
+  const exportShipmentsToExcel = async () => {
     let source = selectedForExport.size > 0
       ? filteredShipmentList.filter((s) => selectedForExport.has(s.trackingNo))
       : filteredShipmentList;
@@ -1142,6 +1198,22 @@ export default function StaffHomePage() {
     if (exportDateFrom) source = source.filter((s) => (s.shipDate ?? s.arrivedAt ?? "").slice(0,10) >= exportDateFrom);
     if (exportDateTo) source = source.filter((s) => (s.shipDate ?? s.arrivedAt ?? "").slice(0,10) <= exportDateTo);
     if (source.length === 0) { setMessage("所选日期范围内没有运单。"); return; }
+    /* 2026-08-31（排查报告 24）：「计费体积」的低消原来写死海运 0.5 / 陆运 0.2，
+       跟管理员「运费配置」里填的数对不上（配置默认陆运就是 0.3，改过就差更多）。
+       改成导出前读一次配置（/admin/shipping/config，staff 也有权限）；
+       读不到就不做低消调整，并把列名标注成「未按低消调整」——绝不再用写死的数。 */
+    let minVolumeMap: Record<string, number> | null = null;
+    try {
+      const config = await fetchShippingConfig();
+      const seaMin = Number(config.sea_min_volume);
+      const landMin = Number(config.land_min_volume);
+      if (Number.isFinite(seaMin) && seaMin >= 0 && Number.isFinite(landMin) && landMin >= 0) {
+        minVolumeMap = { sea: seaMin, land: landMin };
+      }
+    } catch (e) {
+      console.error(e); // 拿不到配置时走下面「未按低消调整」的列名，不中断导出
+    }
+    const billedVolumeCol = minVolumeMap ? "计费体积" : "计费体积(未按低消调整)";
     const rows = source.map((item) => ({
       运单号: item.trackingNo ?? "-", 品名: item.itemName ?? "-",
       归属用户: item.clientName ?? item.clientId ?? "-",
@@ -1153,7 +1225,7 @@ export default function StaffHomePage() {
       长cm: productDim(item.products, "lengthCm"),
       宽cm: productDim(item.products, "widthCm"),
       高cm: productDim(item.products, "heightCm"),
-      计费体积: item.volumeM3 != null && item.volumeM3 > 0 ? Math.max(item.volumeM3, item.transportMode === "sea" ? 0.5 : item.transportMode === "land" ? 0.2 : 0).toFixed(3) : "-",
+      [billedVolumeCol]: item.volumeM3 != null && item.volumeM3 > 0 ? Math.max(item.volumeM3, minVolumeMap?.[item.transportMode ?? ""] ?? 0).toFixed(3) : "-",
       所属仓库: warehouseLabelFromId(item.warehouseId),
       收货地址: truncateText(item.receiverAddressTh, 40),
       柜号: item.batchNo ?? "-", 国内单号: item.domesticTrackingNo ?? "-",
@@ -1203,7 +1275,7 @@ export default function StaffHomePage() {
         loading={loading}
         warehouseOptions={warehouseOptions}
         onConfirmPrealertEdit={confirmPrealertEdit}
-        onApprovePrealert={setApprovingPrealert}
+        onApprovePrealert={(item) => { setReceiveModalError(""); setApprovingPrealert(item); }}
         onUploadImage={(orderId, file) => { void uploadOrderProductImageAndReload(orderId, file); }}
         onDeleteImage={(imageId) => { void deleteOrderProductImageAndReload(imageId); }}
       />
@@ -1584,7 +1656,7 @@ export default function StaffHomePage() {
             <span style={{ fontSize: 12, color: "var(--t-faint)" }}>至</span>
             <input type="date" value={exportDateTo} onChange={e => setExportDateTo(e.target.value)}
               style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "6px 8px", fontSize: 12 }} title="导出日期到" />
-            <button type="button" onClick={exportShipmentsToExcel}
+            <button type="button" onClick={() => void exportShipmentsToExcel()}
               style={{ border: "1px solid var(--line)", borderRadius: 8, padding: "8px 16px", color: "var(--ink-2)", background: "var(--panel)", cursor: "pointer", fontWeight: 500, whiteSpace: "nowrap", fontSize: 14 }}>
               导出Excel
             </button>
@@ -2218,7 +2290,10 @@ export default function StaffHomePage() {
       </section>
 
 
-      {message ? <p style={{ marginTop: 12, color: message.includes("失败") ? "var(--c-red-deep)" : "var(--c-green-deep)" }}>{message}</p> : null}
+      {/* 2026-08-31 排查条目15（复查补丁）：原来只有带「失败」才红，侧边栏创建订单的校验拦截语
+          （如「产品数量必须大于 0。」）不带这两个字，被显示成绿色、看着像成功。
+          改成和弹窗那份一致：只有带「成功」才绿，其余一律红。 */}
+      {message ? <p style={{ marginTop: 12, color: message.includes("成功") ? "var(--c-green-deep)" : "var(--c-red-deep)" }}>{message}</p> : null}
 <Toast open={toast.length > 0} message={toast} />
       {/* 预报单审核弹窗 */}
       {approvingPrealert && (
@@ -2232,7 +2307,8 @@ export default function StaffHomePage() {
               <div style={{ marginBottom: 10, background: "#fefce8", borderRadius: 6, padding: "8px 10px", fontSize: 12 }}>
                 <div style={{ fontWeight: 600, marginBottom: 4, color: "var(--t-strong)" }}>产品列表</div>
                 {(approvingPrealert.products ?? []).map((p) => (
-                  <div key={p.id} style={{ color: "var(--t-strong)" }}>{p.itemName} ×{p.packageCount}箱{p.lengthCm ? ` (${p.lengthCm}×${p.widthCm}×${p.heightCm}cm)` : ""}</div>
+                  // 2026-08-31 排查条目50（复查补丁）：长宽高三个都有才拼，只填了长会显示「(60×null×nullcm)」
+                  <div key={p.id} style={{ color: "var(--t-strong)" }}>{p.itemName} ×{p.packageCount}箱{p.lengthCm && p.widthCm && p.heightCm ? ` (${p.lengthCm}×${p.widthCm}×${p.heightCm}cm)` : ""}</div>
                 ))}
               </div>
             )}
@@ -2248,30 +2324,48 @@ export default function StaffHomePage() {
               <div>发货日期：{prealertEditDrafts[approvingPrealert.id]?.shipDate ?? approvingPrealert.shipDate ?? approvingPrealert.createdAt.slice(0, 10)}</div>
               <div style={{ marginTop: 8, borderTop: "1px solid var(--l-soft)", paddingTop: 8 }}>
                 <div style={{ fontSize: 12, color: "var(--t-strong)", marginBottom: 4 }}>应收金额（必填）</div>
-                <input type="number" step="0.01" value={prealertEditDrafts[approvingPrealert.id]?.receivableAmountCny ?? approvingPrealert.receivableAmountCny ?? ""} onChange={(e) => setPrealertEditDrafts((prev) => ({ ...prev, [approvingPrealert.id]: { ...(prev[approvingPrealert.id] ?? buildPrealertDraft(approvingPrealert)), receivableAmountCny: +e.target.value } }))} placeholder="输入应收金额" style={prealertEditInputStyle} />
+                {/* 2026-08-31 排查条目1（复查补丁）：绑定字符串草稿、onChange 存原始字符串。
+                    原来绑的是 prealertEditDrafts（buildPrealertDraft 预填 0）+ `+e.target.value`——
+                    输入框预填 0、清空立刻变回 0，「必填」永远拦不住。 */}
+                <input type="number" step="0.01" value={prealertReceivableDrafts[approvingPrealert.id] ?? ""} onChange={(e) => setPrealertReceivableDrafts((prev) => ({ ...prev, [approvingPrealert.id]: e.target.value }))} placeholder="输入应收金额" style={prealertEditInputStyle} />
               </div>
               <div>
                 <div style={{ fontSize: 12, color: "var(--t-strong)", marginBottom: 4 }}>柜号（可选）</div>
                 <input value={prealertBatchDrafts[approvingPrealert.id] ?? ""} onChange={(e) => setPrealertBatchDrafts((prev) => ({ ...prev, [approvingPrealert.id]: e.target.value }))} placeholder="柜号（装柜时填写）" style={prealertEditInputStyle} />
               </div>
             </div>
+            {/* 2026-08-31 排查条目43：报错常驻在弹窗里（原来是 2.2 秒就消失、还长得像成功的 Toast，
+                60 多字的提示根本读不完）。红字一直显示到员工改好重新提交，userSelect 让提示可以复制去问人。 */}
+            {receiveModalError ? (
+              <div style={{ marginBottom: 12, padding: "10px 12px", background: "#fef2f2", border: "1px solid var(--c-red-deep)", borderRadius: 8, color: "var(--c-red-deep)", fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap", userSelect: "text" }}>{receiveModalError}</div>
+            ) : null}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
               <button type="button" onClick={() => setApprovingPrealert(null)} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: "var(--white)", cursor: "pointer", color: "var(--t-strong)" }}>取消</button>
               <button type="button" onClick={async () => {
                 const item = approvingPrealert;
                 const draft = prealertEditDrafts[item.id] ?? buildPrealertDraft(item);
                 const batchNo = (prealertBatchDrafts[item.id] ?? "").trim();
+                setReceiveModalError("");
+                /**
+                 * ⚠️ 应收金额取**单独的字符串草稿**（2026-08-31 排查条目1 复查补丁）——
+                 * 不能取 prealertEditDrafts：那份是 buildPrealertDraft 预填的，
+                 * 会把「没填」兜底成 0，必填校验就形同虚设。
+                 * 这个表达式必须和上面输入框的 value 是同一份。
+                 */
+                const rawReceivable = prealertReceivableDrafts[item.id] ?? "";
                 /**
                  * ⚠️ 提交前先校验（2026-08-29 补）：这个弹窗以前**一道校验都没有**，
                  * draft 里的数字原样发出去。
                  */
                 // ⚠️ 第二个参数是**这张单原来的**重量/体积 —— 用来识别
                 //    「员工把原有的数清空了」，那种情况后端做不到清零，必须当场说清楚
+                // ⚠️ 第三个参数是应收金额（2026-08-31 排查条目1）：标着「必填」就真的必填
                 const draftIssue = validateReceiveDraft(draft, {
                   weightKg: (item as any).weightKg,
                   volumeM3: (item as any).volumeM3,
-                });
-                if (draftIssue) { setToast(draftIssue); return; }
+                }, { amount: rawReceivable });
+                // 报错写进弹窗常驻红字，不用 Toast（2026-08-31 排查条目43：2.2 秒读不完长提示）
+                if (draftIssue) { setReceiveModalError(draftIssue); return; }
                 try {
                   await receiveStaffPrealert({
                     orderId: item.id,
@@ -2290,6 +2384,13 @@ export default function StaffHomePage() {
                     volumeM3: optionalNumberForReceive(draft.volumeM3),
                     domesticTrackingNo: draft.domesticTrackingNo,
                     transportMode: draft.transportMode,
+                    /**
+                     * 2026-08-31 排查条目1：应收金额和柜号原来根本没随请求上送，
+                     * 弹窗里填了等于白填。应收金额已在上面校验过（必填、≥0、最多两位小数）。
+                     */
+                    receivableAmountCny: Number(rawReceivable.trim()),
+                    // 柜号选填：trim 后上送，空着就不发这个字段（后端语义「没传 = 不改」）
+                    batchNo: batchNo || undefined,
                   });
                   setToast(`预报单 ${item.id} 确认收货`);
                   await loadPageData();
@@ -2299,7 +2400,8 @@ export default function StaffHomePage() {
                   setApprovingPrealert(null);
                 } catch (error) {
                   const text = error instanceof Error ? error.message : "确认收货失败";
-                  setToast("确认收货失败：" + text);
+                  // 2026-08-31 排查条目43：服务器报错也走弹窗常驻红字，不再用一闪而过的 Toast
+                  setReceiveModalError("确认收货失败：" + text);
                   // 失败时**保留弹窗和已填内容**，让员工照着提示改
                 }
               }} style={{ border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: "var(--c-blue)", color: "var(--white)", fontWeight: 500, cursor: "pointer" }}>确认收货</button>
@@ -2387,6 +2489,26 @@ export default function StaffHomePage() {
               <div style={{ fontSize: 12, color: "var(--t-strong)", marginTop: 4 }}>
                 输入长宽高和单箱重量后，体积和总重量在前端实时自动计算
               </div>
+              {/* 2026-08-31（排查报告 15）：弹窗里原来没有「包裹数量」「产品数量」和整单长宽高——
+                  可提交校验偏偏要求它们大于 0，员工不加产品行就永远创建不了，报错还指向一个
+                  页面上不存在的框。这里照侧边栏「创建订单」区块补齐同一套输入框。 */}
+              <input type="number" value={form.packageCount} onChange={(e) => {
+                /* 弹窗的「总体积」允许手填（和侧边栏不同）。updateOrderDimensions 在长宽高
+                   没填全时会把体积清空，所以只有长宽高都填了才让箱数触发重算，
+                   免得手填的体积被悄悄清掉。 */
+                const hasDims = Number(form.lengthCm) > 0 && Number(form.widthCm) > 0 && Number(form.heightCm) > 0;
+                if (hasDims) updateOrderDimensions({ packageCount: e.target.value });
+                else setForm((v) => ({ ...v, packageCount: e.target.value }));
+              }} placeholder="包裹数量 *" style={orderCreateInputStyle} />
+              <input type="number" value={form.productQuantity} onChange={(e) => setForm((v) => ({ ...v, productQuantity: e.target.value }))} placeholder="产品数量 *" style={orderCreateInputStyle} />
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+                {/* 2026-08-31 排查条目15（复查补丁）：弹窗尺寸框走 updateModalOrderDimension——
+                    没填全长宽高时不动 volumeM3，免得手填的总体积被悄悄清掉（和上面「包裹数量」框同一套守卫）。 */}
+                <input type="number" min={0} step="0.01" value={form.lengthCm} onChange={(e) => updateModalOrderDimension({ lengthCm: e.target.value })} placeholder="长（cm）" style={orderCreateInputStyle} />
+                <input type="number" min={0} step="0.01" value={form.widthCm} onChange={(e) => updateModalOrderDimension({ widthCm: e.target.value })} placeholder="宽（cm）" style={orderCreateInputStyle} />
+                <input type="number" min={0} step="0.01" value={form.heightCm} onChange={(e) => updateModalOrderDimension({ heightCm: e.target.value })} placeholder="高（cm）" style={orderCreateInputStyle} />
+              </div>
+              <div style={{ fontSize: 12, color: "var(--t-strong)", marginTop: -4 }}>尺寸：厘米；填全长宽高后体积（m³）= 长×宽×高 ÷ 1,000,000 自动填入下方，也可直接手填总体积。</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
                 <select value={form.packageUnit} onChange={(e) => setForm((v) => ({ ...v, packageUnit: e.target.value as "bag" | "box" }))} style={orderCreateInputStyle}>
                   <option value="box">箱</option>
@@ -2432,10 +2554,11 @@ export default function StaffHomePage() {
               <div style={{ fontSize: 12, color: "var(--t-strong)", marginBottom: 4 }}>备注</div>
               <input value={form.remark} onChange={(e) => setForm((v) => ({ ...v, remark: e.target.value }))} placeholder="备注（可选）" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13 }} />
 
-            {message && message.includes("失败") ? (
-              <p style={{ marginTop: 8, color: "var(--c-red-deep)", fontSize: 13 }}>{message}</p>
-            ) : message && !message.includes("失败") && showCreateModal ? (
-              <p style={{ marginTop: 8, color: "var(--c-green-deep)", fontSize: 13 }}>{message}</p>
+            {/* 2026-08-31（排查报告 15）：原来只有带「失败」字样的提示才红，校验拦截语
+                （如「产品数量必须大于 0」）不带这两个字，被显示成绿色、看着像成功。
+                改成只有带「成功」字样才绿，其余一律红。 */}
+            {message ? (
+              <p style={{ marginTop: 8, color: message.includes("成功") ? "var(--c-green-deep)" : "var(--c-red-deep)", fontSize: 13 }}>{message}</p>
             ) : null}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
               <button type="button" onClick={() => { setShowCreateModal(false); setMessage(""); setOrderImageFiles([]); setOrderImagePreviews([]); }} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: "var(--white)", cursor: "pointer", color: "var(--t-strong)" }}>取消</button>
@@ -2670,65 +2793,6 @@ export default function StaffHomePage() {
                 onClick={() => { setShowBatchImport(false); setBatchRows([]); setBatchSourceRowCount(0); setBatchErrors([]); setBatchProgress({ current: 0, success: 0, fail: 0 }); setBatchFileName(""); setBatchConfirmed(false); }}
                 style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: "var(--white)", cursor: batchLoading ? "not-allowed" : "pointer", color: batchLoading ? "var(--t-faint)" : "var(--t-strong)" }}
               >{batchLoading ? "创建中，请勿关闭" : "关闭"}</button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {/* 分柜弹窗 */}
-      {splittingShipment ? (
-        <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.4)", padding: 16 }}>
-          <div style={{ width: "100%", maxWidth: 540, maxHeight: "90vh", overflow: "auto", background: "var(--white)", borderRadius: 12, padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
-            <h3 style={{ margin: "0 0 12px", fontSize: 18, fontWeight: 600 }}>运单分柜</h3>
-            <div style={{ fontSize: 13, color: "var(--t-strong)", marginBottom: 12 }}>
-              运单号：{splittingShipment.trackingNo} ｜ 当前总件数：<strong>{splittingShipment.packageCount ?? "—"}</strong>
-            </div>
-            <div style={{ fontSize: 12, color: "var(--t-strong)", marginBottom: 12 }}>
-              已分配：{splitRows.reduce((sum, r) => sum + (Number(r.packageCount) || 0), 0)} 件
-              ｜ 剩余：{(splittingShipment.packageCount ?? 0) - splitRows.reduce((sum, r) => sum + (Number(r.packageCount) || 0), 0)} 件
-            </div>
-            <div style={{ display: "grid", gap: 12 }}>
-              {splitRows.map((row, i) => (
-                <div key={i} style={{ padding: 12, border: "1px solid var(--l-soft)", borderRadius: 8, background: "#F0F1F4" }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: "var(--t-strong)", marginBottom: 6 }}>分柜 {i + 1}</div>
-                  <div style={{ display: "grid", gap: 6 }}>
-                    <input value={row.trackingNo} onChange={(e) => setSplitRows((prev) => prev.map((r, j) => j === i ? { ...r, trackingNo: e.target.value } : r))} placeholder="运单号 *" style={orderCreateInputStyle} />
-                    <input value={row.batchNo} onChange={(e) => setSplitRows((prev) => prev.map((r, j) => j === i ? { ...r, batchNo: e.target.value } : r))} placeholder="柜号 *" style={orderCreateInputStyle} />
-                    <input value={row.itemName} onChange={(e) => setSplitRows((prev) => prev.map((r, j) => j === i ? { ...r, itemName: e.target.value } : r))} placeholder="品名" style={orderCreateInputStyle} />
-                    <input type="number" min={1} value={row.packageCount} onChange={(e) => setSplitRows((prev) => prev.map((r, j) => j === i ? { ...r, packageCount: e.target.value } : r))} placeholder="移走件数 *" style={orderCreateInputStyle} />
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-              <button type="button" onClick={() => setSplitRows((prev) => [...prev, { trackingNo: "", batchNo: "", itemName: splittingShipment.itemName ?? "", packageCount: "" }])} style={{ border: "1px dashed var(--l-strong)", borderRadius: 6, padding: "6px 12px", fontSize: 12, background: "var(--white)", cursor: "pointer", color: "var(--t-strong)" }}>添加分柜</button>
-            </div>
-            {message && message.includes("分柜") ? (
-              <p style={{ marginTop: 8, color: message.includes("失败") ? "var(--c-red-deep)" : "var(--c-green-deep)", fontSize: 13 }}>{message}</p>
-            ) : null}
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-              <button type="button" onClick={() => { setSplittingShipment(null); setMessage(""); }} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: "var(--white)", cursor: "pointer", color: "var(--t-strong)" }}>取消</button>
-              <button type="button" disabled={loading} onClick={async () => {
-                const validRows = splitRows.filter((r) => r.trackingNo.trim() && r.batchNo.trim() && Number(r.packageCount) > 0);
-                if (validRows.length === 0) { setMessage("分柜失败：请至少填写运单号、柜号和件数"); return; }
-                const totalSplit = validRows.reduce((s, r) => s + Number(r.packageCount), 0);
-                if (totalSplit > (splittingShipment.packageCount ?? 0)) { setMessage(`分柜失败：移走总件数(${totalSplit})超过当前总件数(${splittingShipment.packageCount ?? 0})`); return; }
-                setLoading(true); setMessage("");
-                try {
-                  const result = await splitStaffShipment({
-                    parentShipmentId: splittingShipment.id,
-                    splits: validRows.map((r) => ({ trackingNo: r.trackingNo.trim(), batchNo: r.batchNo.trim(), itemName: r.itemName.trim(), packageCount: Number(r.packageCount) })),
-                  });
-                  setToast(`分柜成功：${result.children.length} 个子单`);
-                  setMessage(`分柜成功：${result.children.map((c) => c.trackingNo).join("、")}`);
-                  setSplittingShipment(null);
-                  setSplitRows([]);
-                  await loadPageData();
-                } catch (error) {
-                  const text = error instanceof Error ? error.message : "分柜失败";
-                  setMessage(`分柜失败：${text}`);
-                } finally { setLoading(false); }
-              }} style={{ border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: loading ? "var(--t-strong)" : "#B45309", color: "var(--white)", fontWeight: 500, cursor: loading ? "not-allowed" : "pointer" }}>{loading ? "提交中…" : "确认分柜"}</button>
             </div>
           </div>
         </div>

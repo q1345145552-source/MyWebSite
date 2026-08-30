@@ -8,37 +8,16 @@ function trimTrailingSlash(url: string): string {
 }
 
 /**
- * 判断 API 地址是否仍是本地回环地址（localhost/127.0.0.1）。
- */
-function isLoopbackApiUrl(url: string): boolean {
-  return /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(url);
-}
-
-/**
- * 在 Render 域名下从当前前端域名推断后端域名。
- * 例如：xtwlwz-web.onrender.com -> xtwlwz.onrender.com
- */
-function inferRenderApiUrlFromWindow(): string | null {
-  if (typeof window === "undefined") return null;
-  const hostname = window.location.hostname;
-  if (!hostname.endsWith(".onrender.com")) return null;
-  if (!hostname.includes("-web.")) return null;
-  return `https://${hostname.replace("-web.", ".")}`;
-}
-
-/**
  * 计算前端请求 API 的基础地址。
- * 优先使用 NEXT_PUBLIC_API_BASE_URL；若该值错误地指向本地地址且当前在 Render 上，
- * 则自动按域名推断线上 API 地址，避免线上请求 127.0.0.1。
+ * 浏览器端固定走相对路径（Next.js rewrites 代理），服务端渲染时才用环境变量。
+ * 2026-08-31：删掉了「Render 域名自动推断」那段老逻辑（inferRenderApiUrlFromWindow /
+ * isLoopbackApiUrl）—— 上面那行 `typeof window` 早把浏览器端截走了，
+ * 推断函数在服务端永远返回 null，整段一次都执行不到，留着只会误导人。
  */
 export function apiBaseUrl(): string {
   // 浏览器端用相对路径，走 Next.js rewrites 代理到 API
   if (typeof window !== "undefined") return "";
   const configured = (process.env.NEXT_PUBLIC_API_BASE_URL ?? process.env.VITE_API_BASE_URL ?? "http://localhost:3001").trim();
-  const inferredRenderApiUrl = inferRenderApiUrlFromWindow();
-  if (inferredRenderApiUrl && isLoopbackApiUrl(configured)) {
-    return trimTrailingSlash(inferredRenderApiUrl);
-  }
   return trimTrailingSlash(configured);
 }
 

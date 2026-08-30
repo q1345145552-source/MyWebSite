@@ -20,8 +20,6 @@ type PrealertEditDraft = {
   productQuantity: number;
   weightKg: number;
   volumeM3: number;
-  receivableAmountCny: number;
-  receivableCurrency: "CNY" | "THB";
   domesticTrackingNo: string;
   transportMode: "sea" | "land";
   shipDate: string;
@@ -52,8 +50,8 @@ function buildPrealertDraft(item: OrderItem): PrealertEditDraft {
     productQuantity: item.productQuantity ?? 0,
     weightKg: item.weightKg ?? 0,
     volumeM3: item.volumeM3 ?? 0,
-    receivableAmountCny: item.receivableAmountCny ?? 0,
-    receivableCurrency: (item.receivableCurrency as "CNY" | "THB") ?? "CNY",
+    // 应收金额/币种不进 draft（2026-08-31 排查条目30）：应收改成必填输入框、走字符串状态，
+    // draft 兜底成 0 会让必填校验形同虚设
     domesticTrackingNo: (firstProduct?.domesticTrackingNo || item.domesticTrackingNo) ?? "",
     transportMode: (item.transportMode as "sea" | "land") ?? "sea",
     shipDate: item.shipDate?.slice(0, 10) ?? "",
@@ -74,6 +72,15 @@ export default function AdminPrealertsPage() {
   const [prealertEditDrafts, setPrealertEditDrafts] = useState<Record<string, PrealertEditDraft>>({});
   const [prealertConfirmedDrafts, setPrealertConfirmedDrafts] = useState<Record<string, PrealertEditDraft>>({});
   const [editingPrealertId, setEditingPrealertId] = useState<string | null>(null);
+  /**
+   * 应收金额 / 柜号（2026-08-31 排查条目30）：老板已拍板「收货时录应收金额」，
+   * 员工端弹窗改完了，这个页面走同一个接口收货却不传 —— 从这条路确认的单应收是空的，
+   * 对账少收钱的口子在管理员端还开着。现在跟员工端对齐：应收必填、柜号选填。
+   * ⚠️ 应收金额用**字符串**存输入框原始值，不进 PrealertEditDraft ——
+   *    draft 会把「没填」兜底成 0，必填校验就形同虚设（见 validateReceiveDraft 注释）。
+   */
+  const [prealertReceivableDrafts, setPrealertReceivableDrafts] = useState<Record<string, string>>({});
+  const [prealertBatchDrafts, setPrealertBatchDrafts] = useState<Record<string, string>>({});
 
   const loadPrealerts = async (cancelled?: { current: boolean }) => {
     setLoading(true);
@@ -127,12 +134,19 @@ export default function AdminPrealertsPage() {
      * ⚠️ 换成共用校验（2026-08-29）：原来是 `< 1`，**2.5 箱能过**，
      * 而库里是 Int。员工端那个弹窗以前一道校验都没有，现在两边走同一份。
      */
+    /**
+     * ⚠️ 应收金额取**输入框绑定的原始值**（2026-08-31 排查条目30）——
+     * 不能取 draft，draft 会把「没填」兜底成 0，必填校验就形同虚设。
+     * 这个表达式必须和下面输入框的 value 是同一份。
+     */
+    const rawReceivable = prealertReceivableDrafts[item.id] ?? (item.receivableAmountCny != null ? String(item.receivableAmountCny) : "");
+    const batchNo = (prealertBatchDrafts[item.id] ?? "").trim();
     {
-      // 同上：传原值，识别「清空了原有的数」
+      // 同上：传原值，识别「清空了原有的数」；第三个参数是应收金额（必填、≥0、最多两位小数）
       const issue = validateReceiveDraft(draft, {
         weightKg: (item as any).weightKg,
         volumeM3: (item as any).volumeM3,
-      });
+      }, { amount: rawReceivable });
       if (issue) { setMessage(issue); return; }
     }
     setLoading(true);
@@ -149,6 +163,12 @@ export default function AdminPrealertsPage() {
         volumeM3: optionalNumberForReceive(draft.volumeM3),
         domesticTrackingNo: draft.domesticTrackingNo.trim() || undefined,
         transportMode: draft.transportMode,
+        /**
+         * 2026-08-31 排查条目30：跟员工端弹窗同一口径 —— 应收金额随收货上送（上面已校验），
+         * 柜号选填、空着就不发这个字段（后端语义「没传 = 不改」）。
+         */
+        receivableAmountCny: Number(String(rawReceivable).trim()),
+        batchNo: batchNo || undefined,
       });
       setToast("已确认收货");
       setEditingPrealertId(null);
@@ -232,13 +252,32 @@ export default function AdminPrealertsPage() {
                           <span>产品数量：<strong>{displayDraft.productQuantity || "—"}</strong></span>
                           <span>重量：<strong>{displayDraft.weightKg ? `${displayDraft.weightKg}kg` : "—"}</strong></span>
                           <span>体积：<strong>{displayDraft.volumeM3 ? `${displayDraft.volumeM3}m³` : "—"}</strong></span>
-                          <span>应收：<strong>{displayDraft.receivableAmountCny ? `${displayDraft.receivableAmountCny} ${displayDraft.receivableCurrency}` : "—"}</strong></span>
                           <span>运输：<strong>{displayDraft.transportMode === "sea" ? "海运" : "陆运"}</strong></span>
                           <span>国内单号：<strong>{displayDraft.domesticTrackingNo || "—"}</strong></span>
                           <span>发货日：<strong>{displayDraft.shipDate || "—"}</strong></span>
                         </>
                       )}
                     </div>
+                    {!isEditing && (
+                      /* 2026-08-31 排查条目30：确认收货前要录应收金额（必填）和柜号（选填），
+                         跟员工端确认收货弹窗同一口径。原来这里只有只读的「应收：—」，
+                         走这条路收的单应收全是空的。 */
+                      <div style={{ display: "flex", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
+                        <div style={{ flex: 1, minWidth: 160 }}>
+                          <div style={{ fontSize: 12, color: "var(--t-strong)", marginBottom: 4 }}>应收金额（必填）</div>
+                          <input type="number" step="0.01"
+                            value={prealertReceivableDrafts[item.id] ?? (item.receivableAmountCny != null ? String(item.receivableAmountCny) : "")}
+                            onChange={(e) => setPrealertReceivableDrafts((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                            placeholder="输入应收金额" style={prealertEditInputStyle} />
+                        </div>
+                        <div style={{ flex: 1, minWidth: 160 }}>
+                          <div style={{ fontSize: 12, color: "var(--t-strong)", marginBottom: 4 }}>柜号（可选）</div>
+                          <input value={prealertBatchDrafts[item.id] ?? ""}
+                            onChange={(e) => setPrealertBatchDrafts((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                            placeholder="柜号（装柜时填写）" style={prealertEditInputStyle} />
+                        </div>
+                      </div>
+                    )}
                     <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                       {isEditing ? (
                         <>

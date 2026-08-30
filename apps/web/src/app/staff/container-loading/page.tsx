@@ -95,7 +95,8 @@ const NEXT_STOP_DEFAULT_LAND: Record<string, string> = {
   IN_VIETNAM: "老挝",
   LAOS_CLEARED: "泰国边境",
   BORDER_DELAY: "排队出关口",
-  CUSTOMS_INSPECT: "泰国仓库",
+  // 海关查验=越南口岸抽查，下一步是老挝；跟后端 status-flow.ts 同步改（2026-08-31）
+  CUSTOMS_INSPECT: "老挝",
   CUSTOMS_CLEARED: "泰国仓库",
 };
 

@@ -70,6 +70,14 @@ export default function StaffConsolidationPage() {
 
   const [cancelStep, setCancelStep] = useState<0 | 1>(0);
   const [cancelSubmitting, setCancelSubmitting] = useState(false);
+  // 有已签收预报单的任务，后端会拦下取消并要管理员密码（2026-08-31）。
+  // 这里存后端那句提示，非空就弹密码框；交互照管理员端删除任务那套。
+  const [cancelPwdPrompt, setCancelPwdPrompt] = useState("");
+  const [cancelPassword, setCancelPassword] = useState("");
+
+  // 签收成功但后端带回了提醒（付款后才签收，2026-08-31）——
+  // 要让员工读完再关，不能只闪一下角落的 Toast
+  const [receiveWarning, setReceiveWarning] = useState("");
 
   const [showLoadingForm, setShowLoadingForm] = useState(false);
   const [loadingContainerNo, setLoadingContainerNo] = useState("");
@@ -113,7 +121,7 @@ export default function StaffConsolidationPage() {
   useEffect(() => { loadTasks(); }, [loadTasks]);
   useEffect(() => {
     if (selectedTaskId) loadDetail(selectedTaskId);
-    else { setTaskDetail(null); setCancelStep(0); }
+    else { setTaskDetail(null); setCancelStep(0); setCancelPwdPrompt(""); setCancelPassword(""); }
   }, [selectedTaskId, loadDetail]);
 
   // ======== 过滤 ========
@@ -132,7 +140,7 @@ export default function StaffConsolidationPage() {
     if (!receiveProofBase64) { setToast("请上传签收照片"); return; }
     setReceiveSubmitting(true);
     try {
-      await receiveConsolidationPrealert({
+      const r = await receiveConsolidationPrealert({
         prealertId: showReceive.id,
         proofBase64: receiveProofBase64,
         proofFileName: receiveProofFileName,
@@ -142,7 +150,12 @@ export default function StaffConsolidationPage() {
       setReceiveProofBase64("");
       setReceiveProofFileName("");
       setReceiveProofMime("");
-      setToast("签收成功");
+      if (r.warning) {
+        // 付款后才签收的提醒（2026-08-31）：弹窗摆出来让员工读完，Toast 一闪就过了
+        setReceiveWarning(r.warning);
+      } else {
+        setToast("签收成功");
+      }
       if (selectedTaskId) await loadDetail(selectedTaskId);
       await loadTasks();
     } catch (e: any) {
@@ -193,19 +206,32 @@ export default function StaffConsolidationPage() {
   };
 
   // ======== 取消 ========
-  const handleCancel = async () => {
+  // 普通任务照旧：第一下变「确认取消」、第二下真取消。
+  // 有已签收预报单的任务，后端会拦（409，提示语里带「管理员密码」，2026-08-31）——
+  // 这时弹密码框，输入后带 confirmPassword 重试。
+  const handleCancel = async (confirmPassword?: string) => {
     const tid = selectedTaskId;
     if (!tid) return;
     if (cancelStep === 0) { setCancelStep(1); return; }
     setCancelSubmitting(true);
     try {
-      await cancelConsolidationTask(tid);
+      await cancelConsolidationTask(tid, confirmPassword ? { confirmPassword } : undefined);
       setToast("任务已取消");
       setSelectedTaskId(null);
       setCancelStep(0);
+      setCancelPwdPrompt("");
+      setCancelPassword("");
       await loadTasks();
     } catch (e: any) {
-      setToast(e.message);
+      const msg: string = e?.message ?? "取消任务失败";
+      if (msg.includes("管理员密码")) {
+        // 被拦（或密码不对）：把后端原话摆在密码框上方，别塞进角落的 Toast
+        setCancelPwdPrompt(msg);
+      } else {
+        setCancelPwdPrompt("");
+        setCancelPassword("");
+        setToast(msg);
+      }
       // 失败也要刷新（2026-08-27 补）：后端现在会说「刚刚被别人改过，请刷新后再看」，
       // 页面不刷新的话用户看到的还是旧数字，容易照着旧数字再操作一次。
       await loadTasks();
@@ -495,7 +521,7 @@ export default function StaffConsolidationPage() {
       {selectedTaskId && taskDetail && (
         <div style={{ padding: 24 }}>
           <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
-            <button onClick={() => { setSelectedTaskId(null); setPreviewImage(null); setShowReceive(null); setShowQuote(false); setShowLoadingForm(false); setCancelStep(0); setExpandedPrealerts(new Set()); setReviewSubmitting(false); setShowRejectDialog(false); setRejectReason(""); setToast(""); loadTasks(); }} style={{ padding: "6px 14px", border: "1px solid var(--l-strong)", background: "var(--white)", color: "var(--t-muted)", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>← 返回</button>
+            <button onClick={() => { setSelectedTaskId(null); setPreviewImage(null); setShowReceive(null); setShowQuote(false); setShowLoadingForm(false); setCancelStep(0); setCancelPwdPrompt(""); setCancelPassword(""); setExpandedPrealerts(new Set()); setReviewSubmitting(false); setShowRejectDialog(false); setRejectReason(""); setToast(""); loadTasks(); }} style={{ padding: "6px 14px", border: "1px solid var(--l-strong)", background: "var(--white)", color: "var(--t-muted)", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>← 返回</button>
             <h2 style={{ fontSize: 20, margin: 0 }}>{taskDetail.taskNo}</h2>
             <div style={{ fontSize: 12, color: "var(--t-muted)", marginBottom: 8 }}>创建时间：{formatBeijingTime(taskDetail.createdAt)}</div>
             <span style={{ color: "var(--t-muted)", fontSize: 13 }}>{taskDetail.clientName}</span>
@@ -561,9 +587,9 @@ export default function StaffConsolidationPage() {
               )
             ))}
 
-            {/* 取消 */}
+            {/* 取消。⚠️ 不能写 onClick={handleCancel}：它现在带可选密码参数，直接传会把点击事件当密码 */}
             {["collecting", "full_confirmed", "quoted"].includes(taskDetail.status) && (
-              <button onClick={handleCancel} style={actionBtn("var(--c-red)")} disabled={cancelSubmitting}>
+              <button onClick={() => handleCancel()} style={actionBtn("var(--c-red)")} disabled={cancelSubmitting}>
                 {cancelSubmitting ? "取消中..." : cancelStep === 1 ? "确认取消" : "取消任务"}
               </button>
             )}
@@ -753,6 +779,40 @@ export default function StaffConsolidationPage() {
           <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
             <button onClick={handleReceive} disabled={receiveSubmitting || !receiveProofBase64} style={{ padding: "8px 20px", background: !receiveProofBase64 ? "var(--t-faint)" : "var(--c-blue)", color: "var(--white)", border: "none", borderRadius: 6, cursor: receiveProofBase64 ? "pointer" : "not-allowed", fontWeight: 600 }}>{receiveSubmitting ? "签收中..." : !receiveProofBase64 ? "请上传签收照片" : "确认签收"}</button>
             <button onClick={() => { setShowReceive(null); setReceiveProofBase64(""); setReceiveProofFileName(""); setReceiveProofMime(""); }} style={{ padding: "8px 20px", border: "1px solid var(--l-strong)", background: "var(--white)", borderRadius: 6, cursor: "pointer", color: "var(--t-muted)" }}>取消</button>
+          </div>
+        </Modal>
+      )}
+
+      {/* ======== 取消任务要管理员密码（2026-08-31，交互照管理员端删除任务那套）======== */}
+      {cancelPwdPrompt && (
+        <Modal onClose={() => { setCancelPwdPrompt(""); setCancelPassword(""); setCancelStep(0); }}>
+          <p style={{ marginTop: 0, fontWeight: 600 }}>取消这个集货任务需要管理员密码</p>
+          <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 6, padding: 10, marginBottom: 12, fontSize: 13, color: "var(--c-red-deep)", lineHeight: 1.7 }}>
+            {cancelPwdPrompt}
+          </div>
+          <input
+            type="password"
+            value={cancelPassword}
+            onChange={(e) => setCancelPassword(e.target.value)}
+            placeholder="管理员密码"
+            style={{ width: "100%", border: "1px solid var(--l-strong)", borderRadius: 6, padding: "6px 10px", fontSize: 13, boxSizing: "border-box" }}
+          />
+          <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
+            <button onClick={() => handleCancel(cancelPassword.trim())} disabled={cancelSubmitting || !cancelPassword.trim()} style={{ padding: "8px 16px", background: cancelPassword.trim() ? "var(--c-red)" : "var(--l-strong)", color: "var(--white)", border: "none", borderRadius: 6, cursor: cancelPassword.trim() ? "pointer" : "not-allowed", fontWeight: 600 }}>{cancelSubmitting ? "取消中..." : "确认取消任务"}</button>
+            <button onClick={() => { setCancelPwdPrompt(""); setCancelPassword(""); setCancelStep(0); }} style={{ padding: "8px 16px", border: "1px solid var(--l-strong)", background: "var(--white)", color: "var(--t-muted)", borderRadius: 6, cursor: "pointer" }}>返回</button>
+          </div>
+        </Modal>
+      )}
+
+      {/* ======== 签收成功但要留意的提醒（2026-08-31：付款后才签收）======== */}
+      {receiveWarning && (
+        <Modal onClose={() => setReceiveWarning("")}>
+          <h3 style={{ marginTop: 0 }}>签收成功，但有一件事要留意</h3>
+          <div style={{ background: "var(--c-amber-bg)", border: "1px solid var(--c-amber)", borderRadius: 6, padding: 12, fontSize: 13, color: "var(--c-amber-deep)", lineHeight: 1.7 }}>
+            {receiveWarning}
+          </div>
+          <div style={{ marginTop: 14 }}>
+            <button onClick={() => setReceiveWarning("")} style={{ padding: "8px 20px", background: "var(--c-blue)", color: "var(--white)", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>知道了</button>
           </div>
         </Modal>
       )}

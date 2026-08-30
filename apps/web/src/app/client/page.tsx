@@ -2,12 +2,12 @@
 
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { validateProductRows, packageCountForPayload } from "../../modules/orders/productRowGuard";
 import EmptyStateCard from "../../modules/layout/EmptyStateCard";
 import RoleShell from "../../modules/layout/RoleShell";
 import Toast from "../../modules/layout/Toast";
-import { formatCny } from "../../modules/billing/billing-utils";
+// 2026-08-31 收尾清理：formatCny 引入了但全文件没用过（历史遗留死 import），删掉
 import { sendAiMessage } from "../../services/ai-client";
 import { apiBaseUrl } from "../../services/core-api";
 import { volumeM3FromDimensionsCm, formatVolumeM3String, warehouseLabelFromId } from "../../modules/staff/utils";
@@ -16,8 +16,8 @@ import {
   createClientPrealert,
   fetchClientPrealerts,
   // 预报单创建即已发货，不再需要确认发货
-  deleteClientPrealert,
-  updateClientPrealert,
+  // 2026-08-31（条目48）：deleteClientPrealert / updateClientPrealert 不再引入 ——
+  // 它们只被那个没有任何入口的「编辑预报单」死弹窗用到，弹窗已删。
   fetchClientOrders,
   fetchClientWalletOverview,
   fetchClientShipmentOverview,
@@ -28,11 +28,10 @@ import {
   type OrderProductImageItem,
   type StaffShipmentOverview,
 } from "../../services/business-api";
-import { openPrintLabel, openPrintPrealert } from "../../modules/shipment/ShipmentPrintLabel";
 import { openShipmentTrack } from "../../modules/shipment/ShipmentTrackModal";
 import { ShipmentOverviewStrip } from "../../modules/shipment/ShipmentOverviewStrip";
 import DetailModal from "../../modules/layout/DetailModal";
-import { shipmentStatusZh, CLIENT_STATUS_ZH_OVERRIDES } from "../../modules/shipment/shipment-status";
+import { shipmentStatusZh, CLIENT_STATUS_ZH_OVERRIDES, SHIPMENT_STATUS_FILTER_OPTIONS } from "../../modules/shipment/shipment-status";
 import {
   GridColgroup,
   ProductDetailCell,
@@ -76,32 +75,19 @@ const CLIENT_SECTION_IDS = ["client-main", "client-query", "client-prealert", "c
    客户真正看到的是运单列表那一列状态，和「物流轨迹」弹窗，两处都走
    shipmentStatusZh，新加的环节都有中文。 */
 
-const VALID_PACKAGE_UNITS = ["bag", "box"] as const;
-const VALID_TRANSPORT_MODES = ["sea", "land"] as const;
+/* 2026-08-31（条目18）：客户端「状态」筛选下拉的选项。
+   复用员工端/管理员端那份从流程表自动生成的清单（加状态自动跟上），
+   只有一处口径差异：客户端把 delivered 叫「已签收」，员工端叫「派送完成」，
+   所以这里把那一个标签换掉，其余原样。比对逻辑见 runOrderQuery。 */
+const clientStatusFilterOptions: string[] = SHIPMENT_STATUS_FILTER_OPTIONS.map((label) =>
+  label === shipmentStatusZh("delivered") ? shipmentStatusZh("delivered", CLIENT_STATUS_ZH_OVERRIDES) : label,
+);
 
-function PrealertPrintButton({ item }: { item: OrderItem }) {
-  const wl = warehouseOptions.find(w => w.id === item.warehouseId)?.label || item.warehouseId || "—";
-  const safePkgUnit = VALID_PACKAGE_UNITS.includes(item.packageUnit as any) ? (item.packageUnit as "bag"  |  "box") : "box";
-  const safeTransport = VALID_TRANSPORT_MODES.includes(item.transportMode as any) ? (item.transportMode as "sea"  |  "land") : "sea";
-
-  return (
-    <button type="button" onClick={() => {
-      openPrintPrealert({
-        prealertNo: item.orderNo || "—",
-        itemName: item.itemName,
-        packageCount: item.packageCount,
-        packageUnit: safePkgUnit,
-        transportMode: safeTransport,
-        warehouseLabel: wl,
-        domesticTrackingNo: item.domesticTrackingNo,
-        createdAt: item.createdAt,
-        clientId: item.clientId,
-        productQuantity: item.productQuantity,
-        products: item.products?.map(p => ({ itemName: p.itemName, packageCount: p.packageCount })),
-      });
-    }} style={{ border: "1px solid #1e3a8a", borderRadius: 4, padding: "4px 10px", fontSize: 12, background: "var(--white)", color: "#1e3a8a", cursor: "pointer", marginLeft: 6 }}>打印预报单</button>
-  );
-}
+/* 2026-08-31（条目48）删掉 PrealertPrintButton（连同它专用的
+   VALID_PACKAGE_UNITS / VALID_TRANSPORT_MODES 两个常量和 openPrintLabel /
+   openPrintPrealert 两个 import）：2026-06-28 预报单列表改成表格样式时，
+   「编辑」「删除」「打印预报单」三个按钮一起被删了，这个组件从那天起
+   没有任何地方渲染过。全文件 grep 过只剩定义没有使用。 */
 
 function imgSrc(img: { imageUrl?: string | null }): string {
   return img.imageUrl ? apiBaseUrl() + img.imageUrl : "";
@@ -136,18 +122,33 @@ export default function ClientHomePage() {
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [toast, setToast] = useState("");
-  const [queryMode, setQueryMode] = useState<"unfinished"  |  "completed"  |  "all"  |  null>("all");
+  /* 2026-08-31（条目23）：分组从「在途/已完成/全部」改成五个 ——
+     全部订单(all=不传) / 未发出(pending) / 在途(transit) / 已签收(delivered) / 退回、取消、异常(closed)，
+     值就是后端 /client/orders 的 statusGroup 参数，两边一份口径。 */
+  const [queryMode, setQueryMode] = useState<"all"  |  "pending"  |  "transit"  |  "delivered"  |  "closed"  |  null>("all");
   const [queriedOrders, setQueriedOrders] = useState<OrderItem[]>([]);
   const [hasQueried, setHasQueried] = useState(false);
   const [prealerts, setPrealerts] = useState<OrderItem[]>([]);
   const [dashboardOrders, setDashboardOrders] = useState<OrderItem[]>([]);
   const [prealertSearch, setPrealertSearch] = useState("");
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [editingPrealert, setEditingPrealert] = useState<OrderItem  |  null>(null);
+  /* 2026-08-31（条目48）：删掉 editingPrealert 状态和文件末尾那个「编辑预报单」弹窗。
+     2026-06-28 起页面上就没有任何按钮能打开它（「编辑」按钮当时随列表改版一起删了），
+     留着这段死代码会误导后来人以为客户能自己改预报单。
+     客户要不要恢复自助编辑，等老板拍板后再把按钮和弹窗一起加回来。 */
   const [previewImage, setPreviewImage] = useState<{ src: string; alt: string }  |  null>(null);
 
   const [pageSize, setPageSize] = useState(50);
   const [currentPage, setCurrentPage] = useState(1);
+  /* 2026-08-31（条目47）：预报单改成后端翻页。原来前端悄悄 .slice(0, pageSize)
+     砍到前 50 条、不给翻页按钮，预报单多的老客户会以为旧单被删了。
+     两处预报单列表（首页一份、侧边栏「预报单」页一份）共用这套页码和总数。 */
+  const [prealertPage, setPrealertPage] = useState(1);
+  const [prealertTotal, setPrealertTotal] = useState(0);
+  /* 2026-08-31（条目47收尾）：预报单搜索池。改成后端翻页后，搜索框一度只能筛当前页——
+     比改造前「一次拿全再筛」还退步。搜索词非空时一次拉前 500 条（后端上限就是 500）放这里本地筛；
+     null = 没在搜索或还没拉到，列表走正常翻页。 */
+  const [prealertSearchPool, setPrealertSearchPool] = useState<OrderItem[] | null>(null);
 
   /* 「我的运单查询」顶部那排数字。拉不到就整排不显示 ——
      宁可不显示，也不能显示一个假的 0 让客户以为「没有在途的」。 */
@@ -194,12 +195,18 @@ export default function ClientHomePage() {
 
   const refreshMainData = async () => {
     const results = await Promise.allSettled([
-      fetchClientPrealerts("all"),
+      // 2026-08-31（条目47）：fetchClientPrealerts 改为返回 { items, total } 并按页取
+      fetchClientPrealerts("all", { page: prealertPage, pageSize }),
       fetchClientOrders(),
       fetchClientWalletOverview(),
       fetchClientAddresses(),
     ]);
-    if (results[0].status === "fulfilled") setPrealerts(results[0].value);
+    if (results[0].status === "fulfilled") {
+      setPrealerts(results[0].value.items);
+      setPrealertTotal(results[0].value.total);
+      // 2026-08-31（条目47收尾）：新建预报单后搜索池已过期，清掉让下面的搜索 effect 按需重拉
+      setPrealertSearchPool(null);
+    }
     if (results[1].status === "fulfilled") setDashboardOrders(results[1].value);
     // 2026-08-07 删除：这里原来读 results[2].value.exchangeRate.rate。
     // 后端 /client/wallet/overview 在集货余额改造后已不再返回 exchangeRate
@@ -254,6 +261,46 @@ export default function ClientHomePage() {
       .finally(() => setDashboardLoading(false));
 
   }, []);
+
+  // 2026-08-31（条目47）：翻页/改每页条数时重拉预报单的那一页。
+  // 首次挂载跳过 —— 第 1 页已经由上面 refreshMainData 拉过了，别重复请求。
+  const prealertPageInitRef = useRef(true);
+  useEffect(() => {
+    if (prealertPageInitRef.current) {
+      prealertPageInitRef.current = false;
+      return;
+    }
+    fetchClientPrealerts("all", { page: prealertPage, pageSize })
+      .then((result) => {
+        setPrealerts(result.items);
+        setPrealertTotal(result.total);
+      })
+      .catch(() => { /* 翻页失败保留当前页数据，不清空 */ });
+  }, [prealertPage, pageSize]);
+
+  // 2026-08-31（条目47收尾）：搜索词非空时拉一次前 500 条进搜索池，清空搜索就退回正常翻页。
+  // 用 ref 挡住重复请求 —— 池子只拉一次，别每敲一个字都重拉。
+  const prealertPoolLoadingRef = useRef(false);
+  useEffect(() => {
+    if (!prealertSearch.trim()) {
+      setPrealertSearchPool(null);
+      return;
+    }
+    if (prealertSearchPool !== null || prealertPoolLoadingRef.current) return;
+    prealertPoolLoadingRef.current = true;
+    fetchClientPrealerts("all", { page: 1, pageSize: 500 })
+      .then((result) => setPrealertSearchPool(result.items))
+      .catch(() => setToast("加载全部预报单失败，暂时只在当前页里搜"))
+      .finally(() => { prealertPoolLoadingRef.current = false; });
+  }, [prealertSearch, prealertSearchPool]);
+
+  // 搜索中筛池子（池子没到之前先筛当前页顶着），没搜索就原样显示当前页。两处预报单列表共用这一份。
+  const prealertSearchActive = prealertSearch.trim().length > 0;
+  const visiblePrealerts = (prealertSearchActive && prealertSearchPool ? prealertSearchPool : prealerts).filter((item) => {
+    const q = prealertSearch.trim().toLowerCase();
+    if (!q) return true;
+    return item.id.toLowerCase().includes(q) || (item.itemName ?? "").toLowerCase().includes(q);
+  });
 
   useEffect(() => {
     if (!toast) return;
@@ -326,7 +373,7 @@ export default function ClientHomePage() {
 
   const runOrderQuery = async () => {
     if (!queryMode) {
-      setMessage("请先选择“订单在途”“订单已完成”或“全部订单”。");
+      setMessage("请先选择“全部订单”“未发出”“在途”“已签收”或“退回/取消/异常”。");
       return;
     }
 
@@ -352,10 +399,15 @@ export default function ClientHomePage() {
           // 同时搜索产品行的国内单号
           return (item.products ?? []).some((p: any) => (p.domesticTrackingNo ?? "").toLowerCase().includes(kw));
         })
-        .filter((item) => !search.status || (item.currentStatus ?? "").toLowerCase() === search.status.toLowerCase())
+        // 2026-08-31（条目18）：先把英文状态码翻成客户看到的中文再比对。
+        // 原来拿下拉值和英文码硬比，客户照着列表抄「已开船」永远查出 0 条。
+        .filter((item) => !search.status || shipmentStatusZh(item.currentStatus, CLIENT_STATUS_ZH_OVERRIDES) === search.status)
         .filter((item) => !search.transportMode || item.transportMode === search.transportMode)
         .filter((item) => !search.warehouseId || item.warehouseId === search.warehouseId);
       setQueriedOrders(result);
+      // 2026-08-31（条目19）：换条件重查后页码必须回第 1 页，
+      // 否则翻到第 3 页再查、新结果只有 1 页时，表格一片空白像丢了数据。
+      setCurrentPage(1);
       setHasQueried(true);
       hasQueriedRef.current = true;
       if (queryMode === "all" && !search.batchNo && !search.arrivedDateFrom && !search.arrivedDateTo && !search.domesticTrackingNo && !search.status && !search.transportMode && !search.warehouseId) {
@@ -375,15 +427,36 @@ export default function ClientHomePage() {
 
 
   /**
-   * 切换运单查询分组（在途/已完成/全部）。
+   * 切换运单查询分组（全部/未发出/在途/已签收/退回取消异常）。
+   *
+   * 2026-08-31（条目20）：切分组后立刻查一次，别把客户晾着等 10 秒轮询 ——
+   * 原来这里只清状态不查数，列表要空白到下一轮自动刷新才出来。
+   * 响应回来时先核对 queryModeRef：客户连点两个分组时，慢的那个请求作废，
+   * 不许拿旧分组的数据盖住新分组。
    */
-  const changeQueryMode = (mode: "unfinished"  |  "completed"  |  "all") => {
+  const changeQueryMode = (mode: "all"  |  "pending"  |  "transit"  |  "delivered"  |  "closed") => {
     setQueryMode(mode);
     setSearch(initialSearch);
     setHasQueried(false);
     hasQueriedRef.current = false;
     setQueriedOrders([]);
+    setCurrentPage(1); // 2026-08-31（条目19）：切分组页码回第 1 页
     setMessage("");
+    setLoading(true);
+    fetchClientOrders(mode === "all" ? undefined : { statusGroup: mode })
+      .then((orders) => {
+        if (queryModeRef.current !== mode) return; // 已经切到别的分组了，这份结果作废
+        setQueriedOrders(orders);
+        setHasQueried(true);
+        hasQueriedRef.current = true;
+        if (mode === "all") saveOrdersToCache(orders);
+      })
+      .catch((error) => {
+        if (queryModeRef.current !== mode) return;
+        const text = error instanceof Error ? error.message : "查询失败";
+        setMessage(`查询失败：${text}`);
+      })
+      .finally(() => setLoading(false));
   };
 
   const runAiSearch = async () => {
@@ -410,13 +483,22 @@ export default function ClientHomePage() {
     if (cached && cached.length > 0) {
       setQueriedOrders(cached);
       setQueryMode("all");
+      // 2026-08-31（条目20）：读到缓存就把「已查询」开关打开，列表立刻显示。
+      // 原来忘了开这个开关，客户进页面头 10 秒同时看到「正在加载」和「无匹配订单」，
+      // 注释吹的「缓存秒开」实际完全没生效。
+      // ⚠️ 只开 hasQueried，不动 hasQueriedRef —— ref 是「用户手动查过、别覆盖」的标记，
+      // 缓存这份旧数据恰恰需要下面的后台请求来刷新，把 ref 设了后台刷新就被自己拦掉了。
+      setHasQueried(true);
     }
     setDashboardLoading(true);
     fetchClientOrders()
       .then((orders) => {
         if (hasQueriedRef.current) return;
+        if (queryModeRef.current !== "all") return; // 客户已切到别的分组，这份「全部」数据作废
         setQueriedOrders(orders);
         setQueryMode("all");
+        // 2026-08-31（条目20）：自动加载成功也要开「已查询」开关，别等 10 秒轮询
+        setHasQueried(true);
         saveOrdersToCache(orders);
       })
       .catch(() => {})
@@ -440,11 +522,14 @@ export default function ClientHomePage() {
       if (cancelled) return;
       try {
         const mode = queryModeRef.current;
-        const orders = mode === "all"
-          ? await fetchClientOrders()
-          : await fetchClientOrders({ statusGroup: mode as "unfinished" | "completed" });
-        if (!cancelled) { setQueriedOrders(orders); setHasQueried(true); }
-        if (mode === "all") saveOrdersToCache(orders);
+        // 2026-08-31（条目23）：分组值改成 statusGroup 四分类，类型对上后不再需要 as 强转
+        if (mode) {
+          const orders = mode === "all"
+            ? await fetchClientOrders()
+            : await fetchClientOrders({ statusGroup: mode });
+          if (!cancelled) { setQueriedOrders(orders); setHasQueried(true); }
+          if (mode === "all") saveOrdersToCache(orders);
+        }
       } catch { /* silent */ }
       if (!cancelled) timer = setTimeout(poll, 10000);
     };
@@ -513,37 +598,36 @@ export default function ClientHomePage() {
 
   /**
    * 客户看板状态统计：用于状态卡片与图表展示。
+   *
+   * 2026-08-31 重写（条目16）。原来这张图全是错的：
+   *   ① 「已完成」靠 group === "completed" 判断，但接口那时根本不返回 statusGroup，
+   *      永远是 0（旁边「在途运单数」2026-08-07 就为同一个坑修过，这张图漏了）；
+   *   ② 还用审批状态分流，已发货、已签收的单全被画成「处理中」。
+   * 现在后端 /client/orders 已在每张单上带算好的 statusGroup 四分类
+   * （pending=未发出 / transit=在途 / delivered=已签收 / closed=退回/取消/异常），
+   * 直接按它画，口径和「我的运单查询」的分组按钮一致，别再自己发明算法。
    */
   const clientStatusData = useMemo(() => {
-    const bucket = { completed: 0, unfinished: 0, processing: 0 };
+    const bucket = { pending: 0, transit: 0, delivered: 0, closed: 0 };
     dashboardOrders.forEach((item) => {
       const group = (item.statusGroup ?? "").toLowerCase();
-      const approval = (item.approvalStatus ?? "").toLowerCase();
-      if (approval !== "approved") {
-        bucket.processing += 1;
-      } else if (group === "completed") {
-        bucket.completed += 1;
-      } else {
-        bucket.unfinished += 1;
-      }
+      if (group === "delivered") bucket.delivered += 1;
+      else if (group === "closed") bucket.closed += 1;
+      else if (group === "transit") bucket.transit += 1;
+      else bucket.pending += 1; // pending 或字段缺失的老数据，都归「未发出」
     });
     return [
-      { name: "已完成", value: bucket.completed, color: "#15803D" },
-      { name: "在途", value: bucket.unfinished, color: "#B45309" },
-      { name: "处理中", value: bucket.processing, color: "#B45309" },
+      { name: "未发出", value: bucket.pending, color: "#B45309" },
+      { name: "在途", value: bucket.transit, color: "#1e3a8a" },
+      { name: "已签收", value: bucket.delivered, color: "#15803D" },
+      { name: "退回/取消/异常", value: bucket.closed, color: "#B91C1C" },
     ];
   }, [dashboardOrders]);
 
-  /**
-   * 客户时效趋势图：按最近订单构建可视化趋势。
-   */
-  const clientEtaTrend = useMemo(() => {
-    return dashboardOrders.slice(0, 8).map((item, index) => ({
-      label: `订单${index + 1}`,
-      orderId: item.id,
-      days: Number((2.2 + index * 0.5 + (item.transportMode === "sea" ? 4.6 : 1.2)).toFixed(1)),
-    }));
-  }, [dashboardOrders]);
+  /* 2026-08-31 删除「中泰线路时效分析图」（clientEtaTrend + 那块 LineChart）：
+     它的天数是公式编的（第几个订单 × 0.5 再加固定数），跟货实际走了几天无关，
+     曲线永远单调上升。管理员端同款假公式 2026-08-21 已删掉换成后端真算的数据，
+     客户端这份漏改了。拍板结果：直接撤掉，不接真接口。给客户看假数比不给还糟。 */
 
   /**
    * 客户可见「在途运单数」：还没完成的运单有几张。
@@ -559,6 +643,11 @@ export default function ClientHomePage() {
    * 后端 statusGroup 用的是 COMPLETED_STATUSES = delivered / returned / cancelled
    *（apps/api/src/modules/shipments/status-flow.ts:52），其余都算在途。
    * ⚠️ 后端那份清单改了，这里要跟着改。
+   *
+   * 2026-08-31 补注：上面「接口不返回 statusGroup」说的是当年的旧接口，
+   * 现在 /client/orders 已经在每张单上带 statusGroup 四分类了（见 clientStatusData）。
+   * 这个数字保留按状态清单算 —— 它的口径是「没走完的都算」（含还没发出的），
+   * 和四分类里的 transit（真正在路上）不是一回事，别顺手改成数 transit。
    */
   const clientInTransitOrderCount = useMemo(() => {
     const done = new Set(["delivered", "returned", "cancelled"]);
@@ -578,24 +667,8 @@ export default function ClientHomePage() {
       >
         <div className="section-label section-label-primary">主业务区</div>
         <h2 style={{ marginTop: 0, fontSize: 20 }}>主页</h2>
+        {/* 2026-08-31：原来这里还有一块「中泰线路时效分析图」，数据是公式编的假曲线，已整块删掉（见上面 clientEtaTrend 的删除说明） */}
         <div className="dashboard-grid-2" style={{ marginBottom: 12 }}>
-          <div className="dashboard-panel">
-            <div className="dashboard-panel-title">中泰线路时效分析图</div>
-            <div style={{ width: "100%", height: 220 }}>
-              <ResponsiveContainer>
-                <LineChart data={clientEtaTrend}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E4E6EC" />
-                  <XAxis dataKey="label" stroke="#8B94A3" />
-                  <YAxis stroke="#8B94A3" />
-                  <Tooltip
-                    formatter={(value) => [`${String(value ?? "-")} 天`, "时效"]}
-                    labelFormatter={(label) => (label ? `订单号：${String(label)}` : "时效详情")}
-                  />
-                  <Line type="monotone" dataKey="days" stroke="#1e3a8a" strokeWidth={2} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
           <div className="dashboard-panel">
             <div className="dashboard-panel-title">订单状态分布</div>
             <div style={{ width: "100%", height: 220 }}>
@@ -633,11 +706,28 @@ export default function ClientHomePage() {
             <button type="button" onClick={() => setShowCreateModal(true)}
               style={{ border: "none", borderRadius: 6, padding: "8px 16px", background: "var(--c-blue)", color: "var(--white)", fontWeight: 500, fontSize: 13, cursor: "pointer" }}>创建预报单</button>
           </div>
+          {/* 2026-08-31（条目47）：共 N 条改用后端 total（原来只数拿到的这一页），并补上翻页按钮 */}
+          {/* 2026-08-31（条目47收尾）：搜索时换成搜索结果口径、藏起翻页按钮（搜的是一次拉回的 500 条池子，
+              页码不起作用）；超过 500 条按条目21 明说只搜了前 500，别让客户以为搜遍了 */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-            <div style={{ fontSize: 12, color: "var(--t-strong)" }}>共 {prealerts.length} 条</div>
-            <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 8px", fontSize: 12 }}>
-              {[20, 50, 100, 200, 500, 1000].map((n) => <option key={n} value={n}>{n}条/页</option>)}
-            </select>
+            {prealertSearchActive ? (
+              <div style={{ fontSize: 12, color: "var(--t-strong)" }}>搜到 {visiblePrealerts.length} 条{prealertSearchPool === null ? "（正在加载全部预报单…先只搜当前页）" : prealertTotal > 500 ? `（共 ${prealertTotal} 条，仅搜索前 500 条）` : ""}</div>
+            ) : (
+            <div style={{ fontSize: 12, color: "var(--t-strong)" }}>共 {prealertTotal} 条 · 第 {prealertPage}/{Math.max(1, Math.ceil(prealertTotal / pageSize))} 页</div>
+            )}
+            {prealertSearchActive ? null : (
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <button type="button" onClick={() => setPrealertPage((p) => Math.max(1, p - 1))} disabled={prealertPage <= 1} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 12px", background: prealertPage <= 1 ? "var(--s-sunken)" : "var(--white)", color: prealertPage <= 1 ? "var(--t-faint)" : "var(--t-heading)", cursor: prealertPage <= 1 ? "default" : "pointer", fontSize: 12 }}>上一页</button>
+              <button type="button" onClick={() => setPrealertPage((p) => Math.min(Math.max(1, Math.ceil(prealertTotal / pageSize)), p + 1))} disabled={prealertPage >= Math.max(1, Math.ceil(prealertTotal / pageSize))} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 12px", background: prealertPage >= Math.max(1, Math.ceil(prealertTotal / pageSize)) ? "var(--s-sunken)" : "var(--white)", color: prealertPage >= Math.max(1, Math.ceil(prealertTotal / pageSize)) ? "var(--t-faint)" : "var(--t-heading)", cursor: prealertPage >= Math.max(1, Math.ceil(prealertTotal / pageSize)) ? "default" : "pointer", fontSize: 12 }}>下一页</button>
+              <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPrealertPage(1); setCurrentPage(1); /* 2026-08-31（条目19/47）：改每页条数，两张表页码都回第 1 页 */ }} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 8px", fontSize: 12 }}>
+                {/* 2026-08-31（复查条目3）：去掉 1000 这一档 —— 后端 /client/prealerts 每页最多回 500 条，
+                    选 1000 时页数按 1000 算、实际只回 500，后一半既看不到也翻不到，又是静默截断（教训21）。
+                    这个下拉同时管运单查询表的每页条数（那张表是纯前端切片，1000 本身没事），
+                    但为了不做成两个下拉，一起压到 500 一页，够用。 */}
+                {[20, 50, 100, 200, 500].map((n) => <option key={n} value={n}>{n}条/页</option>)}
+              </select>
+            </div>
+            )}
           </div>
           <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
             <input value={prealertSearch} onChange={(e) => setPrealertSearch(e.target.value)}
@@ -653,11 +743,10 @@ export default function ClientHomePage() {
                   <th style={{ padding: "6px 8px", fontWeight: 600 }}>唛头</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>预报单号</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>品名</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>尺寸(cm)</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>体积(m³)</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>重量(kg)</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>件</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>运输</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>状态</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>备注</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>操作</th>
                 </tr></thead>
                 <tbody>
-                  {prealerts.filter((item) => {
-                    const q = prealertSearch.trim().toLowerCase();
-                    if (!q) return true;
-                    return item.id.toLowerCase().includes(q) || (item.itemName ?? "").toLowerCase().includes(q);
-                  }).slice(0, pageSize).map((item) => {
+                  {/* 2026-08-31（条目47）：删掉这里原来的 .slice(0, pageSize) —— 现在后端按页返回，
+                      再切一刀会把整页数据砍半。搜索改在 visiblePrealerts 里统一做：
+                      搜索词非空时筛的是一次拉回的前 500 条池子，不再只筛当前页。 */}
+                  {visiblePrealerts.map((item) => {
                     const isShipped = item.approvalStatus === "shipped";
                     const isReceived = item.approvalStatus === "received";
                     const sLabel = isReceived ? "已收货" : "已发货";
@@ -741,52 +830,38 @@ export default function ClientHomePage() {
 
         {/* 折叠按钮删掉后，这块（分组按钮 + 查询框 + 列表）常驻显示，不再用条件包着 */}
         <>
-            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-              <button
-                type="button"
-                onClick={() => changeQueryMode("unfinished")}
-                style={{
-                  border: "none",
-                  borderRadius: 999,
-                  padding: "6px 14px",
-                  color: "var(--white)",
-                  background: queryMode === "unfinished" ? "var(--c-blue)" : "var(--t-strong)",
-                }}
-              >
-                订单在途
-              </button>
-              <button
-                type="button"
-                onClick={() => changeQueryMode("completed")}
-                style={{
-                  border: "none",
-                  borderRadius: 999,
-                  padding: "6px 14px",
-                  color: "var(--white)",
-                  background: queryMode === "completed" ? "var(--c-blue)" : "var(--t-strong)",
-                }}
-              >
-                订单已完成
-              </button>
-              <button
-                type="button"
-                onClick={() => changeQueryMode("all")}
-                style={{
-                  border: "none",
-                  borderRadius: 999,
-                  padding: "6px 14px",
-                  color: "var(--white)",
-                  background: queryMode === "all" ? "var(--c-blue)" : "var(--t-strong)",
-                }}
-              >
-                全部订单
-              </button>
+            {/* 2026-08-31（条目23）：原来是「订单在途/订单已完成/全部订单」三个按钮，
+                名字和实际查的东西对不上（刚创建没发走的也算「在途」，退回/取消算「已完成」）。
+                拍板改成五个分组，值直接用后端的 statusGroup 口径。 */}
+            <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+              {([
+                { mode: "all", label: "全部订单" },
+                { mode: "pending", label: "未发出" },
+                { mode: "transit", label: "在途" },
+                { mode: "delivered", label: "已签收" },
+                { mode: "closed", label: "退回/取消/异常" },
+              ] as const).map(({ mode, label }) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => changeQueryMode(mode)}
+                  style={{
+                    border: "none",
+                    borderRadius: 999,
+                    padding: "6px 14px",
+                    color: "var(--white)",
+                    background: queryMode === mode ? "var(--c-blue)" : "var(--t-strong)",
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
 
         {/* 折叠按钮已删（2026-08-11），这里不能再说「已折叠」「展开搜索框」——
             现在只是还没选分组，照实说就行 */}
         {!queryMode ? (
-          <EmptyStateCard title="请先选择要看哪些订单" description="点上面的「订单在途」「订单已完成」或「全部订单」，下面就会列出来。" />
+          <EmptyStateCard title="请先选择要看哪些订单" description="点上面的「全部订单」「未发出」「在途」「已签收」或「退回/取消/异常」，下面就会列出来。" />
         ) : (
           <>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8, marginBottom: 12 }}>
@@ -842,12 +917,24 @@ export default function ClientHomePage() {
                 placeholder="国内快递单号"
                 style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }}
               />
-              <input
+              {/* 2026-08-31（条目18）：原来是个随便填字的输入框，却拿填的字去和英文状态码
+                  （如 departed）精确比对 —— 客户照着列表抄「已开船」永远查出 0 条。
+                  改成下拉框，选项从员工端/管理员端共用的那份自动生成的清单来
+                  （delivered 按客户端口径显示成「已签收」），比对时把状态翻成中文再匹配，
+                  和管理员端 orderSearch 的做法一致。不用英文码做值，是因为同一个中文状态
+                  可能对应多个英文码（「已到仓」就有三种写法），按码精确比对会漏单。 */}
+              <select
                 value={search.status}
                 onChange={(e) => setSearch((v) => ({ ...v, status: e.target.value }))}
-                placeholder="状态（如 运输中）"
                 style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }}
-              />
+              >
+                <option value="">状态（全部）</option>
+                {clientStatusFilterOptions.map((label) => (
+                  <option key={label} value={label}>
+                    {label}
+                  </option>
+                ))}
+              </select>
               <select
                 value={search.transportMode}
                 onChange={(e) => setSearch((v) => ({ ...v, transportMode: e.target.value }))}
@@ -883,9 +970,11 @@ export default function ClientHomePage() {
               <button
                 type="button"
                 onClick={() => {
-                  setSearch(initialSearch);
-                  setHasQueried(false);
-                  setQueriedOrders([]);
+                  // 2026-08-31（复查条目26）：清空条件直接复用 changeQueryMode ——
+                  // 它本来就会清搜索条件、页码回第 1 页（条目19），并立刻按当前分组查一次。
+                  // 原来这里只清状态不查数，列表消失后要空等 10 秒轮询才回来，
+                  // 和条目20修掉的「切分组空等」是同一个病，只是入口不同。
+                  changeQueryMode(queryMode ?? "all");
                 }}
                 style={{ border: "1px solid #E4E6EC", borderRadius: 8, padding: "8px 14px", background: "var(--white)", color: "var(--t-strong)" }}
               >
@@ -1077,6 +1166,22 @@ export default function ClientHomePage() {
             <button type="button" onClick={() => setShowCreateModal(true)}
               style={{ border: "none", borderRadius: 6, padding: "8px 16px", background: "var(--c-blue)", color: "var(--white)", fontWeight: 500, fontSize: 13, cursor: "pointer" }}>创建预报单</button>
           </div>
+          {/* 2026-08-31（条目47）：这个专页原来连「共多少条」都不显示，超过一页的老单翻不到
+              也没人知道还有更多。补上总数和翻页，和首页那份共用同一套页码。 */}
+          {/* 2026-08-31（条目47收尾）：搜索时换成搜索结果口径、藏起翻页按钮，口径和首页那份一致 */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            {prealertSearchActive ? (
+              <div style={{ fontSize: 12, color: "var(--t-strong)" }}>搜到 {visiblePrealerts.length} 条{prealertSearchPool === null ? "（正在加载全部预报单…先只搜当前页）" : prealertTotal > 500 ? `（共 ${prealertTotal} 条，仅搜索前 500 条）` : ""}</div>
+            ) : (
+            <div style={{ fontSize: 12, color: "var(--t-strong)" }}>共 {prealertTotal} 条 · 第 {prealertPage}/{Math.max(1, Math.ceil(prealertTotal / pageSize))} 页</div>
+            )}
+            {prealertSearchActive ? null : (
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <button type="button" onClick={() => setPrealertPage((p) => Math.max(1, p - 1))} disabled={prealertPage <= 1} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 12px", background: prealertPage <= 1 ? "var(--s-sunken)" : "var(--white)", color: prealertPage <= 1 ? "var(--t-faint)" : "var(--t-heading)", cursor: prealertPage <= 1 ? "default" : "pointer", fontSize: 12 }}>上一页</button>
+              <button type="button" onClick={() => setPrealertPage((p) => Math.min(Math.max(1, Math.ceil(prealertTotal / pageSize)), p + 1))} disabled={prealertPage >= Math.max(1, Math.ceil(prealertTotal / pageSize))} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 12px", background: prealertPage >= Math.max(1, Math.ceil(prealertTotal / pageSize)) ? "var(--s-sunken)" : "var(--white)", color: prealertPage >= Math.max(1, Math.ceil(prealertTotal / pageSize)) ? "var(--t-faint)" : "var(--t-heading)", cursor: prealertPage >= Math.max(1, Math.ceil(prealertTotal / pageSize)) ? "default" : "pointer", fontSize: 12 }}>下一页</button>
+            </div>
+            )}
+          </div>
           <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
             <input value={prealertSearch} onChange={(e) => setPrealertSearch(e.target.value)}
               placeholder="搜索单号、品名…"
@@ -1091,11 +1196,10 @@ export default function ClientHomePage() {
                   <th style={{ padding: "6px 8px", fontWeight: 600 }}>唛头</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>预报单号</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>品名</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>尺寸(cm)</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>体积(m³)</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>重量(kg)</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>件</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>运输</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>状态</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>备注</th><th style={{ padding: "6px 8px", fontWeight: 600 }}>操作</th>
                 </tr></thead>
                 <tbody>
-                  {prealerts.filter((item) => {
-                    const q = prealertSearch.trim().toLowerCase();
-                    if (!q) return true;
-                    return item.id.toLowerCase().includes(q) || (item.itemName ?? "").toLowerCase().includes(q);
-                  }).slice(0, pageSize).map((item) => {
+                  {/* 2026-08-31（条目47）：删掉这里原来的 .slice(0, pageSize) —— 现在后端按页返回，
+                      再切一刀会把整页数据砍半。搜索改在 visiblePrealerts 里统一做：
+                      搜索词非空时筛的是一次拉回的前 500 条池子，不再只筛当前页。 */}
+                  {visiblePrealerts.map((item) => {
                     const isShipped = item.approvalStatus === "shipped";
                     const isReceived = item.approvalStatus === "received";
                     const sLabel = isReceived ? "已收货" : "已发货";
@@ -1288,60 +1392,8 @@ export default function ClientHomePage() {
         </div>
       )}
 
-      {/* 编辑预报单弹窗 */}
-      {editingPrealert && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.4)", padding: 16 }}>
-          <div style={{ width: "100%", maxWidth: 520, maxHeight: "90vh", overflow: "auto", background: "var(--white)", borderRadius: 12, padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
-            <h3 style={{ margin: "0 0 16px", fontSize: 18, fontWeight: 600 }}>编辑预报单</h3>
-            {(editingPrealert.products?.length ?? 0) > 1 && (
-              <div style={{ marginBottom: 10, background: "var(--s-cool)", borderRadius: 6, padding: "8px 10px", fontSize: 12 }}>
-                <div style={{ fontWeight: 600, marginBottom: 4, color: "var(--t-strong)" }}>产品列表</div>
-                {(editingPrealert.products ?? []).map((p) => (
-                  <div key={p.id} style={{ color: "var(--t-strong)" }}>{p.itemName} ×{p.packageCount}箱</div>
-                ))}
-              </div>
-            )}
-            <div style={{ display: "grid", gap: 10 }}>
-              <input value={editingPrealert.itemName} onChange={(e) => setEditingPrealert((v) => v ? { ...v, itemName: e.target.value } : v)} placeholder="品名" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", fontSize: 13 }} />
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                <input type="number" value={editingPrealert.packageCount} onChange={(e) => setEditingPrealert((v) => v ? { ...v, packageCount: +e.target.value } : v)} placeholder="箱数" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", fontSize: 13 }} />
-                <select value={editingPrealert.packageUnit} onChange={(e) => setEditingPrealert((v) => v ? { ...v, packageUnit: e.target.value as "bag"  |  "box" } : v)} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", fontSize: 13 }}>
-                  <option value="box">箱</option>
-                  <option value="bag">袋</option>
-                </select>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                <input type="number" step="0.01" value={editingPrealert.weightKg ?? ""} onChange={(e) => setEditingPrealert((v) => v ? { ...v, weightKg: e.target.value ? +e.target.value : undefined } : v)} placeholder="重量(kg)" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", fontSize: 13 }} />
-                <input type="number" step="0.001" value={editingPrealert.volumeM3 ?? ""} onChange={(e) => setEditingPrealert((v) => v ? { ...v, volumeM3: e.target.value ? +e.target.value : undefined } : v)} placeholder="体积(m³)" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", fontSize: 13 }} />
-              </div>
-              <input value={editingPrealert.domesticTrackingNo ?? ""} onChange={(e) => setEditingPrealert((v) => v ? { ...v, domesticTrackingNo: e.target.value } : v)} placeholder="国内快递单号" style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", fontSize: 13 }} />
-              <select value={editingPrealert.transportMode} onChange={(e) => setEditingPrealert((v) => v ? { ...v, transportMode: e.target.value } : v)} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", fontSize: 13 }}>
-                <option value="sea">海运</option>
-                <option value="land">陆运</option>
-              </select>
-            </div>
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-              <button type="button" onClick={() => setEditingPrealert(null)} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: "var(--white)", cursor: "pointer", color: "var(--t-strong)" }}>取消</button>
-              <button type="button" onClick={async () => {
-                try {
-                  await updateClientPrealert(editingPrealert.id, {
-                    itemName: editingPrealert.itemName,
-                    packageCount: editingPrealert.packageCount,
-                    packageUnit: editingPrealert.packageUnit,
-                    weightKg: editingPrealert.weightKg,
-                    volumeM3: editingPrealert.volumeM3,
-                    domesticTrackingNo: editingPrealert.domesticTrackingNo,
-                    transportMode: editingPrealert.transportMode,
-                  });
-                  setToast("预报单已更新");
-                  setEditingPrealert(null);
-                  await refreshMainData();
-                } catch { setToast("更新失败"); }
-              }} style={{ border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: "var(--c-blue)", color: "var(--white)", fontWeight: 500, cursor: "pointer" }}>保存</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* 2026-08-31（条目48）：原来这里有个完整的「编辑预报单」弹窗，
+          但 2026-06-28 列表改版后页面上就没有任何按钮能打开它，纯死代码，已删。 */}
       <Toast open={toast.length > 0} message={toast} />
       <section id="client-fcl" style={{ display: activeSection === "client-fcl" ? "block" : "none" }}>
         <FclInquiryPanel visible={activeSection === "client-fcl"} onToast={setToast} />

@@ -303,6 +303,15 @@ export function validateReceiveDraft(
    * 那种情况必须当场说清楚，不能静默保留旧值。不传就跳过那道检查。
    */
   original?: { weightKg?: number | string | null; volumeM3?: number | string | null },
+  /**
+   * 应收金额（2026-08-31 排查条目1）：**传了这个参数就按「必填」校验** ——
+   * 必须是 ≥0、最多两位小数的数字，空着当场用人话拦住。
+   * ⚠️ 员工端确认收货弹窗和管理员端收货页（admin/prealerts，2026-08-31 已接上）
+   *   都传；不传就跳过这道检查（兼容其他调用方）。
+   * ⚠️ 传进来的要是**输入框绑定的原始值**（可能是 ""、数字、甚至 NaN），
+   *   别传 buildPrealertDraft 兜底后的值 —— 兜底会把「没填」翻译成 0，必填就形同虚设。
+   */
+  receivable?: { amount: number | string | null | undefined },
 ): string | null {
   const pkg = Number(String(draft.packageCount ?? "").trim());
   if (!Number.isFinite(pkg) || !Number.isInteger(pkg) || pkg <= 0) {
@@ -383,6 +392,28 @@ export function validateReceiveDraft(
         return `${label}原来是 ${before}，你清空了它 —— 但系统没有「把${label}清零」这个操作，` +
           `保存之后还是 ${before}。请填一个真实的${label}，或者把原来的数填回去。`;
       }
+    }
+  }
+
+  /**
+   * 应收金额（2026-08-31 排查条目1）：弹窗上标着「必填」却从来没检查过，
+   * 员工空着点确认也能过，以为钱登记了其实是空的，对账才发现少收。
+   * 规矩：必填、≥0（0 表示这单不加收）、最多两位小数（库里按两位存，
+   * 多的位数会被抹掉，跟员工填的对不上 —— 跟上面重量/体积同一套道理）。
+   */
+  if (receivable) {
+    const rawAmount = receivable.amount;
+    const t = rawAmount === null || rawAmount === undefined ? "" : String(rawAmount).trim();
+    if (t === "") {
+      return "应收金额是必填的：请填一个数字（不加收就填 0）";
+    }
+    const amount = Number(t);
+    if (!Number.isFinite(amount) || amount < 0) {
+      return "应收金额必须是不小于 0 的数字";
+    }
+    const roundedAmount = Math.round((amount + Number.EPSILON) * 100) / 100;
+    if (roundedAmount !== amount) {
+      return "应收金额最多只能有 2 位小数（多的位数会被系统抹掉，跟你填的对不上）";
     }
   }
 

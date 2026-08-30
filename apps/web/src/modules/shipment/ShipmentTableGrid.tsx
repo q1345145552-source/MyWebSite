@@ -135,7 +135,9 @@ export function buildProductDetailRows(item: ProductCarrier): string[][] {
       p.itemName ?? "—",
       p.packageCount != null ? `${p.packageCount}箱` : "—",
       p.productQuantity ? `${p.productQuantity}个/箱` : "—",
-      p.lengthCm ? `${p.lengthCm}×${p.widthCm}×${p.heightCm}cm` : "—",
+      // 长宽高是三个独立输入框，可以只填一个 —— 原来只看长，只填长时会拼出「60×null×nullcm」。
+      // 跟客户端口径一致：三个都有才拼，缺任何一个显示「—」
+      p.lengthCm && p.widthCm && p.heightCm ? `${p.lengthCm}×${p.widthCm}×${p.heightCm}cm` : "—",
       p.domesticTrackingNo || "货拉拉",
       cargoTypeLabelOf(p.cargoType),
     ]);

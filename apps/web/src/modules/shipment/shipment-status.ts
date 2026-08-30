@@ -107,6 +107,10 @@ export const SHIPMENT_STATUS_FILTER_OPTIONS: string[] = (() => {
   LEGACY_FILTER_STATUSES.forEach(push);
   SHIPMENT_STATUS_FLOW.forEach((s) => push(shipmentStatusZh(s)));
   SHIPMENT_STATUS_FLOW_LAND.forEach((s) => push(shipmentStatusZh(s)));
+  // 2026-08-31（复查条目25）：异常 / 已退回 / 已取消 三个终态不在任何流程表里，
+  // 列表那一列能显示出来（SHIPMENT_STATUS_ZH 里有），下拉里却一直选不到。
+  // 追加到末尾，三端（员工/管理员/客户端）共用这份清单，改这一处一起补齐。
+  ["exception", "returned", "cancelled"].forEach((s) => push(shipmentStatusZh(s)));
   return out;
 })();
 

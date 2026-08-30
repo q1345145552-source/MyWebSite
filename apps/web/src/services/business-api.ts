@@ -245,7 +245,7 @@ export interface OrderItem {
   domesticTrackingNo?: string;
   trackingNo?: string;
   currentStatus?: string;
-  statusGroup?: "unfinished" | "completed";
+  statusGroup?: "pending" | "transit" | "delivered" | "closed";
   productQuantity: number;
   packageCount: number;
   packageUnit: string;
@@ -799,7 +799,8 @@ export async function fetchStaffWalletBalances(): Promise<{ balances: StaffWalle
 }
 
 export async function fetchClientOrders(params?: {
-  statusGroup?: "completed" | "unfinished";
+  // 2026-08-31 分组改为四分类：pending=未发出、transit=在途、delivered=已签收、closed=退回/取消/异常
+  statusGroup?: "pending" | "transit" | "delivered" | "closed";
 }): Promise<OrderItem[]> {
   const query = new URLSearchParams();
   if (params?.statusGroup) query.set("statusGroup", params.statusGroup);
@@ -811,42 +812,28 @@ export async function fetchClientOrders(params?: {
  * 获取客户端预报单列表
  * @param status 预报单状态：pending(待审核), approved(已审核/待发货), shipped(已发货), all(全部)
  */
-export async function fetchClientPrealerts(status: string = "pending"): Promise<OrderItem[]> {
-  const response = await fetch(`${apiBaseUrl()}/client/prealerts?status=${status}`, {
+export async function fetchClientPrealerts(
+  status: string = "pending",
+  params?: { page?: number; pageSize?: number },
+): Promise<{ items: OrderItem[]; total: number }> {
+  // 2026-08-31：原来固定只拿一页、也不给总数，客户端两处列表都被砍到前 50 条还看不出来。
+  const query = new URLSearchParams({ status });
+  if (params?.page) query.set("page", String(params.page));
+  if (params?.pageSize) query.set("pageSize", String(params.pageSize));
+  const response = await fetch(`${apiBaseUrl()}/client/prealerts?${query.toString()}`, {
     method: "GET",
     headers: { ...authHeaders() },
   });
-  const data = await parseApiResponse<{ items: OrderItem[] }>(response);
-  return data.items;
+  const data = await parseApiResponse<{ items: OrderItem[]; total?: number }>(response);
+  return { items: data.items, total: data.total ?? data.items.length };
 }
 
-/**
- * 客户确认发货 - 将已审核的预报单转为正式订单
- */
-
-export async function deleteClientPrealert(orderId: string): Promise<{ deleted: boolean }> {
-  const response = await fetch(`${apiBaseUrl()}/client/prealerts/delete`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeaders(),
-    },
-    body: JSON.stringify({ orderId }),
-  });
-  return parseApiResponse(response);
-}
-
-export async function updateClientPrealert(orderId: string, payload: Record<string, unknown>): Promise<{ updated: boolean }> {
-  const response = await fetch(`${apiBaseUrl()}/client/prealerts/update`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeaders(),
-    },
-    body: JSON.stringify({ orderId, ...payload }),
-  });
-  return parseApiResponse(response);
-}
+/* 2026-08-31（复查条目24 / 条目48收尾）：deleteClientPrealert / updateClientPrealert 已删 ——
+   唯一调用方是客户端那个没有入口的「编辑预报单」死弹窗，弹窗条目48已删，
+   全 web 目录 grep 引用为 0，留着就是新的死导出（教训9）。
+   连带删掉上面那段「客户确认发货」的孤儿注释（它说的函数早就没了）。
+   ⚠️ 后端 /client/prealerts/update、/client/prealerts/delete 两个接口先不动，
+   客户还能不能自助改/删预报单要老板拍板。 */
 
 export async function fetchStaffPrealerts(): Promise<OrderItem[]> {
   const response = await fetch(`${apiBaseUrl()}/staff/prealerts`, {
@@ -868,6 +855,9 @@ export async function receiveStaffPrealert(payload: {
   domesticTrackingNo?: string;
   transportMode?: "sea" | "land";
   cargoType?: string;
+  // 2026-08-31：确认收货弹窗里的应收金额（必填）和柜号原来根本没上送，白填。现在随收货一起保存。
+  receivableAmountCny?: number;
+  batchNo?: string;
 }): Promise<{ orderId: string; status: string; updatedAt: string }> {
   const response = await fetch(`${apiBaseUrl()}/staff/prealerts/receive`, {
     method: "POST",
@@ -887,18 +877,6 @@ export async function fetchClientShipments(): Promise<ShipmentItem[]> {
   });
   const data = await parseApiResponse<{ items: ShipmentItem[] }>(response);
   return data.items;
-}
-
-export async function splitStaffShipment(payload: {
-  parentShipmentId: string;
-  splits: Array<{ trackingNo: string; batchNo: string; itemName: string; packageCount: number }>;
-}): Promise<{ parentTrackingNo: string; children: Array<{ trackingNo: string; shipmentId: string }> }> {
-  const response = await fetch(`${apiBaseUrl()}/staff/shipments/split`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify(payload),
-  });
-  return parseApiResponse(response);
 }
 
 /* ==========================================================================
@@ -2145,15 +2123,19 @@ export async function fetchStaffConsolidationTaskDetail(taskId: string): Promise
   }
 }
 
-/** 签收预报单 */
+/**
+ * 签收预报单。
+ * warning（2026-08-31 新增，可选）：这张单是任务**付款之后**才签收的，
+ * 这批货不在当初报价的账里 —— 后端只提醒不拦，前端要把这句话摆给员工看清楚。
+ */
 export async function receiveConsolidationPrealert(payload: {
   prealertId: string;
   proofBase64: string;
   proofFileName: string;
   proofMime: string;
-}): Promise<{ success: boolean; prealertId: string; status: string }> {
+}): Promise<{ success: boolean; prealertId: string; status: string; warning?: string }> {
   try {
-    return await apiRequest<{ success: boolean; prealertId: string; status: string }>(
+    return await apiRequest<{ success: boolean; prealertId: string; status: string; warning?: string }>(
       `${apiBaseUrl()}/staff/consolidation/prealerts/receive`,
       { method: "POST", body: JSON.stringify(payload) },
     );
@@ -2223,12 +2205,20 @@ export async function loadingConsolidationTask(payload: {
   }
 }
 
-/** 取消任务 */
-export async function cancelConsolidationTask(taskId: string): Promise<{ success: boolean; taskId: string; status: string }> {
+/**
+ * 取消任务。
+ * 2026-08-31 起后端多了一道闸：任务里有**已签收**的预报单时，直接取消会被拦
+ * （409，提示语里带「管理员密码」）—— 取消会把签收记录物理删光，等于销毁签收证据。
+ * 被拦时带 confirmPassword 重试才放行，用法照 deleteAdminConsolidationTask 那套。
+ */
+export async function cancelConsolidationTask(
+  taskId: string,
+  opts?: { confirmPassword?: string },
+): Promise<{ success: boolean; taskId: string; status: string }> {
   try {
     return await apiRequest<{ success: boolean; taskId: string; status: string }>(
       `${apiBaseUrl()}/staff/consolidation/tasks/cancel`,
-      { method: "POST", body: JSON.stringify({ taskId }) },
+      { method: "POST", body: JSON.stringify({ taskId, ...opts }) },
     );
   } catch (error) {
     throw new Error(`取消任务失败：${error instanceof Error ? error.message : "未知错误"}`);

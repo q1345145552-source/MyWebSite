@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { clearAuthSession, setAuthSession } from "../../auth/auth-session";
+import { clearAuthSession, clearClientOrderCaches, setAuthSession } from "../../auth/auth-session";
 import { login } from "../../services/auth-api";
 
 const roleRouteMap: Record<string, string> = {
@@ -21,6 +21,10 @@ export default function LoginPage() {
     // 原来这里会显示「检测到已登录账号 → 进入工作台」的快捷入口，
     // 在共用电脑上等于让后一个人免密码用上一个人的身份（登录状态保留 7 天），
     // 所以取消该入口，并强制每次都重新输账号密码。
+    // 运单清单缓存也要一并清（2026-08-31，排查报告第 57 条收尾）——
+    // 只清凭证不清缓存的话，共用电脑上直接开登录页换人，
+    // 上一位客户的运单清单还留在 localStorage 里，跟退出按钮那条路口径要一致。
+    clearClientOrderCaches();
     clearAuthSession();
   }, []);
 

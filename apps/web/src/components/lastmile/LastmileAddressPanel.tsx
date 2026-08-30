@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiBaseUrl, authHeaders, parseApiResponse } from "../../services/core-api";
 import { fetchClientNotes } from "../../services/business-api";
 
@@ -56,6 +56,8 @@ export function LastmileAddressPanel({ onToast }: LastmileAddressPanelProps) {
   const [editingAddr, setEditingAddr] = useState<{ id: string; contactName: string; contactPhone: string; addressDetail: string } | null>(null);
   /** 没有全局 toast 时，提示就显示在面板里，不能让操作结果无声无息 */
   const [inlineMessage, setInlineMessage] = useState("");
+  /** 当前 items 是按哪个词搜回来的 —— 用来判断「把搜索词删短」时本地名单还够不够筛 */
+  const [loadedKeyword, setLoadedKeyword] = useState("");
 
   const say = useCallback((message: string) => {
     if (onToast) onToast(message);
@@ -69,7 +71,16 @@ export function LastmileAddressPanel({ onToast }: LastmileAddressPanelProps) {
     return () => clearTimeout(timer);
   }, [inlineMessage]);
 
+  /** 请求序号（2026-08-31 排查条目28）：只让「最后一次发出去的请求」的结果落地 */
+  const loadSeqRef = useRef(0);
+
   const loadAddresses = useCallback(async (kw: string) => {
+    /* ⚠️ 快速连删（「ABC」→「AB」→「A」）会连发两个请求，网络上谁先回没有保证。
+       若「AB」的响应比「A」的后到，items 和 loadedKeyword 会停在 AB 那份小名单上、
+       而输入框里是「A」—— 本地筛又开始缺人。所以每次发请求领一个自增序号，
+       响应回来时序号已经不是最新的就整个丢弃（数据、报错、loading 都不动，
+       全交给最后那个请求收尾）。 */
+    const seq = ++loadSeqRef.current;
     setLoading(true);
     try {
       const resp = await fetch(`${apiBaseUrl()}/staff/lastmile/addresses?keyword=${encodeURIComponent(kw)}`, {
@@ -77,11 +88,14 @@ export function LastmileAddressPanel({ onToast }: LastmileAddressPanelProps) {
       });
       // 走 parseApiResponse：401 会自动跳登录页；失败也给提示，不再静默空白
       const json = await parseApiResponse<{ items: ClientRow[] }>(resp);
+      if (seq !== loadSeqRef.current) return; // 旧响应后到，丢弃
       setItems(json.items ?? []);
+      setLoadedKeyword(kw);
     } catch (e) {
+      if (seq !== loadSeqRef.current) return; // 过期请求的报错也不弹，免得盖住新请求的结果
       say(`地址库加载失败：${e instanceof Error ? e.message : "未知错误"}`);
     } finally {
-      setLoading(false);
+      if (seq === loadSeqRef.current) setLoading(false);
     }
   }, [say]);
 
@@ -175,7 +189,16 @@ export function LastmileAddressPanel({ onToast }: LastmileAddressPanelProps) {
       <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
         <input
           value={keyword}
-          onChange={(e) => { setKeyword(e.target.value); if (!e.target.value) void loadAddresses(""); }}
+          onChange={(e) => {
+            const value = e.target.value;
+            setKeyword(value);
+            if (!value) { void loadAddresses(""); return; }
+            /* 按回车搜过「ABC」之后，items 只剩符合 ABC 的小名单。这时把词删短成「AB」，
+               在小名单里本地筛怎么筛都缺人 —— 本该出现的客户不显示，看着像没注册。
+               判断标准：新词不再包含搜回这份名单的旧词，就得按新词重新向服务器查一次。
+               （新词包含旧词 = 在收窄，本地筛不缺人，不用发请求，正常打字不受影响） */
+            if (!value.toLowerCase().includes(loadedKeyword.toLowerCase())) void loadAddresses(value);
+          }}
           onKeyDown={(e) => { if (e.key === "Enter") void loadAddresses(keyword); }}
           placeholder="搜索唛头或客户名"
           style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", fontSize: 13, flex: 1 }}

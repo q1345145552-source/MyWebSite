@@ -492,8 +492,18 @@ function patchCustomerChineseTemplate(
     xml = setTextCell(xml, `H${row}`, line.remark, strings);
   });
   xml = setFormulaCell(xml, "E16", "SUM(E6:E15)", lineTotal(lines, "packageCount"));
-  xml = setFormulaCell(xml, "F16", "SUM(F6:F15)", lineTotal(lines, "volumeM3"));
-  xml = setFormulaCell(xml, "G16", "SUM(G6:G15)", lineTotal(lines, "weightKg"));
+  /* 体积、重量合计（2026-08-31 排查报告第 49 条，改法收窄过一次）：
+     整页一个值都没填时留空、不印 0——明细格空着、合计栏写 0 自相矛盾还误导客户。
+     但有值时必须保留 SUM 活公式（test-lastmile-export 第 12 项盯着这个）：
+     客户在 Excel 里改一行数字，合计要跟着变；写死的数就不会变了。 */
+  const cnVolTotal = optionalLineTotal(lines, "volumeM3");
+  const cnWeightTotal = optionalLineTotal(lines, "weightKg");
+  xml = cnVolTotal === null
+    ? setOptionalNumberCell(xml, "F16", null)
+    : setFormulaCell(xml, "F16", "SUM(F6:F15)", cnVolTotal);
+  xml = cnWeightTotal === null
+    ? setOptionalNumberCell(xml, "G16", null)
+    : setFormulaCell(xml, "G16", "SUM(G6:G15)", cnWeightTotal);
   xml = setTextCell(xml, "H16", "", strings);
   xml = setTextCell(xml, "G18", data.deliveryDate, strings);
   return setTextCell(xml, "G19", [data.driverName, data.phoneNumber].filter(Boolean).join(" / "), strings);

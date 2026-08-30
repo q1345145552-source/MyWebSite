@@ -187,6 +187,83 @@ const ORDER_TABLE_MIN_WIDTH = ORDER_COL_WIDTHS.reduce((a, b) => a + b, 0);
 /** 弹性列＝「备注」（表头第 15 个）。操作列有 5 个按钮，宽度必须写死。 */
 const ORDER_FLEX_COL_INDEX = 14;
 
+/**
+ * 编辑运单时「总重量/总体积到底听谁的」的裁决（2026-08-31，排查报告第22条）。
+ * 老毛病：只要任何一行产品填了尺寸，手填的总体积就被静默扔掉 —— 三行货仓库只量了
+ * 一箱的尺寸，管理员手填实际总体积 3.5 方，保存后悄悄变成那一箱的 0.6 方，没人察觉。
+ * 现在的规则：
+ * - 每一行都填齐了尺寸（或单箱重）→ 数据齐全，按产品行自动算，手填值不生效；
+ * - 有行没填齐 → 手填了就以手填为准；没手填才拿不完整的自动值凑合（跟原来一致）；
+ * - 哪边生效通过 notes 在编辑框旁边和保存提示里明说，不再静默。
+ * 保存和界面提示都调这一个函数，保证两边口径一致。
+ */
+function decideEditTotals(
+  products: Array<{ packageCount: string; lengthCm: string; widthCm: string; heightCm: string; weightKg: string }>,
+  manualWeightRaw: string,
+  manualVolumeRaw: string,
+): { finalWeight: number | null; finalVolume: number | null; notes: string[] } {
+  let autoVolume = 0;
+  let autoWeight = 0;
+  let dimRows = 0;
+  let weightRows = 0;
+  for (const p of products) {
+    const qty = Number(String(p.packageCount).trim()) || 0;
+    const l = Number(p.lengthCm);
+    const w = Number(p.widthCm);
+    const h = Number(p.heightCm);
+    if (l > 0 && w > 0 && h > 0) {
+      autoVolume += (l * w * h * qty) / 1_000_000;
+      dimRows++;
+    }
+    const pw = Number(p.weightKg);
+    if (pw > 0) {
+      autoWeight += pw * qty;
+      weightRows++;
+    }
+  }
+  const manualVolume = manualVolumeRaw.trim() ? Number(manualVolumeRaw) : null;
+  const manualWeight = manualWeightRaw.trim() ? Number(manualWeightRaw) : null;
+  const notes: string[] = [];
+
+  let finalVolume: number | null;
+  if (products.length > 0 && dimRows === products.length) {
+    finalVolume = autoVolume;
+    if (manualVolume !== null && Math.abs(manualVolume - autoVolume) > 0.0005) {
+      notes.push(`产品行尺寸已填齐：总体积按尺寸自动算为 ${autoVolume.toFixed(3)} m³，手填的 ${manualVolume} 不生效`);
+    }
+  } else if (dimRows > 0) {
+    if (manualVolume !== null) {
+      finalVolume = manualVolume;
+      notes.push(`产品行尺寸没填齐（${dimRows}/${products.length} 行有尺寸）：总体积以手填的 ${manualVolume} m³ 为准`);
+    } else {
+      finalVolume = autoVolume;
+      notes.push(`产品行尺寸没填齐、也没手填总体积：先按已填尺寸的 ${dimRows} 行算出 ${autoVolume.toFixed(3)} m³，偏小`);
+    }
+  } else {
+    finalVolume = manualVolume;
+  }
+
+  let finalWeight: number | null;
+  if (products.length > 0 && weightRows === products.length) {
+    finalWeight = autoWeight;
+    if (manualWeight !== null && Math.abs(manualWeight - autoWeight) > 0.005) {
+      notes.push(`产品行单箱重已填齐：总重量自动算为 ${autoWeight.toFixed(2)} kg，手填的 ${manualWeight} 不生效`);
+    }
+  } else if (weightRows > 0) {
+    if (manualWeight !== null) {
+      finalWeight = manualWeight;
+      notes.push(`产品行单箱重没填齐（${weightRows}/${products.length} 行有重量）：总重量以手填的 ${manualWeight} kg 为准`);
+    } else {
+      finalWeight = autoWeight;
+      notes.push(`产品行单箱重没填齐、也没手填总重量：先按已填重量的 ${weightRows} 行算出 ${autoWeight.toFixed(2)} kg，偏小`);
+    }
+  } else {
+    finalWeight = manualWeight;
+  }
+
+  return { finalWeight, finalVolume, notes };
+}
+
 export default function AdminHomePage() {
   const [session, setSession] = useState<AuthSession | null>(null);
   const [loading, setLoading] = useState(false);
@@ -272,6 +349,13 @@ export default function AdminHomePage() {
   const [batchProgress, setBatchProgress] = useState({ current: 0, success: 0, fail: 0 });
   const [batchFileName, setBatchFileName] = useState("");
   const [batchConfirmed, setBatchConfirmed] = useState(false);
+  /* 批量导入的失败明细（2026-08-31，排查报告第46条）：原来只报「成功 95 失败 5」，
+     哪 5 条、为什么失败当场就扔了，管理员只能整表重导（把已建好的 95 条建重）。
+     现在逐条记下行号 + 客户ID/品名 + 后端返回的原因，导完列在弹窗里。
+     封顶 200 条防止极端情况下撑爆内存，超出部分只计数。 */
+  const [batchFailures, setBatchFailures] = useState<Array<{ row: number; clientId: string; itemName: string; reason: string }>>([]);
+  /** 本轮导入是否已跑完（跑完且有失败时弹窗不自动关，留人看明细） */
+  const [batchDone, setBatchDone] = useState(false);
   const [calcLength, setCalcLength] = useState("");
   const [calcWidth, setCalcWidth] = useState("");
   const [calcHeight, setCalcHeight] = useState("");
@@ -353,6 +437,12 @@ export default function AdminHomePage() {
   }>>([]);
   /** 打开编辑弹窗那一刻的原始数据，用于保存时算出「哪些项被改过」 */
   const [editSnapshot, setEditSnapshot] = useState<{ form: Record<string, string>; productsJson: string } | null>(null);
+  /* 编辑弹窗里实时提示「总重量/总体积保存时听谁的」（2026-08-31，排查报告第22条）。
+     跟保存用的是同一个 decideEditTotals，界面上说的和实际存的不会两张皮。 */
+  const editTotalsPreview = useMemo(
+    () => decideEditTotals(editProducts, orderEditForm.weightKg, orderEditForm.volumeM3),
+    [editProducts, orderEditForm.weightKg, orderEditForm.volumeM3],
+  );
   const [staffForm, setStaffForm] = useState({ id: "", name: "", phone: "", password: "" });
   const [clientForm, setClientForm] = useState({ id: "", name: "", companyName: "", phone: "", email: "", password: "" });
   const [showStaffModal, setShowStaffModal] = useState(false);
@@ -607,22 +697,11 @@ export default function AdminHomePage() {
       setMessage("请至少添加一个产品行。");
       return;
     }
-    // 从产品行自动计算总体积和总重量
-    let autoVolume = 0;
-    let autoWeight = 0;
-    let hasProductDims = false;
-    for (const p of activeProducts) {
-      const l = Number(p.lengthCm); const w = Number(p.widthCm); const h = Number(p.heightCm);
-      const qty = Number(String(p.packageCount).trim());
-      if (l > 0 && w > 0 && h > 0) {
-        autoVolume += (l * w * h * qty) / 1_000_000;
-        hasProductDims = true;
-      }
-      const pw = Number(p.weightKg);
-      if (pw > 0) autoWeight += pw * qty;
-    }
-    const finalVolume = hasProductDims ? autoVolume : (orderEditForm.volumeM3.trim() ? Number(orderEditForm.volumeM3) : null);
-    const finalWeight = autoWeight > 0 ? autoWeight : (orderEditForm.weightKg.trim() ? Number(orderEditForm.weightKg) : null);
+    // 总体积/总重量「自动算 vs 手填」的裁决统一走 decideEditTotals
+    // （2026-08-31，排查报告第22条：原来任何一行填了尺寸就静默扔掉手填值）
+    const { finalVolume, finalWeight, notes: totalsNotes } = decideEditTotals(
+      activeProducts, orderEditForm.weightKg, orderEditForm.volumeM3,
+    );
 
     const saveOrderId = editingOrderId;
     if (!saveOrderId) { setMessage("编辑失败：未选择订单"); return; }
@@ -648,6 +727,10 @@ export default function AdminHomePage() {
       const snap = editSnapshot?.form;
       const changed = (key: string, current: string) => !snap || snap[key] !== current;
       const productsChanged = !editSnapshot || editSnapshot.productsJson !== JSON.stringify(activeProducts);
+      // 只改了手填的总重量/总体积、没动产品明细时也要保存（2026-08-31，排查报告第22条：
+      // 原来这两个数只跟着产品行一起发，单独改手填框等于白填）
+      const manualTotalsChanged =
+        changed("weightKg", orderEditForm.weightKg) || changed("volumeM3", orderEditForm.volumeM3);
 
       await updateAdminOrder({
         orderId: saveOrderId,
@@ -664,16 +747,20 @@ export default function AdminHomePage() {
         ...(changed("cargoType", orderEditForm.cargoType) ? { cargoType: orderEditForm.cargoType } : {}),
         ...(changed("shipDate", orderEditForm.shipDate) ? { shipDate: orderEditForm.shipDate.trim() } : {}),
         ...(changed("remark", orderEditForm.remark ?? "") ? { remark: orderEditForm.remark?.trim() || null } : {}),
-        // 件数/数量/重量/体积是按产品行算出来的，产品行没动就不发
+        // 件数/数量是按产品行算出来的，产品行没动就不发
         ...(productsChanged ? {
           productQuantity: totalProductQuantity,
           packageCount: totalPackageCount,
-          weightKg: finalWeight,
-          volumeM3: finalVolume,
           products,
         } : {}),
+        // 重量/体积单独判断：产品行或手填框任一动过就发（见上面 manualTotalsChanged 的注释）
+        ...(productsChanged || manualTotalsChanged ? {
+          weightKg: finalWeight,
+          volumeM3: finalVolume,
+        } : {}),
       });
-      setToast("订单信息已更新");
+      // 手填值和自动计算冲突时明说哪边生效了，不再静默（排查报告第22条）
+      setToast(totalsNotes.length > 0 ? `订单信息已更新。${totalsNotes.join("；")}` : "订单信息已更新");
       await loadOrders();
     } catch (error) {
       const text = error instanceof Error ? error.message : "保存失败";
@@ -1655,7 +1742,13 @@ export default function AdminHomePage() {
         {!ordersPanelCollapsed ? (
           <ShipmentSearch
             value={orderSearch}
-            onChange={(key, val) => setOrderSearch((prev) => ({ ...prev, [key]: val }))}
+            onChange={(key, val) => {
+              /* 换筛选条件必须回到第 1 页（2026-08-31，排查报告第19条）：
+                 翻到第 3 页再改条件，新结果只剩 1 页时页面会停在第 3 页，
+                 标题写着「共 20 条」表格却一行都没有，像数据丢了。 */
+              setCurrentPage(1);
+              setOrderSearch((prev) => ({ ...prev, [key]: val }));
+            }}
             onSearch={() => {}}
             warehouseOptions={warehouseOptions}
             logisticsStatusOptions={logisticsStatusOptions as unknown as string[]}
@@ -1867,6 +1960,13 @@ export default function AdminHomePage() {
                             <input value={orderEditForm.volumeM3} onChange={(e) => setOrderEditForm((v) => ({ ...v, volumeM3: e.target.value }))} placeholder="体积(m³)" style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }} />
                             <input type="date" value={orderEditForm.shipDate} onChange={(e) => setOrderEditForm((v) => ({ ...v, shipDate: e.target.value }))} style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px" }} />
                           </div>
+                          {/* 手填总重量/总体积和产品行自动计算冲突时，当场说清保存后哪边生效
+                              （2026-08-31，排查报告第22条：原来静默扔掉手填值，没人察觉） */}
+                          {editTotalsPreview.notes.length > 0 && (
+                            <div style={{ fontSize: 12, color: "var(--c-red-deep)", background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, padding: "6px 10px" }}>
+                              {editTotalsPreview.notes.map((n, i) => (<div key={i}>{n}</div>))}
+                            </div>
+                          )}
                           <div style={{ border: "1px solid var(--l-soft)", borderRadius: 8, padding: 10, background: "var(--s-alt)", marginTop: 8 }}>
                             <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: "var(--t-strong)" }}>产品行编辑</div>
                             {editProducts.length === 0 && (
@@ -2190,11 +2290,8 @@ export default function AdminHomePage() {
       <section id="ai-memory" style={{ ...sectionStyle, display: activeSection === "ai-memory" ? "block" : "none" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
           <h2 style={{ margin: 0, fontSize: 18 }}>{SECTION_LABELS["ai-memory"]}</h2>
-                          <div style={{ marginBottom: 12 }}>
-                            <div style={{ fontSize: 12, color: "var(--t-strong)", marginBottom: 4 }}>备注</div>
-                            <input value={orderEditForm.remark} onChange={(e) => setOrderEditForm((v) => ({ ...v, remark: e.target.value }))} placeholder="备注（可选）" style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px", width: "100%", fontSize: 13 }} />
-                          </div>
-
+          {/* 这里原来错贴了一个运单编辑的「备注」输入框（2026-08-31 删，排查报告第45条）：
+              在这打字会写进 orderEditForm，极端操作下会存成别的运单的备注。 */}
           <div style={{ display: "flex", gap: 8 }}>
             <button
               type="button"
@@ -2271,11 +2368,7 @@ export default function AdminHomePage() {
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
           <h2 style={{ margin: 0, fontSize: 18 }}>{SECTION_LABELS["ai-knowledge-gaps"]}</h2>
-                          <div style={{ marginBottom: 12 }}>
-                            <div style={{ fontSize: 12, color: "var(--t-strong)", marginBottom: 4 }}>备注</div>
-                            <input value={orderEditForm.remark} onChange={(e) => setOrderEditForm((v) => ({ ...v, remark: e.target.value }))} placeholder="备注（可选）" style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px", width: "100%", fontSize: 13 }} />
-                          </div>
-
+          {/* 同 ai-memory：错贴的「备注」输入框已删（2026-08-31，排查报告第45条） */}
           <div style={{ display: "flex", gap: 8 }}>
             <select
               value={knowledgeGapStatus}
@@ -2647,17 +2740,53 @@ export default function AdminHomePage() {
               <div>
                 {/* 进度：只用文字报数，不放进度条 */}
                 <div style={{ marginBottom: 8, fontSize: 12, color: "var(--t-strong)" }}>
-                  正在导入 {batchRows.length} 条…
+                  {batchDone ? "导入完成。" : `正在导入 ${batchRows.length} 条…`}
                   {batchProgress.current > 0 ? `　已处理 ${batchProgress.current}/${batchRows.length}，成功 ${batchProgress.success} 条` : ""}
                   {batchProgress.fail > 0 ? <span style={{ color: "var(--c-red-deep)" }}>，失败 {batchProgress.fail} 条</span> : null}
                 </div>
+                {/* 失败明细（2026-08-31，排查报告第46条）：列出行号+客户ID/品名+原因，
+                    让人照着补录，别整表重导把已成功的建重 */}
+                {batchDone && batchFailures.length > 0 && (
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "var(--c-red-deep)", marginBottom: 4 }}>
+                      失败明细（共 {batchProgress.fail} 条{batchProgress.fail > batchFailures.length ? `，只记录了前 ${batchFailures.length} 条` : ""}）。
+                      行号=表头下面第几行。已成功的 {batchProgress.success} 条不用重导，照下面明细补失败的就行：
+                    </div>
+                    <textarea
+                      readOnly
+                      value={batchFailures.map((f) => `第${f.row}行　客户ID:${f.clientId || "-"}　品名:${f.itemName || "-"}　原因:${f.reason}`).join("\n")}
+                      style={{ width: "100%", height: 160, fontSize: 12, border: "1px solid #fca5a5", borderRadius: 6, padding: 8, background: "#fef2f2", color: "var(--t-strong)", resize: "vertical", boxSizing: "border-box" }}
+                    />
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const text = batchFailures.map((f) => `第${f.row}行\t${f.clientId}\t${f.itemName}\t${f.reason}`).join("\n");
+                        try {
+                          await navigator.clipboard.writeText(text);
+                          setToast("失败明细已复制");
+                        } catch {
+                          setToast("复制失败，请直接全选上面文本框的内容复制");
+                        }
+                      }}
+                      style={{ marginTop: 4, border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 10px", background: "var(--white)", cursor: "pointer", fontSize: 12, color: "var(--t-strong)" }}
+                    >
+                      复制失败明细
+                    </button>
+                  </div>
+                )}
               </div>
             )}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-              <button onClick={() => { setShowBatchImport(false); setBatchRows([]); setBatchConfirmed(false); setBatchFileName(""); }} style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 14px", background: "var(--white)", cursor: "pointer" }}>取消</button>
-              {batchConfirmed && (
+              <button onClick={() => { setShowBatchImport(false); setBatchRows([]); setBatchConfirmed(false); setBatchFileName(""); setBatchDone(false); setBatchFailures([]); setBatchProgress({ current: 0, success: 0, fail: 0 }); }} style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 14px", background: "var(--white)", cursor: "pointer" }}>{batchDone ? "关闭" : "取消"}</button>
+              {/* 导入跑完就把「开始导入」收起来，防止手抖再点一次把成功的整批建重 */}
+              {batchConfirmed && !batchDone && (
                 <button disabled={batchLoading} onClick={async () => {
                   setBatchLoading(true); let success = 0; let fail = 0;
+                  // 开跑前清掉上一轮的数字，别让旧进度/旧明细混进这一轮
+                  setBatchProgress({ current: 0, success: 0, fail: 0 });
+                  setBatchFailures([]);
+                  // 【排查报告第46条 · 2026-08-31】失败的行要逐条记下来，不许只报个数
+                  const failures: Array<{ row: number; clientId: string; itemName: string; reason: string }> = [];
                   for (let i = 0; i < batchRows.length; i++) {
                     const r = batchRows[i];
                     try {
@@ -2676,12 +2805,30 @@ export default function AdminHomePage() {
                         receiverAddressTh: String(r["泰国收货地址"] ?? r.receiverAddressTh ?? ""),
                       });
                       success++;
-                    } catch { fail++; }
+                    } catch (err) {
+                      fail++;
+                      // 行号按数据行算（第 1 条 = 表头下面第一行），凑不满 200 条才继续记
+                      if (failures.length < 200) {
+                        failures.push({
+                          row: i + 1,
+                          clientId: String(r["客户ID"] ?? r.clientId ?? ""),
+                          itemName: String(r["品名"] ?? r.itemName ?? ""),
+                          reason: err instanceof Error ? err.message : "未知错误",
+                        });
+                      }
+                    }
                     setBatchProgress({ current: i + 1, success, fail });
                   }
                   setBatchLoading(false);
-                  setToast(`导入完成：成功 ${success}，失败 ${fail}`);
-                  setShowBatchImport(false); setBatchRows([]); setBatchConfirmed(false);
+                  setBatchDone(true);
+                  setBatchFailures(failures);
+                  if (fail === 0) {
+                    // 全部成功才自动关弹窗；有失败就留着弹窗给人看明细（排查报告第46条）
+                    setToast(`导入完成：${success} 条全部成功`);
+                    setShowBatchImport(false); setBatchRows([]); setBatchConfirmed(false); setBatchDone(false);
+                  } else {
+                    setToast(`导入完成：成功 ${success}，失败 ${fail}，失败明细见弹窗`);
+                  }
                   await loadOrders();
                 }} style={{ border: "none", borderRadius: 8, padding: "8px 14px", background: "var(--c-blue)", color: "var(--white)", fontWeight: 600, cursor: "pointer" }}>
                   {batchLoading ? `导入中 ${batchProgress.current}/${batchRows.length}` : "开始导入"}
