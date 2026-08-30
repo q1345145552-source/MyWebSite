@@ -2210,10 +2210,12 @@ export async function loadingConsolidationTask(payload: {
  * 2026-08-31 起后端多了一道闸：任务里有**已签收**的预报单时，直接取消会被拦
  * （409，提示语里带「管理员密码」）—— 取消会把签收记录物理删光，等于销毁签收证据。
  * 被拦时带 confirmPassword 重试才放行，用法照 deleteAdminConsolidationTask 那套。
+ * 2026-08-31 Codex 复核补：还要带 adminAccount 指名验哪个管理员——
+ * 原来后端拿密码挨个试全公司管理员，等于给员工开了猜密码的口子。
  */
 export async function cancelConsolidationTask(
   taskId: string,
-  opts?: { confirmPassword?: string },
+  opts?: { confirmPassword?: string; adminAccount?: string },
 ): Promise<{ success: boolean; taskId: string; status: string }> {
   try {
     return await apiRequest<{ success: boolean; taskId: string; status: string }>(

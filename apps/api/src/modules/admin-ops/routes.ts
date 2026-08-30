@@ -555,8 +555,17 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
     // 2026-08-31（排查 #33）：状态只认 DELIVERING / SIGNED 两个值。
     // 原来传什么存什么，乱码状态会让签收单导出和「不能重复派送」的判断失灵。
     // 页面不传 status（默认 DELIVERING），这里只挡直接调接口的。
-    if (status !== "DELIVERING" && status !== "SIGNED") {
-      fail(res, 400, "VALIDATION_ERROR", `状态不合法：${status}。只允许 DELIVERING（派送中）或 SIGNED（已签收）`);
+    // 2026-08-31（Codex 复核）：再收紧 —— 新建只许 DELIVERING。传 SIGNED 建单时，
+    // 下面照样把运单写成 outForDelivery、轨迹写「正在派送」，还没有签收照片，
+    // 单子说签收了、运单说在派送，两边对不上。签收只能走 /admin/lastmile/status。
+    // 前端建单从不传 status（LastmileDispatchWorkspace 的 body 里没这个字段；
+    // business-api 里带 status 的 createAdminLastmileOrder 无人调用），只挡直接调接口的。
+    if (status === "SIGNED") {
+      fail(res, 400, "VALIDATION_ERROR", "新建派送单不能直接是已签收，签收请走签收操作");
+      return;
+    }
+    if (status !== "DELIVERING") {
+      fail(res, 400, "VALIDATION_ERROR", `状态不合法：${status}。新建派送单只允许 DELIVERING（派送中）`);
       return;
     }
     // 2026-08-06：派送日期在库里是纯文本，原来填什么存什么 ——

@@ -72,7 +72,10 @@ const LOCK_HELPERS: Record<string, string[]> = {
    * 里真正的那把锁。不登记的话第 1 项会把它们当成「没锁就写」误报。
    * 用的是假表名（advisory_ 前缀），不参与第 2/3 项的表顺序比对。
    * ⚠️ 别把 orders/routes.ts:124 那个同名 generateTrackingNo 登进来 ——
-   * 它不带 tx、没有锁，登了就是给它白发绿灯（所以这里只登这两个独名的）。
+   * 它不带 tx、没有锁，登了就是给它白发绿灯（所以这里只登这两个独名的；
+   * consolidation 那个 generateTrackingNo 由第 10 项单独点名核查）。
+   * ⚠️ 登在这里只是「免误报」，锁本身还在不在由第 10 项去函数体里核实
+   * （2026-08-31 Codex 复核：原来把 generateTaskNo 里的锁真删掉，照样全绿）。
    */
   generatePrealertNo: ["advisory_prealert_no"],
   generateTaskNo: ["advisory_consolidation_task_no"],
@@ -737,6 +740,105 @@ check("9) 共用的批量锁函数本身要守住三条：查父子、分两层�
   );
 });
 
+/**
+ * 从 lines 里把 `async function 名字(...)` 的整个函数体切出来
+ * （按大括号粗略配对，跟上面 deadBlockEnd 一个口径：只求够用，不求完美解析）。
+ * 找不到定义返回 null。注意：只认**定义**，`await generateTaskNo(tx)` 这种调用不算。
+ */
+function functionBody(lines: string[], name: string): string[] | null {
+  const defRe = new RegExp(`\\basync\\s+function\\s+${name}\\s*\\(`);
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!defRe.test(lines[i])) continue;
+    const body: string[] = [];
+    let depth = 0;
+    let started = false;
+    for (let j = i; j < lines.length; j += 1) {
+      body.push(lines[j]);
+      depth += (lines[j].match(/\{/g) ?? []).length;
+      depth -= (lines[j].match(/\}/g) ?? []).length;
+      if (depth > 0) started = true;
+      if (started && depth <= 0) return body;
+    }
+    return body;
+  }
+  return null;
+}
+
+/**
+ * 函数体里有没有一句**真的会执行到**的 pg_advisory_xact_lock。
+ * 口径跟上面 scanFile 完全一致：注释行不算、写死假条件的死块整块跳过、
+ * 「同一行 if + 锁」不算数（真要条件锁就写成块形式，跟第 1/7 项一个规矩）。
+ */
+function hasLiveAdvisoryLock(body: string[]): boolean {
+  let k = 0;
+  while (k < body.length) {
+    const t = body[k].trim();
+    if (t.startsWith("*") || t.startsWith("//") || t.startsWith("/*")) { k += 1; continue; }
+    if (isDeadLine(body[k])) { k = deadBlockEnd(body, k); continue; }
+    if (body[k].includes("pg_advisory_xact_lock") && !(/\bif\s*\(/.test(t) && !/\{\s*$/.test(t))) {
+      return true;
+    }
+    k += 1;
+  }
+  return false;
+}
+
+check("10) 登记成 advisory 锁的取号 helper，函数体里必须真有 pg_advisory_xact_lock", () => {
+  /**
+   * ⚠️ 2026-08-31 Codex 复核点的：LOCK_HELPERS 对取号 helper 是「见名给分」——
+   * 把 generateTaskNo() 里的 pg_advisory_xact_lock 真删掉，前面 9 项照样全绿，
+   * 因为登记表只看函数名，从来没人去函数体里核实那把锁还在不在。
+   * 这一项补上：凡是登记成 advisory_ 假表名的 helper，
+   * 去源文件里找到它的函数体，锁必须真的在、而且没被死条件包住。
+   */
+  const files = walk(ROOT);
+  const advisoryHelpers = Object.entries(LOCK_HELPERS)
+    .filter(([, tables]) => tables.every((t) => t.startsWith("advisory_")))
+    .map(([name]) => name);
+  assert.ok(
+    advisoryHelpers.length >= 2,
+    `只有 ${advisoryHelpers.length} 个登记成 advisory 的 helper，比预期少 —— 是不是有人把登记删了`,
+  );
+  for (const name of advisoryHelpers) {
+    // 找**定义**（调用不算）：全模块里必须恰好一处 ——
+    // 撞名的话登记表按名字给分，会给无锁的同名函数白发绿灯（见下面 generateTrackingNo）
+    const defs = files
+      .map((f) => ({ f, body: functionBody(fs.readFileSync(f, "utf-8").split("\n"), name) }))
+      .filter((x) => x.body !== null);
+    assert.equal(
+      defs.length,
+      1,
+      `${name} 在模块里有 ${defs.length} 处定义 —— 登记表按名字给分，撞名就会发错绿灯，先改名再登记`,
+    );
+    assert.ok(
+      hasLiveAdvisoryLock(defs[0].body!),
+      `${rel(defs[0].f)} 里的 ${name}：helper 登记了锁但函数体里没有锁` +
+        `（pg_advisory_xact_lock 被删了或被死条件包住了）`,
+    );
+  }
+  /**
+   * ⚠️ consolidation/routes.ts 的 generateTrackingNo（83002 那把锁）**故意不进 LOCK_HELPERS**
+   * （2026-08-31 Codex 复核点名）：orders/routes.ts 里有个已废弃的同名 generateTrackingNo，
+   * 不带 tx、没有锁。登记表是按「这一行出现了这个名字」给分的，
+   * 把这个名字登进去，就等于给 orders 那个无锁同名函数白发绿灯。
+   * 所以只能在这里点名核查 consolidation 这一个的函数体 —— 哪天两边改成不撞名了，
+   * 再把它正常登进 LOCK_HELPERS、删掉这段特判。
+   */
+  const consolidationLines = fs
+    .readFileSync(path.join(ROOT, "consolidation", "routes.ts"), "utf-8")
+    .split("\n");
+  const trackingBody = functionBody(consolidationLines, "generateTrackingNo");
+  assert.ok(
+    trackingBody,
+    "consolidation/routes.ts 里找不到 generateTrackingNo 的定义了 —— 挪走的话把这段特判一起搬过去",
+  );
+  assert.ok(
+    hasLiveAdvisoryLock(trackingBody!),
+    "consolidation/routes.ts 的 generateTrackingNo：函数体里没有 pg_advisory_xact_lock" +
+      "（83002 那把锁被删了或被死条件包住了）",
+  );
+});
+
 check("4) 扫到的事务数量不能突然变少（防止我把正则写窄了自己骗自己）", () => {
   // 这个数字是 2026-08-29 实际扫出来的。以后加接口只会变多；
   // 变少说明正则漏掉了一批，那时候上面三项的「全绿」就不作数了。
@@ -759,7 +861,7 @@ check("5) 「已知没加锁」那张表只许变短，不许变长", () => {
 });
 
 if (failures.length > 0) {
-  console.error(`\n${failures.length}/9 项不通过：${failures.join("；")}`);
+  console.error(`\n${failures.length}/10 项不通过：${failures.join("；")}`);
   process.exit(1);
 }
-console.log(`加锁顺序：9 项全部通过（扫了 ${allBlocks.length} 个会写数据的事务）`);
+console.log(`加锁顺序：10 项全部通过（扫了 ${allBlocks.length} 个会写数据的事务）`);

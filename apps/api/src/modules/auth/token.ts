@@ -15,6 +15,14 @@ export interface AuthTokenPayload {
    *    否则这次上线会把所有人当场踢下线。
    */
   pv?: string;
+  /**
+   * 随机令牌编号（2026-08-31 Codex 复核）。exp 只精确到秒，原来同一个人
+   * 同一秒登录两次拿到的是**一模一样**的两张令牌 —— 黑名单按令牌本身记，
+   * 退出旧标签页会把同秒刚登录拿到的新令牌一起拉黑。
+   * 加 8 字节随机数保证每张令牌都不同。
+   * ⚠️ 校验端**不要求**这个字段：老令牌里没有，得让它们活到自己过期。
+   */
+  jti?: string;
 }
 
 function base64UrlEncode(input: Buffer | string): string {
@@ -66,6 +74,8 @@ export function signAuthToken(input: {
     role: input.role,
     userName: input.userName,
     exp,
+    // 2026-08-31 Codex 复核：随机编号，保证同一秒签发的两张令牌也不相同（见 jti 字段注释）
+    jti: crypto.randomBytes(8).toString("hex"),
     ...(input.passwordHash === undefined ? {} : { pv: passwordFingerprint(input.passwordHash) }),
   };
   const encodedHeader = base64UrlEncode(JSON.stringify(header));
@@ -126,6 +136,8 @@ export function verifyAuthToken(token: string): AuthTokenPayload | null {
     if (Math.floor(Date.now() / 1000) >= payload.exp) return null;
     return {
       pv: payload.pv,
+      // 2026-08-31 Codex 复核：jti 原样带出但**不校验有无** —— 老令牌没有这个字段，要放行
+      jti: payload.jti,
       userId: payload.userId,
       companyId: payload.companyId,
       role: payload.role,

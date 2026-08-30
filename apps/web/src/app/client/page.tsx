@@ -630,7 +630,7 @@ export default function ClientHomePage() {
      客户端这份漏改了。拍板结果：直接撤掉，不接真接口。给客户看假数比不给还糟。 */
 
   /**
-   * 客户可见「在途运单数」：还没完成的运单有几张。
+   * 客户可见「当前在途运单」：真正在路上（statusGroup=transit）的运单有几张。
    *
    * 2026-08-07 改。原来是「在途柜量」，写法是
    *   filter(statusGroup === "unfinished").map(batchNo) 去重取个数
@@ -646,13 +646,19 @@ export default function ClientHomePage() {
    *
    * 2026-08-31 补注：上面「接口不返回 statusGroup」说的是当年的旧接口，
    * 现在 /client/orders 已经在每张单上带 statusGroup 四分类了（见 clientStatusData）。
-   * 这个数字保留按状态清单算 —— 它的口径是「没走完的都算」（含还没发出的），
-   * 和四分类里的 transit（真正在路上）不是一回事，别顺手改成数 transit。
+   *
+   * 2026-08-31 Codex 复核改：上一段补注原本说「这个数字保留按状态清单算、别改成数 transit」，
+   * 结果同一页两个「在途」打架 —— 状态分布图按四分类只把 transit 算在途，
+   * 这个数字却把未发出、异常的单也算进去，客户看着对不上号。
+   * 拍板按四分类统一：这里也只数 statusGroup === "transit" 的单（后端算好的字段，直接用），
+   * 前面那份手抄状态清单作废，别再照着它改回来。
    */
-  const clientInTransitOrderCount = useMemo(() => {
-    const done = new Set(["delivered", "returned", "cancelled"]);
-    return dashboardOrders.filter((item) => !done.has((item.currentStatus ?? "").trim())).length;
-  }, [dashboardOrders]);
+  const clientInTransitOrderCount = useMemo(
+    () =>
+      dashboardOrders.filter((item) => (item.statusGroup ?? "").toLowerCase() === "transit")
+        .length,
+    [dashboardOrders],
+  );
 
   return (
     <RoleShell allowedRole="client" title="客户端工作台" variant="a3">

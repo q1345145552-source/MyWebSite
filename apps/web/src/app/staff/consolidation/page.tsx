@@ -74,6 +74,8 @@ export default function StaffConsolidationPage() {
   // 这里存后端那句提示，非空就弹密码框；交互照管理员端删除任务那套。
   const [cancelPwdPrompt, setCancelPwdPrompt] = useState("");
   const [cancelPassword, setCancelPassword] = useState("");
+  // 2026-08-31 Codex 复核补：还要填管理员账号，后端只验这一个账号，不再挨个试全公司管理员
+  const [cancelAdminAccount, setCancelAdminAccount] = useState("");
 
   // 签收成功但后端带回了提醒（付款后才签收，2026-08-31）——
   // 要让员工读完再关，不能只闪一下角落的 Toast
@@ -208,28 +210,30 @@ export default function StaffConsolidationPage() {
   // ======== 取消 ========
   // 普通任务照旧：第一下变「确认取消」、第二下真取消。
   // 有已签收预报单的任务，后端会拦（409，提示语里带「管理员密码」，2026-08-31）——
-  // 这时弹密码框，输入后带 confirmPassword 重试。
-  const handleCancel = async (confirmPassword?: string) => {
+  // 这时弹密码框，输入管理员账号+密码后一起重试（2026-08-31 Codex 复核：后端只验指名的那个账号）。
+  const handleCancel = async (confirmPassword?: string, adminAccount?: string) => {
     const tid = selectedTaskId;
     if (!tid) return;
     if (cancelStep === 0) { setCancelStep(1); return; }
     setCancelSubmitting(true);
     try {
-      await cancelConsolidationTask(tid, confirmPassword ? { confirmPassword } : undefined);
+      await cancelConsolidationTask(tid, confirmPassword ? { confirmPassword, adminAccount } : undefined);
       setToast("任务已取消");
       setSelectedTaskId(null);
       setCancelStep(0);
       setCancelPwdPrompt("");
       setCancelPassword("");
+      setCancelAdminAccount("");
       await loadTasks();
     } catch (e: any) {
       const msg: string = e?.message ?? "取消任务失败";
       if (msg.includes("管理员密码")) {
-        // 被拦（或密码不对）：把后端原话摆在密码框上方，别塞进角落的 Toast
+        // 被拦（或账号/密码不对）：把后端原话摆在密码框上方，别塞进角落的 Toast
         setCancelPwdPrompt(msg);
       } else {
         setCancelPwdPrompt("");
         setCancelPassword("");
+        setCancelAdminAccount("");
         setToast(msg);
       }
       // 失败也要刷新（2026-08-27 补）：后端现在会说「刚刚被别人改过，请刷新后再看」，
@@ -785,11 +789,19 @@ export default function StaffConsolidationPage() {
 
       {/* ======== 取消任务要管理员密码（2026-08-31，交互照管理员端删除任务那套）======== */}
       {cancelPwdPrompt && (
-        <Modal onClose={() => { setCancelPwdPrompt(""); setCancelPassword(""); setCancelStep(0); }}>
-          <p style={{ marginTop: 0, fontWeight: 600 }}>取消这个集货任务需要管理员密码</p>
+        <Modal onClose={() => { setCancelPwdPrompt(""); setCancelPassword(""); setCancelAdminAccount(""); setCancelStep(0); }}>
+          <p style={{ marginTop: 0, fontWeight: 600 }}>取消这个集货任务需要管理员账号和管理员密码</p>
           <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 6, padding: 10, marginBottom: 12, fontSize: 13, color: "var(--c-red-deep)", lineHeight: 1.7 }}>
             {cancelPwdPrompt}
           </div>
+          {/* 2026-08-31 Codex 复核补：要写清是哪个管理员拍的板，后端只验这一个账号的密码 */}
+          <input
+            type="text"
+            value={cancelAdminAccount}
+            onChange={(e) => setCancelAdminAccount(e.target.value)}
+            placeholder="管理员账号"
+            style={{ width: "100%", border: "1px solid var(--l-strong)", borderRadius: 6, padding: "6px 10px", fontSize: 13, boxSizing: "border-box", marginBottom: 8 }}
+          />
           <input
             type="password"
             value={cancelPassword}
@@ -798,8 +810,8 @@ export default function StaffConsolidationPage() {
             style={{ width: "100%", border: "1px solid var(--l-strong)", borderRadius: 6, padding: "6px 10px", fontSize: 13, boxSizing: "border-box" }}
           />
           <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
-            <button onClick={() => handleCancel(cancelPassword.trim())} disabled={cancelSubmitting || !cancelPassword.trim()} style={{ padding: "8px 16px", background: cancelPassword.trim() ? "var(--c-red)" : "var(--l-strong)", color: "var(--white)", border: "none", borderRadius: 6, cursor: cancelPassword.trim() ? "pointer" : "not-allowed", fontWeight: 600 }}>{cancelSubmitting ? "取消中..." : "确认取消任务"}</button>
-            <button onClick={() => { setCancelPwdPrompt(""); setCancelPassword(""); setCancelStep(0); }} style={{ padding: "8px 16px", border: "1px solid var(--l-strong)", background: "var(--white)", color: "var(--t-muted)", borderRadius: 6, cursor: "pointer" }}>返回</button>
+            <button onClick={() => handleCancel(cancelPassword.trim(), cancelAdminAccount.trim())} disabled={cancelSubmitting || !cancelPassword.trim() || !cancelAdminAccount.trim()} style={{ padding: "8px 16px", background: cancelPassword.trim() && cancelAdminAccount.trim() ? "var(--c-red)" : "var(--l-strong)", color: "var(--white)", border: "none", borderRadius: 6, cursor: cancelPassword.trim() && cancelAdminAccount.trim() ? "pointer" : "not-allowed", fontWeight: 600 }}>{cancelSubmitting ? "取消中..." : "确认取消任务"}</button>
+            <button onClick={() => { setCancelPwdPrompt(""); setCancelPassword(""); setCancelAdminAccount(""); setCancelStep(0); }} style={{ padding: "8px 16px", border: "1px solid var(--l-strong)", background: "var(--white)", color: "var(--t-muted)", borderRadius: 6, cursor: "pointer" }}>返回</button>
           </div>
         </Modal>
       )}

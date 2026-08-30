@@ -6,6 +6,8 @@ import { fail, ok, requireRole } from "../core/http-utils";
 import { logger } from "../core/logger";
 import { BusinessError } from "../core/business-error";
 import { verifyPassword } from "../auth/crypto-utils";
+// 取消任务验管理员密码用的失败限流（2026-08-31 Codex 复核）：复用登录那套内存计数器
+import { rateLimitKey, isFailureBlocked, failureRetryAfterMs, recordFailure, clearFailures } from "../core/rate-limit";
 import {
   InsufficientBalanceError,
   chargeForConsolidation,
@@ -1804,7 +1806,7 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
     const auth = requireRole(req, res, ["staff", "admin"]);
     if (!auth) return;
 
-    const body = (req.body ?? {}) as { taskId?: string; confirmPassword?: string };
+    const body = (req.body ?? {}) as { taskId?: string; confirmPassword?: string; adminAccount?: string };
     if (!body.taskId?.trim()) {
       fail(res, 400, "BAD_REQUEST", "taskId 为必填");
       return;
@@ -1836,23 +1838,49 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
      * 现在两条路用同一把尺子：没签收货的照旧两下点掉；有签收货的要输密码。
      * 密码验证照 tasks/delete 那套（passwordVerified），差别只有一点：
      * 这个接口员工也能调，验员工自己的密码不算「管理员拍板」，
-     * 所以密码要对得上本公司**管理员**账号里的一个才算数。
+     * 所以密码要对得上本公司**管理员**账号才算数。
+     *
+     * ⚠️ 必须指名验**哪一个**管理员（2026-08-31 Codex 复核）。
+     * 原来是「拿密码去挨个试全公司所有管理员」—— 员工每发一次请求，
+     * 等于同时猜 N 个管理员的密码，而且不限次数，这接口成了猜密码的口子。
+     * 现在改成：前端多传一个 adminAccount（管理员账号），只验这一个账号
+     * （必须是本公司、role=admin、在职）；账号没传/不对/密码不对，一律同一句 403，
+     * 不让人从提示语里区分「账号错」还是「密码错」。
+     *
+     * ⚠️ 再补一道失败限流（同一次复核）：留痕日志只能事后查，挡不住当场硬猜。
+     * 复用 core/rate-limit 那套失败计数（键按**操作者**算，前缀 cancel-pw，
+     * 换任务、换管理员账号都躲不掉）：30 分钟内错 5 次就拒绝再试，验对了清零。
+     * 跟登录限流一样，计数在进程内存里，API 重启会清零 —— 这是那个模块的已知前提。
      */
+    const cancelPwLimitKey = rateLimitKey(auth.userId, "cancel-pw");
+    const CANCEL_PW_FAIL_MAX = 5;
+    const CANCEL_PW_FAIL_WINDOW_MS = 30 * 60_000;
     let passwordVerified = false;
     if (body.confirmPassword?.trim()) {
-      const admins = await prisma.user.findMany({
-        where: { companyId: auth.companyId, role: "admin", status: "active" },
-        select: { passwordHash: true },
-      });
-      if (!admins.some((a) => verifyPassword(body.confirmPassword!, a.passwordHash ?? ""))) {
-        // ⚠️ 密码错也要留痕（2026-08-31 补，复查报告）：这里没有登录那边的锁号机制，
-        // 谁在拿谁的任务反复试管理员密码，事后只能靠这条日志查。
-        logger.warn("取消集货任务：管理员密码验证失败", {
-          操作人: auth.userId, 操作角色: auth.role, 任务号: task.taskNo,
-        });
-        fail(res, 403, "FORBIDDEN", "管理员密码不对，没有取消");
+      if (isFailureBlocked(cancelPwLimitKey, CANCEL_PW_FAIL_MAX)) {
+        const waitMinutes = Math.max(1, Math.ceil(failureRetryAfterMs(cancelPwLimitKey, CANCEL_PW_FAIL_MAX) / 60_000));
+        fail(res, 403, "FORBIDDEN", `管理员密码错的次数太多，请 ${waitMinutes} 分钟后再试，取消没有执行`);
         return;
       }
+      const adminAccount = body.adminAccount?.trim();
+      const admin = adminAccount
+        ? await prisma.user.findFirst({
+            where: { id: adminAccount, companyId: auth.companyId, role: "admin", status: "active" },
+            select: { passwordHash: true },
+          })
+        : null;
+      if (!admin || !verifyPassword(body.confirmPassword, admin.passwordHash ?? "")) {
+        recordFailure(cancelPwLimitKey, CANCEL_PW_FAIL_WINDOW_MS);
+        // ⚠️ 密码错也要留痕（2026-08-31 补，复查报告）：限流只挡当场硬猜，
+        // 谁在拿谁的任务反复试管理员密码，事后还是靠这条日志查。
+        logger.warn("取消集货任务：管理员密码验证失败", {
+          操作人: auth.userId, 操作角色: auth.role, 任务号: task.taskNo,
+          填的管理员账号: adminAccount || "(没填)",
+        });
+        fail(res, 403, "FORBIDDEN", "管理员账号或管理员密码不对，没有取消");
+        return;
+      }
+      clearFailures(cancelPwLimitKey);
       passwordVerified = true;
     }
     const receivedCount = await prisma.consolidationPrealert.count({
@@ -1860,7 +1888,7 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
     });
     if (receivedCount > 0 && !passwordVerified) {
       fail(res, 409, "VALIDATION_ERROR",
-        `这个集货任务不能直接取消：有 ${receivedCount} 张预报单已签收，取消会把签收记录一并删掉。确实要取消请输入管理员密码。`);
+        `这个集货任务不能直接取消：有 ${receivedCount} 张预报单已签收，取消会把签收记录一并删掉。确实要取消请输入管理员账号和管理员密码。`);
       return;
     }
 
@@ -1896,7 +1924,7 @@ export function registerConsolidationRoutes(app: MinimalHttpApp): void {
       });
       if (nowReceived > 0 && !passwordVerified) {
         throw new BusinessError(
-          "这个任务刚刚有预报单被签收了，取消没有执行。请刷新后确认，确实要取消请输入管理员密码。",
+          "这个任务刚刚有预报单被签收了，取消没有执行。请刷新后确认，确实要取消请输入管理员账号和管理员密码。",
           409,
           "VALIDATION_ERROR",
         );

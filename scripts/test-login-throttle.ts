@@ -7,6 +7,12 @@
 process.env.DATABASE_URL = "postgresql://blocked:blocked@127.0.0.1:1/never?connect_timeout=1";
 
 /**
+ * 2026-08-31 Codex 复核：第 18 项要真签令牌，signAuthToken 没有 AUTH_SECRET 会当场 throw。
+ * 随便一个测试值就行 —— 本脚本不连任何真实服务，签出来的令牌只在本进程内自验自拉黑。
+ */
+process.env.AUTH_SECRET = "test-only-secret-for-this-script";
+
+/**
  * 登录限流的自测（不连数据库、不连网络，只测计数逻辑本身）。
  *
  * 为什么要有这个（老板 2026-08-29 拍板加的那道闸）：
@@ -35,6 +41,9 @@ import {
   recordFailure,
   recordLoginFailure,
 } from "../apps/api/src/modules/core/rate-limit";
+// 2026-08-31 Codex 复核第 18 项用：令牌签发/校验 + 退出黑名单（都是生产那份代码，不自己抄）
+import { signAuthToken, verifyAuthToken } from "../apps/api/src/modules/auth/token";
+import { isTokenRevoked, revokeToken } from "../apps/api/src/modules/core/token-blacklist";
 
 const failures: string[] = [];
 function check(name: string, body: () => void): void {
@@ -381,11 +390,39 @@ async function main(): Promise<void> {
     );
   });
 
+  check("18) 同一秒签发的两枚令牌必须不同；拉黑其一不许连累另一枚", () => {
+    /**
+     * 2026-08-31 Codex 复核实测出来的：令牌里的时间只精确到**秒**，
+     * 同一个人同一秒登录两次，拿到的是一模一样的两张令牌。
+     * 而退出黑名单按「令牌本身」记 —— 退出旧标签页会把同秒刚登录
+     * 拿到的新令牌一起拉黑。修法是签发时加 8 字节随机编号（jti）。
+     */
+    const who = { userId: "u_gate_test", companyId: "c_gate_test", role: "staff" as const, userName: "测试" };
+    let a = "";
+    let b = "";
+    // ⚠️ 两次签发得真落在同一秒才测得到随机编号 —— 跨秒的话 exp 本来就不同，
+    //    没修也能假绿。跨秒了就重签，最多试 10 次（一次不到 1 毫秒，基本一次就中）。
+    for (let i = 0; i < 10; i += 1) {
+      a = signAuthToken(who);
+      b = signAuthToken(who);
+      if (verifyAuthToken(a)?.exp === verifyAuthToken(b)?.exp) break;
+    }
+    const pa = verifyAuthToken(a);
+    const pb = verifyAuthToken(b);
+    assert.ok(pa && pb, "刚签出来的令牌自己都验不过");
+    assert.equal(pa!.exp, pb!.exp, "试了 10 次都没落在同一秒 —— 环境不对，这一项没测到东西");
+    assert.notEqual(a, b, "同一秒签的两枚令牌一模一样 —— 退出旧标签页会把同秒新登录的令牌一起拉黑");
+    // 拉黑 a，b 必须照常能用（用的是生产那份 revokeToken / isTokenRevoked）
+    revokeToken(a, pa!.exp);
+    assert.equal(isTokenRevoked(a), true, "拉黑了的令牌居然查不到");
+    assert.equal(isTokenRevoked(b), false, "拉黑 a 把 b 连坐了 —— 同秒重新登录的人会被踢下线");
+  });
+
   if (failures.length > 0) {
-    console.error(`\n${failures.length}/17 项不通过：${failures.join("；")}`);
+    console.error(`\n${failures.length}/18 项不通过：${failures.join("；")}`);
     process.exit(1);
   }
-  console.log("登录限流：17 项全部通过");
+  console.log("登录限流：18 项全部通过");
 }
 
 async function checkAsyncTop(name: string, body: () => Promise<void>): Promise<void> {

@@ -792,11 +792,16 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
          编辑再按「剩余 + 子单合计」回算订单总重，就成了 100 + 70 = 170，
          凭空多出 70kg。修法跟员工端 orders/routes.ts 那条路对齐。
          注意：前端「只改手填的总重量/总体积」时可以不带箱数，所以查子单
-         合计的条件不能只看 packageCount。 */
+         合计的条件不能只看 packageCount。
+         2026-08-31（Codex 复核）：改运单号也必须进这段锁 —— 原来只改单号
+         不带箱数/重量/体积时整段被跳过，拆过柜的父单被改号后子单当场失联
+         （子单全靠 parentTrackingNo = 父单运单号这根线认亲），下面还有
+         「拆过柜不许改号」的拦截要在锁内做。 */
       if (
         packageCount !== undefined ||
         (weightKg !== undefined && weightKg !== null) ||
-        (volumeM3 !== undefined && volumeM3 !== null)
+        (volumeM3 !== undefined && volumeM3 !== null) ||
+        (has("trackingNo") && trackingNo !== null)
       ) {
         const parents = await tx.shipment.findMany({
           where: { orderId, companyId: auth.companyId, parentTrackingNo: null },
@@ -819,7 +824,25 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
               parentTrackingNo: { in: lockedParents.map((p) => p.trackingNo) },
             },
             _sum: { packageCount: true, weightKg: true, volumeM3: true },
+            _count: true,
           });
+          /* 2026-08-31（Codex 复核，员工端 orders/routes.ts 同款拦截）：
+             拆过柜的单不许改运单号。子单全靠 parentTrackingNo = 父单运单号
+             这根线认亲 —— 父单一改号，子单当场失联：上面这份子单合计下次
+             查出来是 0，「还剩多少没装」会被冲错，卸柜还货、父单状态同步
+             这些按 parentTrackingNo 走的流程也全断。比较必须用锁内重读的
+             运单号（CLAUDE.md 第 28 条），不能用锁前那份快照。
+             同步改子单动静太大（还要连带轨迹/装柜记录逐个核），先一律拦住。 */
+          if (has("trackingNo") && trackingNo !== null) {
+            for (const parent of lockedParents) {
+              const childRow = loadedRows.find((r) => r.parentTrackingNo === parent.trackingNo);
+              if (childRow && trackingNo !== parent.trackingNo) {
+                throw new BusinessError(
+                  `这张运单已经拆过柜（有 ${childRow._count} 张子单挂在原单号下），不能修改运单号，本次修改都没有保存。请先把单号改回 ${parent.trackingNo} 再保存其他修改。`,
+                );
+              }
+            }
+          }
           const alreadyLoaded = loadedRows.reduce(
             (s: number, r: { _sum: { packageCount: number | null } }) => s + (r._sum.packageCount ?? 0),
             0,
