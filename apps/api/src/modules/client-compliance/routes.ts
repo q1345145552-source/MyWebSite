@@ -1,8 +1,18 @@
 // B-4b: 已从 node:sqlite 迁移到 Prisma + PostgreSQL（2026-05-20）
 import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
+import { type DecimalRule, requireDecimal } from "../core/decimal-guard";
+import { parseNumericStrict } from "../core/int-guard";
 import { fail, ok, requireRole } from "../core/http-utils";
 import { CONSOLIDATION_CURRENCY } from "../wallet/consolidation-balance";
+
+/**
+ * 2026-08-31 Codex 二轮：充值金额列的规格。
+ * wallet_recharges.amount 在 schema.prisma 里是 Decimal(14,2)，
+ * 上限直接从列本身推（整数部分最多 12 位），不编业务数字。
+ * decimal-guard 里没有现成的 14,2 预设，所以在这里就地声明。
+ */
+const RECHARGE_AMOUNT_RULE: DecimalRule = { precision: 14, scale: 2 };
 
 /**
  * 注册多币种账户接口。
@@ -42,9 +52,17 @@ export function registerClientComplianceRoutes(app: MinimalHttpApp): void {
       proofImage?: string;
       remark?: string;
     };
-    const amount = Number(body.amount);
-    if (!amount || amount <= 0 || !Number.isFinite(amount)) {
-      fail(res, 400, "BAD_REQUEST", "请输入有效的充值金额");
+    /**
+     * 2026-08-31 Codex 二轮：金额改走统一金额闸（照抄集货报价那三处的写法）。
+     * 原来是宽松的 Number()：传 true 会变成 1 元充值，传 [500] 也能溜过去；
+     * 小数位和列上限也没卡 —— 填 0.001 会被 Decimal(14,2) 悄悄存成 0.00。
+     * 现在必须是严格数字、不小于 0.01、最多两位小数、不超列上限，
+     * 不合法在碰库之前就 400 中文报错。
+     */
+    const amount = parseNumericStrict(body.amount);
+    const amountIssue = requireDecimal(amount, "充值金额", RECHARGE_AMOUNT_RULE);
+    if (amountIssue) {
+      fail(res, 400, "BAD_REQUEST", amountIssue);
       return;
     }
     // 2026-08-07：集货余额只有人民币，泰铢已废弃。
@@ -109,7 +127,8 @@ export function registerClientComplianceRoutes(app: MinimalHttpApp): void {
   app.get("/client/wallet/ledger", async (req, res) => {
     const auth = requireRole(req, res, ["client"]);
     if (!auth) return;
-    const take = Math.min(Number((req.query as any)?.pageSize) || 200, 500);
+    // 2026-08-31 Codex 二轮顺带：负数 pageSize 会让 Prisma take 变负、从尾部取数，夹紧到 [1,500]
+    const take = Math.min(Math.max(Math.trunc(Number((req.query as any)?.pageSize)) || 200, 1), 500);
     const rows = await prisma.consolidationBalanceLedger.findMany({
       where: { companyId: auth.companyId, clientId: auth.userId },
       orderBy: { createdAt: "desc" },

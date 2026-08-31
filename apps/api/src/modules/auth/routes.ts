@@ -27,7 +27,9 @@ export function registerAuthRoutes(app: MinimalHttpApp): void {
     // 速率限制：每个 IP 每分钟最多 10 次登录尝试
     const ip = getClientIp(req.headers);
     if (checkRateLimit(rateLimitKey(ip, "login"), 10, 60_000)) {
-      fail(res, 429, "BAD_REQUEST", "too many login attempts, please try again later");
+      // 2026-08-31 Codex 二轮：这条 429 前端会原样弹给用户，原来是英文，普通用户看不懂。
+      // 口径跟下面按账号限流那条保持一致；这道闸的窗口只有 1 分钟，等一下就能再试。
+      fail(res, 429, "BAD_REQUEST", "登录尝试次数过多，请 1 分钟后再试；着急的话联系管理员重置密码。");
       return;
     }
     // 2026-08-04：原来直接 body.account?.trim()，账号传成数字/数组/对象时

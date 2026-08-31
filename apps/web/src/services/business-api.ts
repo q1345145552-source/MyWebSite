@@ -431,25 +431,8 @@ export interface AdminLastmileItem {
   updatedAt: string;
 }
 
-export interface AdminSettlementEntryItem {
-  id: string;
-  orderId: string;
-  clientReceivable: number;
-  supplierPayable: number;
-  taxFee: number;
-  currency: string;
-  updatedAt: string;
-}
-
-export interface AdminProfitItem {
-  orderId: string;
-  clientReceivable: number;
-  supplierPayable: number;
-  taxFee: number;
-  profit: number;
-  currency: string;
-  updatedAt: string;
-}
+/* 2026-08-31（Codex 二轮）：删掉 AdminSettlementEntryItem / AdminProfitItem 两个类型——
+   只有下面三个零调用的死包装在用，随包装一起删（后端 /admin/settlement 接口另一路处理） */
 
 export interface AdminOpsOverview {
   // 2026-08-27：后端已不再返回 profitSummary / profitTrend（按运单算利润那套已废弃）
@@ -1451,47 +1434,8 @@ export async function createAdminLastmileOrder(payload: {
   return parseApiResponse(response);
 }
 
-/**
- * 获取财务结算录入项。
- */
-export async function fetchAdminSettlementEntries(): Promise<AdminSettlementEntryItem[]> {
-  const response = await fetch(`${apiBaseUrl()}/admin/settlement/entries`, {
-    method: "GET",
-    headers: { ...authHeaders() },
-  });
-  const data = await parseApiResponse<{ items: AdminSettlementEntryItem[] }>(response);
-  return data.items;
-}
-
-/**
- * 新增财务结算录入项（AR/AP/Tax）。
- */
-export async function createAdminSettlementEntry(payload: {
-  orderId: string;
-  clientReceivable: number;
-  supplierPayable: number;
-  taxFee: number;
-  currency?: string;
-}): Promise<{ id: string; updatedAt: string }> {
-  const response = await fetch(`${apiBaseUrl()}/admin/settlement/entries`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify(payload),
-  });
-  return parseApiResponse(response);
-}
-
-/**
- * 获取利润分析列表。
- */
-export async function fetchAdminProfitAnalysis(): Promise<AdminProfitItem[]> {
-  const response = await fetch(`${apiBaseUrl()}/admin/settlement/profit`, {
-    method: "GET",
-    headers: { ...authHeaders() },
-  });
-  const data = await parseApiResponse<{ items: AdminProfitItem[] }>(response);
-  return data.items;
-}
+/* 2026-08-31（Codex 二轮）：删掉 fetchAdminSettlementEntries / createAdminSettlementEntry /
+   fetchAdminProfitAnalysis 三个死包装——grep 全仓库零调用（按运单算利润那套 08-27 已废弃） */
 
 /**
  * 获取管理员运营总控看板数据（毛利/关务预警/报价变动）。

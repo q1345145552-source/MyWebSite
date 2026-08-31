@@ -1122,92 +1122,17 @@ export function registerAdminOpsRoutes(app: MinimalHttpApp): void {
     });
   });
 
-  app.get("/admin/settlement/entries", async (req, res) => {
-    const auth = requireRole(req, res, ["admin"]);
-    if (!auth) return;
-    const rows = await prisma.adminSettlementEntry.findMany({
-      where: { companyId: auth.companyId },
-      orderBy: { updatedAt: "desc" },
-    });
-    const orderIds = [...new Set(rows.map((r) => r.orderId))];
-    const orders = await prisma.order.findMany({ where: { id: { in: orderIds }, companyId: auth.companyId }, select: { id: true, shipments: { take: 1, orderBy: { updatedAt: "desc" }, select: { trackingNo: true } } } });
-    const tnMap = new Map(orders.map((o) => [o.id, o.shipments[0]?.trackingNo ?? null]));
-    ok(res, {
-      items: rows.map((item) => ({
-        id: item.id,
-        orderId: item.orderId,
-        trackingNo: tnMap.get(item.orderId) ?? null,
-        clientReceivable: decToNumber(item.clientReceivable),
-        supplierPayable: decToNumber(item.supplierPayable),
-        taxFee: decToNumber(item.taxFee),
-        currency: item.currency,
-        updatedAt: item.updatedAt.toISOString(),
-      })),
-    });
-  });
-
-  app.post("/admin/settlement/entries", async (req, res) => {
-    const auth = requireRole(req, res, ["admin"]);
-    if (!auth) return;
-    const body = (req.body ?? {}) as {
-      orderId?: string;
-      clientReceivable?: number;
-      supplierPayable?: number;
-      taxFee?: number;
-      currency?: string;
-    };
-    const orderId = body.orderId?.trim();
-    const clientReceivable = Number(body.clientReceivable);
-    const supplierPayable = Number(body.supplierPayable);
-    const taxFee = Number(body.taxFee);
-    if (!orderId || !Number.isFinite(clientReceivable) || !Number.isFinite(supplierPayable) || !Number.isFinite(taxFee)) {
-      fail(res, 400, "BAD_REQUEST", "invalid settlement payload");
-      return;
-    }
-    const id = `set_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-    const created = await prisma.adminSettlementEntry.create({
-      data: {
-        id,
-        companyId: auth.companyId,
-        orderId,
-        clientReceivable,
-        supplierPayable,
-        taxFee,
-        currency: body.currency?.trim() || "CNY",
-      },
-      select: { id: true, updatedAt: true },
-    });
-    ok(res, { id: created.id, updatedAt: created.updatedAt.toISOString() });
-  });
-
-  app.get("/admin/settlement/profit", async (req, res) => {
-    const auth = requireRole(req, res, ["admin"]);
-    if (!auth) return;
-    const rows = await prisma.adminSettlementEntry.findMany({
-      where: { companyId: auth.companyId },
-      orderBy: { updatedAt: "desc" },
-    });
-    const orderIds = [...new Set(rows.map((r) => r.orderId))];
-    const orders = await prisma.order.findMany({ where: { id: { in: orderIds }, companyId: auth.companyId }, select: { id: true, shipments: { take: 1, orderBy: { updatedAt: "desc" }, select: { trackingNo: true } } } });
-    const tnMap = new Map(orders.map((o) => [o.id, o.shipments[0]?.trackingNo ?? null]));
-    ok(res, {
-      items: rows.map((item) => {
-        const cr = decToNumber(item.clientReceivable);
-        const sp = decToNumber(item.supplierPayable);
-        const tf = decToNumber(item.taxFee);
-        return {
-          orderId: item.orderId,
-          trackingNo: tnMap.get(item.orderId) ?? null,
-          clientReceivable: cr,
-          supplierPayable: sp,
-          taxFee: tf,
-          profit: Number((cr - sp - tf).toFixed(2)),
-          currency: item.currency,
-          updatedAt: item.updatedAt.toISOString(),
-        };
-      }),
-    });
-  });
+  /* 2026-08-31 Codex 二轮：这里原来还有三条「按运单结算」的遗留接口，整块删掉：
+       GET  /admin/settlement/entries   查每张运单的应收/应付/税费
+       POST /admin/settlement/entries   给任意 orderId 写应收/应付/税费
+       GET  /admin/settlement/profit    按运单算利润
+     删的原因三条：
+       ① POST 不校验 orderId 属于本公司，还能给普通运单写钱 —— 直接违反
+          「钱只在两个集货功能里」的口径（老板 2026-08-27 拍板，见上面 by-container 的注释）
+       ② 前端三个包装函数（fetchAdminSettlementEntries / createAdminSettlementEntry /
+          fetchAdminProfitAnalysis）已确认零调用，另一路一并删掉了
+       ③ 结算表生产上 0 行，从上线到现在没人用过
+     结算表本身（admin_settlement_entries）没动；要恢复走 git 历史。 */
 
   app.get("/admin/ops/overview", async (req, res) => {
     const auth = requireRole(req, res, ["admin"]);

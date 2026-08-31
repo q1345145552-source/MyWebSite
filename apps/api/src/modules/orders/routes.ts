@@ -1,6 +1,6 @@
 // B-3 ~ B-7: 已从 node:sqlite 迁移到 Prisma + PostgreSQL（2026-05-18）
 import { DECIMAL_10_2, DECIMAL_10_3, DECIMAL_12_2, requireDecimal } from "../core/decimal-guard";
-import { parseNumericStrict, requirePositiveInt } from "../core/int-guard";
+import { parseNumericStrict, requireNonNegativeInt, requirePositiveInt } from "../core/int-guard";
 import { ShipmentsNotFoundError, lockShipmentsChildrenFirst } from "../shipments/lock-shipments";
 import { validateProductRows, validateOrderLevelQuantity } from "./product-row-guard";
 import crypto from "node:crypto";
@@ -1712,6 +1712,39 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       return;
     }
 
+    /* 2026-08-31（Codex 二轮）：数值校验收紧，并挪到碰库之前。
+       原来件数/产品数量只判 `isFinite && >= 0`，填 2.5 会被写库那句 Math.floor
+       **静默**抹成 2，员工毫无察觉；重量 -5、体积 -2 更是只判了 isFinite 就原样入库。
+       跟确认收货（本文件 446 段）、管理员编辑（admin/routes.ts 606 段）不是一套闸。
+       改成同一套规矩：
+       · 件数/产品数量用 requireNonNegativeInt —— 允许 0，因为这里传的是
+         「还剩多少没装柜」（见下面事务里的注释），拆完柜的单剩余就是 0，不能拦死；
+         同理重量/体积的 min 也放到 0，requireDecimal 默认的「最小正数」会误伤。
+       · 重量/体积按数据库列精度卡：weightKg Decimal(10,2)、volumeM3 Decimal(10,3)。
+       · 先 parseNumericStrict 再校验（Number(true) 是 1，直接 Number() 挡不住）。 */
+    const productQuantity = parseNumericStrict(body.productQuantity);
+    {
+      const issue = requireNonNegativeInt(productQuantity, "产品数量");
+      if (issue) { fail(res, 400, "VALIDATION_ERROR", issue); return; }
+    }
+    const packageCount = parseNumericStrict(body.packageCount);
+    {
+      const issue = requireNonNegativeInt(packageCount, "箱数");
+      if (issue) { fail(res, 400, "VALIDATION_ERROR", issue); return; }
+    }
+    const weightKg =
+      body.weightKg === undefined || body.weightKg === null ? null : parseNumericStrict(body.weightKg);
+    if (weightKg !== null) {
+      const issue = requireDecimal(weightKg, "重量(kg)", { ...DECIMAL_10_2, min: 0 });
+      if (issue) { fail(res, 400, "VALIDATION_ERROR", issue); return; }
+    }
+    const volumeM3 =
+      body.volumeM3 === undefined || body.volumeM3 === null ? null : parseNumericStrict(body.volumeM3);
+    if (volumeM3 !== null) {
+      const issue = requireDecimal(volumeM3, "体积(m³)", { ...DECIMAL_10_3, min: 0 });
+      if (issue) { fail(res, 400, "VALIDATION_ERROR", issue); return; }
+    }
+
     // 【审查问题 7】原来在 include.order 里写了 where —— Prisma 不允许对
     // 一对一关联加 where（schema 里 order 是必填的一对一），一调就抛校验错误变 500。
     // 归属公司的限制改到外层 where 上，等价且合法。
@@ -1777,28 +1810,8 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       return;
     }
 
-    const productQuantity = Number(body.productQuantity);
-    const packageCount = Number(body.packageCount);
-    if (!Number.isFinite(productQuantity) || productQuantity < 0) {
-      fail(res, 400, "BAD_REQUEST", "invalid productQuantity");
-      return;
-    }
-    if (!Number.isFinite(packageCount) || packageCount < 0) {
-      fail(res, 400, "BAD_REQUEST", "invalid packageCount");
-      return;
-    }
-
+    // 数值字段的校验在 handler 入口（碰库之前）已经做完了（2026-08-31 Codex 二轮）
     const packageUnit = body.packageUnit === "bag" ? "bag" : "box";
-    const weightKg = body.weightKg === undefined || body.weightKg === null ? null : Number(body.weightKg);
-    const volumeM3 = body.volumeM3 === undefined || body.volumeM3 === null ? null : Number(body.volumeM3);
-    if (weightKg !== null && !Number.isFinite(weightKg)) {
-      fail(res, 400, "BAD_REQUEST", "invalid weightKg");
-      return;
-    }
-    if (volumeM3 !== null && !Number.isFinite(volumeM3)) {
-      fail(res, 400, "BAD_REQUEST", "invalid volumeM3");
-      return;
-    }
 
     const orderCreatedDate = body.orderCreatedDate?.trim();
     if (!orderCreatedDate) {
@@ -1914,8 +1927,9 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
           warehouseId: nextWarehouseId,
           batchNo,
           itemName,
-          productQuantity: Math.floor(productQuantity),
-          packageCount: Math.floor(packageCount) + alreadyLoadedPkg,
+          // 入口已保证是整数，原来的 Math.floor 正是把 2.5 静默抹成 2 的元凶，删掉（2026-08-31 Codex 二轮）
+          productQuantity,
+          packageCount: packageCount + alreadyLoadedPkg,
           packageUnit,
           // 订单上存「剩余 + 已装走」的合计，跟上面箱数同一个规矩（2026-08-31）
           weightKg: orderWeightKg as unknown as Prisma.Decimal | null,
@@ -1947,7 +1961,7 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
              管理员端编辑框传上来的是**产品行合计（整单箱数）**，那边才需要减；
              这边传上来的已经是剩余了，再减一次会越保存越少（71 → 41 → 11）。
              两个端传的含义不一样，这是我第一版改错过的地方。 */
-          packageCount: Math.floor(packageCount),
+          packageCount,
           packageUnit,
           weightKg: weightKg as unknown as Prisma.Decimal | null,
           volumeM3: (volumeM3 as unknown as Prisma.Decimal | null),

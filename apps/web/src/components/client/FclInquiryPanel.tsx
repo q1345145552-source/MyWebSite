@@ -3,13 +3,15 @@
 import { useState } from "react";
 import { apiBaseUrl, apiRequest } from "../../services/core-api";
 
+/* 2026-08-31（Codex 二轮）：列表接口不再下发 certFileBase64 / productImages 大字段
+   （表格根本不显示它们），remark 客户角色也拿不到了——类型跟着后端同步。
+   大字段要看的话走 /client/fcl-inquiries/detail?id= 按条取。 */
 type FclInquiryItem = {
   id: string; clientId: string; productName: string;
   cargoValue: string; cargoWeight: string; address: string;
   containerType: string; serviceType: string; loadingDate: string | null;
-  certFileName: string | null; certFileBase64: string | null;
-  productImages: Array<{ fileName: string; base64: string }>;
-  status: string; remark: string | null; createdByRole: string;
+  certFileName: string | null;
+  status: string; remark?: string | null; createdByRole: string;
   createdAt: string;
 };
 
@@ -26,6 +28,10 @@ export default function FclInquiryPanel(props: ClientFclInquiryProps) {
   const [list, setList] = useState<FclInquiryItem[]>([]);
   const [listLoaded, setListLoaded] = useState(false);
   const [listError, setListError] = useState(false);
+  // 2026-08-31（Codex 二轮）：列表改后端翻页（照客户预报单列表的写法），共 N 条用后端 total
+  const [listPage, setListPage] = useState(1);
+  const [listTotal, setListTotal] = useState(0);
+  const listPageSize = 50;
 
   // 表单
   const [productName, setProductName] = useState("");
@@ -40,10 +46,16 @@ export default function FclInquiryPanel(props: ClientFclInquiryProps) {
   const [productPreviews, setProductPreviews] = useState<string[]>([]);
   const [selectedClientId, setSelectedClientId] = useState("");
 
-  const loadList = async () => {
+  const loadList = async (page = listPage) => {
     try {
-      const data = await apiRequest<{ items: FclInquiryItem[] }>(`${apiBaseUrl()}/client/fcl-inquiries`);
+      // 2026-08-31（Codex 二轮）：带上 page/pageSize，接口只回当前页 + 真实总数
+      const data = await apiRequest<{ items: FclInquiryItem[]; total?: number }>(
+        `${apiBaseUrl()}/client/fcl-inquiries?page=${page}&pageSize=${listPageSize}`
+      );
       setList(data.items ?? []); // 【审查问题 13】接口少了 items 就会让整页崩掉
+      setListTotal(data.total ?? (data.items ?? []).length);
+      setListPage(page);
+      setListError(false);
     } catch (e: any) { props.onToast("加载询价记录失败：" + (e.message || "网络错误")); setListError(true); }
     setListLoaded(true);
   };
@@ -98,7 +110,7 @@ export default function FclInquiryPanel(props: ClientFclInquiryProps) {
       setContainerType("1*40HQ"); setServiceType("清提派"); setLoadingDate("");
       setCertFile(null); setProductImageFiles([]); setProductPreviews([]);
       setSelectedClientId("");
-      loadList();
+      loadList(1); // 2026-08-31（Codex 二轮）：新提交的排最前，回第 1 页才看得见
     } catch (e: any) {
       setMessage(e.message || "提交失败");
     } finally {
@@ -205,9 +217,19 @@ export default function FclInquiryPanel(props: ClientFclInquiryProps) {
 
       {/* 历史列表 */}
       <h3 style={{ fontSize: 15, marginBottom: 10 }}>询价记录</h3>
-      {!listLoaded && <button onClick={loadList} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "6px 14px", background: "var(--white)", cursor: "pointer", fontSize: 13 }}>加载记录</button>}
+      {!listLoaded && <button onClick={() => loadList(1)} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "6px 14px", background: "var(--white)", cursor: "pointer", fontSize: 13 }}>加载记录</button>}
       {listLoaded && listError && <button onClick={() => { setListError(false); setListLoaded(false); }} style={{ border: "1px solid #fca5a5", borderRadius: 6, padding: "6px 14px", background: "var(--white)", color: "var(--c-red-2)", cursor: "pointer", fontSize: 13 }}>加载失败，点击重试</button>}
       {listLoaded && !listError && list.length === 0 && <p style={{ color: "var(--t-faint)", fontSize: 13 }}>暂无询价记录</p>}
+      {/* 2026-08-31（Codex 二轮）：后端翻页，共 N 条用后端 total（照客户预报单列表的写法） */}
+      {listLoaded && !listError && listTotal > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+          <span style={{ fontSize: 12, color: "var(--t-strong)" }}>共 {listTotal} 条 · 第 {listPage}/{Math.max(1, Math.ceil(listTotal / listPageSize))} 页</span>
+          <button type="button" onClick={() => loadList(Math.max(1, listPage - 1))} disabled={listPage <= 1}
+            style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 12px", background: listPage <= 1 ? "var(--s-sunken)" : "var(--white)", color: listPage <= 1 ? "var(--t-faint)" : "var(--t-heading)", cursor: listPage <= 1 ? "default" : "pointer", fontSize: 12 }}>上一页</button>
+          <button type="button" onClick={() => loadList(Math.min(Math.max(1, Math.ceil(listTotal / listPageSize)), listPage + 1))} disabled={listPage >= Math.max(1, Math.ceil(listTotal / listPageSize))}
+            style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 12px", background: listPage >= Math.max(1, Math.ceil(listTotal / listPageSize)) ? "var(--s-sunken)" : "var(--white)", color: listPage >= Math.max(1, Math.ceil(listTotal / listPageSize)) ? "var(--t-faint)" : "var(--t-heading)", cursor: listPage >= Math.max(1, Math.ceil(listTotal / listPageSize)) ? "default" : "pointer", fontSize: 12 }}>下一页</button>
+        </div>
+      )}
       {list.length > 0 && (
         <div style={{ overflowX: "auto" }}>
           <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
