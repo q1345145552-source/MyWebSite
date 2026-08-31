@@ -20,7 +20,11 @@ import assert from "node:assert/strict";
 type Handler = (req: any, res: any) => Promise<void> | void;
 
 const failures: string[] = [];
+// 2026-09-01 终验收尾：项数改成计数器自动数（照 test-product-rows 的写法），
+// 收尾那句写死「7 项」的话，加减用例后没人核对，差一了都不知道
+let totalChecks = 0;
 async function check(name: string, body: () => Promise<void>): Promise<void> {
+  totalChecks += 1;
   try { await body(); console.log(`  ✅ ${name}`); }
   catch (error) {
     failures.push(name);
@@ -132,11 +136,37 @@ async function main(): Promise<void> {
     assert.ok(Number.isSafeInteger(skip), `skip 不是安全整数：${skip} —— Prisma 会 500`);
   });
 
+  await check("8) page=2 → skip=50：翻页真的往后挪，不许把 skip 写死成 0", async () => {
+    /**
+     * 2026-09-01 终验收尾（防假绿）：第 5 项只断言了 page=1 时 skip=0 ——
+     * 把 skip 算式整个写死成 0，7 项照样全绿。这里用 page=2 逼它真算一次。
+     */
+    const r = await call({ page: "2", pageSize: "50" });
+    assert.equal(r.status, 200, `应该 200，实际 ${r.status}（${r.message}）`);
+    assert.equal(findManyCalls[0]?.skip, 50, `page=2 时 skip 该是 50：${findManyCalls[0]?.skip}`);
+    assert.equal(findManyCalls[0]?.take, 50, `take 该是 50：${findManyCalls[0]?.take}`);
+    assert.equal(r.data?.page, 2);
+  });
+
+  await check("9) page=4 且 pageSize 超限 → skip=600：skip 必须按夹到 200 之后的 pageSize 算", async () => {
+    /**
+     * 2026-09-01 终验收尾（防假绿）：传 999 会被夹到 200，skip = (4-1)×200 = 600。
+     * 要是有人把 skip 写成用夹之前的原始值算（(4-1)×999 = 2997），
+     * 客户翻页就会整段整段跳空 —— 这一项当场变红。
+     */
+    const r = await call({ page: "4", pageSize: "999" });
+    assert.equal(r.status, 200, `应该 200，实际 ${r.status}（${r.message}）`);
+    assert.equal(findManyCalls[0]?.skip, 600, `page=4、pageSize 夹到 200 后 skip 该是 600：${findManyCalls[0]?.skip}`);
+    assert.equal(findManyCalls[0]?.take, 200, `take 该是夹过的 200：${findManyCalls[0]?.take}`);
+    assert.equal(r.data?.page, 4);
+    assert.equal(r.data?.pageSize, 200);
+  });
+
   if (failures.length > 0) {
-    console.error(`\n${failures.length}/7 项不通过：${failures.join("；")}`);
+    console.error(`\n${failures.length}/${totalChecks} 项不通过：${failures.join("；")}`);
     process.exit(1);
   }
-  console.log("整柜询价列表分页参数：7 项全部通过");
+  console.log(`整柜询价列表分页参数：${totalChecks} 项全部通过`);
 }
 
 main().catch((error) => {

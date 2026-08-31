@@ -66,8 +66,15 @@ export default function ClientWalletPage() {
   const [ledgerPage, setLedgerPage] = useState(1);
   const [ledgerTotal, setLedgerTotal] = useState(0);
 
+  /* 2026-09-01 终验收尾：流水请求自增序号（照抄 LastmileAddressPanel 的 loadSeq 写法）。
+     快速连点翻页会连发多个请求，网络上谁先回没有保证——每次发请求领一个序号，
+     响应回来时序号已不是最新的就整个丢弃，只让最后一次请求的结果落地。 */
+  const ledgerSeqRef = useRef(0);
+
   const loadData = useCallback(async () => {
     setLoading(true);
+    // 全量刷新也占一个序号：还在路上的翻页旧响应不许盖掉刷新结果
+    const seq = ++ledgerSeqRef.current;
     try {
       const [overview, recs, led] = await Promise.all([
         fetchClientWalletOverview(),
@@ -76,10 +83,12 @@ export default function ClientWalletPage() {
       ]);
       setData(overview);
       setRecharges(recs.recharges);
-      setLedger(led.items);
-      setLedgerTotal(led.total);
-      // 全量刷新（首次加载/充值提交后）拿的是第 1 页，页码同步回 1，别跟表格错位
-      setLedgerPage(1);
+      if (seq === ledgerSeqRef.current) {
+        setLedger(led.items);
+        setLedgerTotal(led.total);
+        // 全量刷新（首次加载/充值提交后）拿的是第 1 页；用后端回的 page 校准，别跟表格错位
+        setLedgerPage(led.page);
+      }
     } catch (error) {
       const text = error instanceof Error ? error.message : "加载失败";
       setMessage(`加载失败：${text}`);
@@ -92,21 +101,25 @@ export default function ClientWalletPage() {
     void loadData();
   }, [loadData]);
 
-  // 2026-09-01 Codex 复核收尾：翻页时只重拉流水那一页。
-  // 首次挂载跳过 —— 第 1 页已经由上面 loadData 拉过了，别重复请求。
-  const ledgerPageInitRef = useRef(true);
-  useEffect(() => {
-    if (ledgerPageInitRef.current) {
-      ledgerPageInitRef.current = false;
-      return;
+  /* 2026-09-01 终验收尾：翻页改成「请求成功后页码和数据一起更新」。
+     原来是先 setLedgerPage 再靠 useEffect 发请求——请求失败时表格还是旧页的数据、
+     页码却已经跳了，客户看着「第 2 页」实际是第 1 页的流水。现在目标页只存在
+     临时变量 targetPage 里，成功才落地（并用后端回的 page 校准）；失败页码不动、给提示。 */
+  const loadLedgerPage = useCallback(async (targetPage: number) => {
+    const seq = ++ledgerSeqRef.current;
+    try {
+      const res = await fetchConsolidationLedger({ page: targetPage, pageSize: LEDGER_PAGE_SIZE });
+      if (seq !== ledgerSeqRef.current) return; // 旧响应后到，丢弃
+      setLedger(res.items);
+      setLedgerTotal(res.total);
+      setLedgerPage(res.page);
+    } catch (error) {
+      if (seq !== ledgerSeqRef.current) return; // 过期请求的报错也不提示，免得盖住新请求的结果
+      const text = error instanceof Error ? error.message : "未知错误";
+      // 失败时页码和表格都保持原样，只提示；再点一次按钮即可重试
+      setMessage(`流水翻页失败：${text}`);
     }
-    fetchConsolidationLedger({ page: ledgerPage, pageSize: LEDGER_PAGE_SIZE })
-      .then((res) => {
-        setLedger(res.items);
-        setLedgerTotal(res.total);
-      })
-      .catch(() => { /* 翻页失败保留当前页数据，不清空 */ });
-  }, [ledgerPage]);
+  }, []);
 
   // 处理付款凭证上传
   const handleProofUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -205,8 +218,9 @@ export default function ClientWalletPage() {
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
             <div style={{ fontSize: 12, color: "var(--t-strong)" }}>共 {ledgerTotal} 条 · 第 {ledgerPage}/{Math.max(1, Math.ceil(ledgerTotal / LEDGER_PAGE_SIZE))} 页</div>
             <div style={{ display: "flex", gap: 6 }}>
-              <button type="button" onClick={() => setLedgerPage((p) => Math.max(1, p - 1))} disabled={ledgerPage <= 1} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 12px", background: ledgerPage <= 1 ? "var(--s-sunken)" : "var(--white)", color: ledgerPage <= 1 ? "var(--t-faint)" : "var(--t-heading)", cursor: ledgerPage <= 1 ? "default" : "pointer", fontSize: 12 }}>上一页</button>
-              <button type="button" onClick={() => setLedgerPage((p) => Math.min(Math.max(1, Math.ceil(ledgerTotal / LEDGER_PAGE_SIZE)), p + 1))} disabled={ledgerPage >= Math.max(1, Math.ceil(ledgerTotal / LEDGER_PAGE_SIZE))} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 12px", background: ledgerPage >= Math.max(1, Math.ceil(ledgerTotal / LEDGER_PAGE_SIZE)) ? "var(--s-sunken)" : "var(--white)", color: ledgerPage >= Math.max(1, Math.ceil(ledgerTotal / LEDGER_PAGE_SIZE)) ? "var(--t-faint)" : "var(--t-heading)", cursor: ledgerPage >= Math.max(1, Math.ceil(ledgerTotal / LEDGER_PAGE_SIZE)) ? "default" : "pointer", fontSize: 12 }}>下一页</button>
+              {/* 2026-09-01 终验收尾：点按钮不再直接改页码，改成发请求、成功后才翻页（见 loadLedgerPage） */}
+              <button type="button" onClick={() => void loadLedgerPage(Math.max(1, ledgerPage - 1))} disabled={ledgerPage <= 1} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 12px", background: ledgerPage <= 1 ? "var(--s-sunken)" : "var(--white)", color: ledgerPage <= 1 ? "var(--t-faint)" : "var(--t-heading)", cursor: ledgerPage <= 1 ? "default" : "pointer", fontSize: 12 }}>上一页</button>
+              <button type="button" onClick={() => void loadLedgerPage(Math.min(Math.max(1, Math.ceil(ledgerTotal / LEDGER_PAGE_SIZE)), ledgerPage + 1))} disabled={ledgerPage >= Math.max(1, Math.ceil(ledgerTotal / LEDGER_PAGE_SIZE))} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 12px", background: ledgerPage >= Math.max(1, Math.ceil(ledgerTotal / LEDGER_PAGE_SIZE)) ? "var(--s-sunken)" : "var(--white)", color: ledgerPage >= Math.max(1, Math.ceil(ledgerTotal / LEDGER_PAGE_SIZE)) ? "var(--t-faint)" : "var(--t-heading)", cursor: ledgerPage >= Math.max(1, Math.ceil(ledgerTotal / LEDGER_PAGE_SIZE)) ? "default" : "pointer", fontSize: 12 }}>下一页</button>
             </div>
           </div>
         ) : null}

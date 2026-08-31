@@ -128,7 +128,21 @@ export function registerFclInquiryRoutes(app: MinimalHttpApp): void {
       serviceType: r.serviceType, loadingDate: r.loadingDate,
       certFileName: r.certFileName,
       certFileBase64: r.certFileBase64,
-      productImages: (() => { try { return r.productImages ? JSON.parse(r.productImages) : []; } catch { return []; } })(),
+      /* 2026-09-01（终验收尾）：契约承诺 productImages 一定是数组，这里把承诺做实。
+         库里这列存的是任意字符串（两条创建路都只收 string、不校验形状）：
+         正常前端写入的是 JSON 数组，但直连 API 或历史数据可能存着 JSON 对象——
+         夹具实测就返回过对象。出口统一规整：
+         数组原样给；单个对象包成 [对象]（别用 Object.values，会把 {fileName,base64}
+         拆成两个碎片）；标量 / 解析失败 / 空值一律给 []。
+         目前 detail 接口前端还没人调（只在注释里提过），规整不会碰坏任何调用方。 */
+      productImages: (() => {
+        try {
+          const parsed = r.productImages ? JSON.parse(r.productImages) : [];
+          if (Array.isArray(parsed)) return parsed;
+          if (parsed && typeof parsed === "object") return [parsed];
+          return [];
+        } catch { return []; }
+      })(),
       status: r.status,
       // 同列表：内部备注不给客户
       remark: isClient ? undefined : r.remark,

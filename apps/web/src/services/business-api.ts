@@ -715,7 +715,7 @@ export interface ConsolidationLedgerItem {
  */
 export async function fetchConsolidationLedger(
   params?: { page?: number; pageSize?: number },
-): Promise<{ items: ConsolidationLedgerItem[]; total: number }> {
+): Promise<{ items: ConsolidationLedgerItem[]; total: number; page: number; pageSize: number }> {
   const query = new URLSearchParams();
   if (params?.page) query.set("page", String(params.page));
   if (params?.pageSize) query.set("pageSize", String(params.pageSize));
@@ -724,9 +724,17 @@ export async function fetchConsolidationLedger(
     method: "GET",
     headers: { ...authHeaders() },
   });
-  const data = await parseApiResponse<{ items: ConsolidationLedgerItem[]; total?: number }>(response);
-  // 老后端没有 total 时兜底成本页条数，前端至少不显示 undefined
-  return { items: data.items, total: data.total ?? data.items.length };
+  const data = await parseApiResponse<{ items: ConsolidationLedgerItem[]; total?: number; page?: number; pageSize?: number }>(response);
+  /* 2026-09-01 终验收尾：page/pageSize 不再丢掉，原样透传给调用方（钱包页用后端
+     回的 page 校准页码；非法页码后端直接 400 中文报错（2026-09-01 起不再静默夹紧），前端不能自己猜）。
+     后端现在一定返回这三个字段；?? 兜底只为兼容还没部署新版的老后端——
+     老响应缺字段时 page/pageSize 退回请求参数，total 退回本页条数（至少不显示 undefined）。 */
+  return {
+    items: data.items,
+    total: data.total ?? data.items.length,
+    page: data.page ?? params?.page ?? 1,
+    pageSize: data.pageSize ?? params?.pageSize ?? data.items.length,
+  };
 }
 
 /**

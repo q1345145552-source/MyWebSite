@@ -863,6 +863,84 @@ async function main(): Promise<void> {
     );
   });
 
+  check("23) 源码级：patch-shipment-bundle 的事务体里必须真的调 guardCombinedTotals", () => {
+    /**
+     * 2026-09-01（终验收尾，防假绿）：第 22 项只直测了 guardCombinedTotals
+     * **函数本身** —— 把生产路由里那行调用删了，22 项照样全绿，
+     * 正是第 11 项注释里记过的「测的是函数，没人问它有没有被调用」。
+     * 溢出闸在事务里、写库之前才拦得住，没法不连库真调到那一步，
+     * 所以照 test-lock-order 第 10 项的写法查函数体：
+     * 读 orders/routes.ts 里 patch-shipment-bundle 那一段，
+     * 断言 $transaction 的**事务体**里有一句活着的 guardCombinedTotals( ——
+     * 注释里提到不算，包在写死假条件的死块里也不算。
+     * ⚠️ 扫源码证明不了行为（第 11 项注释），这里只兜「调用被整个删掉」这一种退化。
+     */
+    const fs = require("node:fs") as typeof import("node:fs");
+    const path = require("node:path") as typeof import("node:path");
+    const file = path.join(__dirname, "..", "apps", "api", "src", "modules", "orders", "routes.ts");
+    const lines = fs.readFileSync(file, "utf-8").split("\n");
+
+    // ① 圈出 patch-shipment-bundle 这一段（到下一个路由注册为止）
+    const routeStart = lines.findIndex((l) =>
+      l.includes('app.post("/staff/orders/patch-shipment-bundle"'),
+    );
+    assert.ok(routeStart >= 0, "orders/routes.ts 里没找到 patch-shipment-bundle 的路由注册");
+    let routeEnd = lines.length;
+    for (let i = routeStart + 1; i < lines.length; i += 1) {
+      if (/app\.(post|get|delete)\("/.test(lines[i])) { routeEnd = i; break; }
+    }
+
+    // ② 圈出事务体：从 $transaction 那一行起按大括号配平到收尾
+    let txStart = -1;
+    for (let i = routeStart; i < routeEnd; i += 1) {
+      if (lines[i].includes("$transaction")) { txStart = i; break; }
+    }
+    assert.ok(txStart >= 0, "patch-shipment-bundle 里找不到 $transaction 了 —— 溢出闸挪哪去了？");
+    let txEnd = routeEnd;
+    {
+      let depth = 0;
+      for (let i = txStart; i < routeEnd; i += 1) {
+        depth += (lines[i].match(/\{/g) ?? []).length;
+        depth -= (lines[i].match(/\}/g) ?? []).length;
+        if (i > txStart && depth <= 0) { txEnd = i + 1; break; }
+      }
+    }
+
+    // ③ 事务体里逐行找活着的调用：跳过注释行，跳过写死假条件的死块
+    //   （死条件清单照 test-lock-order 的 isDeadLine，含 Boolean(0) 这类变体）
+    const isDeadLine = (l: string): boolean =>
+      /\bif\s*\(\s*(false|0|!true|!!0|Boolean\(0\)|1\s*===\s*2|1\s*==\s*2)\s*\)/.test(l);
+    let found = false;
+    let i = txStart + 1;
+    while (i < txEnd) {
+      const t = lines[i].trim();
+      if (t.startsWith("*") || t.startsWith("//") || t.startsWith("/*")) { i += 1; continue; }
+      if (isDeadLine(lines[i])) {
+        if (/\{\s*$/.test(lines[i])) {
+          // 死块：按大括号配平整块跳掉（test-lock-order 的 deadBlockEnd 同款）
+          let depth = 0;
+          let j = i;
+          for (; j < txEnd; j += 1) {
+            depth += (lines[j].match(/\{/g) ?? []).length;
+            depth -= (lines[j].match(/\}/g) ?? []).length;
+            if (j > i && depth <= 0) break;
+          }
+          i = j + 1;
+        } else {
+          i += 1; // 单行死代码：整行跳掉（guardCombinedTotals 跟 if(false) 同行也不算数）
+        }
+        continue;
+      }
+      if (/guardCombinedTotals\(/.test(t)) { found = true; break; }
+      i += 1;
+    }
+    assert.ok(
+      found,
+      "patch-shipment-bundle 的事务体里没有活着的 guardCombinedTotals( 调用 ——\n" +
+        "     第 22 项测的只是函数本身，路由里不调它的话「剩余 + 已装走」合计溢出照样写库炸 500",
+    );
+  });
+
   if (failures.length > 0) {
     console.error(`\n${failures.length}/${totalChecks} 项不通过：${failures.join("；")}`);
     process.exit(1);

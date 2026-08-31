@@ -15,6 +15,20 @@ import { CONSOLIDATION_CURRENCY } from "../wallet/consolidation-balance";
 const RECHARGE_AMOUNT_RULE: DecimalRule = { precision: 14, scale: 2 };
 
 /**
+ * 2026-09-01（Codex 终验收尾）：分页参数的严格校验，逐字照抄 fcl-inquiries/routes.ts。
+ * 原来 page 用 Number(...) 宽松转换：传 `1e400` 会变 Infinity，skip 跟着变
+ * Infinity 打到库上直接 500；0/-1/2.5 被 Math.trunc/Math.max 静默改写成合法值。
+ * 规矩：没传/传空串用默认值；传了就必须是正的安全整数（Number.isSafeInteger），
+ * 不是就返回 null，由调用处 400 中文报错。
+ */
+function parsePageParam(raw: unknown, fallback: number): number | null {
+  if (raw === undefined || raw === null || (typeof raw === "string" && raw.trim() === "")) return fallback;
+  const n = parseNumericStrict(raw);
+  if (!Number.isSafeInteger(n) || n < 1) return null;
+  return n;
+}
+
+/**
  * 注册多币种账户接口。
  */
 export function registerClientComplianceRoutes(app: MinimalHttpApp): void {
@@ -131,16 +145,23 @@ export function registerClientComplianceRoutes(app: MinimalHttpApp): void {
        原来只取前 200 条、total 写的是本次返回条数——流水超 200 条后老记录
        静默消失，客户对账少看还不知道（教训21）。默认 50、上限 500，
        total 改成 count 出来的真实总数，前端按它翻页。 */
-    // 2026-08-31 Codex 二轮顺带：负数 pageSize 会让 Prisma take 变负、从尾部取数，夹紧到 [1,500]
-    const pageSize = Math.min(Math.max(Math.trunc(Number((req.query as any)?.pageSize)) || 50, 1), 500);
-    const page = Math.max(Math.trunc(Number((req.query as any)?.page)) || 1, 1);
+    // 2026-09-01（Codex 终验收尾）：page/pageSize 改用严格校验，非法直接 400（见文件头 parsePageParam）。
+    // 原来的宽松转换：1e400 → skip=Infinity 打到库上 500，0/-1/2.5 被静默改写。
+    const page = parsePageParam((req.query as any)?.page, 1);
+    if (page === null) { fail(res, 400, "BAD_REQUEST", "页码不合法"); return; }
+    const pageSizeRaw = parsePageParam((req.query as any)?.pageSize, 50);
+    if (pageSizeRaw === null) { fail(res, 400, "BAD_REQUEST", "每页条数不合法"); return; }
+    const pageSize = Math.min(pageSizeRaw, 500); // 上限维持 500，传再大也只给 500
+    // skip 再夹一道保险，全部在碰库之前算好（2026-09-01 Codex 终验收尾）
+    const skip = Math.min((page - 1) * pageSize, Number.MAX_SAFE_INTEGER);
     const ledgerWhere = { companyId: auth.companyId, clientId: auth.userId };
     const [total, rows] = await Promise.all([
       prisma.consolidationBalanceLedger.count({ where: ledgerWhere }),
       prisma.consolidationBalanceLedger.findMany({
         where: ledgerWhere,
-        orderBy: { createdAt: "desc" },
-        skip: (page - 1) * pageSize,
+        // 2026-09-01（Codex 终验收尾）：createdAt 不唯一，同一秒多笔会跨页重复/漏行，加 id 当第二排序键
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        skip,
         take: pageSize,
         select: {
           id: true, type: true, amount: true, balanceAfter: true,
