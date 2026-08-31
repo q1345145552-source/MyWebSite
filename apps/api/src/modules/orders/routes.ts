@@ -1,6 +1,6 @@
 // B-3 ~ B-7: 已从 node:sqlite 迁移到 Prisma + PostgreSQL（2026-05-18）
 import { DECIMAL_10_2, DECIMAL_10_3, DECIMAL_12_2, requireDecimal } from "../core/decimal-guard";
-import { parseNumericStrict, requireNonNegativeInt, requirePositiveInt } from "../core/int-guard";
+import { PG_INT_MAX, parseNumericStrict, requireNonNegativeInt, requirePositiveInt } from "../core/int-guard";
 import { ShipmentsNotFoundError, lockShipmentsChildrenFirst } from "../shipments/lock-shipments";
 import { validateProductRows, validateOrderLevelQuantity } from "./product-row-guard";
 import crypto from "node:crypto";
@@ -172,6 +172,37 @@ async function generatePrealertNo(tx: Prisma.TransactionClient, warehouseId: str
   }
 
   return `${prefix}${String(nextSeq).padStart(7, "0")}`;
+}
+
+/**
+ * patch-shipment-bundle 专用：「剩余 + 已装走」合计后的最后一道闸（2026-09-01 Codex 复核收尾）。
+ *
+ * 剩余数在 handler 入口卡过、子单是分柜时各自卡过 —— **每个数单独都合法，
+ * 加起来照样能爆列上限**（跟 int-guard 里 requireSumWithinInt 记的是同一类教训）：
+ *   · 件数是 Int：剩余 15 亿 + 已装走 15 亿 = 30 亿 > 2147483647
+ *   · 重量 Decimal(10,2) 整数部分最多 8 位（< 1 亿）、体积 Decimal(10,3) 最多 7 位（< 1000 万）
+ * 不在这里拦的话，一路穿到写 orders 那一刻才炸 500「服务器繁忙」，员工不知道错在哪。
+ *
+ * 纯函数、不碰库；在事务里算完合计、写库之前调。超限抛 BusinessError（最外层统一翻 400）。
+ * ⚠️ 传进来的重量/体积必须是**已按列精度舍过**的落库值（调用处的 roundToScale），这里只查上限。
+ */
+export function guardCombinedTotals(totals: {
+  /** 件数合计（剩余 + 已装走），写 orders.packageCount（Int） */
+  packageCount: number;
+  /** 重量合计，写 orders.weightKg（Decimal(10,2)）；null = 两边都没数 */
+  weightKg: number | null;
+  /** 体积合计，写 orders.volumeM3（Decimal(10,3)）；null = 两边都没数 */
+  volumeM3: number | null;
+}): void {
+  const overCount = !Number.isFinite(totals.packageCount) || totals.packageCount > PG_INT_MAX;
+  // Decimal(10,2)：整数部分最多 8 位；Decimal(10,3)：最多 7 位（口径同 decimal-guard 的 maxIntegerDigits）
+  const overWeight =
+    totals.weightKg !== null && (!Number.isFinite(totals.weightKg) || totals.weightKg >= 10 ** 8);
+  const overVolume =
+    totals.volumeM3 !== null && (!Number.isFinite(totals.volumeM3) || totals.volumeM3 >= 10 ** 7);
+  if (overCount || overWeight || overVolume) {
+    throw new BusinessError("整单件数/重量/体积（剩余+已装走）超出系统上限，请核对");
+  }
 }
 
 export function registerOrderRoutes(app: MinimalHttpApp): void {
@@ -1920,6 +1951,16 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
         volumeM3 === null && alreadyLoadedVolumeM3 === null
           ? null
           : roundToScale((volumeM3 ?? 0) + (alreadyLoadedVolumeM3 ?? 0), 3);
+
+      /* 2026-09-01（Codex 复核收尾）：合计完还要再过一次上限。
+         入口那几道闸卡的是**员工填的剩余数**，子单那份是分柜时各自卡的 ——
+         两边单独都合法，加起来照样可能爆 Int / Decimal 列上限，
+         写库那一刻才炸 500。写 orders 之前在锁内用合计值再拦一道。 */
+      guardCombinedTotals({
+        packageCount: packageCount + alreadyLoadedPkg,
+        weightKg: orderWeightKg,
+        volumeM3: orderVolumeM3,
+      });
 
       await tx.order.update({
         where: { id: curOrder.id },

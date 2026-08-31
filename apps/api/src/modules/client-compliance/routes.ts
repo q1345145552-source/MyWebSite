@@ -127,17 +127,27 @@ export function registerClientComplianceRoutes(app: MinimalHttpApp): void {
   app.get("/client/wallet/ledger", async (req, res) => {
     const auth = requireRole(req, res, ["client"]);
     if (!auth) return;
+    /* 2026-09-01 Codex 复核收尾：加真分页（照抄 /client/prealerts 那套）。
+       原来只取前 200 条、total 写的是本次返回条数——流水超 200 条后老记录
+       静默消失，客户对账少看还不知道（教训21）。默认 50、上限 500，
+       total 改成 count 出来的真实总数，前端按它翻页。 */
     // 2026-08-31 Codex 二轮顺带：负数 pageSize 会让 Prisma take 变负、从尾部取数，夹紧到 [1,500]
-    const take = Math.min(Math.max(Math.trunc(Number((req.query as any)?.pageSize)) || 200, 1), 500);
-    const rows = await prisma.consolidationBalanceLedger.findMany({
-      where: { companyId: auth.companyId, clientId: auth.userId },
-      orderBy: { createdAt: "desc" },
-      take,
-      select: {
-        id: true, type: true, amount: true, balanceAfter: true,
-        refType: true, refNo: true, remark: true, createdAt: true,
-      },
-    });
+    const pageSize = Math.min(Math.max(Math.trunc(Number((req.query as any)?.pageSize)) || 50, 1), 500);
+    const page = Math.max(Math.trunc(Number((req.query as any)?.page)) || 1, 1);
+    const ledgerWhere = { companyId: auth.companyId, clientId: auth.userId };
+    const [total, rows] = await Promise.all([
+      prisma.consolidationBalanceLedger.count({ where: ledgerWhere }),
+      prisma.consolidationBalanceLedger.findMany({
+        where: ledgerWhere,
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: {
+          id: true, type: true, amount: true, balanceAfter: true,
+          refType: true, refNo: true, remark: true, createdAt: true,
+        },
+      }),
+    ]);
     const typeZh: Record<string, string> = { recharge: "充值到账", pay: "集货付款", refund: "撤销退款" };
     const refZh: Record<string, string> = { whr: "仓库版集货", normal: "普通版集货", recharge: "充值单" };
     ok(res, {
@@ -152,7 +162,10 @@ export function registerClientComplianceRoutes(app: MinimalHttpApp): void {
         remark: r.remark ?? "",
         createdAt: r.createdAt.toISOString(),
       })),
-      total: rows.length,
+      page,
+      pageSize,
+      // 过滤后的真实总数，不再是「本次返回了几条」（2026-09-01 Codex 复核收尾）
+      total,
     });
   });
 

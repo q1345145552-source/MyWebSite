@@ -28,8 +28,9 @@ export function registerAuthRoutes(app: MinimalHttpApp): void {
     const ip = getClientIp(req.headers);
     if (checkRateLimit(rateLimitKey(ip, "login"), 10, 60_000)) {
       // 2026-08-31 Codex 二轮：这条 429 前端会原样弹给用户，原来是英文，普通用户看不懂。
-      // 口径跟下面按账号限流那条保持一致；这道闸的窗口只有 1 分钟，等一下就能再试。
-      fail(res, 429, "BAD_REQUEST", "登录尝试次数过多，请 1 分钟后再试；着急的话联系管理员重置密码。");
+      // 2026-09-01 Codex 复核收尾：去掉「联系管理员重置密码」——重置密码清的是按账号的计数，
+      // 清不掉这道按 IP 的闸，给的是无效办法；这道闸窗口只有 1 分钟，等一下就能再试。
+      fail(res, 429, "BAD_REQUEST", "登录尝试次数过多，请 1 分钟后再试。");
       return;
     }
     // 2026-08-04：原来直接 body.account?.trim()，账号传成数字/数组/对象时

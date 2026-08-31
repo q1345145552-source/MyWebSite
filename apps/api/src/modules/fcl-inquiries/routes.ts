@@ -1,6 +1,22 @@
 import { prisma } from "../../db/prisma";
 import type { MinimalHttpApp } from "../../server";
 import { fail, ok, requireRole } from "../core/http-utils";
+import { parseNumericStrict } from "../core/int-guard";
+
+/**
+ * 2026-09-01（Codex 复核收尾）：分页参数的严格校验。
+ * 原来 page 只用 parseInt 卡了最小值：传一长串 9，parseInt 会算出超出
+ * 安全整数的浮点数，skip 跟着超界，Prisma 直接 500；`1e400` 这类写法
+ * 哪天被换成 Number(...) 就是 Infinity，同样炸。
+ * 规矩：没传/传空串用默认值；传了就必须是正的安全整数（Number.isSafeInteger），
+ * 不是就返回 null，由调用处 400 中文报错。
+ */
+function parsePageParam(raw: unknown, fallback: number): number | null {
+  if (raw === undefined || raw === null || (typeof raw === "string" && raw.trim() === "")) return fallback;
+  const n = parseNumericStrict(raw);
+  if (!Number.isSafeInteger(n) || n < 1) return null;
+  return n;
+}
 
 export function registerFclInquiryRoutes(app: MinimalHttpApp): void {
   // 客户端提交整柜询价
@@ -49,14 +65,20 @@ export function registerFclInquiryRoutes(app: MinimalHttpApp): void {
     /* 2026-08-31（Codex 二轮）：列表加真分页，默认 50、上限 200，total 是真实总数。
        原来一次全量返回，还把认证文件 Base64 和产品图片整包下发——
        页面表格根本不显示这些，纯浪费流量。大字段挪到下面的 detail 接口按需取。 */
-    const page = Math.max(parseInt(req.query.page as string) || 1, 1);
-    const pageSize = Math.min(Math.max(parseInt(req.query.pageSize as string) || 50, 1), 200);
+    // 2026-09-01（Codex 复核收尾）：page/pageSize 改用严格校验，非法直接 400（见文件头 parsePageParam）
+    const page = parsePageParam(req.query.page, 1);
+    if (page === null) { fail(res, 400, "BAD_REQUEST", "页码不合法"); return; }
+    const pageSizeRaw = parsePageParam(req.query.pageSize, 50);
+    if (pageSizeRaw === null) { fail(res, 400, "BAD_REQUEST", "每页条数不合法"); return; }
+    const pageSize = Math.min(pageSizeRaw, 200); // 上限维持 200，传再大也只给 200
+    // skip 再 clamp 一道当第二道保险：就算上面漏了，也绝不把 Infinity/超界数塞给 Prisma
+    const skip = Math.min((page - 1) * pageSize, Number.MAX_SAFE_INTEGER);
     const [total, items] = await Promise.all([
       prisma.fclInquiry.count({ where }),
       prisma.fclInquiry.findMany({
         where,
         orderBy: { createdAt: "desc" },
-        skip: (page - 1) * pageSize,
+        skip,
         take: pageSize,
         // 只取表格要用的小字段，certFileBase64 / productImages 连库都不读
         select: {

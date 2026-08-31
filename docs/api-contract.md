@@ -531,3 +531,59 @@
 - 缺少 `deliveryNo` 或 `clientId`：`BAD_REQUEST`。
 - WD 不存在或不属于当前公司：`NOT_FOUND`。
 - 所选客户不在该 WD 内：`NOT_FOUND`。
+
+## 16. 整柜询价接口补充（2026-09-01 Codex 复核收尾补记）
+
+> 2026-08-31 Codex 二轮把询价列表改成了真分页 + 大字段按需取，这里把契约补齐。
+
+### 16.1 GET /client/fcl-inquiries（列表）
+
+用途：整柜询价列表。表格只需要小字段，所以**列表不再返回 `certFileBase64` 和 `productImages`**（原来整包下发，纯浪费流量）；要看大字段走 16.2 的详情接口。
+
+权限：
+- Bearer 鉴权必填；`client` / `staff` / `admin` 均可访问。
+- `client` 只能看到自己的询价（`clientId` = 本人）；`staff` / `admin` 看本公司全部。
+
+查询参数（分页，2026-09-01 起严格校验）：
+- `page?`（默认 1）：必须是正的安全整数，否则 `BAD_REQUEST`「页码不合法」。
+  ⚠️ 不再是「非法就当 1」——原来 `page=1e400` 会算出 Infinity 的 skip，Prisma 直接 500。
+- `pageSize?`（默认 50，上限 200）：必须是正的安全整数，否则 `BAD_REQUEST`「每页条数不合法」；超过 200 按 200 处理。
+
+响应 data（第 4 节分页包装）：
+{
+  "items": [
+    {
+      "id": "...", "clientId": "...", "productName": "...",
+      "cargoValue": "...", "cargoWeight": "...", "address": "...",
+      "containerType": "1*40HQ", "serviceType": "清提派",
+      "loadingDate": "...", "certFileName": "...",
+      "status": "pending", "remark": "...",
+      "createdByRole": "client", "createdAt": "ISO 8601"
+    }
+  ],
+  "page": 1, "pageSize": 50, "total": 123
+}
+
+字段说明：
+- `remark` 是管理员内部备注（可能写着利润）：**`client` 角色一律不返回该字段**，只有 staff/admin 能看到。
+- `certFileBase64`、`productImages`：列表**不返回**（连库都不读），只在 16.2 详情里给。
+
+### 16.2 GET /client/fcl-inquiries/detail（详情，2026-08-31 新增）
+
+用途：按 id 取单条询价详情，认证文件 Base64 和产品图片这两个大字段只在这里下发。
+
+权限：
+- Bearer 鉴权必填；`client` / `staff` / `admin` 均可访问。
+- `client` 只能看自己的那条（查询自带 `clientId` = 本人过滤）；跨公司一律查不到。
+
+查询参数：
+- `id`（必填）：询价单 id。缺少时 `BAD_REQUEST`「缺少询价单 id」。
+
+响应 data：列表字段全集，另加
+- `certFileBase64`：认证文件内容（可能为 null）。
+- `productImages`：产品图片数组（存库是 JSON 字符串，接口解析后返回数组；解析失败返回 `[]`）。
+- `remark`：同列表——**`client` 角色不返回**。
+
+错误：
+- 缺少 `id`：`BAD_REQUEST`。
+- 记录不存在 / 不属于本公司 / 客户看别人的：一律 `NOT_FOUND`「询价记录不存在」。

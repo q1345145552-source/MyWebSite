@@ -710,13 +710,23 @@ export interface ConsolidationLedgerItem {
 
 /**
  * 客户端获取集货余额流水（充值到账 / 集货付款 / 撤销退款）。
+ * 2026-09-01 Codex 复核收尾：加分页参数（照抄 fetchClientPrealerts 的写法）。
+ * 原来固定只拿前 200 条、total 就是本次条数，流水多了老记录静默消失（教训21）。
  */
-export async function fetchConsolidationLedger(): Promise<{ items: ConsolidationLedgerItem[]; total: number }> {
-  const response = await fetch(`${apiBaseUrl()}/client/wallet/ledger`, {
+export async function fetchConsolidationLedger(
+  params?: { page?: number; pageSize?: number },
+): Promise<{ items: ConsolidationLedgerItem[]; total: number }> {
+  const query = new URLSearchParams();
+  if (params?.page) query.set("page", String(params.page));
+  if (params?.pageSize) query.set("pageSize", String(params.pageSize));
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
+  const response = await fetch(`${apiBaseUrl()}/client/wallet/ledger${suffix}`, {
     method: "GET",
     headers: { ...authHeaders() },
   });
-  return parseApiResponse(response);
+  const data = await parseApiResponse<{ items: ConsolidationLedgerItem[]; total?: number }>(response);
+  // 老后端没有 total 时兜底成本页条数，前端至少不显示 undefined
+  return { items: data.items, total: data.total ?? data.items.length };
 }
 
 /**

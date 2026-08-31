@@ -825,6 +825,44 @@ async function main(): Promise<void> {
     assert.ok(/s_x/.test(err.message) && /s_y/.test(err.message), "报错里没说清是哪几票");
   });
 
+  await checkAsync("22) 员工编辑运单：「剩余 + 已装走」的合计也要过一次上限", async () => {
+    /**
+     * 2026-09-01（Codex 复核收尾，旧 P2）：patch-shipment-bundle 入口只卡了
+     * **员工填的剩余数**，子单那份是分柜时各自卡的 —— 两边单独都合法，
+     * 加起来照样能爆 Int / Decimal 列上限，原来要到写 orders 那一刻才炸 500。
+     * 现在事务里算完合计、写库之前调 guardCombinedTotals 拦住。
+     * 这里直测那个纯函数（不碰库）。
+     */
+    const { guardCombinedTotals } = await import("../apps/api/src/modules/orders/routes");
+    const { isBusinessError } = await import("../apps/api/src/modules/core/business-error");
+
+    // 合法合计不许误伤：普通量、贴着上限的量、重量体积都没数（null）
+    guardCombinedTotals({ packageCount: 101, weightKg: 350.5, volumeM3: 0.76 });
+    guardCombinedTotals({ packageCount: 2147483647, weightKg: 99999999.99, volumeM3: 9999999.999 });
+    guardCombinedTotals({ packageCount: 0, weightKg: null, volumeM3: null });
+
+    // 件数合计溢出：剩余 15 亿 + 已装走 15 亿 = 30 亿 > 2147483647，且必须是业务错误（翻 400 不是 500）
+    assert.throws(
+      () => guardCombinedTotals({ packageCount: 1500000000 + 1500000000, weightKg: null, volumeM3: null }),
+      (e: unknown) => isBusinessError(e) && /超出系统上限/.test((e as Error).message),
+      "件数合计 30 亿没被拦住（或者抛的不是业务错误）",
+    );
+
+    // 重量合计溢出：各 6000 万 kg 单独都能写 Decimal(10,2)，合计 1.2 亿超 8 位整数上限
+    assert.throws(
+      () => guardCombinedTotals({ packageCount: 10, weightKg: 60000000 + 60000000, volumeM3: null }),
+      (e: unknown) => isBusinessError(e) && /超出系统上限/.test((e as Error).message),
+      "重量合计 1.2 亿没被拦住（或者抛的不是业务错误）",
+    );
+
+    // 体积合计溢出：Decimal(10,3) 整数部分只有 7 位，合计 1000 万就到顶了
+    assert.throws(
+      () => guardCombinedTotals({ packageCount: 10, weightKg: null, volumeM3: 10 ** 7 }),
+      (e: unknown) => isBusinessError(e) && /超出系统上限/.test((e as Error).message),
+      "体积合计 1000 万没被拦住（或者抛的不是业务错误）",
+    );
+  });
+
   if (failures.length > 0) {
     console.error(`\n${failures.length}/${totalChecks} 项不通过：${failures.join("；")}`);
     process.exit(1);

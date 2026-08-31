@@ -36,6 +36,9 @@ const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
   REJECTED: { bg: "var(--c-red-bg)", text: "var(--c-red-dark)" },
 };
 
+// 2026-09-01 Codex 复核收尾：流水每页条数（后端默认也是 50，两边对齐）
+const LEDGER_PAGE_SIZE = 50;
+
 /**
  * 客户端余额页面（含充值功能）。
  */
@@ -58,6 +61,10 @@ export default function ClientWalletPage() {
   const [recharges, setRecharges] = useState<WalletRechargeItem[]>([]);
   // 集货余额流水（充值到账 / 集货付款 / 撤销退款）
   const [ledger, setLedger] = useState<ConsolidationLedgerItem[]>([]);
+  // 2026-09-01 Codex 复核收尾：流水分页（照抄客户端预报单列表那套，教训21：
+  // 原来后端只回前 200 条、页面全渲染，超了老记录静默消失，客户没法知道后面还有）
+  const [ledgerPage, setLedgerPage] = useState(1);
+  const [ledgerTotal, setLedgerTotal] = useState(0);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -65,11 +72,14 @@ export default function ClientWalletPage() {
       const [overview, recs, led] = await Promise.all([
         fetchClientWalletOverview(),
         fetchClientWalletRecharges(),
-        fetchConsolidationLedger(),
+        fetchConsolidationLedger({ page: 1, pageSize: LEDGER_PAGE_SIZE }),
       ]);
       setData(overview);
       setRecharges(recs.recharges);
       setLedger(led.items);
+      setLedgerTotal(led.total);
+      // 全量刷新（首次加载/充值提交后）拿的是第 1 页，页码同步回 1，别跟表格错位
+      setLedgerPage(1);
     } catch (error) {
       const text = error instanceof Error ? error.message : "加载失败";
       setMessage(`加载失败：${text}`);
@@ -81,6 +91,22 @@ export default function ClientWalletPage() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  // 2026-09-01 Codex 复核收尾：翻页时只重拉流水那一页。
+  // 首次挂载跳过 —— 第 1 页已经由上面 loadData 拉过了，别重复请求。
+  const ledgerPageInitRef = useRef(true);
+  useEffect(() => {
+    if (ledgerPageInitRef.current) {
+      ledgerPageInitRef.current = false;
+      return;
+    }
+    fetchConsolidationLedger({ page: ledgerPage, pageSize: LEDGER_PAGE_SIZE })
+      .then((res) => {
+        setLedger(res.items);
+        setLedgerTotal(res.total);
+      })
+      .catch(() => { /* 翻页失败保留当前页数据，不清空 */ });
+  }, [ledgerPage]);
 
   // 处理付款凭证上传
   const handleProofUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -174,6 +200,16 @@ export default function ClientWalletPage() {
       {/* 余额流水（2026-08-07 新增）：每一笔进出都在这里，客户能自己对账 */}
       <section style={{ border: "1px solid var(--l-soft)", borderRadius: 12, padding: 16, background: "var(--white)", marginBottom: 14 }}>
         <h3 style={{ margin: "0 0 12px" }}>余额流水</h3>
+        {/* 2026-09-01 Codex 复核收尾：共 N 条用后端真实 total + 翻页按钮（照抄预报单列表的写法，教训21） */}
+        {ledgerTotal > 0 ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+            <div style={{ fontSize: 12, color: "var(--t-strong)" }}>共 {ledgerTotal} 条 · 第 {ledgerPage}/{Math.max(1, Math.ceil(ledgerTotal / LEDGER_PAGE_SIZE))} 页</div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button type="button" onClick={() => setLedgerPage((p) => Math.max(1, p - 1))} disabled={ledgerPage <= 1} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 12px", background: ledgerPage <= 1 ? "var(--s-sunken)" : "var(--white)", color: ledgerPage <= 1 ? "var(--t-faint)" : "var(--t-heading)", cursor: ledgerPage <= 1 ? "default" : "pointer", fontSize: 12 }}>上一页</button>
+              <button type="button" onClick={() => setLedgerPage((p) => Math.min(Math.max(1, Math.ceil(ledgerTotal / LEDGER_PAGE_SIZE)), p + 1))} disabled={ledgerPage >= Math.max(1, Math.ceil(ledgerTotal / LEDGER_PAGE_SIZE))} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 12px", background: ledgerPage >= Math.max(1, Math.ceil(ledgerTotal / LEDGER_PAGE_SIZE)) ? "var(--s-sunken)" : "var(--white)", color: ledgerPage >= Math.max(1, Math.ceil(ledgerTotal / LEDGER_PAGE_SIZE)) ? "var(--t-faint)" : "var(--t-heading)", cursor: ledgerPage >= Math.max(1, Math.ceil(ledgerTotal / LEDGER_PAGE_SIZE)) ? "default" : "pointer", fontSize: 12 }}>下一页</button>
+            </div>
+          </div>
+        ) : null}
         {ledger.length === 0 ? (
           <p style={{ color: "var(--t-muted)", fontSize: 13 }}>暂无流水</p>
         ) : (
