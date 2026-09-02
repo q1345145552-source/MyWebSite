@@ -944,15 +944,20 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
              * 父单又「自己有货」了，syncParentStatusFromChildren 就不再接管它 ——
              * 不退的话状态永远冻在还货前那一刻（比如已发运），货其实躺在仓库。
              * 同样只在父单确实拿回了货、且状态确实往前走过时才退。
+             * 2026-09-02：退回目标从「已创建」改成「已入库」（inWarehouseCN）——
+             * 货卸下来就在国内仓里；created / inWarehouseCN 都不再退（跟那边同一口径）。
              */
-            const 要退状态 = parentNewPkg > 0 && parent.currentStatus !== "created";
+            const 要退状态 =
+              parentNewPkg > 0 &&
+              parent.currentStatus !== "created" &&
+              parent.currentStatus !== "inWarehouseCN";
             await tx.shipment.update({
               where: { id: parent.id },
               data: {
                 packageCount: parentNewPkg,
                 volumeM3: Number((pv + backVol).toFixed(3)) as any,
                 ...(pw == null || backWt == null ? {} : { weightKg: Number((pw + backWt).toFixed(2)) as any }),
-                ...(要退状态 ? { currentStatus: "created" } : {}),
+                ...(要退状态 ? { currentStatus: "inWarehouseCN" } : {}),
                 updatedAt: new Date(),
               },
             });
@@ -967,8 +972,8 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
                   operatorRole: "system",
                   operatorName: "系统",
                   fromStatus: parent.currentStatus,
-                  toStatus: "created",
-                  remark: "已从柜子卸下，退回仓库等待重新装柜",
+                  toStatus: "inWarehouseCN",
+                  remark: "已从柜子卸下，退回国内仓等待重新装柜",
                   changedAt: new Date(),
                 },
               });

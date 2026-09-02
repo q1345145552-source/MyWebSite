@@ -67,8 +67,9 @@ import { shipmentStatusZh } from "./shipment-status";
 
 const STATUS_CONFIG: Record<string, { zh: string; color: string; bg: string; icon: string }> = {
   created:        { zh: "已创建",     color: "var(--t-muted)", bg: "var(--s-sunken)", icon: "" },
-  // 前半段（2026-08-06 起才写轨迹）：客户预报 → 国内仓收货
-  inwarehousecn:  { zh: "国内仓已收货", color: "#1e3a8a", bg: "#EEF2FB", icon: "" },
+  // 前半段（2026-08-06 起才写轨迹）：客户预报 → 货入国内仓
+  // 2026-09-02 起 inWarehouseCN 是流程里的正式一步，中文「已入库」（文案走 shipment-status.ts）
+  inwarehousecn:  { zh: "已入库", color: "#1e3a8a", bg: "#EEF2FB", icon: "" },
   receivedcn:     { zh: "国内仓已收货", color: "#1e3a8a", bg: "#EEF2FB", icon: "" },
   pickedup:       { zh: "已揽收",     color: "var(--t-muted)", bg: "var(--s-sunken)", icon: "" },
   loaded:         { zh: "已装柜",     color: "#1e3a8a", bg: "#EEF2FB", icon: "" },

@@ -43,7 +43,9 @@ const DEMO_HASH = hashPassword(DEFAULT_PASSWORD);
 const DEFAULT_STATUS_LABELS: Array<{ status: string; labelZh: string }> = [
   { status: "created", labelZh: "已创建" },
   { status: "pickedUp", labelZh: "已揽收" },
-  { status: "inWarehouseCN", labelZh: "中国仓已入库" },
+  // 2026-09-02：inWarehouseCN 进了运单状态流程（中文定为「已入库」），
+  // 跟 ai-config-store.ts 的 DEFAULT_STATUS_LABELS 逐字一致（原来这里写的是老名字「中国仓已入库」）
+  { status: "inWarehouseCN", labelZh: "已入库" },
   { status: "customsPending", labelZh: "清关待处理" },
   { status: "inTransit", labelZh: "运输中" },
   { status: "customsTH", labelZh: "泰国清关中" },

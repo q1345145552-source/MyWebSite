@@ -15,7 +15,11 @@ import { SHIPMENT_STATUS_FLOW, SHIPMENT_STATUS_FLOW_LAND } from "../../../../../
 export const SHIPMENT_STATUS_ZH: Record<string, string> = {
   created: "已创建",
   pickedup: "已揽收",
-  inwarehousecn: "国内仓已收货",
+  /* 2026-09-02：inWarehouseCN 进了运单状态流程（created → 已入库 → …），
+     老板定的中文是「已入库」。原来这里写「国内仓已收货」——
+     老轨迹里的 inWarehouseCN 会跟着改叫「已入库」，意思一样。
+     receivedcn 是另一个只在老数据里出现的状态，保持旧叫法不动。 */
+  inwarehousecn: "已入库",
   receivedcn: "国内仓已收货",
   customspending: "报关中",
   holdloading: "暂缓柜",

@@ -934,6 +934,7 @@ export interface StaffShipmentOverview {
   signedThisMonthCount: number;
   /** 下面几个是后端返回的对账字段，界面不显示 */
   totalCount: number;
+  /** 未发出（已创建 + 已入库）—— 2026-09-02 起后端把 inWarehouseCN 也算进这格 */
   createdCount: number;
   deliveringCount: number;
   doneCount: number;

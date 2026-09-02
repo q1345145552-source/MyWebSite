@@ -1,6 +1,11 @@
 export type ShipmentStatus =
   | "loaded"
   | "created"
+  // ↓ 2026-09-02 进主流程：货到国内仓（中文「已入库」）。老板拍板：员工建单=货已到仓，
+  //   起始状态就是它；客户预报单仍从 created 起，仓库确认收货后推到这里。
+  //   ⚠️ 这个状态名不是新造的 —— 老数据轨迹里早就有 inWarehouseCN（确认收货那条路
+  //   2026-08-06 起只写轨迹不改 currentStatus），现在把它转正进流程表。
+  | "inWarehouseCN"
   | "delayDeparted"
   | "departed"
   | "delayInTransit"
@@ -37,9 +42,14 @@ export type ShipmentStatus =
   // 「清关已放行」直接跳「已到仓」，中间几天一片空白。海运陆运都有。
   | "unloading";
 
-/** 海运流程（原来的唯一流程，未改动） */
+/**
+ * 海运流程（2026-09-02 起 23 步）。
+ * inWarehouseCN（已入库）排在 created 之后、holdLoading 之前 ——
+ * holdLoading 的语义是「货在仓里暂缓装柜」，货得先入库才谈得上暂缓。
+ */
 export const SHIPMENT_STATUS_FLOW: ShipmentStatus[] = [
   "created",
+  "inWarehouseCN",
   "holdLoading",
   "loaded",
   "customsInspectCn",
@@ -71,6 +81,8 @@ export const SHIPMENT_STATUS_FLOW: ShipmentStatus[] = [
  */
 export const SHIPMENT_STATUS_FLOW_LAND: ShipmentStatus[] = [
   "created",
+  // 2026-09-02 进主流程：货到国内仓（已入库），海运陆运都有
+  "inWarehouseCN",
   "loaded",
   "customsInspectCn",
   "inspectClearedCn",
@@ -128,6 +140,8 @@ export const COMPLETED_STATUSES: ShipmentStatus[] = [
  */
 const NOT_IN_TRANSIT: ShipmentStatus[] = [
   "created",
+  // 已入库 = 货还在国内仓没发走，不算在途（2026-09-02，口径同「已创建/暂缓柜」）
+  "inWarehouseCN",
   "holdLoading",
   ...COMPLETED_STATUSES,
   ...SHIPMENT_EXCEPTION_STATUSES,

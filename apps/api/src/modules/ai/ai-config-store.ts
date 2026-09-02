@@ -7,6 +7,8 @@ import type { AiKnowledgeStore, StatusLabelStore } from "./ai-types";
 
 export const DEFAULT_STATUS_LABELS: StatusLabelConfig[] = [
   { status: "created", labelZh: "已创建" },
+  // 2026-09-02 进流程的新状态（货到国内仓）。⚠️ prisma/seed.ts 里那份手抄副本要逐字一致。
+  { status: "inWarehouseCN", labelZh: "已入库" },
   { status: "holdLoading", labelZh: "暂缓柜" },
   { status: "loaded", labelZh: "已装柜" },
   { status: "customsInspectCn", labelZh: "国内海关查验" },

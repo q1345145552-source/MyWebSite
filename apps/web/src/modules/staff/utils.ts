@@ -7,6 +7,8 @@ import type { PrealertEditDraft, ShipmentOrderEditDraft } from "./types";
 /** 与后端 STATUS_FLOW 完全一致。 */
 export const SHIPMENT_STATUS_FLOW = [
   "created",
+  // 2026-09-02 进流程：货到国内仓（已入库），排在暂缓柜前面
+  "inWarehouseCN",
   "holdLoading",
   "loaded",
   "customsInspectCn",

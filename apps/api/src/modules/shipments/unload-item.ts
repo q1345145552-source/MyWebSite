@@ -83,19 +83,22 @@ export async function unloadItemFully(
      * 最坏的情况：一票货已经推到「已签收」，员工发现装错柜、卸下来，
      * 客户在订单里还是看到「已签收」，而货其实躺在仓库里。
      *
-     * 所以这里明确把它退回「已创建」—— 货回到仓库、等着重新装柜，
-     * 那正是流程里 `loaded`（已装柜）的前一站。
-     * ⚠️ 只在**父单确实拿回了货**（newPkg > 0）且状态确实往前走过时才退，
-     *    别把本来就没动过的父单也改一遍。
+     * 所以这里明确把它退回「已入库」（inWarehouseCN）—— 货卸下来就在国内仓里、
+     * 等着重新装柜（2026-09-02 起它进了流程，正是 loaded 之前的在仓状态；
+     * 原来退的是「已创建」，那是还没入库的意思，跟货的真实位置对不上）。
+     * ⚠️ 只在**父单确实拿回了货**（newPkg > 0）且状态确实往前走过时才退：
+     *    还停在 created 的老单不动（拍板：老运单不回填），
+     *    已经是 inWarehouseCN 的也不动（状态没变就别刷一条轨迹）。
      */
-    const 要退状态 = newPkg > 0 && parent.currentStatus !== "created";
+    const 要退状态 =
+      newPkg > 0 && parent.currentStatus !== "created" && parent.currentStatus !== "inWarehouseCN";
     await tx.shipment.update({
       where: { id: parent.id },
       data: {
         packageCount: newPkg,
         volumeM3: Number((pv + childVol).toFixed(3)) as any,
         ...(pw == null || childWt == null ? {} : { weightKg: Number((pw + childWt).toFixed(2)) as any }),
-        ...(要退状态 ? { currentStatus: "created" } : {}),
+        ...(要退状态 ? { currentStatus: "inWarehouseCN" } : {}),
         updatedAt: new Date(),
       },
     });
@@ -111,8 +114,8 @@ export async function unloadItemFully(
           operatorRole: "system",
           operatorName: "系统",
           fromStatus: parent.currentStatus,
-          toStatus: "created",
-          remark: "已从柜子卸下，退回仓库等待重新装柜",
+          toStatus: "inWarehouseCN",
+          remark: "已从柜子卸下，退回国内仓等待重新装柜",
           changedAt: new Date(),
         },
       });

@@ -76,27 +76,32 @@ async function main(): Promise<void> {
     assert.deepEqual(记录.删掉的运单, ["s_child"], "子单没删");
   });
 
-  await check("2) 卸柜：父单状态要退回「已创建」，还要写一条客户看得懂的轨迹", async () => {
+  await check("2) 卸柜：父单状态要退回「已入库」，还要写一条客户看得懂的轨迹", async () => {
     /**
      * ⚠️ 这就是那个「状态永远冻住」的 bug。
-     * 父单原来是 delivered（跟着子单走的），卸柜之后货回到仓库，
+     * 父单原来是 delivered（跟着子单走的），卸柜之后货回到国内仓，
      * 状态必须跟着退回来，否则客户一直看到「已签收」。
+     * 2026-09-02：退回目标从「已创建」改成「已入库」（inWarehouseCN 进了流程）——
+     * 货卸下来就在仓里，退到「已创建」反而说成还没入库。
      */
     const { tx, 记录 } = makeTx({ id: "s_parent", packageCount: 0, volumeM3: 0, weightKg: 0, currentStatus: "delivered" });
     await unloadItemFully(tx as any, { id: "i_1", shipment: 子单() }, "c_1");
-    assert.equal(记录.父单更新.currentStatus, "created", "父单状态没退回 —— 客户会一直看到「已签收」");
+    assert.equal(记录.父单更新.currentStatus, "inWarehouseCN", "父单状态没退回「已入库」—— 客户会一直看到「已签收」");
     assert.equal(记录.轨迹.length, 1, "没写轨迹 —— 客户会觉得状态莫名其妙变了");
     assert.equal(记录.轨迹[0].fromStatus, "delivered", "轨迹的起点状态不对");
-    assert.equal(记录.轨迹[0].toStatus, "created", "轨迹的终点状态不对");
-    assert.ok(/退回仓库/.test(记录.轨迹[0].remark), `轨迹备注看不懂：${记录.轨迹[0].remark}`);
+    assert.equal(记录.轨迹[0].toStatus, "inWarehouseCN", "轨迹的终点状态不对");
+    assert.ok(/退回国内仓/.test(记录.轨迹[0].remark), `轨迹备注看不懂：${记录.轨迹[0].remark}`);
   });
 
-  await check("3) 父单本来就是「已创建」时不许多写一条轨迹（别刷屏）", async () => {
-    const { tx, 记录 } = makeTx({ id: "s_parent", packageCount: 70, volumeM3: 3, weightKg: 200, currentStatus: "created" });
-    await unloadItemFully(tx as any, { id: "i_1", shipment: 子单() }, "c_1");
-    assert.equal(记录.轨迹.length, 0, "状态没变还写了轨迹");
-    assert.equal(记录.父单更新.packageCount, 100, "件数还是要还回去（70 + 30）");
-    assert.equal(记录.父单更新.currentStatus, undefined, "状态没变就不该出现在更新里");
+  await check("3) 父单还停在「已创建/已入库」时不许改状态、不许多写轨迹（别刷屏）", async () => {
+    // 「已创建」的老单不回填（2026-09-02 拍板），「已入库」的状态本来就对 —— 两种都不动
+    for (const cur of ["created", "inWarehouseCN"]) {
+      const { tx, 记录 } = makeTx({ id: "s_parent", packageCount: 70, volumeM3: 3, weightKg: 200, currentStatus: cur });
+      await unloadItemFully(tx as any, { id: "i_1", shipment: 子单() }, "c_1");
+      assert.equal(记录.轨迹.length, 0, `父单是 ${cur} 时还写了轨迹`);
+      assert.equal(记录.父单更新.packageCount, 100, "件数还是要还回去（70 + 30）");
+      assert.equal(记录.父单更新.currentStatus, undefined, `父单是 ${cur} 时不该动它的状态`);
+    }
   });
 
   await check("4) 没有父单的整票货：只删柜内记录，**不许删运单**", async () => {
@@ -161,11 +166,23 @@ async function main(): Promise<void> {
     );
   });
 
+  await check("8) 部分卸柜那份手抄的还货逻辑，退的状态和轨迹前缀必须跟共用实现一致", async () => {
+    /* 2026-09-02 复核补：loading-manifests 的部分卸柜还货是 unloadItemFully 的手抄同款，
+       两份今天一致、明天就可能只改一份（本项目「N 个入口只修 M 个」栽过多次）。
+       这里做源码级对表：部分卸柜那段必须也退回 inWarehouseCN、也写 sl_unld_ 轨迹。 */
+    const fs = require("node:fs") as typeof import("node:fs");
+    const path = require("node:path") as typeof import("node:path");
+    const api = path.join(__dirname, "..", "apps", "api", "src", "modules");
+    const 部分卸柜 = fs.readFileSync(path.join(api, "loading-manifests", "routes.ts"), "utf-8");
+    assert.ok(/inWarehouseCN/.test(部分卸柜), "部分卸柜还货没退回「已入库」—— 跟 unload-item.ts 那份走岔了");
+    assert.ok(/sl_unld_/.test(部分卸柜), "部分卸柜还货没写 sl_unld_ 轨迹 —— 跟 unload-item.ts 那份走岔了");
+  });
+
   if (failures.length > 0) {
-    console.error(`\n${failures.length}/7 项不通过：${failures.join("；")}`);
+    console.error(`\n${failures.length}/8 项不通过：${failures.join("；")}`);
     process.exit(1);
   }
-  console.log("从柜子里卸货：7 项全部通过");
+  console.log("从柜子里卸货：8 项全部通过");
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

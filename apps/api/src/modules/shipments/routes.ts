@@ -7,7 +7,7 @@ import { fail, ok, requireRole } from "../core/http-utils";
 import { logger } from "../core/logger";
 import { loadProductImagesForOrders } from "../orders/product-images";
 import { checkRateLimit, rateLimitKey } from "../core/rate-limit";
-import { STATUS_FLOW, STATUS_FLOW_LAND, EXCEPTION_STATUSES, DELAY_STATUSES, COMPLETED_STATUSES } from "./status-flow";
+import { STATUS_FLOW, STATUS_FLOW_LAND, EXCEPTION_STATUSES, SKIP_ON_ADVANCE_STATUSES, COMPLETED_STATUSES } from "./status-flow";
 import { syncParentStatusFromChildren } from "./parent-status";
 import { loadOrderTotalMetrics } from "./total-metrics";
 
@@ -55,10 +55,11 @@ export function canTransit(fromStatus: string, toStatus: string): boolean {
   if (fromIndex < 0 && EXCEPTION_STATUSES.has(fromStatus) && toIndex >= 0) return true;
   if (fromIndex < 0 || toIndex < 0) return false;
   if (toIndex <= fromIndex) return false;
-  // 一次只能往前一格，但中间隔着的如果全是「延迟」类状态，可以直接跨过去
-  // （没延误的单子不该被逼着先点一下「延迟开船」/「延迟运输」才能往下走）。
+  // 一次只能往前一格，但中间隔着的如果全是「可跳过的中间态」（延迟类 + 已入库），
+  // 可以直接跨过去 —— 没延误的单子不该被逼着先点「延迟开船」，
+  // 停在 created 的老运单也不该被 2026-09-02 新插的「已入库」卡死（拍板：老单不回填）。
   for (let i = fromIndex + 1; i < toIndex; i += 1) {
-    if (!DELAY_STATUSES.has(STATUS_FLOW[i]!)) return false;
+    if (!SKIP_ON_ADVANCE_STATUSES.has(STATUS_FLOW[i]!)) return false;
   }
   return true;
 }
@@ -732,7 +733,10 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
     const [total, created, atWarehouse, delivering, done, attention, signedThisMonth] =
       await Promise.all([
         prisma.shipment.count({ where }),
-        prisma.shipment.count({ where: { ...where, currentStatus: "created" } }),
+        // 「未发出」：已创建 + 已入库 + 暂缓装柜（2026-09-02 复核对齐：客户端四分类的
+        // pending 就是这三个，暂缓装柜的货同样躺在国内仓，不能掉进减法算出的「在途」。
+        // 货都还在国内仓，绝不能掉进下面减法算出的「在途」里）
+        prisma.shipment.count({ where: { ...where, currentStatus: { in: ["created", "inWarehouseCN", "holdLoading"] } } }),
         prisma.shipment.count({ where: { ...where, currentStatus: "inWarehouseTH" } }),
         prisma.shipment.count({ where: { ...where, currentStatus: "outForDelivery" } }),
         prisma.shipment.count({ where: { ...where, currentStatus: { in: [...COMPLETED_STATUSES] } } }),
@@ -752,6 +756,8 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
       signedThisMonthCount: signedThisMonth,
       // 下面这几个是给「四段相加等于总数」对账用的，界面上不显示
       totalCount: total,
+      // ⚠️ 名字叫 createdCount，实际是「未发出」= 已创建 + 已入库（2026-09-02 起）。
+      //    字段名不改 —— 前端 business-api.ts 的接口是逐字对齐的，改名要两边一起。
       createdCount: created,
       deliveringCount: delivering,
       doneCount: done,

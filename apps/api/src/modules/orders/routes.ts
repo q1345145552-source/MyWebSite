@@ -52,7 +52,7 @@ import { BusinessError } from "../core/business-error";
 /**
  * 客户端订单四分类（2026-08-31，排查报告第 23 条拍板口径）。
  * 按运单 currentStatus 算：
- *   · 没有运单，或还在国内仓没发出（created / holdLoading）→ pending（未发出）
+ *   · 没有运单，或还在国内仓没发出（created / inWarehouseCN / holdLoading）→ pending（未发出）
  *   · delivered → delivered（已签收）
  *   · returned / cancelled / exception → closed（退回/取消/异常）
  *   · 其余一律 → transit（在途）
@@ -64,7 +64,13 @@ import { BusinessError } from "../core/business-error";
 function classifyClientStatusGroup(
   currentStatus: string | null | undefined,
 ): "pending" | "transit" | "delivered" | "closed" {
-  if (!currentStatus || currentStatus === "created" || currentStatus === "holdLoading") return "pending";
+  if (
+    !currentStatus ||
+    currentStatus === "created" ||
+    // 2026-09-02 新状态「已入库」：货在国内仓，还没发出
+    currentStatus === "inWarehouseCN" ||
+    currentStatus === "holdLoading"
+  ) return "pending";
   if (currentStatus === "delivered") return "delivered";
   if (EXCEPTION_STATUSES.has(currentStatus)) return "closed";
   return "transit";
@@ -523,7 +529,7 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
 
     const order = await prisma.order.findFirst({
       where: { id: orderId, companyId: auth.companyId },
-      // currentStatus 是写「国内仓已收货」轨迹时要用的 fromStatus（2026-08-06）
+      // currentStatus 是写「已入库」轨迹时要用的 fromStatus（2026-08-06；2026-09-02 起还要拿它判断该不该推状态）
       include: { shipments: { take: 1, select: { id: true, currentStatus: true } } },
     });
     if (!order) { fail(res, 404, "NOT_FOUND", "order not found"); return; }
@@ -609,11 +615,20 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
         // 只写订单的话，收货时填的柜号在运单列表里看不到——「订单详情」编辑那条路
         // （patch-shipment-bundle）也是两边一起写的，口径保持一致（2026-08-31）
         if (receiveBatchNo !== undefined) sUpdate.batchNo = receiveBatchNo;
+        /**
+         * 2026-09-02：inWarehouseCN（已入库）进了状态流程（STATUS_FLOW），
+         * 确认收货不再是「只写轨迹不动状态」—— currentStatus 一并推到「已入库」。
+         * ⚠️ 只在锁后重读的状态还是 created 时才推（只往前不往后）：
+         *    货先被装柜/推进过的单（老数据补确认收货很常见），状态已经在
+         *    inWarehouseCN 后面了，这里绝不能把它拽回来。
+         *    轨迹照旧无条件写 —— 「仓库收到货」是发生过的事实，fromStatus 用锁后重读的值。
+         */
+        if ((freshShipmentStatus ?? shipment.currentStatus) === "created") {
+          sUpdate.currentStatus = "inWarehouseCN";
+        }
         await tx.shipment.update({ where: { id: shipment.id }, data: sUpdate });
 
         // 2026-08-06：国内仓收到货是客户最关心的一步，原来一条轨迹都不写。
-        // ⚠️ 只写轨迹，**不动 currentStatus** —— inWarehouseCN 不在运单状态流程里（STATUS_FLOW），
-        //    真去改状态会被流转校验拦下，而且三端列表的筛选口径也会跟着变。
         await tx.statusLog.create({
           data: {
             id: `sl_rcv_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -621,7 +636,7 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
             operatorId: auth.userId, operatorRole: auth.role, operatorName: auth.name ?? "",
             // ⚠️ 用锁后重读的状态，不是事务外那份
             fromStatus: freshShipmentStatus ?? shipment.currentStatus, toStatus: "inWarehouseCN",
-            remark: "国内仓已收货，等待装柜",
+            remark: "货已入库（国内仓已收货），等待装柜",
             nextStop: "装柜",
             changedAt: now,
           },
@@ -1229,7 +1244,10 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
           orderId,
           trackingNo: generatedTrackingNo,
           batchNo,
-          currentStatus: "created",
+          /* 2026-09-02 老板拍板：录单就是货到了仓库才录单 ——
+             员工建单的运单起始状态直接是「已入库」，不是「已创建」。
+             （客户预报那条路不一样：报单时货还在路上，仍从 created 起。） */
+          currentStatus: "inWarehouseCN",
           currentLocation: null,
           weightKg: prWeight > 0 ? (prWeight as unknown as Prisma.Decimal) : (weightKg as unknown as Prisma.Decimal | null),
           volumeM3: prVol > 0 ? (prVol as unknown as Prisma.Decimal) : (volumeM3 as unknown as Prisma.Decimal | null),
@@ -1251,12 +1269,13 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
           operatorId: auth.userId,
           operatorRole: auth.role,
           operatorName: auth.name ?? "",
+          /* 2026-09-02 老板拍板落地：员工建单=货已到仓，运单直接从「已入库」起步，
+             首条轨迹写 created → inWarehouseCN，客户一眼看到货已进仓。
+             录单那一刻货已经在仓里，下一站是「装柜」（跟确认收货那条轨迹同一口径）。
+             ⚠️ 客户报预报单那条路（remark「等待国内仓收货」那处）仍是 created → created、
+             下一站「国内仓」—— 那时货还在路上，是对的，别顺手改。 */
           fromStatus: "created",
-          toStatus: "created",
-          /* 2026-09-02 老板指正：员工建单的业务口径是「货到了国内仓才录单」——
-             录单那一刻货已经在仓里，下一站写「国内仓」等于胡说。
-             改成和确认收货那条轨迹（上面 nextStop:"装柜"）同一口径。
-             ⚠️ 客户报预报单那条路（remark「等待国内仓收货」那处）的「国内仓」是对的，别顺手改。 */
+          toStatus: "inWarehouseCN",
           remark: "货已到国内仓，等待装柜",
           nextStop: "装柜",
           changedAt: new Date(),
