@@ -65,6 +65,51 @@ const 子单 = (over: any = {}) => ({
   id: "s_child", parentTrackingNo: "YW0001", packageCount: 30, volumeM3: 1.5, weightKg: 120, ...over,
 });
 
+/**
+ * 2026-09-02 三审整改（P3）：给第 8 项「真调路由」用的假 prisma。
+ * apps/api/src/db/prisma.ts 是 `globalThis.__prisma ?? new PrismaClient()`，
+ * 在动态 import 路由**之前**把 __prisma 换成假的，真 PrismaClient 根本不会被 new 出来；
+ * 文件头那行被挡死的 DATABASE_URL 是第二道保险（写法照 test-client-address-update.ts）。
+ * 假 prisma 只有 $transaction 一个方法：直接把「当前场景的假 tx」递给事务回调。
+ */
+let 路由用假tx: any = null;
+(globalThis as any).__prisma = {
+  $transaction: async (fn: (tx: any) => Promise<unknown>) => fn(路由用假tx),
+};
+
+/** 换上一套新的路由假 tx（每个场景一套），把所有写操作录下来供断言 */
+function 装路由假tx(opts: { item: any; parent?: any }) {
+  const 记录 = {
+    柜内记录更新: null as any,
+    子单更新: null as any,
+    父单更新: null as any,
+    运单更新次数: 0,
+    轨迹: [] as any[],
+  };
+  路由用假tx = {
+    shipmentContainerItem: {
+      // 同一个函数要伺候两次 findFirst（锁前的 lockTarget + 锁后重查的 item），
+      // 假对象把两边要的字段都带上就行，不用理会 select/include
+      findFirst: async () => opts.item,
+      update: async ({ data }: any) => { 记录.柜内记录更新 = data; return data; },
+    },
+    shipment: {
+      findFirst: async () => opts.parent ?? null,
+      update: async ({ where, data }: any) => {
+        记录.运单更新次数 += 1;
+        if (opts.parent && where?.id === opts.parent.id) 记录.父单更新 = data;
+        else 记录.子单更新 = data;
+        return data;
+      },
+    },
+    statusLog: { create: async ({ data }: any) => { 记录.轨迹.push(data); } },
+    $queryRaw: async () => [],
+  };
+  return { 记录 };
+}
+
+type Handler = (req: any, res: any) => Promise<void> | void;
+
 async function main(): Promise<void> {
   console.log("从柜子里卸货");
 
@@ -209,70 +254,97 @@ async function main(): Promise<void> {
     );
   });
 
-  await check("8) 部分卸柜那份手抄的还货逻辑：退状态和写轨迹必须是活代码", async () => {
-    /* 2026-09-02 复核补，2026-09-02 复核整改（P3）从「全文件 grep 字符串」升级成
-       行为级别的源码检查（上一版被 Codex 终审点名假绿：别处出现那两个字符串也算过）。
-       现在照 test-lock-order 的 isDeadLine / 死块跳过写法：
-         · 用稳定锚点圈出 loading-manifests/routes.ts 里「部分卸柜还货」那一段；
-         · 只在**那段范围内**找 inWarehouseCN 状态更新语句和 sl_unld_ 轨迹创建语句；
-         · 注释行不算，被写死假条件（if(false) 之类）包住的死块整块跳过。
-       变异自证（2026-09-02 真做过）：把那段包进 if (false) { ... } 后本项变红
-       （两条断言都报「是死代码/被删了」），还原后恢复绿 —— 证明它真的在看那段代码。
-       ⚠️ 扫源码仍然证明不了运行时行为，真正的行为守卫是上面 1~6 那些用假 tx 真调的项；
-       这一项防的是「改一份漏一份」+「代码在但被注释/死块废掉」。 */
-    const fs = require("node:fs") as typeof import("node:fs");
-    const path = require("node:path") as typeof import("node:path");
-    const api = path.join(__dirname, "..", "apps", "api", "src", "modules");
-    const 源码 = fs.readFileSync(path.join(api, "loading-manifests", "routes.ts"), "utf-8");
-    const lines = 源码.split("\n");
-    const 是注释行 = (l: string): boolean => {
-      const t = l.trim();
-      return t.startsWith("*") || t.startsWith("//") || t.startsWith("/*");
-    };
-
+  await check("8) 部分卸柜还货给父单：真调 remove-shipment 路由，退状态和写轨迹必须真的发生", async () => {
     /**
-     * 稳定锚点定位「部分卸柜还货」那段：
-     *   起点 = `if (reqPieces < totalLoaded) {` —— 部分卸柜分支的入口；
-     *   终点 = 起点之后第一处活的 `unloadItemFully(` —— else 分支的全量卸柜调用，
-     *          紧贴在部分卸柜段后面（第 7 项已经保证这个调用必须存在）。
-     * 锚点找不到就直接红：说明那段被重构了，这一项要跟着搬家。
+     * 2026-09-02 三审整改（P3）：这一项从「扫源码」升级成**真调路由**。
+     * 前两版（grep 字符串 → 锚点圈段找活代码）都被 Codex 变异实测打脸：
+     * 把「要退状态」永久改成 false 后仍全绿 —— 因为那几个字样还在源码里活着，
+     * 只是条件永远不成立。扫源码证明不了运行时行为，这个教训项目里已经第五次了。
+     *
+     * 现在照 test-client-address-update.ts / test-product-rows.ts 第 11 项的写法：
+     * 真注册 loading-manifests 路由，拿到 POST /staff/loading-manifests/remove-shipment
+     * 的 handler 真调；假 prisma 的 $transaction 直接把假 tx 递给回调，全程不连库。
+     *
+     * 变异自证（2026-09-02 真做过）：routes.ts 里「要退状态」写死 false → 本项变红
+     * （父单 update 里没有 currentStatus + 没写 sl_unld_ 轨迹两条一起报）；还原后全绿。
      */
-    const start = lines.findIndex((l) => !是注释行(l) && /if\s*\(\s*reqPieces\s*<\s*totalLoaded\s*\)/.test(l));
-    assert.ok(start >= 0, "找不到部分卸柜分支入口锚点 if (reqPieces < totalLoaded) —— 那段被重构了，这一项要跟着改");
-    let end = -1;
-    for (let j = start + 1; j < lines.length; j += 1) {
-      if (!是注释行(lines[j]) && /unloadItemFully\s*\(/.test(lines[j])) { end = j; break; }
-    }
-    assert.ok(end > start, "找不到部分卸柜段的终点锚点 unloadItemFully( —— 那段被重构了，这一项要跟着改");
+    const routes = new Map<string, Handler>();
+    const fakeApp: any = {
+      get(p: string, h: Handler) { routes.set(`GET ${p}`, h); },
+      post(p: string, h: Handler) { routes.set(`POST ${p}`, h); },
+      delete(p: string, h: Handler) { routes.set(`DELETE ${p}`, h); },
+      listen() {},
+    };
+    const mod = await import("../apps/api/src/modules/loading-manifests/routes");
+    (mod as any).registerLoadingManifestRoutes(fakeApp);
+    const handler = routes.get("POST /staff/loading-manifests/remove-shipment");
+    assert.ok(handler, "没注册到 POST /staff/loading-manifests/remove-shipment —— 路由被改名/搬家了，这一项要跟着改");
 
-    // 照 test-lock-order 的写法：只认写死的假条件；正常的条件分支（要退状态 ? …）必须放行
-    const isDeadLine = (line: string): boolean =>
-      /\bif\s*\(\s*(false|0|!true|1\s*===\s*2|1\s*==\s*2)\s*\)/.test(line);
-    // 死块范围（左闭右开）：块形式按大括号配对整块跳过，单行形式跳一行
-    const deadBlockEnd = (i: number): number => {
-      if (!/\{\s*$/.test(lines[i])) return i + 1;
-      let depth = 0;
-      for (let k = i; k < end; k += 1) {
-        depth += (lines[k].match(/\{/g) ?? []).length;
-        depth -= (lines[k].match(/\}/g) ?? []).length;
-        if (depth <= 0 && k > i) return k + 1;
-      }
-      return end;
+    const call卸柜 = async (body: unknown): Promise<{ status: number; message: string }> => {
+      let status = 0;
+      let payload: any = {};
+      const res: any = { status(c: number) { status = c; return res; }, json(v: unknown) { payload = v; } };
+      await handler!({
+        method: "POST", path: "", query: {}, headers: {}, body,
+        auth: { userId: "STAFF1", companyId: "c_1", role: "staff", name: "测试员工" },
+      }, res);
+      // 成功时 ok() 包成 { data: { message } }，失败时 fail() 是顶层 message
+      return { status, message: payload?.data?.message ?? payload?.message ?? "" };
     };
 
-    let 活的退状态 = false;
-    let 活的轨迹 = false;
-    let j = start;
-    while (j < end) {
-      const l = lines[j];
-      if (是注释行(l)) { j += 1; continue; }
-      if (isDeadLine(l)) { j = deadBlockEnd(j); continue; }
-      if (/currentStatus:\s*"inWarehouseCN"/.test(l)) 活的退状态 = true;
-      if (/sl_unld_/.test(l)) 活的轨迹 = true;
-      j += 1;
+    // 一条柜内记录：柜里装着 30 件，只卸 10 件（10 < 30 → 走部分卸柜分支）
+    const 柜内记录 = (parentTrackingNo: string | null) => ({
+      id: "i_1", containerId: "ct_1", shipmentId: "s_child",
+      loadedPieceCount: 30,
+      // ⚠️ 故意比运单总方数小（0.9 < 1.5）：顺带盯住 2026-08-31 修的
+      // 「部分卸柜把已装方数按运单总体积重算覆盖」那个 bug 不复发
+      loadedVolumeM3: 0.9,
+      shipment: { id: "s_child", parentTrackingNo, packageCount: 30, volumeM3: 1.5, weightKg: 120 },
+    });
+
+    // 8a) 子单带父单、父单状态已前进（departed）→ 必须退回「已入库」+ 写 sl_unld_ 轨迹
+    {
+      const { 记录 } = 装路由假tx({
+        item: 柜内记录("YW0001"),
+        // ⚠️ 父单三个数字互不相同（5 件 / 2 方 / 50kg），防「凑巧相等」假绿
+        parent: { id: "s_parent", packageCount: 5, volumeM3: 2, weightKg: 50, currentStatus: "departed" },
+      });
+      const r = await call卸柜({ itemId: "i_1", pieceCount: 10 });
+      assert.equal(r.status, 200, `部分卸柜没走通：${r.status} ${JSON.stringify(r.message)}`);
+      assert.ok(记录.父单更新, "父单根本没被 update —— 还货那段没跑到");
+      assert.equal(记录.父单更新.currentStatus, "inWarehouseCN",
+        "父单状态没退回「已入库」——「要退状态」那条判断是死的，客户会一直看到旧状态");
+      /**
+       * ⚠️ 这条分支跟第 4 项那个「整票不许动数字」的口径**正好相反**：
+       * 还货给父单时，件数/方数/重量三兄弟**必须出现在父单 update 里而且加对**
+       * （5+10 件 / 2+0.5 方 / 50+40 kg）—— 卸下来的货凭空消失才是 bug。
+       * 「三兄弟不许出现」只适用于没父单的整票记录，那个在下面 8b 盯。
+       */
+      assert.equal(记录.父单更新.packageCount, 15, "件数没还回父单（5 + 10）");
+      assert.equal(Number(记录.父单更新.volumeM3), 2.5, "方数没还回父单（2 + 0.5）");
+      assert.equal(Number(记录.父单更新.weightKg), 90, "重量没还回父单（50 + 40）");
+      assert.equal(记录.轨迹.length, 1, "没写 sl_unld_ 轨迹 —— 客户会觉得状态莫名其妙变了");
+      assert.ok(String(记录.轨迹[0].id).startsWith("sl_unld_"), `轨迹 id 前缀不是 sl_unld_：${记录.轨迹[0].id}`);
+      assert.equal(记录.轨迹[0].fromStatus, "departed", "轨迹的起点状态不对");
+      assert.equal(记录.轨迹[0].toStatus, "inWarehouseCN", "轨迹的终点状态不对");
+      assert.ok(/退回国内仓/.test(记录.轨迹[0].remark), `轨迹备注看不懂：${记录.轨迹[0].remark}`);
+      // 柜内记录按**自己的已装量**等比缩：0.9 × 20/30 = 0.6（不是按运单总方数 1.5 重算）
+      assert.equal(记录.柜内记录更新?.loadedPieceCount, 20, "柜内记录件数没减对（30 − 10）");
+      assert.equal(Number(记录.柜内记录更新?.loadedVolumeM3), 0.6, "柜内已装方数没按记录自己的已装量等比缩（0.9 × 20/30）");
+      // 子单自己也要砍小，砍下来的那份才是还给父单的
+      assert.equal(记录.子单更新?.packageCount, 20, "子单件数没砍成 20（30 − 10）");
     }
-    assert.ok(活的退状态, "部分卸柜还货段里没有活的「退回已入库」状态更新 —— 被删了或成了注释/死代码");
-    assert.ok(活的轨迹, "部分卸柜还货段里没有活的 sl_unld_ 轨迹创建 —— 被删了或成了注释/死代码");
+
+    // 8b) 整票记录（没父单）部分卸柜：运单的件数/方数/重量三兄弟一个都不许动
+    //     （排查第 3 条拍板；2026-08-31 修过「先把运单砍小、又没人收还货」的凭空消失 bug）
+    {
+      const { 记录 } = 装路由假tx({ item: 柜内记录(null) });
+      const r = await call卸柜({ itemId: "i_1", pieceCount: 10 });
+      assert.equal(r.status, 200, `整票部分卸柜没走通：${r.status} ${JSON.stringify(r.message)}`);
+      assert.equal(记录.运单更新次数, 0, "整票部分卸柜动了运单 —— 件数/方数/重量会凭空变小");
+      assert.equal(记录.轨迹.length, 0, "整票部分卸柜不该写状态轨迹");
+      assert.equal(记录.柜内记录更新?.loadedPieceCount, 20, "柜内记录件数没减对（30 − 10）");
+    }
   });
 
   if (failures.length > 0) {

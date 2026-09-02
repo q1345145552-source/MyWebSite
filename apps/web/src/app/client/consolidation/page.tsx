@@ -161,6 +161,12 @@ export default function ClientConsolidationPage() {
   };
 
   const loadDetail = useCallback(async (taskId: string) => {
+    // 2026-09-02 三审整改：进门第一件事先认主人——过期上下文的刷新连号都不许领。
+    // 场景：任务 A 的操作（付款/删预报单等）完成后回调拿着 A 来刷新，但用户已切到 B：
+    // 若此处照常领号，会把 B 还在路上的请求作废；而 A 自己的响应又过不了主人核对被丢弃，
+    // B 页面就空白且没有任何重试提示。所以不是当前选中的任务直接整段 return——
+    // 不领号、不开 loading、不清数据，旧上下文的刷新对新上下文零影响。
+    if (taskId !== selectedTaskIdRef.current) return;
     const ticket = detailGate.begin(); // 2026-09-01 竞态全扫：出发时领号
     setDetailLoading(true);
     try {
@@ -275,6 +281,9 @@ export default function ClientConsolidationPage() {
       if (!r.cargoValue.trim()) { setToast(`产品行${i + 1}：货值为必填`); return; }
     }
 
+    // 2026-09-02 三审整改：操作回调里的刷新一律传「本次操作发生时」的明确任务 id。
+    // 用户中途切走时，loadDetail 进门认主人会直接拒收这次刷新，不会作废新任务的在途请求。
+    const opTaskId = selectedTaskId;
     setPrealertSubmitting(true);
     try {
       const products = productRows.map((r) => ({
@@ -295,11 +304,11 @@ export default function ClientConsolidationPage() {
       if (editPrealertId) {
         await updateConsolidationPrealert({ prealertId: editPrealertId, mark: prealertMark.trim(), expressNo: prealertExpressNo.trim() || undefined, products });
       } else {
-        await createConsolidationPrealert({ taskId: selectedTaskId!, mark: prealertMark.trim(), expressNo: prealertExpressNo.trim() || undefined, products });
+        await createConsolidationPrealert({ taskId: opTaskId!, mark: prealertMark.trim(), expressNo: prealertExpressNo.trim() || undefined, products });
       }
       setShowCreatePrealert(false);
       setToast(editPrealertId ? "预报单已更新" : "预报单已创建");
-      if (selectedTaskId) await loadDetail(selectedTaskId);
+      if (opTaskId) await loadDetail(opTaskId); // 2026-09-02 三审整改：刷新传明确的操作任务 id
       await loadTasks();
     } catch (e: any) {
       setToast(e.message);
@@ -310,17 +319,20 @@ export default function ClientConsolidationPage() {
 
   // ---- 删除预报单 ----
   const handleDeletePrealert = async (prealertId: string) => {
+    // 2026-09-02 三审整改：操作回调里的刷新一律传「本次操作发生时」的明确任务 id。
+    // 用户中途切走时，loadDetail 进门认主人会直接拒收这次刷新，不会作废新任务的在途请求。
+    const opTaskId = selectedTaskId;
     try {
       await deleteConsolidationPrealert(prealertId);
       setDeleteConfirm(null);
       setToast("预报单已删除");
-      if (selectedTaskId) await loadDetail(selectedTaskId);
+      if (opTaskId) await loadDetail(opTaskId);
       await loadTasks();
     } catch (e: any) {
       setToast(e.message);
       // 失败也要刷新（2026-08-27 补）：后端现在会说「刚刚被别人改过，请刷新后再看」，
       // 页面不刷新的话用户看到的还是旧数字，容易照着旧数字再操作一次。
-      if (selectedTaskId) await loadDetail(selectedTaskId);
+      if (opTaskId) await loadDetail(opTaskId);
       await loadTasks();
     }
   };
@@ -333,20 +345,23 @@ export default function ClientConsolidationPage() {
     if (!(fee > 0)) { setToast("这个任务还没有报价金额，请联系客服"); return; }
     if (balance < fee) { setToast(`集货余额不足，还差 ¥${(fee - balance).toFixed(2)}，请先去「集货余额」充值`); return; }
     if (!confirm(`确认用集货余额支付 ¥${fee.toFixed(2)}？\n\n此次付款不可撤销，误操作请联系客服。`)) return;
+    // 2026-09-02 三审整改：操作回调里的刷新一律传「本次操作发生时」的明确任务 id。
+    // 用户中途切走时，loadDetail 进门认主人会直接拒收这次刷新，不会作废新任务的在途请求。
+    const opTaskId = selectedTaskId;
     setPayLoading(true);
     try {
-      const r = await payConsolidationTask({ taskId: selectedTaskId! });
+      const r = await payConsolidationTask({ taskId: opTaskId! });
       setShowPay(false);
       setToast(r?.message ?? "付款成功");
       await loadBalance();
-      if (selectedTaskId) await loadDetail(selectedTaskId);
+      if (opTaskId) await loadDetail(opTaskId);
       await loadTasks();
     } catch (e: any) {
       setToast(e.message);
       // 失败也要刷新（2026-08-27 补）：后端现在会说「刚刚被别人改过，请刷新后再看」，
       // 页面不刷新的话用户看到的还是旧数字，容易照着旧数字再操作一次。
       await loadBalance();
-      if (selectedTaskId) await loadDetail(selectedTaskId);
+      if (opTaskId) await loadDetail(opTaskId);
       await loadTasks();
     } finally {
       setPayLoading(false);

@@ -271,25 +271,38 @@ export default function StaffContainerLoadingPage() {
     setSelectedId(id);
   };
 
+  /** 2026-09-02 三审整改：详情自己的门闩——同一柜子的新旧两次刷新只认最新一票，
+      旧票不许提前掐掉新票的加载态（照 client/consolidation 的写法，一份口径）。 */
+  const detailGate = useRef(createRequestGate()).current;
+
   const loadDetail = useCallback(async (id: string) => {
-    if (!id) return;
+    // 2026-09-02 三审整改（Codex 点名）：入口先认主人——柜 A 的操作回调 await 期间用户切到柜 B，
+    // 回调醒来还会拿 A 的 id 来刷新。过期的刷新连号都不该领：不是当前选中柜就整个 return，
+    // 不开 loading、不领号，旧上下文的刷新对新上下文零影响。
+    // （修前的病：这条路照样开了 loading、领了号，响应在下面被认主人丢弃，
+    //   finally 又因「主人不符」拒收 loading——柜 B 早已加载完、再没人来收，「加载中…」永远挂着。）
+    if (!id || selectedIdRef.current !== id) return;
+    const ticket = detailGate.begin(); // 认完主人才领号
     setStatusRemark("");
     setDetailError(""); // 2026-09-02 复核整改：新一轮加载出发，先清上一轮的失败提示
     setLoadingDetail(true);
     try {
       const d = await fetchLoadingManifestDetail(id);
-      if (selectedIdRef.current !== id) return; // 用户已点到别的柜子，A 的详情不落地
+      if (!detailGate.isCurrent(ticket) || selectedIdRef.current !== id) return; // 号作废或用户已点到别的柜子，A 的详情不落地
       setDetail(d);
     } catch (e) {
-      if (selectedIdRef.current !== id) return; // 旧柜子的报错也不弹
+      if (!detailGate.isCurrent(ticket) || selectedIdRef.current !== id) return; // 旧柜子的报错也不弹
       // 2026-09-02 复核整改：加载失败绝不留上一个柜的详情冒充当前柜——
       // 清空详情，详情区显示「加载失败 + 点击重试」
       setDetail(null);
       setDetailError(e instanceof Error ? e.message : "详情加载失败");
     } finally {
-      if (selectedIdRef.current === id) setLoadingDetail(false); // 别掐掉新柜子的加载态
+      // 2026-09-02 三审整改：finally 只按票号收 loading，不再核对主人——
+      // 被作废的旧票在此不碰 loading（不许掐掉新请求的加载态）；最新一票收尾必须把 loading 收掉，
+      // 哪怕主人刚换（比如删柜后清空选中、再没有新请求来收），新主人的请求自己会再置 true。
+      if (detailGate.isCurrent(ticket)) setLoadingDetail(false);
     }
-  }, []);
+  }, [detailGate]);
 
   useEffect(() => { if (selectedId) void loadDetail(selectedId); }, [selectedId, loadDetail]);
 
