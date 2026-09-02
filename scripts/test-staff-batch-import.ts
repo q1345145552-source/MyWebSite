@@ -601,6 +601,160 @@ assert.equal(lastRowWithCells(["A1", "Z1048565"]), 1048565, "大行号要认得�
 // 元信息 key 不许被当成单元格（"!ref" 不能被 /^[A-Z]+(\d+)$/ 之外的方式误认）
 assert.equal(lastRowWithCells(["!merges", "!margins", "C3"]), 3);
 
+/* ==========================================================================
+   仓库真实在用的《上传系统数据》表（2026-09-02 拿到真表后加）
+   --------------------------------------------------------------------------
+   真表表头：日期, 唛头, 仓库, 运输方式, 运单号, 货型, 品名, 尺寸, 件数, 国内单号,
+   单项体积, 单项重量, 总体积, 总重量, 计费体积, 总计费体积, 单价, 单项价格,
+   订单总价, 备注, 结算状态。
+   跟系统模板差三处：箱数他们叫「件数」、到仓日期叫「日期」、没有单箱重量，
+   只有行级总重「单项重量」（真表实测 195kg ÷ 13件 ≈ 15kg/箱 才合理）。
+   其余列（尤其跨行累计的「总重量」）一律不认 —— 认了必错。
+   ========================================================================== */
+const WH_ROW: Record<string, unknown> = {
+  日期: "2026-08-30",
+  唛头: "WH-MARK01",
+  仓库: "东莞仓",
+  运输方式: "海运",
+  运单号: "SITU9234141",
+  货型: "商检",            // 解析器不认这一列（订单默认普货、要人工改），但它在场不许影响别的数字
+  品名: "沙发",
+  尺寸: "42.5*38*51.5",
+  件数: 13,
+  国内单号: "SF123456",
+  单项体积: 1.08,
+  单项重量: 195,
+  总体积: 5.4,
+  总重量: 999,             // ⚠️ 跨行的订单总重 —— 绝不能被认成任何重量（下面有专门用例盯它）
+  计费体积: 1.1,
+  总计费体积: 5.5,
+  单价: 730,
+  单项价格: 803,
+  订单总价: 3940,
+  备注: "易碎",
+  结算状态: "未结算",
+};
+
+/** 整行原样解析：件数/日期/单项重量/尺寸 全认对，闲杂列一个都不许捣乱 */
+{
+  const r = parseStaffBatchRows([{ ...WH_ROW }]);
+  assert.deepEqual(r.issues, [], `仓库表格式报错了：${JSON.stringify(r.issues.map((i) => i.message))}`);
+  const o = r.orders[0];
+  assert.ok(o, "仓库表格式没建出订单");
+  assert.equal(o.packageCount, 13, "「件数」没被认成箱数");
+  assert.equal(o.arrivedAt, "2026-08-30", "「日期」没被认成到仓日期");
+  assert.equal(o.warehouseId, "wh_dongguan_01", "仓库没认对");
+  assert.equal(o.products[0].weightKg, 15, `单项重量 195÷13件 应换算成 15kg/箱，实际 ${o.products[0].weightKg}`);
+  assert.equal(o.weightKg, 195, `订单总重应该是 15×13=195，实际 ${o.weightKg}（=999 说明「总重量」被误认了）`);
+  assert.deepEqual(
+    [o.products[0].lengthCm, o.products[0].widthCm, o.products[0].heightCm],
+    [42.5, 38, 51.5],
+    "「尺寸」42.5*38*51.5 没拆成长宽高",
+  );
+  assert.ok(
+    Math.abs((o.volumeM3 ?? 0) - (42.5 * 38 * 51.5 * 13) / 1e6) < 1e-9,
+    `方数不对：${o.volumeM3}`,
+  );
+  assert.equal(o.products[0].domesticTrackingNo, "SF123456", "国内单号丢了");
+}
+
+/** 「总重量」表头绝不能被认成重量：删掉「单项重量」后只剩「总重量」→ 必须按缺列拦下 */
+{
+  const rest = { ...WH_ROW };
+  delete rest["单项重量"];
+  const r = parseStaffBatchRows([rest]);
+  assert.equal(r.orders.length, 0, "没有单项重量、只剩「总重量」还建单了 —— 跨行的总重被误认了");
+  assert.ok(
+    r.issues.some((i) => i.kind === "file" && i.message.includes("单箱重量kg")),
+    `应该报缺「单箱重量kg」这一列：${JSON.stringify(r.issues.map((i) => i.message))}`,
+  );
+}
+
+/** 两列都填但对不上（10×13=130 vs 195，差远超 1%）→ 报错让员工核对，不悄悄选边 */
+{
+  const r = parseStaffBatchRows([{ ...WH_ROW, 单箱重量kg: 10 }]);
+  assert.equal(r.orders.length, 0, "单箱重量×件数 跟单项重量对不上还放行了");
+  assert.ok(
+    r.issues.some((i) => i.message.includes("对不上") && i.message.includes("130") && i.message.includes("195")),
+    `核对提示没把两边的数都摆出来：${JSON.stringify(r.issues.map((i) => i.message))}`,
+  );
+}
+
+/** 两列都填且一致（15×13=195）→ 放行，用员工亲手填的单箱重量 */
+{
+  const r = parseStaffBatchRows([{ ...WH_ROW, 单箱重量kg: 15 }]);
+  assert.deepEqual(r.issues, [], `两列一致还报错：${JSON.stringify(r.issues.map((i) => i.message))}`);
+  assert.equal(r.orders[0].products[0].weightKg, 15);
+}
+
+/** 换算除不尽 → 四舍五入到 2 位：196÷13=15.0769… → 15.08；195.05÷13=15.0038… → 15 */
+{
+  const up = parseStaffBatchRows([{ ...WH_ROW, 单项重量: 196 }]);
+  assert.deepEqual(up.issues, [], `196÷13 报错了：${JSON.stringify(up.issues.map((i) => i.message))}`);
+  assert.equal(up.orders[0].products[0].weightKg, 15.08, `进位口径不对：${up.orders[0].products[0].weightKg}`);
+  const down = parseStaffBatchRows([{ ...WH_ROW, 单项重量: 195.05 }]);
+  assert.equal(down.orders[0].products[0].weightKg, 15, `舍位口径不对：${down.orders[0].products[0].weightKg}`);
+}
+
+/** 换算出的单箱重会被抹成 0（0.04÷13≈0.003）→ 报错回显原文和算式，不许静默存 0 */
+{
+  const r = parseStaffBatchRows([{ ...WH_ROW, 单项重量: 0.04 }]);
+  assert.equal(r.orders.length, 0, "单箱重换算出 0 还放行了");
+  const msg = r.issues.map((i) => i.message).join("；");
+  assert.ok(
+    msg.includes("0.04") && msg.includes("13"),
+    `提示没带原文和算式：${msg}`,
+  );
+}
+
+/** 只有「单项重量」列而这一格空着 → 必填提示要按这张表的叫法说，别提他表里没有的列 */
+{
+  const r = parseStaffBatchRows([{ ...WH_ROW, 单项重量: "" }]);
+  assert.equal(r.orders.length, 0, "单项重量留空还建单了");
+  assert.ok(
+    r.issues.some((i) => i.message.includes("单项重量为必填")),
+    `没按「单项重量」报必填：${JSON.stringify(r.issues.map((i) => i.message))}`,
+  );
+}
+
+/** 「尺寸」认不出 → 报错回显原文；× 和 x 当分隔符也认；留空 = 不填长宽高，照样放行 */
+{
+  const bad = parseStaffBatchRows([{ ...WH_ROW, 尺寸: "42.5*38" }]);
+  assert.equal(bad.orders.length, 0, "尺寸只有两个数还放行了");
+  assert.ok(
+    bad.issues.some((i) => i.message.includes("「42.5*38」")),
+    `尺寸报错没回显原文：${JSON.stringify(bad.issues.map((i) => i.message))}`,
+  );
+  for (const sep of ["42.5×38×51.5", "42.5x38x51.5"]) {
+    const r = parseStaffBatchRows([{ ...WH_ROW, 尺寸: sep }]);
+    assert.deepEqual(r.issues, [], `尺寸「${sep}」被误伤：${JSON.stringify(r.issues.map((i) => i.message))}`);
+    assert.equal(r.orders[0].products[0].widthCm, 38, `尺寸「${sep}」没拆对`);
+  }
+  const empty = parseStaffBatchRows([{ ...WH_ROW, 尺寸: "" }]);
+  assert.deepEqual(empty.issues, [], "尺寸留空被拦了（长宽高本来就是选填）");
+  assert.equal(empty.orders[0].volumeM3, undefined, "尺寸留空不该编出方数");
+}
+
+/** 「尺寸」和单独的长/宽/高同一行都填 → 报错让员工留一种，不悄悄选边 */
+{
+  const r = parseStaffBatchRows([{ ...WH_ROW, 长cm: 100, 宽cm: 50, 高cm: 20 }]);
+  assert.equal(r.orders.length, 0, "尺寸和长宽高同时填还放行了");
+  assert.ok(
+    r.issues.some((i) => i.message.includes("只保留一种")),
+    `没报「只保留一种写法」：${JSON.stringify(r.issues.map((i) => i.message))}`,
+  );
+}
+
+/** 系统模板的「箱数」和仓库表的「件数」同时出现 → 按重复列报整表错误，不悄悄挑一个 */
+{
+  const r = parseStaffBatchRows([{ ...WH_ROW, 箱数: 99 }]);
+  assert.equal(r.orders.length, 0, "箱数和件数两列并存还建单了");
+  assert.ok(
+    r.issues.some((i) => i.kind === "file" && i.message.includes("请只保留一列")),
+    `没按重复列报错：${JSON.stringify(r.issues.map((i) => i.message))}`,
+  );
+}
+
 console.log("staff batch import parser: 100 orders / 300 rows passed");
 
 checkInvalidClientIdMessage()

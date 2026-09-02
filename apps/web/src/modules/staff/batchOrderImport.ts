@@ -75,9 +75,15 @@ export const WAREHOUSE_NAME_MAP: Record<string, string> = {
   广州仓: "wh_guangzhou_01",
   东莞仓: "wh_dongguan_01",
   深圳仓: "wh_shenzhen_01",
+  // 2026-09-02：仓库《上传系统数据》真表里写的是不带「仓」字的城市名——同一个意思，收进来。
+  // 报错提示仍只列带「仓」的四个标准名（WAREHOUSE_NAMES 过滤掉这四个短别名，见下）。
+  义乌: "wh_yiwu_01",
+  广州: "wh_guangzhou_01",
+  东莞: "wh_dongguan_01",
+  深圳: "wh_shenzhen_01",
 };
 const WAREHOUSE_IDS = new Set(Object.values(WAREHOUSE_NAME_MAP));
-const WAREHOUSE_NAMES = Object.keys(WAREHOUSE_NAME_MAP);
+const WAREHOUSE_NAMES = Object.keys(WAREHOUSE_NAME_MAP).filter((n) => n.endsWith("仓"));
 
 /* ==========================================================================
    全角 → 半角
@@ -131,23 +137,46 @@ function normalizeHeader(raw: string): string {
 type FieldKey =
   | "clientId" | "trackingNo" | "warehouse" | "itemName" | "packageCount"
   | "packageUnit" | "lengthCm" | "widthCm" | "heightCm" | "weightKg"
-  | "arrivedAt" | "transportMode" | "domesticTrackingNo" | "perBoxQty" | "legacyQty";
+  | "arrivedAt" | "transportMode" | "domesticTrackingNo" | "perBoxQty" | "legacyQty"
+  | "rowTotalWeightKg" | "dimensions";
 
-/** 每个字段认哪些表头（正规化之后全等比对）。 */
+/**
+ * 每个字段认哪些表头（正规化之后全等比对）。
+ *
+ * 2026-09-02 拿到仓库真实在用的《上传系统数据》表后补了三样：
+ * 「件数」（=箱数）、「日期」（=到仓日期）、「单项重量」（行级总重，见下）。
+ * 那张表里其余的列（货型/单项体积/总体积/总重量/计费体积/总计费体积/单价/
+ * 单项价格/订单总价/备注/结算状态）都**故意不认**——精确匹配下不认就碰不到，
+ * 不会影响任何数字。其中「货型」不认意味着他们表里的「商检」导入后会变普货，
+ * 这是已知取舍，要人工改。
+ */
 const FIELD_ALIASES: Record<FieldKey, string[]> = {
   clientId:           ["唛头", "客户唛头"],
   trackingNo:         ["运单号", "运单号码"],
   warehouse:          ["仓库", "仓库名称", "发货仓库"],
   itemName:           ["品名", "货名", "货物名称", "商品名称"],
-  packageCount:       ["箱数"],
+  // 「件数」是仓库《上传系统数据》表对箱数的叫法（2026-09-02 对过真表，同一个意思）。
+  // ⚠️ 「总箱数」照旧**绝对不能**收 —— 那是员工自己做小计用的，见上面那段血泪史。
+  packageCount:       ["箱数", "件数"],
   packageUnit:        ["包装类型", "包装"],
   lengthCm:           ["长cm", "长", "长度", "长度cm"],
   widthCm:            ["宽cm", "宽", "宽度", "宽度cm"],
   heightCm:           ["高cm", "高", "高度", "高度cm"],
   weightKg:           ["单箱重量kg", "单箱重量", "每箱重量kg", "每箱重量"],
-  arrivedAt:          ["到仓日期", "入仓日期", "到仓时间"],
+  // 「日期」是仓库《上传系统数据》表对到仓日期的叫法（那张表里只有这一个日期列，不会歧义）。
+  arrivedAt:          ["到仓日期", "入仓日期", "到仓时间", "日期"],
   transportMode:      ["运输方式"],
   domesticTrackingNo: ["国内单号", "国内快递单号", "国内物流单号"],
+  /**
+   * 仓库《上传系统数据》表的行级重量（2026-09-02 加）。
+   * ⚠️ 语义是**这一行货的总重**、不是单箱重：真表实测 195kg ÷ 13件 ≈ 15kg/箱 才合理。
+   *    解析时除以箱数换算成单箱重（见 parseStaffBatchRows 里的换算段）。
+   * ⚠️ 「总重量」**绝对不能**收进这里 —— 那张表里它是跨行累计的**订单总重**，
+   *    认了它等于把整张单的重量算到每一行头上，必错。同理「计费体积」那几列也都不认。
+   */
+  rowTotalWeightKg:   ["单项重量"],
+  // 仓库表的长宽高连写在一格：「42.5*38*51.5」。只是多认一种写法，单独的长/宽/高照旧。
+  dimensions:         ["尺寸"],
   // 「每箱几个」是现行模板的列名。「单箱数量」以前不敢用（含「箱数」会被包含匹配认错列），
   // 现在改成精确匹配之后可以安全地收进来。
   perBoxQty:          ["每箱几个", "单箱数量", "每箱数量"],
@@ -204,6 +233,9 @@ function resolveColumns(rows: Record<string, unknown>[]): { columns: ColumnMap; 
   }
 
   for (const { field, label } of REQUIRED_COLUMNS) {
+    // 仓库《上传系统数据》表没有「单箱重量kg」列，用行级的「单项重量」换算代替（2026-09-02）。
+    // 有那一列（或它命中了重复列、马上要报重复错）就不再要求「单箱重量kg」。
+    if (field === "weightKg" && (columns.rowTotalWeightKg !== undefined || duplicated.has("rowTotalWeightKg"))) continue;
     if (!columns[field] && !duplicated.has(field)) {
       issues.push({
         kind: "file",
@@ -253,6 +285,11 @@ function parseNumberCell(raw: unknown): { value?: number; badText?: string } {
   if (!/^-?\d+(\.\d+)?$/.test(t)) return { badText: original };
   const value = Number(t);
   return Number.isFinite(value) ? { value } : { badText: original };
+}
+
+/** 数字进提示语前收到 2 位小数，免得出现「45.300000000000004kg」这种吓人的尾巴。 */
+function fmt2(n: number): string {
+  return String(Math.round(n * 100) / 100);
 }
 
 /* ==========================================================================
@@ -538,11 +575,40 @@ export function parseStaffBatchRows(rows: Record<string, unknown>[]): StaffBatch
     if (!itemName) draft.issues.push({ rowNumber, trackingNo, message: "品名为必填" });
     const packageCount = readNumber(draft, rowNumber, "箱数", cellOf(row, columns, "packageCount"), { required: true, integer: true });
     const issuesBeforeDimensions = draft.issues.length;
-    const lengthCm = readNumber(draft, rowNumber, "长cm", cellOf(row, columns, "lengthCm"));
-    const widthCm = readNumber(draft, rowNumber, "宽cm", cellOf(row, columns, "widthCm"));
-    const heightCm = readNumber(draft, rowNumber, "高cm", cellOf(row, columns, "heightCm"));
+    let lengthCm = readNumber(draft, rowNumber, "长cm", cellOf(row, columns, "lengthCm"));
+    let widthCm = readNumber(draft, rowNumber, "宽cm", cellOf(row, columns, "widthCm"));
+    let heightCm = readNumber(draft, rowNumber, "高cm", cellOf(row, columns, "heightCm"));
+    /**
+     * 「尺寸」一格连写（2026-09-02 加）：仓库《上传系统数据》表就这么填，「42.5*38*51.5」。
+     * 长宽高本来就是选填、缺列不报错，所以这只是**多认一种写法**，原有路径一条没动。
+     * 分隔符收 * × x（全角＊、Ｘ、ｘ 会先被 toHalfWidth 转成半角）；
+     * 解析不出报错并回显原文，不许静默丢掉。
+     * 跟单独的长/宽/高同一行都填了 → 报错让员工留一种，不悄悄选边。
+     */
+    const rawDimensions = textOf(row, columns, "dimensions");
+    if (rawDimensions) {
+      if (lengthCm !== undefined || widthCm !== undefined || heightCm !== undefined) {
+        draft.issues.push({
+          rowNumber,
+          trackingNo,
+          message: "这一行同时填了「尺寸」和单独的长/宽/高，请只保留一种写法",
+        });
+      } else {
+        const parts = rawDimensions.replace(/\s+/g, "").split(/[*×x]/i);
+        const numbers = parts.map((part) => parseNumberCell(part).value);
+        if (parts.length !== 3 || numbers.some((value) => value === undefined || value <= 0)) {
+          draft.issues.push({
+            rowNumber,
+            trackingNo,
+            message: `尺寸填的是「${rawDimensions}」，看不懂，请写成 长*宽*高，比如 42.5*38*51.5`,
+          });
+        } else {
+          [lengthCm, widthCm, heightCm] = numbers as [number, number, number];
+        }
+      }
+    }
     // 三格里已经有一格「看不懂」了，就别再补一句「长宽高需要同时填写」——
-    // 员工三格都填了，被告知没填全只会更糊涂。
+    // 员工三格都填了，被告知没填全只会更糊涂。「尺寸」解析失败同理。
     const dimensionHadError = draft.issues.length > issuesBeforeDimensions;
     /**
      * 2026-08-29 老板拍板：单箱重量**必填**。
@@ -550,8 +616,56 @@ export function parseStaffBatchRows(rows: Record<string, unknown>[]): StaffBatch
      * 整列留空照样建单、重量存 null、一句提示都没有，两边口径终于对上了。
      * ⚠️ 必填之后原来那条「同一运单的单箱重量要么全填要么全空」就没用了（不可能只填一半），
      *    留着只会在漏填时多报一条重复的错，所以删掉了。
+     *
+     * 2026-09-02 加「单项重量」换算：仓库《上传系统数据》表没有单箱重量列，
+     * 只有行级总重「单项重量」（实测 195kg ÷ 13件 ≈ 15kg/箱 才合理）。规矩：
+     *   - 单箱重量没填、单项重量有值 → 单箱重 = 单项重量 ÷ 箱数，四舍五入到 2 位；
+     *     换算前单项重量得是合法正数（parseNumberCell 那套照旧）、箱数得已解析成正整数；
+     *     换算结果 < 0.01（会被抹成 0）或 ≥ 1 亿（数据库 Decimal(10,2) 装不下，
+     *     见 apps/api routes.ts 里 10**8 那道闸）→ 报错回显原文和算式。
+     *   - 两列都填了且对不上（单箱重×箱数 和单项重量差超过 1%）→ 报错让员工核对，
+     *     不悄悄选边。对得上就用员工亲手填的单箱重量。
+     *   - 两列都空 → 照旧必填报错；提示按表里实际有哪列来说，别让用仓库表的员工
+     *     去找一个他表里根本没有的「单箱重量kg」。
      */
-    const weightKg = readNumber(draft, rowNumber, "单箱重量kg", cellOf(row, columns, "weightKg"), { required: true });
+    const issuesBeforeWeight = draft.issues.length;
+    const perBoxWeightInput = readNumber(draft, rowNumber, "单箱重量kg", cellOf(row, columns, "weightKg"));
+    const rowTotalWeight = readNumber(draft, rowNumber, "单项重量", cellOf(row, columns, "rowTotalWeightKg"));
+    const weightHadError = draft.issues.length > issuesBeforeWeight;
+    let weightKg = perBoxWeightInput;
+    if (perBoxWeightInput !== undefined && rowTotalWeight !== undefined) {
+      // 箱数那格没解析出来时它自己已经报过错、这一行本来就过不去，核对不了就不硬核对
+      if (packageCount !== undefined) {
+        const expected = perBoxWeightInput * packageCount;
+        if (Math.abs(expected - rowTotalWeight) > rowTotalWeight * 0.01) {
+          draft.issues.push({
+            rowNumber,
+            trackingNo,
+            message: `单箱重量${fmt2(perBoxWeightInput)}×${packageCount}件=${fmt2(expected)}kg，跟单项重量${fmt2(rowTotalWeight)}对不上，请核对后把错的那列改掉`,
+          });
+        }
+      }
+    } else if (perBoxWeightInput === undefined && rowTotalWeight !== undefined) {
+      if (packageCount !== undefined) {
+        const quotient = rowTotalWeight / packageCount;
+        const converted = Math.round(quotient * 100) / 100;
+        if (converted < 0.01 || converted >= 10 ** 8) {
+          draft.issues.push({
+            rowNumber,
+            trackingNo,
+            message: `单项重量${textOf(row, columns, "rowTotalWeightKg")}÷${packageCount}件=${Math.round(quotient * 10000) / 10000}/箱，这个单箱重不合理（要在 0.01 ~ 99999999.99 kg 之间），请核对单项重量和件数`,
+          });
+        } else {
+          weightKg = converted;
+        }
+      }
+    } else if (weightKg === undefined && !weightHadError) {
+      draft.issues.push({
+        rowNumber,
+        trackingNo,
+        message: columns.weightKg !== undefined ? "单箱重量kg为必填" : "单项重量为必填",
+      });
+    }
     /**
      * ⚠️ 两个表头都要认。
      * 模板原来这一列叫「产品数量」，跟旁边的「**单箱**重量kg」口径不一致，
