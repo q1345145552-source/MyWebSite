@@ -833,7 +833,7 @@ export async function fetchClientPrealerts(
    唯一调用方是客户端那个没有入口的「编辑预报单」死弹窗，弹窗条目48已删，
    全 web 目录 grep 引用为 0，留着就是新的死导出（教训9）。
    连带删掉上面那段「客户确认发货」的孤儿注释（它说的函数早就没了）。
-   ⚠️ 后端 /client/prealerts/update、/client/prealerts/delete 两个接口先不动，
+   后端 /client/prealerts/update、/client/prealerts/delete 两个接口已于 2026-09-02 按老板拍板下线，
    客户还能不能自助改/删预报单要老板拍板。 */
 
 export async function fetchStaffPrealerts(): Promise<OrderItem[]> {

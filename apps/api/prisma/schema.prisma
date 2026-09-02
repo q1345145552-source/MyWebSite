@@ -975,6 +975,8 @@ model WhrConsolidationPlanCustomer {
 
   @@index([companyId, clientId])
   @@index([companyId, planId])
+  // 2026-09-02 老板拍板：同一个柜 + 同一个客户只许一行（数据库级铁门，代码锁是第一道防线）
+  @@unique([planId, clientId])
   @@map("whr_consolidation_plan_customers")
 }
 
