@@ -26,6 +26,7 @@ import RoleShell from "../../modules/layout/RoleShell";
 import DetailModal from "../../modules/layout/DetailModal";
 import Toast from "../../modules/layout/Toast";
 import { apiBaseUrl, authHeaders, parseApiResponse } from "../../services/core-api";
+import { createRequestGate } from "../../modules/shared/request-gate";
 import LastmileAddressPanel from "../../components/lastmile/LastmileAddressPanel";
 import {
   receiveStaffPrealert,
@@ -315,6 +316,8 @@ export default function StaffHomePage() {
     fileName: "",
     mime: "",
     contentBase64: "",
+    /** 2026-09-02 终审整改：这张照片是「读取出发那一刻」为哪个运单选的（照片会话）。上传前必须核对它 === 即将上传的运单号 */
+    forShipmentId: "",
   });
   const [photoList, setPhotoList] = useState<StaffInboundPhotoItem[]>([]);
   /** 2026-09-01 竞态全扫：入库照片要「认主人」。查 A 的照片期间把输入框改成 B，
@@ -322,6 +325,11 @@ export default function StaffHomePage() {
       运单号」还是不是出发时那个，不是就整段丢弃。每次渲染同步一次最新值。 */
   const photoShipmentIdRef = useRef("");
   photoShipmentIdRef.current = photoDraft.shipmentId.trim();
+  /** 2026-09-02 终审整改：入库照片文件读取的门闩。换运单号时 begin() 作废在途读取，
+      防止「读 A 的照片期间换成 B，FileReader 回调把 A 的图塞进 B 的草稿」。 */
+  const photoReadGate = useRef(createRequestGate()).current;
+  /** 2026-09-02 终审整改：换运单号时要把文件选择框也清空，否则草稿清了、输入框还显示旧文件名 */
+  const photoFileInputRef = useRef<HTMLInputElement>(null);
   const [activeSection, setActiveSection] = useState<StaffSectionId>("staff-prealert-review");
 
   const [lmShipments, setLmShipments] = useState<LastmileShipmentOption[]>([]);
@@ -1525,21 +1533,47 @@ export default function StaffHomePage() {
           <div style={{ border: "1px solid #fecaca", borderRadius: 10, padding: 10, background: "#fff1f2" }}>
             <div style={{ fontWeight: 700, marginBottom: 8 }}>入库拍照（责任留档）</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 8 }}>
-              <input value={photoDraft.shipmentId} onChange={(e) => setPhotoDraft((v) => ({ ...v, shipmentId: e.target.value }))} placeholder="运单ID（shipmentId）" style={orderCreateInputStyle} />
+              <input
+                value={photoDraft.shipmentId}
+                onChange={(e) => {
+                  // 2026-09-02 终审整改：换运单号 = 重新选图。三件事必须在这里同步做（不等重渲染/useEffect）：
+                  // ① 认主人的 ref 立刻改成新值；② 作废在途的文件读取；③ 清掉已选照片（含文件选择框）
+                  photoShipmentIdRef.current = e.target.value.trim();
+                  photoReadGate.begin();
+                  if (photoFileInputRef.current) photoFileInputRef.current.value = "";
+                  setPhotoDraft((v) => ({ ...v, shipmentId: e.target.value, fileName: "", mime: "", contentBase64: "", forShipmentId: "" }));
+                }}
+                placeholder="运单ID（shipmentId）"
+                style={orderCreateInputStyle}
+              />
               <input value={photoDraft.note} onChange={(e) => setPhotoDraft((v) => ({ ...v, note: e.target.value }))} placeholder="备注（例如：外箱破损）" style={orderCreateInputStyle} />
               <input
+                ref={photoFileInputRef}
                 type="file"
                 accept="image/*"
                 onChange={async (e) => {
                   const file = e.target.files?.[0];
                   if (!file) return;
-                  const contentBase64 = await readFileAsBase64(file);
-                  setPhotoDraft((v) => ({
-                    ...v,
-                    fileName: file.name,
-                    mime: file.type || "application/octet-stream",
-                    contentBase64,
-                  }));
+                  // 2026-09-02 终审整改：出发时记住「此刻输入框里的运单号」并领号；
+                  // 读完先验号（换单/重选都会作废旧读取）、再认主人（运单号变了整段作废），
+                  // 防止读 A 的照片期间换成 B，回调把 A 的图片放进 B 的草稿。
+                  const sessionShipmentId = photoShipmentIdRef.current;
+                  const ticket = photoReadGate.begin();
+                  try {
+                    const contentBase64 = await readFileAsBase64(file);
+                    if (!photoReadGate.isCurrent(ticket)) return;
+                    if (photoShipmentIdRef.current !== sessionShipmentId) return;
+                    setPhotoDraft((v) => ({
+                      ...v,
+                      fileName: file.name,
+                      mime: file.type || "application/octet-stream",
+                      contentBase64,
+                      forShipmentId: sessionShipmentId,
+                    }));
+                  } catch {
+                    if (!photoReadGate.isCurrent(ticket)) return;
+                    setMessage("图片读取失败，请重新选择");
+                  }
                 }}
                 style={orderCreateInputStyle}
               />
@@ -1551,9 +1585,15 @@ export default function StaffHomePage() {
                     setMessage("请先填写运单ID并选择文件");
                     return;
                   }
-                  setLoading(true);
                   // 2026-09-01 竞态全扫：记住这次是给哪个运单传的，刷新照片时要认主人
                   const uploadShipmentId = photoDraft.shipmentId.trim();
+                  // 2026-09-02 终审整改：提交前再核一次「照片会话的运单号 === 即将上传的运单号」，
+                  // 不一致说明选图之后换过运单号（或选图时没填运单号），拒绝上传并要求重选
+                  if (photoDraft.forShipmentId !== uploadShipmentId) {
+                    setMessage("照片是给另一个运单选的（或选图时未填运单ID），请重新选择图片再上传");
+                    return;
+                  }
+                  setLoading(true);
                   try {
                     await uploadStaffInboundPhoto({
                       shipmentId: uploadShipmentId,

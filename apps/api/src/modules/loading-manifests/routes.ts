@@ -985,7 +985,7 @@ export function registerLoadingManifestRoutes(app: MinimalHttpApp): void {
          * 全量卸柜 —— 走共用实现（2026-08-29 抽出去了）。
          * 「删除柜子」那条路以前完全没做这件事，子单变孤儿、父单数字回不来；
          * 现在两处同一份代码，改一处不会漏另一处。
-         * 状态退回「已创建」+ 写轨迹也在那个函数里，见 shipments/unload-item.ts。
+         * 状态退回「已入库」（2026-09-02 起）+ 写轨迹也在那个函数里，见 shipments/unload-item.ts。
          */
         await unloadItemFully(
           tx,

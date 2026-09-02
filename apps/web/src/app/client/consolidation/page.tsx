@@ -88,6 +88,8 @@ export default function ClientConsolidationPage() {
   const [activeTab, setActiveTab] = useState<"active" | "completed">("active");
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
+  // 2026-09-02 终审整改：详情加载失败要明说并给重试入口，不许留着上一个任务的内容冒充当前任务
+  const [detailError, setDetailError] = useState("");
 
   // 搜索
   const [searchTaskNo, setSearchTaskNo] = useState("");
@@ -148,6 +150,16 @@ export default function ClientConsolidationPage() {
   const selectedTaskIdRef = useRef<string | null>(null);
   const detailGate = useRef(createRequestGate()).current;
 
+  /** 2026-09-02 终审整改：换选中任务必须在用户点击处**同步**赋值 ref，useEffect 里那句只作兜底。
+      只靠 useEffect 的话，点击到 effect 跑起来之间有间隙，旧任务的晚响应在间隙里核对的还是旧 ref，
+      会照样落地盖到错的任务上。所有改选中任务的入口一律走这里。 */
+  const selectTask = (id: string | null) => {
+    selectedTaskIdRef.current = id; // 点击处同步认主人，晚到的旧响应立刻失效
+    setTaskDetail(null);            // 旧任务的详情内容不许在新任务名下多留一帧
+    setDetailError("");
+    setSelectedTaskId(id);
+  };
+
   const loadDetail = useCallback(async (taskId: string) => {
     const ticket = detailGate.begin(); // 2026-09-01 竞态全扫：出发时领号
     setDetailLoading(true);
@@ -156,10 +168,14 @@ export default function ClientConsolidationPage() {
       // 2026-09-01 竞态全扫：号作废或主人换了（用户切了任务/回了列表），整段丢弃
       if (!detailGate.isCurrent(ticket) || selectedTaskIdRef.current !== taskId) return;
       setTaskDetail(data);
+      setDetailError(""); // 2026-09-02 终审整改：加载成功要把上一次的失败提示清掉
     } catch (e: any) {
       // 2026-09-01 竞态全扫：旧请求的报错不许安到新请求头上
       if (!detailGate.isCurrent(ticket) || selectedTaskIdRef.current !== taskId) return;
-      setToast(e.message);
+      // 2026-09-02 终审整改（Codex 点名）：B 加载失败时不许留着 A 的详情冒充 B——
+      // 清空详情并明示「加载失败，点击重试」
+      setTaskDetail(null);
+      setDetailError(e?.message || "加载失败");
     } finally {
       // 2026-09-01 竞态全扫：旧请求不许提前掐掉新请求的加载态
       if (detailGate.isCurrent(ticket) && selectedTaskIdRef.current === taskId) setDetailLoading(false);
@@ -201,7 +217,7 @@ export default function ClientConsolidationPage() {
       await loadTasks();
       setShowCreateTask(false);
       setNewDest("");
-      setSelectedTaskId(t.id);
+      selectTask(t.id); // 2026-09-02 终审整改：走统一入口，点击处同步认主人
     } catch (e: any) {
       setToast(e.message);
     } finally {
@@ -442,7 +458,7 @@ export default function ClientConsolidationPage() {
                       <span style={{ fontSize: 12, color: "var(--t-muted)", whiteSpace: "nowrap" }}>{t.totalVolumeM3} / {t.maxVolumeM3} m³</span>
                     </div>
                   </div>
-                  <button onClick={() => setSelectedTaskId(t.id)} style={{ padding: "6px 16px", border: "1px solid var(--c-blue)", color: "var(--c-blue)", background: "var(--white)", borderRadius: 6, cursor: "pointer", fontSize: 13, whiteSpace: "nowrap" }}>
+                  <button onClick={() => selectTask(t.id)} style={{ padding: "6px 16px", border: "1px solid var(--c-blue)", color: "var(--c-blue)", background: "var(--white)", borderRadius: 6, cursor: "pointer", fontSize: 13, whiteSpace: "nowrap" }}>
                     查看详情
                   </button>
                 </div>
@@ -452,11 +468,31 @@ export default function ClientConsolidationPage() {
         </div>
       )}
 
+      {/* 2026-09-02 终审整改（Codex 点名）：详情还没拿到（加载中/加载失败）时，
+          明示状态并给重试入口，不许空白、更不许拿上一个任务的内容顶着 */}
+      {selectedTaskId && !taskDetail && (
+        <div style={{ padding: 24 }}>
+          <button onClick={() => { selectTask(null); loadTasks(); }} style={{ marginBottom: 16, padding: "6px 14px", border: "1px solid var(--l-strong)", background: "var(--white)", color: "var(--t-muted)", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>
+            ← 返回列表
+          </button>
+          {detailLoading ? (
+            <p>加载中...</p>
+          ) : detailError ? (
+            <div>
+              <p style={{ color: "var(--c-red)", fontSize: 14 }}>详情加载失败：{detailError}</p>
+              <button onClick={() => { if (selectedTaskId) loadDetail(selectedTaskId); }} style={{ padding: "6px 16px", border: "1px solid var(--c-blue)", color: "var(--c-blue)", background: "var(--white)", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>
+                点击重试
+              </button>
+            </div>
+          ) : null}
+        </div>
+      )}
+
       {/* ======== 详情视图 ======== */}
       {selectedTaskId && taskDetail && (
         <div style={{ padding: 24 }}>
           {/* 返回按钮 */}
-          <button onClick={() => { setSelectedTaskId(null); setPreviewImage(null); setShowAllProducts(false); setExpandedPrealerts(new Set()); setEditPrealertId(null); setShowCreatePrealert(false); setPrealertMark(""); setPrealertExpressNo(""); setProductRows([emptyProductRow(Date.now())]); setPrealertSubmitting(false); setDeleteConfirm(null); setShowPay(false); setToast(""); loadTasks(); }} style={{ marginBottom: 16, padding: "6px 14px", border: "1px solid var(--l-strong)", background: "var(--white)", color: "var(--t-muted)", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>
+          <button onClick={() => { selectTask(null); setPreviewImage(null); setShowAllProducts(false); setExpandedPrealerts(new Set()); setEditPrealertId(null); setShowCreatePrealert(false); setPrealertMark(""); setPrealertExpressNo(""); setProductRows([emptyProductRow(Date.now())]); setPrealertSubmitting(false); setDeleteConfirm(null); setShowPay(false); setToast(""); loadTasks(); }} style={{ marginBottom: 16, padding: "6px 14px", border: "1px solid var(--l-strong)", background: "var(--white)", color: "var(--t-muted)", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>
             ← 返回列表
           </button>
 

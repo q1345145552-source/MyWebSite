@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import RoleShell from "../../../modules/layout/RoleShell";
+import { createRequestGate } from "../../../modules/shared/request-gate";
 import { createClientPrealert, type ClientPrealertPayload } from "../../../services/business-api";
 
 interface ImportRow {
@@ -121,6 +122,10 @@ const td: React.CSSProperties = { padding: "6px 4px" };
 export default function ClientImportsPage() {
   const [rows, setRows] = useState<ImportRow[]>([]);
   const [loading, setLoading] = useState(false);
+  // 2026-09-02 终审整改：解析门闩——文件解析是异步的（arrayBuffer + XLSX），大文件要读好几秒。
+  // 解析期间「选文件」和「提交」都锁死，解析回调验号后才落地，防止旧预览被提交到一半。
+  const [parsing, setParsing] = useState(false);
+  const parseGate = useRef(createRequestGate()).current;
   const [current, setCurrent] = useState(0);
   const [successCount, setSuccessCount] = useState(0);
   const [failCount, setFailCount] = useState(0);
@@ -138,18 +143,23 @@ export default function ClientImportsPage() {
 
   const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
+    event.target.value = "";
     if (!file) return;
-    // 2026-09-01 竞态全扫：提交进行中不接受新文件（入口已 disabled，这里再兜一层）
-    if (loading) {
-      event.target.value = "";
-      return;
-    }
+    // 2026-09-01 竞态全扫 + 2026-09-02 终审整改：提交中/解析中都不接受新文件（入口已 disabled，这里再兜一层）
+    if (loading || parsing) return;
+    // 2026-09-02 终审整改：领号必须在用户动作处同步完成（任何 await 之前）——
+    // 一领号，旧解析立即作废；同时立刻挂上 parsing，把「提交」按钮锁死到解析落地为止
+    const ticket = parseGate.begin();
+    setParsing(true);
+    setMessage("正在解析文件…");
     try {
       const buffer = await file.arrayBuffer();
       const wb = XLSX.read(buffer, { type: "array" });
       const ws = wb.Sheets[wb.SheetNames[0]];
       const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: "" });
       const normalized = normalizeRows(raw);
+      // 2026-09-02 终审整改：成功分支验号——解析期间又选了新文件的话，这份旧结果整体作废
+      if (!parseGate.isCurrent(ticket)) return;
       // 2026-09-01 竞态全扫：预览换主人，快照同步更新
       previewRef.current = normalized;
       setRows(normalized);
@@ -160,12 +170,19 @@ export default function ClientImportsPage() {
       setDone(false);
       setMessage(`已读取 ${normalized.length} 条有效数据`);
     } catch {
+      // 2026-09-02 终审整改：失败分支同样验号，旧解析的报错不许盖到新解析的提示上
+      if (!parseGate.isCurrent(ticket)) return;
       setMessage("文件解析失败，请确认使用提供的模板格式");
+    } finally {
+      // 2026-09-02 终审整改：收尾也验号——只有最新一次解析才有资格解锁提交
+      if (parseGate.isCurrent(ticket)) setParsing(false);
     }
-    event.target.value = "";
   };
 
   const handleSubmit = async () => {
+    // 2026-09-02 终审整改：解析中/提交中/没数据一律拒绝（按钮已 disabled，这里再兜一层）——
+    // 解析期间提交的会是上一份旧预览，等新文件解析完打断循环就只写进半批
+    if (loading || parsing || rows.length === 0) return;
     // 2026-09-01 竞态全扫：记下这次提交的是哪一份预览（点击那一刻的 rows 快照）
     const batch = rows;
     setLoading(true);
@@ -237,31 +254,32 @@ export default function ClientImportsPage() {
             下载模板
           </button>
           {/* 2026-09-01 竞态全扫：提交期间禁用上传入口——提交中换文件会让 A 批次的
-              后台创建结果和统计混进 B 的预览（复用现成的 loading 态） */}
+              后台创建结果和统计混进 B 的预览（复用现成的 loading 态）
+              2026-09-02 终审整改：解析期间同样禁用——两把锁互锁：提交中不许换文件，解析中不许提交也不许再换文件 */}
           <label
             style={{
-              border: loading ? "1px solid var(--l-strong)" : "1px solid var(--c-blue)",
+              border: loading || parsing ? "1px solid var(--l-strong)" : "1px solid var(--c-blue)",
               borderRadius: 8,
               padding: "8px 12px",
-              background: loading ? "var(--s-sunken)" : "var(--c-blue-bg)",
-              color: loading ? "var(--t-faint)" : "#1e3a8a",
-              cursor: loading ? "not-allowed" : "pointer",
+              background: loading || parsing ? "var(--s-sunken)" : "var(--c-blue-bg)",
+              color: loading || parsing ? "var(--t-faint)" : "#1e3a8a",
+              cursor: loading || parsing ? "not-allowed" : "pointer",
             }}
           >
-            上传 Excel
-            <input type="file" accept=".xlsx,.xls" disabled={loading} style={{ display: "none" }} onChange={handleUpload} />
+            {parsing ? "解析中…" : "上传 Excel"}
+            <input type="file" accept=".xlsx,.xls" disabled={loading || parsing} style={{ display: "none" }} onChange={handleUpload} />
           </label>
           <button
             type="button"
-            disabled={loading || rows.length === 0}
+            disabled={loading || parsing || rows.length === 0}
             onClick={handleSubmit}
             style={{
               border: "none",
               borderRadius: 8,
               padding: "8px 12px",
-              background: loading || rows.length === 0 ? "var(--t-faint)" : "var(--c-blue)",
+              background: loading || parsing || rows.length === 0 ? "var(--t-faint)" : "var(--c-blue)",
               color: "var(--white)",
-              cursor: loading || rows.length === 0 ? "not-allowed" : "pointer",
+              cursor: loading || parsing || rows.length === 0 ? "not-allowed" : "pointer",
             }}
           >
             {loading ? `提交中 ${current}/${rows.length}...` : "一键提交批量下单"}

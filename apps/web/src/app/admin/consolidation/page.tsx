@@ -135,6 +135,16 @@ export default function AdminConsolidationPage() {
 
   // 2026-09-01 竞态全扫：详情要认主人——响应回来时核对还是不是当前选中的那个任务
   const selectedTaskIdRef = useRef<string | null>(null);
+
+  /** 2026-09-02 终审整改：换选中任务必须在用户点击处**同步**赋值 ref，useEffect 里那句只作兜底。
+      只靠 useEffect 的话，点击到 effect 跑起来之间有间隙，旧任务的晚响应在间隙里核对的还是旧 ref，
+      会照样落地盖到错的任务上。所有改选中任务的入口一律走这里。 */
+  const selectTask = (id: string | null) => {
+    selectedTaskIdRef.current = id; // 点击处同步认主人，晚到的旧响应立刻失效
+    setTaskDetail(null);            // 旧任务的详情内容不许在新任务名下多留一帧
+    setSelectedTaskId(id);
+  };
+
   const loadDetail = useCallback(async (taskId: string) => {
     try {
       const data = await fetchStaffConsolidationTaskDetail(taskId);
@@ -213,7 +223,7 @@ export default function AdminConsolidationPage() {
       setToast("任务已删除");
       setDeleteTaskId(null);
       setDeletePassword("");
-      if (selectedTaskId === tid) setSelectedTaskId(null);
+      if (selectedTaskId === tid) selectTask(null); // 2026-09-02 终审整改：走统一入口，同步认主人
       await loadTasks();
     } catch (e: any) {
       setDeleteError(e?.message ?? "删除失败");
@@ -448,10 +458,10 @@ export default function AdminConsolidationPage() {
                     <tr key={t.id} style={{ borderBottom: "1px solid var(--l-soft)", cursor: "pointer" }}
                       onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--s-alt)"; }}
                       onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = ""; }}>
-                      <td onClick={() => setSelectedTaskId(t.id)} style={{ ...tdS, fontWeight: 600, whiteSpace: "nowrap", minWidth: 140 }}>{t.taskNo}</td>
-                      <td onClick={() => setSelectedTaskId(t.id)} style={{ ...tdS, minWidth: 80 }}>{t.clientName || "-"}</td>
-                      <td onClick={() => setSelectedTaskId(t.id)} style={{ ...tdS, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.destinationTh}</td>
-                      <td onClick={() => setSelectedTaskId(t.id)} style={tdS}>
+                      <td onClick={() => selectTask(t.id)} style={{ ...tdS, fontWeight: 600, whiteSpace: "nowrap", minWidth: 140 }}>{t.taskNo}</td>
+                      <td onClick={() => selectTask(t.id)} style={{ ...tdS, minWidth: 80 }}>{t.clientName || "-"}</td>
+                      <td onClick={() => selectTask(t.id)} style={{ ...tdS, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.destinationTh}</td>
+                      <td onClick={() => selectTask(t.id)} style={tdS}>
                         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                           <div style={{ flex: 1, height: 6, background: "var(--l-soft)", borderRadius: 3, overflow: "hidden", maxWidth: 120 }}>
                             <div style={{ height: "100%", width: `${Math.min(t.volumePercent, 100)}%`, background: t.volumePercent >= 85 ? (t.volumePercent >= 100 ? "var(--c-green-2)" : "var(--c-amber)") : "#1e3a8a", borderRadius: 3 }} />
@@ -459,12 +469,12 @@ export default function AdminConsolidationPage() {
                           <span style={{ fontSize: 11, color: "var(--t-muted)", whiteSpace: "nowrap" }}>{t.totalVolumeM3}/{t.maxVolumeM3}</span>
                         </div>
                       </td>
-                      <td onClick={() => setSelectedTaskId(t.id)} style={tdS}>
+                      <td onClick={() => selectTask(t.id)} style={tdS}>
                         <span style={{ fontSize: 11, padding: "2px 6px", borderRadius: 4, background: t.status === "completed" ? "var(--c-green-bg)" : t.status === "cancelled" ? "var(--c-red-bg)" : "var(--c-blue-bg-2)", color: t.status === "completed" ? "var(--c-green-deep)" : t.status === "cancelled" ? "var(--c-red-dark)" : "var(--c-blue-deep)", whiteSpace: "nowrap" }}>
                           {STATUS_ZH[t.status] || t.status}
                         </span>
                       </td>
-                      <td onClick={() => setSelectedTaskId(t.id)} style={{ ...tdS, whiteSpace: "nowrap", minWidth: 100 }}>{formatBeijingTime(t.createdAt)}</td>
+                      <td onClick={() => selectTask(t.id)} style={{ ...tdS, whiteSpace: "nowrap", minWidth: 100 }}>{formatBeijingTime(t.createdAt)}</td>
                       <td style={{ ...tdS, textAlign: "right" }}>
                         <button onClick={(e) => { e.stopPropagation(); void openDeleteTask(t.id); }} style={{ padding: "3px 10px", border: "1px solid var(--c-red)", color: "var(--c-red)", background: "var(--white)", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>删除</button>
                       </td>
@@ -481,13 +491,13 @@ export default function AdminConsolidationPage() {
       {selectedTaskId && taskDetail && (
         <div style={{ padding: 24 }}>
           <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
-            <button onClick={() => { setSelectedTaskId(null); setPreviewImage(null); setExpandedPrealerts(new Set()); setEditPrealert(null); setEditMark(""); setEditExpressNo(""); setEditProductRows([]); setEditSubmitting(false); setDeletePrealertId(null); setDeleteTaskId(null); setReviewSubmitting(false); setShowRejectDialog(false); setRejectReason(""); setToast(""); loadTasks(); }} style={{ padding: "6px 14px", border: "1px solid var(--l-strong)", background: "var(--white)", color: "var(--t-muted)", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>← 返回</button>
+            <button onClick={() => { selectTask(null); setPreviewImage(null); setExpandedPrealerts(new Set()); setEditPrealert(null); setEditMark(""); setEditExpressNo(""); setEditProductRows([]); setEditSubmitting(false); setDeletePrealertId(null); setDeleteTaskId(null); setReviewSubmitting(false); setShowRejectDialog(false); setRejectReason(""); setToast(""); loadTasks(); }} style={{ padding: "6px 14px", border: "1px solid var(--l-strong)", background: "var(--white)", color: "var(--t-muted)", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>← 返回</button>
             <h2 style={{ fontSize: 20, margin: 0 }}>{taskDetail.taskNo}</h2>
             <div style={{ fontSize: 12, color: "var(--t-muted)", marginBottom: 8 }}>创建时间：{formatBeijingTime(taskDetail.createdAt)}</div>
             <span style={{ color: "var(--t-muted)", fontSize: 13 }}>{taskDetail.clientName}</span>
             <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 4, background: "var(--c-blue-bg-2)", color: "var(--c-blue-deep)" }}>{STATUS_ZH[taskDetail.status] || taskDetail.status}</span>
             <div style={{ flex: 1 }} />
-            <button onClick={() => { if (taskDetail) { void openDeleteTask(taskDetail.id); setSelectedTaskId(null); } }} style={{ padding: "6px 14px", border: "1px solid var(--c-red)", color: "var(--c-red)", background: "var(--white)", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>删除任务</button>
+            <button onClick={() => { if (taskDetail) { void openDeleteTask(taskDetail.id); selectTask(null); } }} style={{ padding: "6px 14px", border: "1px solid var(--c-red)", color: "var(--c-red)", background: "var(--white)", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>删除任务</button>
           </div>
 
           {/* 进度条 */}

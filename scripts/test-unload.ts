@@ -28,7 +28,10 @@ import assert from "node:assert/strict";
 import { unloadAllItemsOfContainer, unloadItemFully } from "../apps/api/src/modules/shipments/unload-item";
 
 const failures: string[] = [];
+// 2026-09-02 终审整改：项数动态数，别再写死「8」—— 加减项时收尾输出跟着走
+let 总项数 = 0;
 async function check(name: string, body: () => Promise<void>): Promise<void> {
+  总项数 += 1;
   try { await body(); console.log(`  ✅ ${name}`); }
   catch (error) {
     failures.push(name);
@@ -104,16 +107,51 @@ async function main(): Promise<void> {
     }
   });
 
-  await check("4) 没有父单的整票货：只删柜内记录，**不许删运单**", async () => {
+  await check("4) 没有父单的整票货：不删运单、状态退回已入库、件数方数重量一个不许动", async () => {
     /**
      * ⚠️ 整票装柜（没分柜）时子单就是运单本身。
      * 这里要是跟着删，客户的运单就凭空没了。
+     *
+     * 2026-09-02 终审整改（P1）补断言：整票全量卸柜原来只删柜内记录就走人，
+     * 运单状态停在「运输中/已签收」不退回。现在必须：
+     *   · 状态退回「已入库」+ 写 sl_unld_ 轨迹；
+     *   · ⚠️⚠️ 铁的护栏：件数/方数/重量三个字段**不许出现在 update 里**
+     *     （排查第 3 条拍板：整票记录卸柜不许改运单数字）。
      */
-    const { tx, 记录 } = makeTx(null);
-    const r = await unloadItemFully(tx as any, { id: "i_1", shipment: 子单({ parentTrackingNo: null }) }, "c_1");
-    assert.deepEqual(记录.删掉的柜内记录, ["i_1"], "柜内记录没删");
-    assert.deepEqual(记录.删掉的运单, [], "把整票货的运单删掉了 —— 客户的单会凭空消失");
-    assert.equal(r.删了子单, false);
+    // 4a) 状态已前进（运输中）：退回「已入库」+ 写轨迹，数字一个不动
+    {
+      // makeTx 第一个参数在这条分支里当「运单自己」用（mock 的 findFirst 不分对象）
+      const { tx, 记录 } = makeTx({ id: "s_child", currentStatus: "departed" });
+      const r = await unloadItemFully(tx as any, { id: "i_1", shipment: 子单({ parentTrackingNo: null }) }, "c_1");
+      assert.deepEqual(记录.删掉的柜内记录, ["i_1"], "柜内记录没删");
+      assert.deepEqual(记录.删掉的运单, [], "把整票货的运单删掉了 —— 客户的单会凭空消失");
+      assert.equal(r.删了子单, false);
+      assert.ok(记录.父单更新, "整票卸柜后没有动运单 —— 状态没退回");
+      assert.equal(记录.父单更新.currentStatus, "inWarehouseCN", "整票卸柜后状态没退回「已入库」—— 客户会一直看到「运输中」");
+      assert.ok(!("packageCount" in 记录.父单更新), "整票卸柜动了件数 —— 排查第 3 条拍板不许改");
+      assert.ok(!("volumeM3" in 记录.父单更新), "整票卸柜动了方数 —— 排查第 3 条拍板不许改");
+      assert.ok(!("weightKg" in 记录.父单更新), "整票卸柜动了重量 —— 排查第 3 条拍板不许改");
+      assert.equal(记录.轨迹.length, 1, "没写轨迹 —— 客户会觉得状态莫名其妙变了");
+      assert.ok(String(记录.轨迹[0].id).startsWith("sl_unld_"), `轨迹 id 前缀不是 sl_unld_：${记录.轨迹[0].id}`);
+      assert.equal(记录.轨迹[0].fromStatus, "departed", "轨迹的起点状态不对");
+      assert.equal(记录.轨迹[0].toStatus, "inWarehouseCN", "轨迹的终点状态不对");
+      assert.ok(/退回国内仓/.test(记录.轨迹[0].remark), `轨迹备注看不懂：${记录.轨迹[0].remark}`);
+    }
+    // 4b) 终态（已签收等）不许拽回：状态不动，只在轨迹里记一条备注
+    {
+      const { tx, 记录 } = makeTx({ id: "s_child", currentStatus: "delivered" });
+      await unloadItemFully(tx as any, { id: "i_1", shipment: 子单({ parentTrackingNo: null }) }, "c_1");
+      assert.equal(记录.父单更新, null, "终态的整票运单被拽回了 —— 终态不许动");
+      assert.equal(记录.轨迹.length, 1, "终态卸柜该留一条备注轨迹给排查用");
+      assert.equal(记录.轨迹[0].toStatus, "delivered", "终态的备注轨迹不该改状态");
+    }
+    // 4c) 还在国内仓（已创建/已入库/暂缓装柜）：状态不动、也不刷轨迹
+    for (const cur of ["created", "inWarehouseCN", "holdLoading"]) {
+      const { tx, 记录 } = makeTx({ id: "s_child", currentStatus: cur });
+      await unloadItemFully(tx as any, { id: "i_1", shipment: 子单({ parentTrackingNo: null }) }, "c_1");
+      assert.equal(记录.父单更新, null, `整票运单是 ${cur} 时不该动它的状态`);
+      assert.equal(记录.轨迹.length, 0, `整票运单是 ${cur} 时还写了轨迹（刷屏）`);
+    }
   });
 
   await check("5) 删柜子：柜里每一条都要卸，而且按 id 排序（锁序规矩）", async () => {
@@ -167,9 +205,13 @@ async function main(): Promise<void> {
   });
 
   await check("8) 部分卸柜那份手抄的还货逻辑，退的状态和轨迹前缀必须跟共用实现一致", async () => {
-    /* 2026-09-02 复核补：loading-manifests 的部分卸柜还货是 unloadItemFully 的手抄同款，
-       两份今天一致、明天就可能只改一份（本项目「N 个入口只修 M 个」栽过多次）。
-       这里做源码级对表：部分卸柜那段必须也退回 inWarehouseCN、也写 sl_unld_ 轨迹。 */
+    /* 2026-09-02 复核补，2026-09-02 终审整改（P3）把话说老实：
+       ⚠️ 这一项**只是源码对表，不是行为测试** —— 它只 grep 整个 routes.ts 里
+       有没有出现 inWarehouseCN 和 sl_unld_ 这两个字符串，别处出现也算过，
+       证明不了部分卸柜那段真的退状态、真的写轨迹（Codex 终审点名它是假绿）。
+       它防的只有一件事：「改一份漏一份」—— loading-manifests 的部分卸柜还货
+       是 unloadItemFully 的手抄同款，哪天有人把那边的 inWarehouseCN / sl_unld_
+       整个删掉，这里能响一声。真正的行为守卫是上面 1~6 那些用假 tx 真调的项。 */
     const fs = require("node:fs") as typeof import("node:fs");
     const path = require("node:path") as typeof import("node:path");
     const api = path.join(__dirname, "..", "apps", "api", "src", "modules");
@@ -179,10 +221,10 @@ async function main(): Promise<void> {
   });
 
   if (failures.length > 0) {
-    console.error(`\n${failures.length}/8 项不通过：${failures.join("；")}`);
+    console.error(`\n${failures.length}/${总项数} 项不通过：${failures.join("；")}`);
     process.exit(1);
   }
-  console.log("从柜子里卸货：8 项全部通过");
+  console.log(`从柜子里卸货：${总项数} 项全部通过`);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

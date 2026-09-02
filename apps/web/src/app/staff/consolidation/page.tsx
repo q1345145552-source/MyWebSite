@@ -116,18 +116,45 @@ export default function StaffConsolidationPage() {
     }
   }, [statusFilter, tasksGate]);
 
+  /** 2026-09-02 终审整改（P1）：详情加载配门闩 + 认主人。
+      病根：详情是异步取的，旧任务的响应后到会盖掉新任务的详情——页面显示 A，
+      操作函数却拿当前选中的 B，操作会落错任务。
+      两道防线：① 领号验号，只认最新一次详情请求；② 响应落地时核对
+      「当前选中的任务」还是不是出发时那张（selectedTaskIdRef，点击处同步赋值），
+      不是就整段丢弃，报错也不许弹。 */
+  const detailGate = useRef(createRequestGate()).current;
+  // 认主人的 ref：必须在用户点击处**同步**赋值，不许等 useEffect——
+  // useEffect 晚一拍，异步响应插在中间就核不住（2026-09-02 终审整改）
+  const selectedTaskIdRef = useRef<string | null>(null);
   const loadDetail = useCallback(async (taskId: string) => {
+    const ticket = detailGate.begin(); // 出发时领号
     try {
       const data = await fetchStaffConsolidationTaskDetail(taskId);
+      if (!detailGate.isCurrent(ticket)) return; // 验号：已有更新的详情请求出发，旧响应丢弃
+      if (selectedTaskIdRef.current !== taskId) return; // 认主人：用户已切走/返回列表
       setTaskDetail(data);
       // 预填报价
       if (data.bookingFee != null) setQuoteBooking(String(data.bookingFee));
       if (data.customsFee != null) setQuoteCustoms(String(data.customsFee));
       if (data.loadingFee != null) setQuoteLoading(String(data.loadingFee));
     } catch (e: any) {
+      if (!detailGate.isCurrent(ticket)) return; // 旧请求的报错也不许弹
+      if (selectedTaskIdRef.current !== taskId) return;
       setToast(e.message);
     }
-  }, []);
+  }, [detailGate]);
+
+  /** 2026-09-02 终审整改（P1）：所有会写库的操作动手前，核对
+      「当前展示详情的任务 id」===「即将操作的任务 id」。
+      详情和选中项在极端时序下可能对不上（旧详情还挂在页面上），
+      对不上就拒绝操作，绝不让操作落到另一张任务头上。 */
+  const guardDetailOwner = (tid: string): boolean => {
+    if (!taskDetail || taskDetail.id !== tid) {
+      setToast("页面刚切换过任务，请重新打开再操作");
+      return false;
+    }
+    return true;
+  };
 
   useEffect(() => { loadTasks(); }, [loadTasks]);
   useEffect(() => {
@@ -148,6 +175,8 @@ export default function StaffConsolidationPage() {
   // ======== 签收 ========
   const handleReceive = async () => {
     if (!showReceive) return;
+    // 2026-09-02 终审整改：签收会写库，先核对展示详情的任务就是当前选中的任务
+    if (!selectedTaskId || !guardDetailOwner(selectedTaskId)) return;
     if (!receiveProofBase64) { setToast("请上传签收照片"); return; }
     setReceiveSubmitting(true);
     try {
@@ -178,6 +207,7 @@ export default function StaffConsolidationPage() {
   const handleConfirmFull = async () => {
     const tid = selectedTaskId;
     if (!tid) return;
+    if (!guardDetailOwner(tid)) return; // 2026-09-02 终审整改：防止操作落错任务
     try {
       await confirmConsolidationTaskFull(tid);
       setToast("已确认满柜");
@@ -196,6 +226,7 @@ export default function StaffConsolidationPage() {
   const handleQuote = async () => {
     const tid = selectedTaskId;
     if (!tid) return;
+    if (!guardDetailOwner(tid)) return; // 2026-09-02 终审整改：防止报价落错任务
     const b = parseFloat(quoteBooking);
     const c = parseFloat(quoteCustoms);
     const l = parseFloat(quoteLoading);
@@ -223,11 +254,15 @@ export default function StaffConsolidationPage() {
   const handleCancel = async (confirmPassword?: string, adminAccount?: string) => {
     const tid = selectedTaskId;
     if (!tid) return;
+    // 2026-09-02 终审整改：防止取消落错任务。放在两步确认最前面，
+    // 管理员密码弹窗流程（09-01 加的）不受影响——弹窗期间详情和选中项本来就一致
+    if (!guardDetailOwner(tid)) return;
     if (cancelStep === 0) { setCancelStep(1); return; }
     setCancelSubmitting(true);
     try {
       await cancelConsolidationTask(tid, confirmPassword ? { confirmPassword, adminAccount } : undefined);
       setToast("任务已取消");
+      selectedTaskIdRef.current = null; // 2026-09-02 终审整改：取消成功退回列表，同步改主人 ref
       setSelectedTaskId(null);
       setCancelStep(0);
       setCancelPwdPrompt("");
@@ -255,6 +290,7 @@ export default function StaffConsolidationPage() {
   const handleApprovePayment = async () => {
     const tid = selectedTaskId;
     if (!tid) return;
+    if (!guardDetailOwner(tid)) return; // 2026-09-02 终审整改：防止审核落错任务
     setReviewSubmitting(true);
     try {
       await reviewConsolidationPayment(tid);
@@ -274,6 +310,7 @@ export default function StaffConsolidationPage() {
   const handleRejectPayment = async () => {
     const tid = selectedTaskId;
     if (!tid) return;
+    if (!guardDetailOwner(tid)) return; // 2026-09-02 终审整改：防止退回付款落错任务
     if (!rejectReason.trim()) { setToast("请填写拒绝原因"); return; }
     setReviewSubmitting(true);
     try {
@@ -297,6 +334,7 @@ export default function StaffConsolidationPage() {
   const handleAdvance = async (toStatus: string) => {
     const tid = selectedTaskId;
     if (!tid) return;
+    if (!guardDetailOwner(tid)) return; // 2026-09-02 终审整改：防止状态推进落错任务
     setAdvancing(true);
     try {
       await advanceConsolidationTaskStatus({ taskId: tid, toStatus });
@@ -316,6 +354,7 @@ export default function StaffConsolidationPage() {
   const handleLoading = async () => {
     const tid = selectedTaskId;
     if (!tid) return;
+    if (!guardDetailOwner(tid)) return; // 2026-09-02 终审整改：防止装柜落错任务
     setLoadingSubmitting(true);
     try {
       await loadingConsolidationTask({ taskId: tid, containerNo: loadingContainerNo.trim() || undefined, loadingDate: loadingDate || undefined });
@@ -505,7 +544,7 @@ export default function StaffConsolidationPage() {
                 </thead>
                 <tbody>
                   {filteredTasks.map((t) => (
-                    <tr key={t.id} onClick={() => setSelectedTaskId(t.id)} style={{ borderBottom: "1px solid var(--l-soft)", cursor: "pointer", transition: "background 0.15s" }}
+                    <tr key={t.id} onClick={() => { selectedTaskIdRef.current = t.id; /* 2026-09-02 终审整改：认主人 ref 在点击处同步赋值，不等 useEffect */ setSelectedTaskId(t.id); }} style={{ borderBottom: "1px solid var(--l-soft)", cursor: "pointer", transition: "background 0.15s" }}
                       onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--s-alt)"; }}
                       onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = ""; }}>
                       <td style={{ ...tdS, fontWeight: 600, whiteSpace: "nowrap", minWidth: 140 }}>{t.taskNo}</td>
@@ -534,7 +573,7 @@ export default function StaffConsolidationPage() {
       {selectedTaskId && taskDetail && (
         <div style={{ padding: 24 }}>
           <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
-            <button onClick={() => { setSelectedTaskId(null); setPreviewImage(null); setShowReceive(null); setShowQuote(false); setShowLoadingForm(false); setCancelStep(0); setCancelPwdPrompt(""); setCancelPassword(""); setExpandedPrealerts(new Set()); setReviewSubmitting(false); setShowRejectDialog(false); setRejectReason(""); setToast(""); loadTasks(); }} style={{ padding: "6px 14px", border: "1px solid var(--l-strong)", background: "var(--white)", color: "var(--t-muted)", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>← 返回</button>
+            <button onClick={() => { selectedTaskIdRef.current = null; /* 2026-09-02 终审整改：返回列表也要同步改主人 ref，在途的详情响应才拦得住 */ setSelectedTaskId(null); setPreviewImage(null); setShowReceive(null); setShowQuote(false); setShowLoadingForm(false); setCancelStep(0); setCancelPwdPrompt(""); setCancelPassword(""); setExpandedPrealerts(new Set()); setReviewSubmitting(false); setShowRejectDialog(false); setRejectReason(""); setToast(""); loadTasks(); }} style={{ padding: "6px 14px", border: "1px solid var(--l-strong)", background: "var(--white)", color: "var(--t-muted)", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>← 返回</button>
             <h2 style={{ fontSize: 20, margin: 0 }}>{taskDetail.taskNo}</h2>
             <div style={{ fontSize: 12, color: "var(--t-muted)", marginBottom: 8 }}>创建时间：{formatBeijingTime(taskDetail.createdAt)}</div>
             <span style={{ color: "var(--t-muted)", fontSize: 13 }}>{taskDetail.clientName}</span>

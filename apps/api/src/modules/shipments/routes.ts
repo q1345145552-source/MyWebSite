@@ -632,6 +632,9 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
    * 删完把运单的当前状态退回到剩下的最后一条轨迹。
    * ⚠️ 如果一条都不剩，当前状态**保持不动** —— 生产库里有 219 张已签收的老运单
    * 压根没有轨迹记录，把它们重置成「已创建」比留着错状态更糟。
+   * 唯一的例外（2026-09-02 终审整改 P2）：删掉的是**唯一一条「已入库」轨迹**、
+   * 且运单当前状态就是「已入库」时，退回「已创建」—— 入库记录写错了删掉，
+   * 状态不能还挂在「已入库」上。老单保护不受影响：那 219 张的状态是已签收。
    */
   app.post("/staff/shipments/track/delete-log", async (req, res) => {
     const auth = requireRole(req, res, ["staff", "admin"]);
@@ -693,6 +696,31 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
         if (lockedShipment?.parentTrackingNo) {
           await syncParentStatusFromChildren(tx, lockedShipment.parentTrackingNo, auth.companyId);
         }
+      } else if (log.toStatus === "inWarehouseCN") {
+        /**
+         * 2026-09-02 终审整改（P2）：删掉**唯一一条**「已入库」轨迹后状态不回退的问题。
+         * 上面「一条不剩就不动」的保护是给没有轨迹的已签收老单的（219 张）——
+         * 它们的当前状态不是 inWarehouseCN，不会走进这个分支。
+         * 这里把 inWarehouseCN 纳入删除后的状态推导：删掉唯一一条入库轨迹
+         * = 入库记录本身写错了，状态退回「已创建」（照上面 latest 重算的写法补）。
+         * ⚠️ 状态用锁内重读的值判断（CLAUDE.md 第 28 条），不用事务外那份快照 ——
+         * 只有当前状态确实还是「已入库」才退，别的状态一律照旧保持不动。
+         */
+        const lockedNow = await tx.shipment.findUnique({
+          where: { id: log.shipmentId },
+          select: { currentStatus: true, parentTrackingNo: true },
+        });
+        if (lockedNow?.currentStatus === "inWarehouseCN") {
+          await tx.shipment.update({
+            where: { id: log.shipmentId },
+            data: { currentStatus: "created", updatedAt: new Date() },
+          });
+          // 子单状态变了照旧要重算父单大状态，口径跟上面 latest 分支一致
+          if (lockedNow.parentTrackingNo) {
+            await syncParentStatusFromChildren(tx, lockedNow.parentTrackingNo, auth.companyId);
+          }
+          return { newStatus: "created", hasLogsLeft: false };
+        }
       }
       return { newStatus: latest?.toStatus ?? log.shipment.currentStatus, hasLogsLeft: !!latest };
     });
@@ -730,7 +758,7 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
     /** 延迟 / 需要盯的：延迟开船、海上延误、口岸滞留、海关查验、异常 */
     const ATTENTION = ["delayDeparted", "delayInTransit", "borderDelay", "customsInspect", "exception"];
 
-    const [total, created, atWarehouse, delivering, done, attention, signedThisMonth] =
+    const [total, created, atWarehouse, delivering, done, attention, signedThisMonth, exceptionCount] =
       await Promise.all([
         prisma.shipment.count({ where }),
         // 「未发出」：已创建 + 已入库 + 暂缓装柜（2026-09-02 复核对齐：客户端四分类的
@@ -744,10 +772,21 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
         prisma.shipment.count({
           where: { ...where, currentStatus: "delivered", updatedAt: { gte: startOfMonth } },
         }),
+        // 2026-09-02 终审整改（P2）：异常单单独数出来，从下面「在途」的减法里扣掉
+        prisma.shipment.count({ where: { ...where, currentStatus: "exception" } }),
       ]);
 
-    // 剩下的全算「在途」——任何没被上面四类认领的状态都不会凭空消失
-    const inTransit = total - created - atWarehouse - delivering - done;
+    /**
+     * 剩下的全算「在途」——任何没被上面几类认领的状态都不会凭空消失。
+     * 2026-09-02 终审整改（P2）：exception 原来没从减法里扣，异常单被同时数进
+     * 「在途」和「延迟/查验」两格。口径写清楚：
+     *   · returned / cancelled 在 COMPLETED_STATUSES（done）里，减法早就扣过了；
+     *   · 延迟/查验类（delayDeparted / delayInTransit / borderDelay / customsInspect）
+     *     货确实还在路上，保留在「在途」里、同时出现在「延迟/查验」是有意为之；
+     *   · exception 是「货不在正常途中」的异常态，只出现在「延迟/查验」那格。
+     * 对账等式从此是：total = 未发出 + 到仓 + 派送中 + 已完成 + 异常 + 在途。
+     */
+    const inTransit = total - created - atWarehouse - delivering - done - exceptionCount;
 
     return {
       inTransitCount: Math.max(0, inTransit),
@@ -761,6 +800,9 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
       createdCount: created,
       deliveringCount: delivering,
       doneCount: done,
+      // 2026-09-02 终审整改：异常单数（对账用，界面不显示）——
+      // 未发出 + 到仓 + 派送中 + 已完成 + 异常 + 在途 = total
+      exceptionCount,
     };
   }
 
@@ -790,8 +832,9 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
    * ⚠️ 「在途」用**减法**算，不要列举状态名。
    * 2026-08-08 管理员端柜子统计踩过：第一版列举在途状态，测试库 16 个柜子只数到 13 个，
    * 漏了两个老状态名，柜子凭空消失且没人发现。
-   * 这里同理：精确认领「已创建 / 已到仓 / 派送中 / 已完成」四类，剩下的一律算在途，
-   * 以后加了新状态也不会漏。返回里带上 total，四段相加应等于 total，一眼能看出有没有漏。
+   * 这里同理：精确认领「已创建 / 已到仓 / 派送中 / 已完成 / 异常」几类，剩下的一律算在途，
+   * 以后加了新状态也不会漏。返回里带上 total，各段相加应等于 total，一眼能看出有没有漏
+   * （2026-09-02 起 exception 也从在途里扣掉了，对账时要把 exceptionCount 一起加上）。
    */
   app.get("/staff/shipments/overview", async (req, res) => {
     const auth = requireRole(req, res, ["staff", "admin"]);

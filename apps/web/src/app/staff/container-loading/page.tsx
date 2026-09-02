@@ -233,7 +233,7 @@ export default function StaffContainerLoadingPage() {
       const items = await fetchLoadingManifests({ query: query.trim(), trackingNo: searchTrackingNo.trim(), status: statusFilter, transportMode: modeFilter });
       if (!listGate.isCurrent(ticket)) return; // 旧条件的响应后到，丢弃
       setList(items);
-      if (!selectedId && items.length > 0) setSelectedId(items[0].id);
+      if (!selectedId && items.length > 0) selectManifest(items[0].id); // 2026-09-02 终审整改：走统一入口，同步认主人
     } catch (e) {
       if (!listGate.isCurrent(ticket)) return; // 旧请求的报错不许安到新请求头上
       setError(e instanceof Error ? e.message : "加载失败");
@@ -249,6 +249,14 @@ export default function StaffContainerLoadingPage() {
       响应落地时核对「当前选中的柜子」还是不是出发时那个。每次渲染同步一次最新值。 */
   const selectedIdRef = useRef("");
   selectedIdRef.current = selectedId;
+
+  /** 2026-09-02 终审整改：换柜必须在用户点击处**同步**赋值 ref——上面那句渲染期赋值
+      要等重渲染才跑，点击到重渲染之间的间隙里，旧柜的晚响应核对的还是旧值，会照样落地
+      盖到错的柜子上。渲染处那句保留作兜底。所有改选中柜子的入口一律走这里。 */
+  const selectManifest = (id: string) => {
+    selectedIdRef.current = id; // 点击处同步认主人，晚到的旧响应立刻失效
+    setSelectedId(id);
+  };
 
   const loadDetail = useCallback(async (id: string) => {
     if (!id) return;
@@ -362,7 +370,7 @@ export default function StaffContainerLoadingPage() {
     try {
       await deleteContainer(selectedId);
       setToast("柜子已删除");
-      setSelectedId("");
+      selectManifest(""); // 2026-09-02 终审整改：走统一入口，同步认主人
       setDetail(null);
       await loadList();
       await loadShipmentList();
@@ -526,7 +534,7 @@ export default function StaffContainerLoadingPage() {
             <p style={{ padding: 20, color: "var(--t-strong)", fontSize: 13, textAlign: "center" }}>暂无装柜任务，请先创建装柜</p>
           ) : (
             list.map((item) => (
-              <div key={item.id} onClick={() => setSelectedId(item.id)} style={{ padding: "12px 16px", cursor: "pointer", borderBottom: "1px solid var(--s-cool-2)", background: selectedId === item.id ? "var(--c-blue-bg)" : "transparent" }}>
+              <div key={item.id} onClick={() => selectManifest(item.id)} style={{ padding: "12px 16px", cursor: "pointer", borderBottom: "1px solid var(--s-cool-2)", background: selectedId === item.id ? "var(--c-blue-bg)" : "transparent" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <span style={{ fontWeight: 600, fontSize: 14, color: "#14171D" }}>{item.manifestNo}</span>
                   <span style={{ fontSize: 11, fontWeight: 500, color: STATUS_COLOR[item.status] ?? "var(--t-strong)" }}>{STATUS_LABEL[item.status] ?? item.status}</span>

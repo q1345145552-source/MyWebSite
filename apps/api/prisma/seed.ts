@@ -12,6 +12,10 @@
  */
 import { PrismaClient } from "@prisma/client";
 import crypto from "node:crypto";
+// 2026-09-02 终审整改：状态标签名单直接 import 唯一来源（ai-config-store），
+// 删掉这里的手抄副本 —— 之前两份名单条数（16 vs 31）和中文都对不上，迟早越走越远。
+// 该文件只有 type-only 的跨包 import，tsx 跑 seed 时可正常解析、无副作用。
+import { DEFAULT_STATUS_LABELS } from "../src/modules/ai/ai-config-store";
 
 const prisma = new PrismaClient();
 
@@ -39,28 +43,8 @@ function hashPassword(password: string): string {
 
 const DEMO_HASH = hashPassword(DEFAULT_PASSWORD);
 
-// 状态标签（来自 ai-config-store.ts 的 DEFAULT_STATUS_LABELS）
-const DEFAULT_STATUS_LABELS: Array<{ status: string; labelZh: string }> = [
-  { status: "created", labelZh: "已创建" },
-  { status: "pickedUp", labelZh: "已揽收" },
-  // 2026-09-02：inWarehouseCN 进了运单状态流程（中文定为「已入库」），
-  // 跟 ai-config-store.ts 的 DEFAULT_STATUS_LABELS 逐字一致（原来这里写的是老名字「中国仓已入库」）
-  { status: "inWarehouseCN", labelZh: "已入库" },
-  { status: "customsPending", labelZh: "清关待处理" },
-  { status: "inTransit", labelZh: "运输中" },
-  { status: "customsTH", labelZh: "泰国清关中" },
-  { status: "outForDelivery", labelZh: "派送中" },
-  { status: "delivered", labelZh: "已签收" },
-  // 2026-08-31：补上 2026-08-06 新增的 5 个陆运环节，与 ai-config-store.ts 的名单逐字保持一致
-  { status: "atPortCn", labelZh: "到达凭祥口岸" },
-  { status: "inVietnam", labelZh: "过境越南" },
-  { status: "laosCleared", labelZh: "老挝边境已放行" },
-  { status: "borderDelay", labelZh: "口岸滞留" },
-  { status: "customsInspect", labelZh: "海关查验" },
-  { status: "exception", labelZh: "异常" },
-  { status: "returned", labelZh: "已退回" },
-  { status: "cancelled", labelZh: "已取消" },
-];
+// 2026-09-02 终审整改：状态标签不再手抄，见顶部 import（唯一来源 ai-config-store.DEFAULT_STATUS_LABELS）。
+// ⚠️ 下面对 ai_status_labels 只许 upsert，绝不能加任何删行写法 —— 表里混着计费用的 min_volume 行。
 
 async function main() {
   console.log("🌱 开始 seed...");
@@ -530,6 +514,9 @@ async function main() {
       id: "lm_001",
       companyId: COMPANY_ID,
       shipmentId: "s_001",
+      // 2026-09-02 终审顺带补：deliveryNo 是必填列，缺了它 create 路径一跑就炸
+      // （seed.ts 不在任何 tsconfig 的 include 里，类型检查一直照不到这里）
+      deliveryNo: "WD202600001",
       carrierName: "DHL",
       externalTrackingNo: "DHLTH0001",
       status: "inTransit",

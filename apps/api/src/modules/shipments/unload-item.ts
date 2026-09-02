@@ -45,8 +45,71 @@ export async function unloadItemFully(
   /**
    * 没有父单 = 这票货是整票装进柜的（没分柜），子单就是它自己 ——
    * 那种情况不许删运单，只把柜内记录删掉就行。
+   *
+   * 2026-09-02 终审整改（P1）：原来这里删完柜内记录就走人，**运单状态不退回**——
+   * 整票货卸下来躺在国内仓，客户看到的还是「运输中/已签收」（跟下面父单那个
+   * 「状态冻住」是同一个病，只是这条分支当时漏了）。现在补上：状态退回「已入库」
+   * + 写 sl_unld_ 轨迹。
+   *
+   * ⚠️⚠️ 铁的护栏：**件数/方数/重量一个字段都不许动**（排查第 3 条拍板：
+   * 整票记录卸柜不许改运单数字 —— 整票装柜时本来就没扣过运单数字，没有可还的）。
+   * 这条分支只许碰 currentStatus 和轨迹。
    */
   if (!item.shipment.parentTrackingNo) {
+    /**
+     * 先锁自己这张运单再读状态（CLAUDE.md 第 28 条：用锁内数据做决定）。
+     * 锁序仍是【柜 → 运单 → 父单】：卸柜那条路（loading-manifests ~861）进来前
+     * 已经按这个顺序锁过同一行，同一事务重复锁同一行是免费的；
+     * 删柜子那条路按柜内记录 id 排序逐条处理，加锁顺序固定。
+     */
+    await tx.$queryRaw`
+      SELECT id FROM shipments
+      WHERE id = ${item.shipment.id} AND company_id = ${companyId}
+      FOR UPDATE
+    `;
+    const self = await tx.shipment.findFirst({
+      where: { id: item.shipment.id, companyId },
+      select: { currentStatus: true },
+    });
+    const cur: string | undefined = self?.currentStatus;
+
+    /**
+     * 「状态只往前不往后」的例外仅限「卸柜退仓」这个业务动作，而且终态不豁免：
+     *   · created / inWarehouseCN：状态没往前走过，不退也不刷轨迹（跟父单那边同一口径）；
+     *   · holdLoading：本来就是「在国内仓暂缓装柜」，货的位置没变，
+     *     退成 inWarehouseCN 反而丢了「暂缓」这层意思 —— 保守不动；
+     *   · 终态 delivered / returned / cancelled / exception：**不许拽回**。
+     *     保守跳过状态改动，只在轨迹里记一条备注（fromStatus = toStatus，状态不变），
+     *     给排查留个「这票货被卸下来过」的痕迹。
+     */
+    const 终态 = ["delivered", "returned", "cancelled", "exception"];
+    const 在仓不动 = ["created", "inWarehouseCN", "holdLoading"];
+    if (cur && !在仓不动.includes(cur)) {
+      const 是终态 = 终态.includes(cur);
+      if (!是终态) {
+        await tx.shipment.update({
+          where: { id: item.shipment.id },
+          // ⚠️ 只动状态。件数/方数/重量绝不出现在这份 data 里（见上面的铁护栏）。
+          data: { currentStatus: "inWarehouseCN", updatedAt: new Date() },
+        });
+      }
+      await tx.statusLog.create({
+        data: {
+          id: `sl_unld_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          companyId,
+          shipmentId: item.shipment.id,
+          operatorId: "system",
+          operatorRole: "system",
+          operatorName: "系统",
+          fromStatus: cur,
+          toStatus: 是终态 ? cur : "inWarehouseCN",
+          remark: 是终态
+            ? "已从柜子卸下（运单已是终态，状态保持不变）"
+            : "已从柜子卸下，退回国内仓等待重新装柜",
+          changedAt: new Date(),
+        },
+      });
+    }
     return { 还给父单: false, 删了子单: false };
   }
 

@@ -5,9 +5,11 @@ import type {
 import type { ShipmentStatus } from "../../../../../packages/shared-types/shipment-status";
 import type { AiKnowledgeStore, StatusLabelStore } from "./ai-types";
 
+// 2026-09-02 终审整改：这里是状态标签的唯一来源 —— prisma/seed.ts 已改为直接 import 本名单
+// （手抄副本已删），改这里就是改 seed，两边不会再走散。
 export const DEFAULT_STATUS_LABELS: StatusLabelConfig[] = [
   { status: "created", labelZh: "已创建" },
-  // 2026-09-02 进流程的新状态（货到国内仓）。⚠️ prisma/seed.ts 里那份手抄副本要逐字一致。
+  // 2026-09-02 进流程的新状态（货到国内仓）
   { status: "inWarehouseCN", labelZh: "已入库" },
   { status: "holdLoading", labelZh: "暂缓柜" },
   { status: "loaded", labelZh: "已装柜" },

@@ -261,6 +261,9 @@ export default function StaffWhrConsolidationPage() {
   const signPrealertIdRef = useRef<string | null>(null);
   const reviewPrealertIdRef = useRef<string | null>(null);
   const thailandPrealertIdRef = useRef<string | null>(null);
+  // 2026-09-02 终审整改：这三个 ref 已改为在「点击打开处同步赋值、关闭处同步清空」，
+  // 下面的 useEffect 只留作兜底——effect 要等渲染后才跑，关 A 开 B 的间隙里 ref 若还停在 A，
+  // A 的慢详情 / 慢压缩结果就能趁机落进 B 的弹窗（见 request-gate.ts 用法二）。
   useEffect(() => { signPrealertIdRef.current = signTarget?.prealertId ?? null; }, [signTarget]);
   useEffect(() => { reviewPrealertIdRef.current = reviewTarget?.prealert?.prealertId ?? null; }, [reviewTarget]);
   useEffect(() => { thailandPrealertIdRef.current = thailandTarget?.prealertId ?? null; }, [thailandTarget]);
@@ -428,6 +431,9 @@ export default function StaffWhrConsolidationPage() {
 
   // ---- 仓库签收 ----
   const handleOpenSign = async (pa: any, planId: string) => {
+    // 2026-09-02 终审整改：认主人的 ref 在点击处同步赋值，不等 useEffect——
+    // 否则打开的瞬间 ref 还停在上一单，旧详情/旧压缩照片能趁间隙落进这张新弹窗
+    signPrealertIdRef.current = pa.prealertId;
     // 2026-09-01 竞态全扫：换单先清掉上一单残留的照片，否则给 A 选的照片会跟着签到 B 上
     setSignFiles([]);
     // 先弹出弹窗显示基本信息 + loading
@@ -456,12 +462,15 @@ export default function StaffWhrConsolidationPage() {
       // 失败分支同样认主人：旧请求的报错不许把当前弹窗关掉
       if (signPrealertIdRef.current !== pa.prealertId) return;
       setToast(e?.message ?? "加载预报单详情失败");
+      signPrealertIdRef.current = null; // 2026-09-02 终审整改：关闭处同步清空 owner
       setSignTarget(null);
     }
   };
 
   const handleWarehouseSign = async () => {
     if (!signTarget || signFiles.length === 0) { setToast("请上传收货凭证照片"); return; }
+    // 2026-09-02 终审整改：还有照片在压缩时不许提交，否则压缩中的那张会被静默漏掉
+    if (signCompressing) { setToast("照片处理中，稍等一下再提交"); return; }
     // 整批超上限就当场说清楚，别让请求发出去被服务器挡掉（那样浏览器只会报 413，员工看不懂）
     const signTotal = totalUploadBytes(signFiles);
     if (signTotal > MAX_UPLOAD_TOTAL_BYTES) {
@@ -481,6 +490,7 @@ export default function StaffWhrConsolidationPage() {
         }
       );
       setToast("签收成功");
+      signPrealertIdRef.current = null; // 2026-09-02 终审整改：关闭处同步清空 owner
       setSignTarget(null); setSignFiles([]);
       loadOperations();
       if (activeTab === "dispatch") loadDispatch();
@@ -500,6 +510,8 @@ export default function StaffWhrConsolidationPage() {
 
   // ---- 审核付款 ----
   const handleOpenReview = async (pa: OpsPrealert, planId: string) => {
+    // 2026-09-02 终审整改：认主人的 ref 在点击处同步赋值，不等 useEffect（同 handleOpenSign）
+    reviewPrealertIdRef.current = pa.prealertId;
     // 先用操作区已有数据把弹窗打开，再补货品明细
     setReviewTarget({ planId, prealert: pa, loading: true });
     try {
@@ -531,6 +543,7 @@ export default function StaffWhrConsolidationPage() {
       // 失败分支同样认主人：旧请求的报错不许把当前弹窗关掉
       if (reviewPrealertIdRef.current !== pa.prealertId) return;
       setToast(e?.message ?? "加载货品详情失败");
+      reviewPrealertIdRef.current = null; // 2026-09-02 终审整改：关闭处同步清空 owner
       setReviewTarget(null);
     }
   };
@@ -547,6 +560,7 @@ export default function StaffWhrConsolidationPage() {
         }
       );
       setToast("审核通过");
+      reviewPrealertIdRef.current = null; // 2026-09-02 终审整改：关闭处同步清空 owner
       setReviewTarget(null);
       loadOperations();
       if (activeTab === "dispatch") loadDispatch();
@@ -582,6 +596,7 @@ export default function StaffWhrConsolidationPage() {
         }
       );
       setToast(r?.totalFee != null ? `已拒绝，应付金额已更新为 ¥${r.totalFee}` : "已拒绝");
+      reviewPrealertIdRef.current = null; // 2026-09-02 终审整改：关闭处同步清空 owner
       setShowReject(false); setReviewTarget(null); setRejectReason(""); setRejectPriceNormal(""); setRejectPriceInspection(""); setRejectPriceSensitive("");
       loadOperations();
       if (activeTab === "dispatch") loadDispatch();
@@ -629,6 +644,8 @@ export default function StaffWhrConsolidationPage() {
   // ---- 泰国签收 ----
   const handleThailandSign = async () => {
     if (!thailandTarget || thailandFiles.length === 0) { setToast("请选择签收单文件"); return; }
+    // 2026-09-02 终审整改：还有照片在压缩时不许提交，否则压缩中的那张会被静默漏掉
+    if (thailandCompressing) { setToast("照片处理中，稍等一下再提交"); return; }
     const thailandTotal = totalUploadBytes(thailandFiles);
     if (thailandTotal > MAX_UPLOAD_TOTAL_BYTES) {
       setToast(`这 ${thailandFiles.length} 张照片共 ${formatBytes(thailandTotal)}，超过 ${formatBytes(MAX_UPLOAD_TOTAL_BYTES)}，请先删掉几张再提交`);
@@ -648,6 +665,7 @@ export default function StaffWhrConsolidationPage() {
         }
       );
       setToast("泰国签收成功");
+      thailandPrealertIdRef.current = null; // 2026-09-02 终审整改：关闭处同步清空 owner
       setThailandTarget(null); setThailandFiles([]);
       loadOperations(); loadDispatch();
     } catch (e: any) {
@@ -1049,7 +1067,7 @@ export default function StaffWhrConsolidationPage() {
                           </div>
                           <div style={{ flexShrink: 0 }}>
                             {/* 2026-09-01 竞态全扫：换单先清掉上一单残留的照片，防止跟错单 */}
-                            <button onClick={() => { setThailandFiles([]); setThailandTarget({ planId: p.planId, prealertId: pa.prealertId, planNo: p.planNo, trackingNo: pa.trackingNo, clientName: pa.clientName, volumeM3: pa.volumeM3 }); }} style={btnBlue}>上传签收单</button>
+                            <button onClick={() => { /* 2026-09-02 终审整改：点击处同步赋值 owner ref，不等 useEffect */ thailandPrealertIdRef.current = pa.prealertId; setThailandFiles([]); setThailandTarget({ planId: p.planId, prealertId: pa.prealertId, planNo: p.planNo, trackingNo: pa.trackingNo, clientName: pa.clientName, volumeM3: pa.volumeM3 }); }} style={btnBlue}>上传签收单</button>
                           </div>
                         </div>
                       ))}
@@ -1222,7 +1240,7 @@ export default function StaffWhrConsolidationPage() {
         {/* 弹窗：仓库签收 */}
         {/* ================================================================ */}
         {signTarget && (
-          <Modal onClose={() => { setSignTarget(null); setSignFiles([]); }}>
+          <Modal onClose={() => { signPrealertIdRef.current = null; /* 2026-09-02 终审整改：关闭处同步清空 owner */ setSignTarget(null); setSignFiles([]); }}>
             <h3 style={{ marginTop: 0 }}>仓库签收</h3>
             <p style={{ fontSize: 13, color: "var(--t-muted)" }}>{signTarget.planNo} · 预报单：{signTarget.trackingNo} · 唛头：{signTarget.mark || "-"}</p>
             <p style={{ fontSize: 13, color: "var(--t-body)" }}>
@@ -1294,10 +1312,11 @@ export default function StaffWhrConsolidationPage() {
               )}
             </div>
             <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
-              <button onClick={handleWarehouseSign} disabled={signSubmitting || signFiles.length === 0} style={{ ...btnBlue, opacity: signFiles.length === 0 ? 0.5 : 1, cursor: signFiles.length === 0 ? "not-allowed" : "pointer" }}>
-                {signSubmitting ? "提交中..." : "确认签收"}
+              {/* 2026-09-02 终审整改：压缩中也禁用，防止压缩中的照片被静默漏掉 */}
+              <button onClick={handleWarehouseSign} disabled={signSubmitting || signCompressing || signFiles.length === 0} style={{ ...btnBlue, opacity: signFiles.length === 0 || signCompressing ? 0.5 : 1, cursor: signFiles.length === 0 || signCompressing ? "not-allowed" : "pointer" }}>
+                {signSubmitting ? "提交中..." : signCompressing ? "照片处理中…" : "确认签收"}
               </button>
-              <button onClick={() => { setSignTarget(null); setSignFiles([]); }} style={btnGray}>取消</button>
+              <button onClick={() => { signPrealertIdRef.current = null; /* 2026-09-02 终审整改：关闭处同步清空 owner */ setSignTarget(null); setSignFiles([]); }} style={btnGray}>取消</button>
             </div>
 
           </Modal>
@@ -1307,7 +1326,7 @@ export default function StaffWhrConsolidationPage() {
         {/* 弹窗：审核付款 */}
         {/* ================================================================ */}
         {reviewTarget && (
-          <Modal onClose={() => { setReviewTarget(null); setShowReject(false); }}>
+          <Modal onClose={() => { reviewPrealertIdRef.current = null; /* 2026-09-02 终审整改：关闭处同步清空 owner */ setReviewTarget(null); setShowReject(false); }}>
             {showReject ? (
               <>
                 <h3 style={{ marginTop: 0 }}>审核不通过</h3>
@@ -1410,7 +1429,7 @@ export default function StaffWhrConsolidationPage() {
         {/* 弹窗：泰国签收 */}
         {/* ================================================================ */}
         {thailandTarget && (
-          <Modal onClose={() => { setThailandTarget(null); setThailandFiles([]); }}>
+          <Modal onClose={() => { thailandPrealertIdRef.current = null; /* 2026-09-02 终审整改：关闭处同步清空 owner */ setThailandTarget(null); setThailandFiles([]); }}>
             <h3 style={{ marginTop: 0 }}>泰国签收 - {thailandTarget.clientName}</h3>
             <p style={{ fontSize: 13, color: "var(--t-muted)" }}>{thailandTarget.planNo} · 预报单：{thailandTarget.trackingNo} · {thailandTarget.volumeM3}方</p>
             <div style={{ marginTop: 14 }}>
@@ -1446,10 +1465,11 @@ export default function StaffWhrConsolidationPage() {
               )}
             </div>
             <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
-              <button onClick={handleThailandSign} disabled={thailandSubmitting || thailandFiles.length === 0} style={{ ...btnBlue, opacity: thailandFiles.length === 0 ? 0.5 : 1, cursor: thailandFiles.length === 0 ? "not-allowed" : "pointer" }}>
-                {thailandSubmitting ? "提交中..." : "确认签收"}
+              {/* 2026-09-02 终审整改：压缩中也禁用，防止压缩中的照片被静默漏掉 */}
+              <button onClick={handleThailandSign} disabled={thailandSubmitting || thailandCompressing || thailandFiles.length === 0} style={{ ...btnBlue, opacity: thailandFiles.length === 0 || thailandCompressing ? 0.5 : 1, cursor: thailandFiles.length === 0 || thailandCompressing ? "not-allowed" : "pointer" }}>
+                {thailandSubmitting ? "提交中..." : thailandCompressing ? "照片处理中…" : "确认签收"}
               </button>
-              <button onClick={() => { setThailandTarget(null); setThailandFiles([]); }} style={btnGray}>取消</button>
+              <button onClick={() => { thailandPrealertIdRef.current = null; /* 2026-09-02 终审整改：关闭处同步清空 owner */ setThailandTarget(null); setThailandFiles([]); }} style={btnGray}>取消</button>
             </div>
           </Modal>
         )}
