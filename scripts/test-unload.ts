@@ -107,43 +107,48 @@ async function main(): Promise<void> {
     }
   });
 
-  await check("4) 没有父单的整票货：不删运单、状态退回已入库、件数方数重量一个不许动", async () => {
+  await check("4) 没有父单的整票货：不删运单、按终态口径退状态、件数方数重量一个不许动", async () => {
     /**
      * ⚠️ 整票装柜（没分柜）时子单就是运单本身。
      * 这里要是跟着删，客户的运单就凭空没了。
      *
-     * 2026-09-02 终审整改（P1）补断言：整票全量卸柜原来只删柜内记录就走人，
-     * 运单状态停在「运输中/已签收」不退回。现在必须：
-     *   · 状态退回「已入库」+ 写 sl_unld_ 轨迹；
+     * 2026-09-02 终审整改（P1）补断言，2026-09-02 复核整改跟上主管裁定的新口径：
+     *   · delivered / exception / 一切运输中状态 → 退回「已入库」+ 写 sl_unld_ 轨迹
+     *     （货物理上回仓了，挂着已签收/异常就是假话；卸柜是显式业务动作，
+     *     不受「自动推进只往前」限制）；
+     *   · returned / cancelled → 保持不动（业务已终止不能因卸柜复活），
+     *     只写 fromStatus=toStatus 的备注轨迹；
      *   · ⚠️⚠️ 铁的护栏：件数/方数/重量三个字段**不许出现在 update 里**
      *     （排查第 3 条拍板：整票记录卸柜不许改运单数字）。
      */
-    // 4a) 状态已前进（运输中）：退回「已入库」+ 写轨迹，数字一个不动
-    {
+    // 4a) 运输中 / 已签收 / 异常：都要退回「已入库」+ 写轨迹，数字一个不动
+    for (const cur of ["departed", "delivered", "exception"]) {
       // makeTx 第一个参数在这条分支里当「运单自己」用（mock 的 findFirst 不分对象）
-      const { tx, 记录 } = makeTx({ id: "s_child", currentStatus: "departed" });
+      const { tx, 记录 } = makeTx({ id: "s_child", currentStatus: cur });
       const r = await unloadItemFully(tx as any, { id: "i_1", shipment: 子单({ parentTrackingNo: null }) }, "c_1");
       assert.deepEqual(记录.删掉的柜内记录, ["i_1"], "柜内记录没删");
       assert.deepEqual(记录.删掉的运单, [], "把整票货的运单删掉了 —— 客户的单会凭空消失");
       assert.equal(r.删了子单, false);
-      assert.ok(记录.父单更新, "整票卸柜后没有动运单 —— 状态没退回");
-      assert.equal(记录.父单更新.currentStatus, "inWarehouseCN", "整票卸柜后状态没退回「已入库」—— 客户会一直看到「运输中」");
+      assert.ok(记录.父单更新, `整票卸柜后没有动运单（${cur}）—— 状态没退回`);
+      assert.equal(记录.父单更新.currentStatus, "inWarehouseCN", `${cur} 的整票卸柜后状态没退回「已入库」—— 客户看到的还是假状态`);
       assert.ok(!("packageCount" in 记录.父单更新), "整票卸柜动了件数 —— 排查第 3 条拍板不许改");
       assert.ok(!("volumeM3" in 记录.父单更新), "整票卸柜动了方数 —— 排查第 3 条拍板不许改");
       assert.ok(!("weightKg" in 记录.父单更新), "整票卸柜动了重量 —— 排查第 3 条拍板不许改");
       assert.equal(记录.轨迹.length, 1, "没写轨迹 —— 客户会觉得状态莫名其妙变了");
       assert.ok(String(记录.轨迹[0].id).startsWith("sl_unld_"), `轨迹 id 前缀不是 sl_unld_：${记录.轨迹[0].id}`);
-      assert.equal(记录.轨迹[0].fromStatus, "departed", "轨迹的起点状态不对");
+      assert.equal(记录.轨迹[0].fromStatus, cur, "轨迹的起点状态不对");
       assert.equal(记录.轨迹[0].toStatus, "inWarehouseCN", "轨迹的终点状态不对");
       assert.ok(/退回国内仓/.test(记录.轨迹[0].remark), `轨迹备注看不懂：${记录.轨迹[0].remark}`);
     }
-    // 4b) 终态（已签收等）不许拽回：状态不动，只在轨迹里记一条备注
-    {
-      const { tx, 记录 } = makeTx({ id: "s_child", currentStatus: "delivered" });
+    // 4b) 已退回 / 已取消：业务已终止，不许因卸柜复活；只留 fromStatus=toStatus 的备注轨迹
+    for (const cur of ["returned", "cancelled"]) {
+      const { tx, 记录 } = makeTx({ id: "s_child", currentStatus: cur });
       await unloadItemFully(tx as any, { id: "i_1", shipment: 子单({ parentTrackingNo: null }) }, "c_1");
-      assert.equal(记录.父单更新, null, "终态的整票运单被拽回了 —— 终态不许动");
-      assert.equal(记录.轨迹.length, 1, "终态卸柜该留一条备注轨迹给排查用");
-      assert.equal(记录.轨迹[0].toStatus, "delivered", "终态的备注轨迹不该改状态");
+      assert.equal(记录.父单更新, null, `${cur} 的整票运单被拽回了 —— 已终止的单不许复活`);
+      assert.equal(记录.轨迹.length, 1, `${cur} 卸柜该留一条备注轨迹给排查用`);
+      assert.equal(记录.轨迹[0].fromStatus, cur, "备注轨迹的起点状态不对");
+      assert.equal(记录.轨迹[0].toStatus, cur, `${cur} 的备注轨迹不该改状态`);
+      assert.ok(/已退回\/已取消，卸柜不改变其状态/.test(记录.轨迹[0].remark), `备注轨迹措辞不对：${记录.轨迹[0].remark}`);
     }
     // 4c) 还在国内仓（已创建/已入库/暂缓装柜）：状态不动、也不刷轨迹
     for (const cur of ["created", "inWarehouseCN", "holdLoading"]) {
@@ -204,20 +209,70 @@ async function main(): Promise<void> {
     );
   });
 
-  await check("8) 部分卸柜那份手抄的还货逻辑，退的状态和轨迹前缀必须跟共用实现一致", async () => {
-    /* 2026-09-02 复核补，2026-09-02 终审整改（P3）把话说老实：
-       ⚠️ 这一项**只是源码对表，不是行为测试** —— 它只 grep 整个 routes.ts 里
-       有没有出现 inWarehouseCN 和 sl_unld_ 这两个字符串，别处出现也算过，
-       证明不了部分卸柜那段真的退状态、真的写轨迹（Codex 终审点名它是假绿）。
-       它防的只有一件事：「改一份漏一份」—— loading-manifests 的部分卸柜还货
-       是 unloadItemFully 的手抄同款，哪天有人把那边的 inWarehouseCN / sl_unld_
-       整个删掉，这里能响一声。真正的行为守卫是上面 1~6 那些用假 tx 真调的项。 */
+  await check("8) 部分卸柜那份手抄的还货逻辑：退状态和写轨迹必须是活代码", async () => {
+    /* 2026-09-02 复核补，2026-09-02 复核整改（P3）从「全文件 grep 字符串」升级成
+       行为级别的源码检查（上一版被 Codex 终审点名假绿：别处出现那两个字符串也算过）。
+       现在照 test-lock-order 的 isDeadLine / 死块跳过写法：
+         · 用稳定锚点圈出 loading-manifests/routes.ts 里「部分卸柜还货」那一段；
+         · 只在**那段范围内**找 inWarehouseCN 状态更新语句和 sl_unld_ 轨迹创建语句；
+         · 注释行不算，被写死假条件（if(false) 之类）包住的死块整块跳过。
+       变异自证（2026-09-02 真做过）：把那段包进 if (false) { ... } 后本项变红
+       （两条断言都报「是死代码/被删了」），还原后恢复绿 —— 证明它真的在看那段代码。
+       ⚠️ 扫源码仍然证明不了运行时行为，真正的行为守卫是上面 1~6 那些用假 tx 真调的项；
+       这一项防的是「改一份漏一份」+「代码在但被注释/死块废掉」。 */
     const fs = require("node:fs") as typeof import("node:fs");
     const path = require("node:path") as typeof import("node:path");
     const api = path.join(__dirname, "..", "apps", "api", "src", "modules");
-    const 部分卸柜 = fs.readFileSync(path.join(api, "loading-manifests", "routes.ts"), "utf-8");
-    assert.ok(/inWarehouseCN/.test(部分卸柜), "部分卸柜还货没退回「已入库」—— 跟 unload-item.ts 那份走岔了");
-    assert.ok(/sl_unld_/.test(部分卸柜), "部分卸柜还货没写 sl_unld_ 轨迹 —— 跟 unload-item.ts 那份走岔了");
+    const 源码 = fs.readFileSync(path.join(api, "loading-manifests", "routes.ts"), "utf-8");
+    const lines = 源码.split("\n");
+    const 是注释行 = (l: string): boolean => {
+      const t = l.trim();
+      return t.startsWith("*") || t.startsWith("//") || t.startsWith("/*");
+    };
+
+    /**
+     * 稳定锚点定位「部分卸柜还货」那段：
+     *   起点 = `if (reqPieces < totalLoaded) {` —— 部分卸柜分支的入口；
+     *   终点 = 起点之后第一处活的 `unloadItemFully(` —— else 分支的全量卸柜调用，
+     *          紧贴在部分卸柜段后面（第 7 项已经保证这个调用必须存在）。
+     * 锚点找不到就直接红：说明那段被重构了，这一项要跟着搬家。
+     */
+    const start = lines.findIndex((l) => !是注释行(l) && /if\s*\(\s*reqPieces\s*<\s*totalLoaded\s*\)/.test(l));
+    assert.ok(start >= 0, "找不到部分卸柜分支入口锚点 if (reqPieces < totalLoaded) —— 那段被重构了，这一项要跟着改");
+    let end = -1;
+    for (let j = start + 1; j < lines.length; j += 1) {
+      if (!是注释行(lines[j]) && /unloadItemFully\s*\(/.test(lines[j])) { end = j; break; }
+    }
+    assert.ok(end > start, "找不到部分卸柜段的终点锚点 unloadItemFully( —— 那段被重构了，这一项要跟着改");
+
+    // 照 test-lock-order 的写法：只认写死的假条件；正常的条件分支（要退状态 ? …）必须放行
+    const isDeadLine = (line: string): boolean =>
+      /\bif\s*\(\s*(false|0|!true|1\s*===\s*2|1\s*==\s*2)\s*\)/.test(line);
+    // 死块范围（左闭右开）：块形式按大括号配对整块跳过，单行形式跳一行
+    const deadBlockEnd = (i: number): number => {
+      if (!/\{\s*$/.test(lines[i])) return i + 1;
+      let depth = 0;
+      for (let k = i; k < end; k += 1) {
+        depth += (lines[k].match(/\{/g) ?? []).length;
+        depth -= (lines[k].match(/\}/g) ?? []).length;
+        if (depth <= 0 && k > i) return k + 1;
+      }
+      return end;
+    };
+
+    let 活的退状态 = false;
+    let 活的轨迹 = false;
+    let j = start;
+    while (j < end) {
+      const l = lines[j];
+      if (是注释行(l)) { j += 1; continue; }
+      if (isDeadLine(l)) { j = deadBlockEnd(j); continue; }
+      if (/currentStatus:\s*"inWarehouseCN"/.test(l)) 活的退状态 = true;
+      if (/sl_unld_/.test(l)) 活的轨迹 = true;
+      j += 1;
+    }
+    assert.ok(活的退状态, "部分卸柜还货段里没有活的「退回已入库」状态更新 —— 被删了或成了注释/死代码");
+    assert.ok(活的轨迹, "部分卸柜还货段里没有活的 sl_unld_ 轨迹创建 —— 被删了或成了注释/死代码");
   });
 
   if (failures.length > 0) {

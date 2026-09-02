@@ -938,6 +938,10 @@ export interface StaffShipmentOverview {
   createdCount: number;
   deliveringCount: number;
   doneCount: number;
+  /** 异常单数（2026-09-02 复核整改：后端已从「在途」减法里扣掉并单独返回；
+   *  对账等式 = 未发出 + 到仓 + 派送中 + 已完成 + 异常 + 在途。
+   *  设成可选：老后端没这字段时前端拿到 undefined 不报错 —— TypeScript 不会替你核对 */
+  exceptionCount?: number;
 }
 
 /** 员工端和管理员端共用这个接口（后端 requireRole 里就允许这两个角色） */

@@ -696,30 +696,35 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
         if (lockedShipment?.parentTrackingNo) {
           await syncParentStatusFromChildren(tx, lockedShipment.parentTrackingNo, auth.companyId);
         }
-      } else if (log.toStatus === "inWarehouseCN") {
+      } else if (log.fromStatus && log.fromStatus !== log.toStatus) {
         /**
-         * 2026-09-02 终审整改（P2）：删掉**唯一一条**「已入库」轨迹后状态不回退的问题。
+         * 2026-09-02 终审整改（P2）：删掉**唯一一条**轨迹后状态不回退的问题。
          * 上面「一条不剩就不动」的保护是给没有轨迹的已签收老单的（219 张）——
-         * 它们的当前状态不是 inWarehouseCN，不会走进这个分支。
-         * 这里把 inWarehouseCN 纳入删除后的状态推导：删掉唯一一条入库轨迹
-         * = 入库记录本身写错了，状态退回「已创建」（照上面 latest 重算的写法补）。
+         * 它们的当前状态跟被删轨迹的 toStatus 对不上，不会走进这个分支。
+         *
+         * 2026-09-02 复核整改：上一版这里无论被删轨迹从哪来的，一律退到「已创建」——
+         * 把「唯一一条 loaded→inWarehouseCN 的卸柜轨迹」删掉也被错退成「已创建」。
+         * 改成退回**被删轨迹的 fromStatus**（轨迹本身记着它从哪来）：
+         *   · created→inWarehouseCN 的入库轨迹删掉 → 退回 created；
+         *   · loaded→inWarehouseCN 的卸柜轨迹删掉 → 退回 loaded。
+         * fromStatus 为空或等于 toStatus（备注类轨迹）推不出来路 → 保持不动。
          * ⚠️ 状态用锁内重读的值判断（CLAUDE.md 第 28 条），不用事务外那份快照 ——
-         * 只有当前状态确实还是「已入库」才退，别的状态一律照旧保持不动。
+         * 只有当前状态确实还是被删轨迹的 toStatus 才退，别的状态一律照旧保持不动。
          */
         const lockedNow = await tx.shipment.findUnique({
           where: { id: log.shipmentId },
           select: { currentStatus: true, parentTrackingNo: true },
         });
-        if (lockedNow?.currentStatus === "inWarehouseCN") {
+        if (lockedNow?.currentStatus === log.toStatus) {
           await tx.shipment.update({
             where: { id: log.shipmentId },
-            data: { currentStatus: "created", updatedAt: new Date() },
+            data: { currentStatus: log.fromStatus, updatedAt: new Date() },
           });
           // 子单状态变了照旧要重算父单大状态，口径跟上面 latest 分支一致
           if (lockedNow.parentTrackingNo) {
             await syncParentStatusFromChildren(tx, lockedNow.parentTrackingNo, auth.companyId);
           }
-          return { newStatus: "created", hasLogsLeft: false };
+          return { newStatus: log.fromStatus, hasLogsLeft: false };
         }
       }
       return { newStatus: latest?.toStatus ?? log.shipment.currentStatus, hasLogsLeft: !!latest };

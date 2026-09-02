@@ -177,8 +177,12 @@ export default function ClientConsolidationPage() {
       setTaskDetail(null);
       setDetailError(e?.message || "加载失败");
     } finally {
-      // 2026-09-01 竞态全扫：旧请求不许提前掐掉新请求的加载态
-      if (detailGate.isCurrent(ticket) && selectedTaskIdRef.current === taskId) setDetailLoading(false);
+      // 2026-09-02 复核整改：finally 只认票号，不再叠加「主人核对」。
+      // 之前多了 selectedTaskIdRef.current === taskId 这个条件，最新一票在途时用户切任务/回列表，
+      // 主人一换，最新票的 finally 也拒清 loading；若之后没有新请求（回列表就不再发），转圈永远停不下来。
+      // 票号本身已足够：被作废的旧票在此不碰 loading（不许掐掉新请求的加载态），
+      // 而最新票收尾时必须把 loading 收掉——即便主人换了，新主人的请求自己会再置 true。
+      if (detailGate.isCurrent(ticket)) setDetailLoading(false);
     }
   }, [detailGate]);
 

@@ -172,7 +172,9 @@ async function main() {
       receiverPhoneTh: "0812345678",
       receiverAddressTh: "Bangkok",
       trackingNo: "THCN0001",
-      currentStatus: "inTransit",
+      // 2026-09-02 复核整改：inTransit 早已不在 STATUS_FLOW 里，全新环境会直接显示英文原文；
+      // 换成海运流程里的合法状态 departed（已开船），仍属「在途/unfinished」口径
+      currentStatus: "departed",
       currentLocation: "Bangkok Hub",
       weightKg: 120.5,
       volumeM3: 1.28,

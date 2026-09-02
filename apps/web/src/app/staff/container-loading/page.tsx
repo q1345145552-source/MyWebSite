@@ -144,6 +144,8 @@ export default function StaffContainerLoadingPage() {
   const [selectedId, setSelectedId] = useState("");
   const [detail, setDetail] = useState<LoadingManifestDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  /** 2026-09-02 复核整改：详情加载失败的提示。失败时旧详情已被清空，详情区靠它显示「加载失败 + 点击重试」 */
+  const [detailError, setDetailError] = useState("");
   const [adding, setAdding] = useState(false);
   const [statusRemark, setStatusRemark] = useState("");
   const [statusDate, setStatusDate] = useState("");
@@ -254,13 +256,25 @@ export default function StaffContainerLoadingPage() {
       要等重渲染才跑，点击到重渲染之间的间隙里，旧柜的晚响应核对的还是旧值，会照样落地
       盖到错的柜子上。渲染处那句保留作兜底。所有改选中柜子的入口一律走这里。 */
   const selectManifest = (id: string) => {
+    // 2026-09-02 复核整改：重复点当前柜子不清详情不挂加载态——selectedId 没变，
+    // 下面的 useEffect 不会重发请求，挂了加载态就永远下不来；但上次加载失败时点它等于重试
+    if (id && id === selectedId && id === selectedIdRef.current) {
+      if (detailError) void loadDetail(id);
+      return;
+    }
     selectedIdRef.current = id; // 点击处同步认主人，晚到的旧响应立刻失效
+    // 2026-09-02 复核整改：切柜当场清空旧 detail——绝不让 A 的详情挂在屏幕上冒充 B。
+    // 加载期间显示加载态，失败走「加载失败 + 点击重试」，两条路都不留旧详情。
+    setDetail(null);
+    setDetailError("");
+    if (id) setLoadingDetail(true); // 点击到 useEffect 发请求之间的间隙也显示加载态，不闪「请选择」
     setSelectedId(id);
   };
 
   const loadDetail = useCallback(async (id: string) => {
     if (!id) return;
     setStatusRemark("");
+    setDetailError(""); // 2026-09-02 复核整改：新一轮加载出发，先清上一轮的失败提示
     setLoadingDetail(true);
     try {
       const d = await fetchLoadingManifestDetail(id);
@@ -268,13 +282,28 @@ export default function StaffContainerLoadingPage() {
       setDetail(d);
     } catch (e) {
       if (selectedIdRef.current !== id) return; // 旧柜子的报错也不弹
-      setError(e instanceof Error ? e.message : "详情加载失败");
+      // 2026-09-02 复核整改：加载失败绝不留上一个柜的详情冒充当前柜——
+      // 清空详情，详情区显示「加载失败 + 点击重试」
+      setDetail(null);
+      setDetailError(e instanceof Error ? e.message : "详情加载失败");
     } finally {
       if (selectedIdRef.current === id) setLoadingDetail(false); // 别掐掉新柜子的加载态
     }
   }, []);
 
   useEffect(() => { if (selectedId) void loadDetail(selectedId); }, [selectedId, loadDetail]);
+
+  /** 2026-09-02 复核整改：所有会写库的操作（加运单/卸运单/封柜/推进状态/撤销/删柜/改运输方式）
+      动手前核对「当前详情的柜 id」===「即将操作的柜 id」。对不上说明屏幕上的详情和选中柜
+      不是同一个柜子（详情还没加载完、或加载失败被清空），拒绝操作并让员工重新打开，
+      绝不「看着 A、操作 B」。照集货页 guardDetailOwner 一个口径。 */
+  const guardDetailOwner = (id: string): boolean => {
+    if (!detail || detail.id !== id) {
+      setToast("刚切换过柜子，屏幕上的详情和当前柜对不上，请重新打开柜子再操作");
+      return false;
+    }
+    return true;
+  };
 
   const handleCreate = async () => {
     setCreating(true);
@@ -299,7 +328,8 @@ export default function StaffContainerLoadingPage() {
   const handlePushStatus = async (toStatus: string) => {
     if (!selectedId || !detail) return;
     // 2026-09-01 竞态全扫：刚点了别的柜子、详情还没跟上时，别拿 B 的 id 配 A 的详情去推状态
-    if (detail.id !== selectedId) { setToast("刚切换了柜子，详情还在加载，请稍候再操作"); return; }
+    // （2026-09-02 复核整改：统一走 guardDetailOwner）
+    if (!guardDetailOwner(selectedId)) return;
     try {
       const result = await updateContainerStatus({ id: selectedId, toStatus, remark: statusRemark.trim() || undefined, date: statusDate || undefined, nextStop: nextStop.trim() || undefined });
       setStatusRemark("");
@@ -317,8 +347,8 @@ export default function StaffContainerLoadingPage() {
   const handleUndoStatus = async () => {
     if (!selectedId || !detail || undoing) return;
     // 2026-09-01 竞态全扫：确认弹窗里的状态名来自 detail，撤销动的却是 selectedId ——
-    // 详情还没跟上选中柜时两者不是同一个柜子，先拦下
-    if (detail.id !== selectedId) { setToast("刚切换了柜子，详情还在加载，请稍候再操作"); return; }
+    // 详情还没跟上选中柜时两者不是同一个柜子，先拦下（2026-09-02 复核整改：统一走 guardDetailOwner）
+    if (!guardDetailOwner(selectedId)) return;
     const nowLabel = STATUS_LABEL[detail.status] ?? detail.status;
     const ok = window.confirm(
       `确定撤销这个柜子的「${nowLabel}」吗？\n\n` +
@@ -351,6 +381,8 @@ export default function StaffContainerLoadingPage() {
 
   const handleSeal = async () => {
     if (!selectedId) return;
+    // 2026-09-02 复核整改：封柜写库，先核对屏幕上的详情就是要封的这个柜
+    if (!guardDetailOwner(selectedId)) return;
     try {
       await sealLoadingManifest(selectedId);
       setToast("封柜成功");
@@ -364,8 +396,8 @@ export default function StaffContainerLoadingPage() {
   const handleDelete = async () => {
     if (!selectedId || !detail) return;
     // 2026-09-01 竞态全扫：确认弹窗里的柜号来自 detail，删的却是 selectedId ——
-    // 不核对的话可能「看着 A 的柜号，删了 B 的柜」
-    if (detail.id !== selectedId) { setToast("刚切换了柜子，详情还在加载，请稍候再操作"); return; }
+    // 不核对的话可能「看着 A 的柜号，删了 B 的柜」（2026-09-02 复核整改：统一走 guardDetailOwner）
+    if (!guardDetailOwner(selectedId)) return;
     if (!confirm(`确定删除柜子 ${detail.manifestNo}？\n\n此操作不可撤销。`)) return;
     try {
       await deleteContainer(selectedId);
@@ -399,6 +431,9 @@ export default function StaffContainerLoadingPage() {
   const handleBulkAdd = async () => {
     const entries = Object.entries(selectedShipments);
     if (!selectedId || entries.length === 0) return;
+    // 2026-09-02 复核整改：勾选是照着屏幕上的详情（「已在本柜」标记）勾的，装的却是 selectedId ——
+    // 对不上就会把运单装进另一个柜
+    if (!guardDetailOwner(selectedId)) return;
     setAdding(true);
     let success = 0;
     const errors: string[] = [];
@@ -427,6 +462,9 @@ export default function StaffContainerLoadingPage() {
 
   const handleRemoveShipment = async (itemId: string, pieceCount?: number) => {
     if (!selectedId) return;
+    // 2026-09-02 复核整改：itemId 来自屏幕上的详情，卸柜请求发的柜 id 却是 selectedId ——
+    // 两者不是同一个柜时会去错的柜里卸，先拦下
+    if (!guardDetailOwner(selectedId)) return;
     try {
       await removeShipmentFromManifest(selectedId, itemId, pieceCount);
       setToast("运单已从装柜卸下");
@@ -552,7 +590,19 @@ export default function StaffContainerLoadingPage() {
         <div>
           {/* 柜子详情 */}
           <div style={{ border: "1px solid var(--l-soft)", borderRadius: 10, padding: 16, background: "var(--white)", marginBottom: 12 }}>
-            {loadingDetail ? <p style={{ color: "var(--t-strong)", fontSize: 13 }}>加载中…</p> : !detail ? (
+            {loadingDetail ? <p style={{ color: "var(--t-strong)", fontSize: 13 }}>加载中…</p> : detailError ? (
+              /* 2026-09-02 复核整改：详情加载失败时旧详情已清空，这里显式给失败态 + 重试入口，
+                 绝不让上一个柜的详情留在屏幕上冒充这个柜 */
+              <p style={{ color: "var(--c-red-deep)", fontSize: 13 }}>
+                详情加载失败：{detailError}
+                <button
+                  onClick={() => { if (selectedId) void loadDetail(selectedId); }}
+                  style={{ marginLeft: 8, border: "1px solid var(--l-strong)", borderRadius: 4, padding: "2px 10px", fontSize: 12, background: "var(--white)", color: "var(--c-blue)", cursor: "pointer" }}
+                >
+                  点击重试
+                </button>
+              </p>
+            ) : !detail ? (
               <p style={{ color: "var(--t-strong)", fontSize: 13 }}>选择左侧装柜任务查看详情</p>
             ) : (
               <>
@@ -568,6 +618,8 @@ export default function StaffContainerLoadingPage() {
                         onChange={async (e) => {
                           const mode = e.target.value;
                           if (!mode) return;
+                          // 2026-09-02 复核整改：改运输方式也写库，先核对屏幕上的详情就是当前选中柜
+                          if (!guardDetailOwner(selectedId)) return;
                           try {
                             await setManifestTransportMode(detail.id, mode);
                             setToast(`柜子「${detail.manifestNo}」已标为${mode === "land" ? "陆运" : "海运"}`);
