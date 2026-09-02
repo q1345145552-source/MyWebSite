@@ -28,6 +28,7 @@ import {
   type OrderProductImageItem,
   type StaffShipmentOverview,
 } from "../../services/business-api";
+import { createRequestGate } from "../../modules/shared/request-gate";
 import { openShipmentTrack } from "../../modules/shipment/ShipmentTrackModal";
 import { ShipmentOverviewStrip } from "../../modules/shipment/ShipmentOverviewStrip";
 import DetailModal from "../../modules/layout/DetailModal";
@@ -128,6 +129,12 @@ export default function ClientHomePage() {
   const [queryMode, setQueryMode] = useState<"all"  |  "pending"  |  "transit"  |  "delivered"  |  "closed"  |  null>("all");
   const [queriedOrders, setQueriedOrders] = useState<OrderItem[]>([]);
   const [hasQueried, setHasQueried] = useState(false);
+  /* 2026-09-01 竞态全扫（Codex 复核缺口②）：「运单列表」唯一的门闩（见 modules/shared/request-gate.ts）。
+     所有会写 queriedOrders 的入口 —— 挂载兜底、changeQueryMode、runOrderQuery、10 秒轮询 ——
+     共用这一个：任何入口出发都领新号，晚到的旧响应（连同它的报错、它的 loading 收尾）一律作废。
+     光比分组不够：同分组下「带条件查询」和「清空条件」两份请求分组一样，只有号能分出先后；
+     queryModeRef 的分组比对保留当第二道防线。 */
+  const orderListGate = useRef(createRequestGate()).current;
   const [prealerts, setPrealerts] = useState<OrderItem[]>([]);
   const [dashboardOrders, setDashboardOrders] = useState<OrderItem[]>([]);
   const [prealertSearch, setPrealertSearch] = useState("");
@@ -149,6 +156,10 @@ export default function ClientHomePage() {
      比改造前「一次拿全再筛」还退步。搜索词非空时一次拉前 500 条（后端上限就是 500）放这里本地筛；
      null = 没在搜索或还没拉到，列表走正常翻页。 */
   const [prealertSearchPool, setPrealertSearchPool] = useState<OrderItem[] | null>(null);
+  /* 2026-09-01 竞态全扫：预报单区两道门闩（见 modules/shared/request-gate.ts）。
+     翻页列表一道、搜索池一道 —— 两份独立的数据上下文，各自领号，互不作废。 */
+  const prealertListGate = useRef(createRequestGate()).current;
+  const prealertPoolGate = useRef(createRequestGate()).current;
 
   /* 「我的运单查询」顶部那排数字。拉不到就整排不显示 ——
      宁可不显示，也不能显示一个假的 0 让客户以为「没有在途的」。 */
@@ -194,6 +205,14 @@ export default function ClientHomePage() {
     CLIENT_SECTION_IDS.includes(value as (typeof CLIENT_SECTION_IDS)[number]);
 
   const refreshMainData = async () => {
+    /* 2026-09-01 竞态全扫：预报单列表的写入从统一门闩领号 —— 挂载这份要是比用户的翻页请求
+       先出发、后到达，不许把人家刚翻到的那页盖回去。
+       同时作废在途的建池请求并清池：马上要拿新数据（多半是刚新建了预报单），
+       建池前发出的那份 500 条旧快照晚到时不许写回搜索池（Codex 复核缺口④）。 */
+    const prealertTicket = prealertListGate.begin();
+    prealertPoolGate.begin();
+    // 2026-08-31（条目47收尾）：新建预报单后搜索池已过期，清掉让下面的搜索 effect 按需重拉
+    setPrealertSearchPool(null);
     const results = await Promise.allSettled([
       // 2026-08-31（条目47）：fetchClientPrealerts 改为返回 { items, total } 并按页取
       fetchClientPrealerts("all", { page: prealertPage, pageSize }),
@@ -201,11 +220,9 @@ export default function ClientHomePage() {
       fetchClientWalletOverview(),
       fetchClientAddresses(),
     ]);
-    if (results[0].status === "fulfilled") {
+    if (results[0].status === "fulfilled" && prealertListGate.isCurrent(prealertTicket)) {
       setPrealerts(results[0].value.items);
       setPrealertTotal(results[0].value.total);
-      // 2026-08-31（条目47收尾）：新建预报单后搜索池已过期，清掉让下面的搜索 effect 按需重拉
-      setPrealertSearchPool(null);
     }
     if (results[1].status === "fulfilled") setDashboardOrders(results[1].value);
     // 2026-08-07 删除：这里原来读 results[2].value.exchangeRate.rate。
@@ -262,36 +279,65 @@ export default function ClientHomePage() {
 
   }, []);
 
-  // 2026-08-31（条目47）：翻页/改每页条数时重拉预报单的那一页。
-  // 首次挂载跳过 —— 第 1 页已经由上面 refreshMainData 拉过了，别重复请求。
-  const prealertPageInitRef = useRef(true);
-  useEffect(() => {
-    if (prealertPageInitRef.current) {
-      prealertPageInitRef.current = false;
-      return;
+  /* 2026-08-31（条目47）预报单翻页 → 2026-09-01 竞态全扫改造（Codex 复核缺口④）：
+     原来是「先改页码、useEffect 再拉数据」，有两个病：
+     ① 快速连点下一页，慢的旧响应后到 → 标题写第 2 页、表里是第 1 页的数据；
+     ② 翻页失败静默保留旧页数据，页码却已经跳了 → 客户看着「第 2 页」实际还是第 1 页。
+     照钱包页 loadLedgerPage 的写法改：目标页只存临时变量，请求成功后页码和数据同一拍落地；
+     失败页码不动、给提示；旧响应验号作废。 */
+  const loadPrealertPage = async (targetPage: number, targetPageSize?: number) => {
+    const ticket = prealertListGate.begin();
+    try {
+      const result = await fetchClientPrealerts("all", { page: targetPage, pageSize: targetPageSize ?? pageSize });
+      if (!prealertListGate.isCurrent(ticket)) return; // 旧响应后到，数据、页码都不许碰
+      setPrealerts(result.items);
+      setPrealertTotal(result.total);
+      setPrealertPage(targetPage);
+    } catch {
+      if (!prealertListGate.isCurrent(ticket)) return; // 过期请求的失败也不提示，别盖住新请求
+      setToast("预报单翻页失败，页码和数据保持原样"); // 失败时再点一次按钮即可重试
     }
-    fetchClientPrealerts("all", { page: prealertPage, pageSize })
-      .then((result) => {
-        setPrealerts(result.items);
-        setPrealertTotal(result.total);
-      })
-      .catch(() => { /* 翻页失败保留当前页数据，不清空 */ });
-  }, [prealertPage, pageSize]);
+  };
 
   // 2026-08-31（条目47收尾）：搜索词非空时拉一次前 500 条进搜索池，清空搜索就退回正常翻页。
   // 用 ref 挡住重复请求 —— 池子只拉一次，别每敲一个字都重拉。
   const prealertPoolLoadingRef = useRef(false);
+  // 2026-09-01 竞态全扫：用 ref 跟最新搜索词，给下面「被作废后的补拉」判断用（闭包里的会是旧值）
+  const prealertSearchRef = useRef(prealertSearch);
+  prealertSearchRef.current = prealertSearch;
+  /* 2026-09-01 竞态全扫（Codex 复核缺口④）：建池请求全程验号 ——
+     池子在路上时用户新建了预报单（refreshMainData 清池领新号），
+     晚到的旧快照（建池前的那 500 条）不许写回，否则搜索结果里永远少刚建的那单。 */
+  const loadPrealertPool = () => {
+    if (prealertPoolLoadingRef.current) return;
+    prealertPoolLoadingRef.current = true;
+    const ticket = prealertPoolGate.begin();
+    fetchClientPrealerts("all", { page: 1, pageSize: 500 })
+      .then((result) => {
+        if (!prealertPoolGate.isCurrent(ticket)) return; // 池子已被作废（清空搜索/新建预报单），旧快照不写回
+        setPrealertSearchPool(result.items);
+      })
+      .catch(() => {
+        if (!prealertPoolGate.isCurrent(ticket)) return; // 过期请求的失败不提示
+        setToast("加载全部预报单失败，暂时只在当前页里搜");
+      })
+      .finally(() => {
+        prealertPoolLoadingRef.current = false;
+        /* 这份请求被作废、而用户此刻还在搜索（池子被清空等重建）——
+           effect 的依赖不会再变、不会自己重跑，这里补拉一次新池子，
+           否则搜索会一直停在「只搜当前页」。 */
+        if (!prealertPoolGate.isCurrent(ticket) && prealertSearchRef.current.trim()) loadPrealertPool();
+      });
+  };
   useEffect(() => {
     if (!prealertSearch.trim()) {
+      // 2026-09-01 竞态全扫：清空搜索时也作废在途的建池请求，晚到的快照不许把池子填回来
+      prealertPoolGate.begin();
       setPrealertSearchPool(null);
       return;
     }
-    if (prealertSearchPool !== null || prealertPoolLoadingRef.current) return;
-    prealertPoolLoadingRef.current = true;
-    fetchClientPrealerts("all", { page: 1, pageSize: 500 })
-      .then((result) => setPrealertSearchPool(result.items))
-      .catch(() => setToast("加载全部预报单失败，暂时只在当前页里搜"))
-      .finally(() => { prealertPoolLoadingRef.current = false; });
+    if (prealertSearchPool !== null) return;
+    loadPrealertPool();
   }, [prealertSearch, prealertSearchPool]);
 
   // 搜索中筛池子（池子没到之前先筛当前页顶着），没搜索就原样显示当前页。两处预报单列表共用这一份。
@@ -385,12 +431,17 @@ export default function ClientHomePage() {
        按钮亮着在途、列表却是 84 条全量（含已签收），要挂到下一轮 10 秒轮询才自愈。
        其余四个数据入口早都有这道防线，唯独这条路漏了。 */
     const modeAtStart = queryMode;
+    /* 2026-09-01 竞态全扫（Codex 复核缺口①②）：光比分组挡不住「同分组不同条件」互盖 ——
+       带条件执行查询后点「清空条件」，两份请求分组一样，慢的旧请求照样盖新结果。
+       从运单列表统一门闩领号，成功/失败/finally 三个分支都验号。 */
+    const ticket = orderListGate.begin();
     try {
       const baseOrders =
         modeAtStart === "all"
           ? await fetchClientOrders()
           : await fetchClientOrders({ statusGroup: modeAtStart });
-      if (queryModeRef.current !== modeAtStart) return; // 用户已切分组，这份结果作废
+      if (!orderListGate.isCurrent(ticket)) return; // 已有更新的请求出发（清空条件/切分组/轮询），这份作废
+      if (queryModeRef.current !== modeAtStart) return; // 第二道防线：用户已切分组，这份结果作废
       const result = baseOrders
         .filter((item) => !search.batchNo || (item.trackingNo ?? "").toLowerCase().includes(search.batchNo.toLowerCase()))
         .filter((item) => {
@@ -421,10 +472,13 @@ export default function ClientHomePage() {
         saveOrdersToCache(result);
       }
     } catch (error) {
+      // 2026-09-01 竞态全扫（缺口①）：旧请求的失败不许把「查询失败」红字安到新请求头上
+      if (!orderListGate.isCurrent(ticket)) return;
       const text = error instanceof Error ? error.message : "查询失败";
       setMessage(`查询失败：${text}`);
     } finally {
-      setLoading(false);
+      // 2026-09-01 竞态全扫（缺口①）：旧请求不许提前掐掉新请求的 loading
+      if (orderListGate.isCurrent(ticket)) setLoading(false);
     }
   };
 
@@ -450,20 +504,25 @@ export default function ClientHomePage() {
     setCurrentPage(1); // 2026-08-31（条目19）：切分组页码回第 1 页
     setMessage("");
     setLoading(true);
+    // 2026-09-01 竞态全扫（缺口②）：从运单列表统一门闩领号，作废所有在途的旧请求（含带条件的手动查询）
+    const ticket = orderListGate.begin();
     fetchClientOrders(mode === "all" ? undefined : { statusGroup: mode })
       .then((orders) => {
-        if (queryModeRef.current !== mode) return; // 已经切到别的分组了，这份结果作废
+        if (!orderListGate.isCurrent(ticket)) return; // 已有更新的请求出发，这份作废
+        if (queryModeRef.current !== mode) return; // 第二道防线：已经切到别的分组了，这份结果作废
         setQueriedOrders(orders);
         setHasQueried(true);
         hasQueriedRef.current = true;
         if (mode === "all") saveOrdersToCache(orders);
       })
       .catch((error) => {
+        if (!orderListGate.isCurrent(ticket)) return; // 旧请求的失败不许安到新请求头上
         if (queryModeRef.current !== mode) return;
         const text = error instanceof Error ? error.message : "查询失败";
         setMessage(`查询失败：${text}`);
       })
-      .finally(() => setLoading(false));
+      // 2026-09-01 竞态全扫：旧请求不许提前掐掉新请求的 loading
+      .finally(() => { if (orderListGate.isCurrent(ticket)) setLoading(false); });
   };
 
   const runAiSearch = async () => {
@@ -497,9 +556,15 @@ export default function ClientHomePage() {
       // 缓存这份旧数据恰恰需要下面的后台请求来刷新，把 ref 设了后台刷新就被自己拦掉了。
       setHasQueried(true);
     }
+    /* 2026-09-01 竞态全扫（Codex 复核缺口③）：挂载兜底的后台全量请求也从统一门闩领号 ——
+       原来只靠 hasQueriedRef/分组挡，但 changeQueryMode 会把 hasQueriedRef 清回 false，
+       同分组（全部订单）下刚点的立即查询可能被这份更早出发、更晚到达的全量数据盖掉。
+       有了号：任何后发的入口一领号，这份兜底就自动作废。 */
+    const ticket = orderListGate.begin();
     setDashboardLoading(true);
     fetchClientOrders()
       .then((orders) => {
+        if (!orderListGate.isCurrent(ticket)) return; // 已有更新的运单请求出发，这份兜底作废
         if (hasQueriedRef.current) return;
         if (queryModeRef.current !== "all") return; // 客户已切到别的分组，这份「全部」数据作废
         setQueriedOrders(orders);
@@ -527,18 +592,30 @@ export default function ClientHomePage() {
     let cancelled = false;
     const poll = async () => {
       if (cancelled) return;
-      try {
-        const mode = queryModeRef.current;
-        // 2026-08-31（条目23）：分组值改成 statusGroup 四分类，类型对上后不再需要 as 强转
-        if (mode) {
+      const mode = queryModeRef.current;
+      // 2026-08-31（条目23）：分组值改成 statusGroup 四分类，类型对上后不再需要 as 强转
+      if (mode) {
+        /* 2026-09-01 竞态全扫（缺口②）：轮询每一次开火都要重新领号 ——
+           领一次囤着复用的话，第二轮起号就旧了，会把自己的响应永远作废。 */
+        const ticket = orderListGate.begin();
+        try {
           const orders = mode === "all"
             ? await fetchClientOrders()
             : await fetchClientOrders({ statusGroup: mode });
-          // 2026-09-01：除 cancelled 外再核一次分组——极端时序下 cleanup 还没跑、响应先到
-          if (!cancelled && queryModeRef.current === mode) { setQueriedOrders(orders); setHasQueried(true); }
-          if (!cancelled && queryModeRef.current === mode && mode === "all") saveOrdersToCache(orders);
+          // 2026-09-01：除 cancelled 外先验号再核分组——极端时序下 cleanup 还没跑、响应先到
+          if (!cancelled && orderListGate.isCurrent(ticket) && queryModeRef.current === mode) {
+            setQueriedOrders(orders);
+            setHasQueried(true);
+            if (mode === "all") saveOrdersToCache(orders);
+          }
+        } catch { /* silent */ }
+        finally {
+          /* 2026-09-01 竞态全扫：轮询领号可能作废了一份在途的手动查询（那份的 finally
+             验号失败后不再清 loading）；只要轮询自己仍是最新一号，就替它把 loading 收掉，
+             别让「执行查询」按钮一直转圈。 */
+          if (!cancelled && orderListGate.isCurrent(ticket)) setLoading(false);
         }
-      } catch { /* silent */ }
+      }
       if (!cancelled) timer = setTimeout(poll, 10000);
     };
     timer = setTimeout(poll, 10000);
@@ -731,9 +808,19 @@ export default function ClientHomePage() {
             )}
             {prealertSearchActive ? null : (
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <button type="button" onClick={() => setPrealertPage((p) => Math.max(1, p - 1))} disabled={prealertPage <= 1} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 12px", background: prealertPage <= 1 ? "var(--s-sunken)" : "var(--white)", color: prealertPage <= 1 ? "var(--t-faint)" : "var(--t-heading)", cursor: prealertPage <= 1 ? "default" : "pointer", fontSize: 12 }}>上一页</button>
-              <button type="button" onClick={() => setPrealertPage((p) => Math.min(Math.max(1, Math.ceil(prealertTotal / pageSize)), p + 1))} disabled={prealertPage >= Math.max(1, Math.ceil(prealertTotal / pageSize))} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 12px", background: prealertPage >= Math.max(1, Math.ceil(prealertTotal / pageSize)) ? "var(--s-sunken)" : "var(--white)", color: prealertPage >= Math.max(1, Math.ceil(prealertTotal / pageSize)) ? "var(--t-faint)" : "var(--t-heading)", cursor: prealertPage >= Math.max(1, Math.ceil(prealertTotal / pageSize)) ? "default" : "pointer", fontSize: 12 }}>下一页</button>
-              <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPrealertPage(1); setCurrentPage(1); /* 2026-08-31（条目19/47）：改每页条数，两张表页码都回第 1 页 */ }} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 8px", fontSize: 12 }}>
+              {/* 2026-09-01 竞态全扫（缺口④）：翻页不再直接改页码，改成发请求、成功后页码和数据一起落地（见 loadPrealertPage） */}
+              <button type="button" onClick={() => void loadPrealertPage(Math.max(1, prealertPage - 1))} disabled={prealertPage <= 1} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 12px", background: prealertPage <= 1 ? "var(--s-sunken)" : "var(--white)", color: prealertPage <= 1 ? "var(--t-faint)" : "var(--t-heading)", cursor: prealertPage <= 1 ? "default" : "pointer", fontSize: 12 }}>上一页</button>
+              <button type="button" onClick={() => void loadPrealertPage(Math.min(Math.max(1, Math.ceil(prealertTotal / pageSize)), prealertPage + 1))} disabled={prealertPage >= Math.max(1, Math.ceil(prealertTotal / pageSize))} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 12px", background: prealertPage >= Math.max(1, Math.ceil(prealertTotal / pageSize)) ? "var(--s-sunken)" : "var(--white)", color: prealertPage >= Math.max(1, Math.ceil(prealertTotal / pageSize)) ? "var(--t-faint)" : "var(--t-heading)", cursor: prealertPage >= Math.max(1, Math.ceil(prealertTotal / pageSize)) ? "default" : "pointer", fontSize: 12 }}>下一页</button>
+              <select value={pageSize} onChange={(e) => {
+                /* 2026-08-31（条目19/47）：改每页条数，两张表页码都回第 1 页。
+                   2026-09-01 竞态全扫（缺口④）：预报单那张表改成请求成功后页码随数据一起回第 1 页
+                   （走 loadPrealertPage，新条数用临时变量传，别等 setState）；
+                   运单表是纯前端切片没有请求，页码照旧当场归 1。 */
+                const nextSize = Number(e.target.value);
+                setPageSize(nextSize);
+                setCurrentPage(1);
+                void loadPrealertPage(1, nextSize);
+              }} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 8px", fontSize: 12 }}>
                 {/* 2026-08-31（复查条目3）：去掉 1000 这一档 —— 后端 /client/prealerts 每页最多回 500 条，
                     选 1000 时页数按 1000 算、实际只回 500，后一半既看不到也翻不到，又是静默截断（教训21）。
                     这个下拉同时管运单查询表的每页条数（那张表是纯前端切片，1000 本身没事），
@@ -1191,8 +1278,9 @@ export default function ClientHomePage() {
             )}
             {prealertSearchActive ? null : (
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <button type="button" onClick={() => setPrealertPage((p) => Math.max(1, p - 1))} disabled={prealertPage <= 1} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 12px", background: prealertPage <= 1 ? "var(--s-sunken)" : "var(--white)", color: prealertPage <= 1 ? "var(--t-faint)" : "var(--t-heading)", cursor: prealertPage <= 1 ? "default" : "pointer", fontSize: 12 }}>上一页</button>
-              <button type="button" onClick={() => setPrealertPage((p) => Math.min(Math.max(1, Math.ceil(prealertTotal / pageSize)), p + 1))} disabled={prealertPage >= Math.max(1, Math.ceil(prealertTotal / pageSize))} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 12px", background: prealertPage >= Math.max(1, Math.ceil(prealertTotal / pageSize)) ? "var(--s-sunken)" : "var(--white)", color: prealertPage >= Math.max(1, Math.ceil(prealertTotal / pageSize)) ? "var(--t-faint)" : "var(--t-heading)", cursor: prealertPage >= Math.max(1, Math.ceil(prealertTotal / pageSize)) ? "default" : "pointer", fontSize: 12 }}>下一页</button>
+              {/* 2026-09-01 竞态全扫（缺口④）：翻页不再直接改页码，改成发请求、成功后页码和数据一起落地（见 loadPrealertPage） */}
+              <button type="button" onClick={() => void loadPrealertPage(Math.max(1, prealertPage - 1))} disabled={prealertPage <= 1} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 12px", background: prealertPage <= 1 ? "var(--s-sunken)" : "var(--white)", color: prealertPage <= 1 ? "var(--t-faint)" : "var(--t-heading)", cursor: prealertPage <= 1 ? "default" : "pointer", fontSize: 12 }}>上一页</button>
+              <button type="button" onClick={() => void loadPrealertPage(Math.min(Math.max(1, Math.ceil(prealertTotal / pageSize)), prealertPage + 1))} disabled={prealertPage >= Math.max(1, Math.ceil(prealertTotal / pageSize))} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 12px", background: prealertPage >= Math.max(1, Math.ceil(prealertTotal / pageSize)) ? "var(--s-sunken)" : "var(--white)", color: prealertPage >= Math.max(1, Math.ceil(prealertTotal / pageSize)) ? "var(--t-faint)" : "var(--t-heading)", cursor: prealertPage >= Math.max(1, Math.ceil(prealertTotal / pageSize)) ? "default" : "pointer", fontSize: 12 }}>下一页</button>
             </div>
             )}
           </div>

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { apiBaseUrl, authHeaders, parseApiResponse } from "../../services/core-api";
 import { openShipmentTrack } from "../shipment/ShipmentTrackModal";
+import { createRequestGate } from "../shared/request-gate";
 import { downloadLastmileCustomerWorkbook } from "./exportDispatchWorkbooks";
 import type { LastmileOrderItem, LastmileShipmentOption, LastmileWdGroup } from "./types";
 import {
@@ -57,7 +58,8 @@ export default function LastmileDispatchWorkspace(props: LastmileDispatchWorkspa
   const [deliveryDate, setDeliveryDate] = useState("");
   const [appendTarget, setAppendTarget] = useState("");
   const [signTargetId, setSignTargetId] = useState("");
-  const [previewImage, setPreviewImage] = useState("");
+  /** 2026-09-01 竞态全扫：凭证弹窗带上是哪一票的单号，看图的人才知道自己在看谁的凭证 */
+  const [previewImage, setPreviewImage] = useState<{ src: string; label: string } | null>(null);
   const [orderSearch, setOrderSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<LastmileStatusFilter>("all");
   const [busy, setBusy] = useState(false);
@@ -175,16 +177,23 @@ export default function LastmileDispatchWorkspace(props: LastmileDispatchWorkspa
     requestAnimationFrame(() => workspaceRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
   };
 
-  const openSignImage = async (id: string) => {
+  /** 2026-09-01 竞态全扫：快速点两票「看凭证」，先点那票的图后到会盖掉后点那票的 ——
+      领号验号，只让最后一次点击的凭证落地；报错也只认最后一次。 */
+  const signImageGate = useRef(createRequestGate()).current;
+  const openSignImage = async (order: LastmileOrderItem) => {
+    const ticket = signImageGate.begin();
+    const label = order.trackingNo || order.shipmentId;
     try {
-      const response = await fetch(`${apiBaseUrl()}/admin/lastmile/sign-image?id=${encodeURIComponent(id)}`, {
+      const response = await fetch(`${apiBaseUrl()}/admin/lastmile/sign-image?id=${encodeURIComponent(order.id)}`, {
         headers: authHeaders(),
       });
       const data = await parseApiResponse<{ signImageBase64?: string }>(response);
-      if (data.signImageBase64) setPreviewImage(`data:image/jpeg;base64,${data.signImageBase64}`);
-      else props.onToast("这票运单没有签收凭证");
+      if (!signImageGate.isCurrent(ticket)) return; // 用户已点了别票，旧图不许盖新图
+      if (data.signImageBase64) setPreviewImage({ src: `data:image/jpeg;base64,${data.signImageBase64}`, label });
+      else props.onToast(`运单 ${label} 没有签收凭证`);
     } catch (error) {
-      props.onToast(error instanceof Error ? error.message : "签收凭证加载失败");
+      if (!signImageGate.isCurrent(ticket)) return; // 旧请求的报错也不弹
+      props.onToast(error instanceof Error ? error.message : `运单 ${label} 签收凭证加载失败`);
     }
   };
 
@@ -553,9 +562,16 @@ export default function LastmileDispatchWorkspace(props: LastmileDispatchWorkspa
       />
 
       {previewImage && (
-        <div className="lastmile-image-preview" role="dialog" aria-modal="true" aria-label="签收凭证" onClick={() => setPreviewImage("")}>
-          <button type="button" style={{ background: "var(--white)" }} onClick={() => setPreviewImage("")}>关闭</button>
-          <img src={previewImage} alt="签收凭证" onClick={(event) => event.stopPropagation()} />
+        <div className="lastmile-image-preview" role="dialog" aria-modal="true" aria-label={`签收凭证 ${previewImage.label}`} onClick={() => setPreviewImage(null)}>
+          {/* 2026-09-01 竞态全扫：标题写明单号，防止「看错票」——图上没字时根本分不清是谁的凭证 */}
+          <div
+            onClick={(event) => event.stopPropagation()}
+            style={{ position: "absolute", top: 18, left: 22, padding: "6px 12px", borderRadius: 8, background: "var(--white)", color: "var(--ink)", fontSize: 13, fontWeight: 600 }}
+          >
+            签收凭证 · {previewImage.label}
+          </div>
+          <button type="button" style={{ background: "var(--white)" }} onClick={() => setPreviewImage(null)}>关闭</button>
+          <img src={previewImage.src} alt={`签收凭证 ${previewImage.label}`} onClick={(event) => event.stopPropagation()} />
         </div>
       )}
     </section>
@@ -569,7 +585,8 @@ type WdCardProps = {
   onAppend: (deliveryNo: string) => void;
   onExport: (deliveryNo: string, clientId: string) => void | Promise<void>;
   onSign: (id: string) => void;
-  onOpenSignImage: (id: string) => void | Promise<void>;
+  /** 2026-09-01 竞态全扫：传整票订单不只传 id —— 弹窗标题要单号，响应落地要认主人 */
+  onOpenSignImage: (order: LastmileOrderItem) => void | Promise<void>;
   onDelete: (order: LastmileOrderItem) => void | Promise<void>;
 };
 
@@ -647,7 +664,7 @@ function LastmileWdCard(props: WdCardProps) {
                     <div className="lastmile-row-status">
                       <span className={`lastmile-status-badge ${order.status === "SIGNED" ? "is-done" : "is-active"}`}>{order.status === "SIGNED" ? "已签收" : "派送中"}</span>
                       {order.status === "SIGNED" && order.hasSignImage && (
-                        <button type="button" style={{ background: "transparent" }} onClick={() => void props.onOpenSignImage(order.id)}>看凭证</button>
+                        <button type="button" style={{ background: "transparent" }} onClick={() => void props.onOpenSignImage(order)}>看凭证</button>
                       )}
                     </div>
                     <div className="lastmile-row-actions">

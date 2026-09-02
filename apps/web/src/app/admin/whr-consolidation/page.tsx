@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import RoleShell from "../../../modules/layout/RoleShell";
 import { apiBaseUrl, apiRequest } from "../../../services/core-api";
 import { formatBeijingTime } from "../../../modules/staff/utils";
+import { createRequestGate } from "../../../modules/shared/request-gate";
 
 const jsonPost = { "Content-Type": "application/json" } as const;
 
@@ -246,6 +247,11 @@ export default function AdminWhrConsolidationPage() {
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [planDetail, setPlanDetail] = useState<PlanDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  // 2026-09-01 竞态全扫：详情请求「领号验号 + 认主人」。
+  // 进 A 计划详情、马上退出再进 B，A 的慢响应回来不许把 B 的详情盖掉。
+  // ref 在点击处同步赋值（不等 React 提交），响应落地时核对主人用它。
+  const selectedPlanIdRef = useRef<string | null>(null);
+  const detailGate = useRef(createRequestGate()).current;
   const [expandedCustomer, setExpandedCustomer] = useState<string | null>(null);
   const [expandedPrealert, setExpandedPrealert] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
@@ -315,18 +321,25 @@ export default function AdminWhrConsolidationPage() {
   }, []);
 
   const loadDetail = useCallback(async (planId: string) => {
+    // 2026-09-01 竞态全扫：出发领号，落地验号 + 认主人（成功、失败、finally 三个分支都要验）
+    const ticket = detailGate.begin();
     setDetailLoading(true);
     try {
       const data = await apiRequest<PlanDetail>(
         `${apiBaseUrl()}/admin/whr-consolidation/plans/detail?planId=${encodeURIComponent(planId)}`
       );
+      // 号已作废，或用户已换/退出这个计划：旧详情不许落到新计划头上
+      if (!detailGate.isCurrent(ticket) || selectedPlanIdRef.current !== planId) return;
       setPlanDetail(data);
     } catch (e: any) {
+      // 失败分支同样验：旧请求的报错不许安到新界面头上
+      if (!detailGate.isCurrent(ticket) || selectedPlanIdRef.current !== planId) return;
       setToast(e?.message ?? "加载详情失败");
     } finally {
-      setDetailLoading(false);
+      // 旧请求不许提前掐掉新请求的加载态；只要没有更新的请求在跑，加载态就该收掉
+      if (detailGate.isCurrent(ticket)) setDetailLoading(false);
     }
-  }, []);
+  }, [detailGate]);
 
   // /admin/users 不支持 search / pageSize 参数（传了会被忽略），所以这里一次性拉回列表，
   // 过滤放到前端做，搜索框才是真的有用
@@ -348,13 +361,19 @@ export default function AdminWhrConsolidationPage() {
   // 所以点删除先向后端预检，把「会连带删掉什么」摆给人看；
   // 已付款/已发货的后端会拦住，要输管理员密码才放行。
   const [deletePlanId, setDeletePlanId] = useState<string | null>(null);
-  const [deletePlanPreview, setDeletePlanPreview] = useState<{ willDelete: Record<string, number>; blockers: string[]; refundTotal?: number; refundCount?: number } | null>(null);
+  // 2026-09-01 竞态全扫：预检结果里带上它是给哪个计划算的（planId），执行删除前必须核对
+  const [deletePlanPreview, setDeletePlanPreview] = useState<{ planId: string; willDelete: Record<string, number>; blockers: string[]; refundTotal?: number; refundCount?: number } | null>(null);
   const [deletePlanPassword, setDeletePlanPassword] = useState("");
   const [deletePlanError, setDeletePlanError] = useState("");
   const [deletePlanSubmitting, setDeletePlanSubmitting] = useState(false);
+  // 2026-09-01 竞态全扫：删除弹窗当前对着哪个计划（认主人用）。
+  // 关 A 的删除弹窗再开 B，A 的慢预检回来不许把 B 的预检盖掉——否则界面上给人看的是 A 的清单，删的却是 B。
+  const deletePlanIdRef = useRef<string | null>(null);
+  useEffect(() => { deletePlanIdRef.current = deletePlanId; }, [deletePlanId]);
 
   const openDeletePlan = async (planId: string) => {
     setDeletePlanId(planId);
+    deletePlanIdRef.current = planId; // 同步赋值，不等 React 提交
     setDeletePlanPreview(null);
     setDeletePlanPassword("");
     setDeletePlanError("");
@@ -363,14 +382,23 @@ export default function AdminWhrConsolidationPage() {
         `${apiBaseUrl()}/admin/whr-consolidation/plans/delete`,
         { method: "POST", headers: jsonPost, body: JSON.stringify({ planId, dryRun: true }) },
       );
-      setDeletePlanPreview({ willDelete: r.willDelete, blockers: r.blockers, refundTotal: r.refundTotal, refundCount: r.refundCount });
+      // 2026-09-01 竞态全扫·认主人：弹窗已关或已换成别的计划，旧预检不许落地
+      if (deletePlanIdRef.current !== planId) return;
+      setDeletePlanPreview({ planId, willDelete: r.willDelete, blockers: r.blockers, refundTotal: r.refundTotal, refundCount: r.refundCount });
     } catch (e: any) {
+      // 失败分支同样认主人：旧请求的报错不许安到新弹窗头上
+      if (deletePlanIdRef.current !== planId) return;
       setDeletePlanError(e?.message ?? "预检失败");
     }
   };
 
   const handleDeletePlan = async () => {
     if (!deletePlanId) return;
+    // 2026-09-01 竞态全扫：确认按钮真正要删的 id 必须和预检展示的是同一个计划，对不上就拒绝执行
+    if (!deletePlanPreview || deletePlanPreview.planId !== deletePlanId) {
+      setDeletePlanError("预检信息和当前要删的计划对不上，请关掉这个窗口重新点删除");
+      return;
+    }
     setDeletePlanSubmitting(true);
     setDeletePlanError("");
     try {
@@ -379,7 +407,7 @@ export default function AdminWhrConsolidationPage() {
         body: JSON.stringify({ planId: deletePlanId, ...(deletePlanPassword.trim() ? { confirmPassword: deletePlanPassword.trim() } : {}) }),
       });
       setToast("集货计划已删除");
-      if (selectedPlanId === deletePlanId) setSelectedPlanId(null);
+      if (selectedPlanId === deletePlanId) { setSelectedPlanId(null); selectedPlanIdRef.current = null; }
       setDeletePlanId(null);
       setDeletePlanPassword("");
       await loadPlans();
@@ -756,7 +784,7 @@ export default function AdminWhrConsolidationPage() {
                 </thead>
                 <tbody>
                   {plans.map(p => (
-                    <tr key={p.id} onClick={() => { setSelectedPlanId(p.id); loadDetail(p.id); }} style={{ cursor: "pointer", background: "white" }}
+                    <tr key={p.id} onClick={() => { /* 2026-09-01 竞态全扫：ref 和 state 同步改，详情响应回来按 ref 认主人 */ setSelectedPlanId(p.id); selectedPlanIdRef.current = p.id; loadDetail(p.id); }} style={{ cursor: "pointer", background: "white" }}
                       onMouseEnter={e => { e.currentTarget.style.background = "var(--s-alt)" }}
                       onMouseLeave={e => { e.currentTarget.style.background = "white" }}>
                       <td style={{ ...tdS, fontWeight: 600, minWidth: 120, whiteSpace: "nowrap" }}>{p.planNo}</td>
@@ -791,7 +819,7 @@ export default function AdminWhrConsolidationPage() {
         {/* ================================================================ */}
         {selectedPlanId && (
           <>
-            <button onClick={() => { setSelectedPlanId(null); setPlanDetail(null); setExpandedCustomer(null); }} style={{ ...btnCancel, marginBottom: 16 }}>← 返回列表</button>
+            <button onClick={() => { setSelectedPlanId(null); selectedPlanIdRef.current = null; setPlanDetail(null); setExpandedCustomer(null); }} style={{ ...btnCancel, marginBottom: 16 }}>← 返回列表</button>
 
             {detailLoading ? (
               <p style={{ color: "var(--t-faint)", fontSize: 14 }}>加载中...</p>

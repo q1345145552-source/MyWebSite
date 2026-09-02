@@ -74,6 +74,13 @@ export function LastmileAddressPanel({ onToast }: LastmileAddressPanelProps) {
   /** 请求序号（2026-08-31 排查条目28）：只让「最后一次发出去的请求」的结果落地 */
   const loadSeqRef = useRef(0);
 
+  /** 2026-09-01 竞态全扫：保存/删除地址后的刷新，原来用的是**点保存那一刻**的搜索词。
+      保存请求飞着的几秒里用户把搜索词改成了 B，刷新还按旧词 A 去查、又领的是新号，
+      会「合法」盖掉用户改搜 B 的结果。所以刷新一律从这个 ref 取「此刻输入框里的词」。
+      每次渲染同步一次最新值。 */
+  const keywordRef = useRef("");
+  keywordRef.current = keyword;
+
   const loadAddresses = useCallback(async (kw: string) => {
     /* ⚠️ 快速连删（「ABC」→「AB」→「A」）会连发两个请求，网络上谁先回没有保证。
        若「AB」的响应比「A」的后到，items 和 loadedKeyword 会停在 AB 那份小名单上、
@@ -142,7 +149,8 @@ export function LastmileAddressPanel({ onToast }: LastmileAddressPanelProps) {
       say("地址已添加");
       setAddingFor(null);
       setAddForm({ contactName: "", contactPhone: "", addressDetail: "", label: "" });
-      await loadAddresses(keyword);
+      // 2026-09-01 竞态全扫：用「此刻输入框里的词」刷新，不用点保存那一刻的旧词
+      await loadAddresses(keywordRef.current);
     } catch (e) { say(e instanceof Error ? e.message : "保存失败，请重试"); }
   };
 
@@ -165,7 +173,8 @@ export function LastmileAddressPanel({ onToast }: LastmileAddressPanelProps) {
       await parseApiResponse(res);
       say("地址已修改");
       setEditingAddr(null);
-      await loadAddresses(keyword);
+      // 2026-09-01 竞态全扫：用「此刻输入框里的词」刷新，不用点保存那一刻的旧词
+      await loadAddresses(keywordRef.current);
     } catch (e) { say(e instanceof Error ? e.message : "保存失败，请重试"); }
   };
 
@@ -177,7 +186,8 @@ export function LastmileAddressPanel({ onToast }: LastmileAddressPanelProps) {
       });
       await parseApiResponse(resp);
       say("地址已删除");
-      await loadAddresses(keyword);
+      // 2026-09-01 竞态全扫：用「此刻输入框里的词」刷新，不用点删除那一刻的旧词
+      await loadAddresses(keywordRef.current);
     } catch (e) { say(`删除失败：${e instanceof Error ? e.message : "网络错误"}`); }
   };
 

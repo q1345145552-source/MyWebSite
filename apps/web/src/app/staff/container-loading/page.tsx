@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import RoleShell from "../../../modules/layout/RoleShell";
 import Toast from "../../../modules/layout/Toast";
 import { openShipmentTrack } from "../../../modules/shipment/ShipmentTrackModal";
+import { createRequestGate } from "../../../modules/shared/request-gate";
 import { shipmentStatusZh } from "../../../modules/shipment/shipment-status";
 import { downloadContainerDispatchWorkbook } from "../../../modules/lastmile/exportDispatchWorkbooks";
 import {
@@ -221,22 +222,33 @@ export default function StaffContainerLoadingPage() {
     return set;
   }, [detail]);
 
+  /** 2026-09-01 竞态全扫：柜子搜索连发两次（A 条件、B 条件），A 的响应后到会把
+      B 条件的结果盖回 A 的——领号验号，数据、报错、loading 三个分支只认最新请求。 */
+  const listGate = useRef(createRequestGate()).current;
   const loadList = useCallback(async () => {
+    const ticket = listGate.begin();
     setLoading(true);
     setError("");
     try {
       const items = await fetchLoadingManifests({ query: query.trim(), trackingNo: searchTrackingNo.trim(), status: statusFilter, transportMode: modeFilter });
+      if (!listGate.isCurrent(ticket)) return; // 旧条件的响应后到，丢弃
       setList(items);
       if (!selectedId && items.length > 0) setSelectedId(items[0].id);
     } catch (e) {
+      if (!listGate.isCurrent(ticket)) return; // 旧请求的报错不许安到新请求头上
       setError(e instanceof Error ? e.message : "加载失败");
       setList([]);
     } finally {
-      setLoading(false);
+      if (listGate.isCurrent(ticket)) setLoading(false); // 旧请求不许掐掉新请求的加载态
     }
-  }, [query, searchTrackingNo, statusFilter, modeFilter, selectedId]);
+  }, [query, searchTrackingNo, statusFilter, modeFilter, selectedId, listGate]);
 
   useEffect(() => { void loadList(); }, []);
+
+  /** 2026-09-01 竞态全扫：详情要「认主人」。连点柜 A、柜 B，A 的详情后到会顶掉 B 的。
+      响应落地时核对「当前选中的柜子」还是不是出发时那个。每次渲染同步一次最新值。 */
+  const selectedIdRef = useRef("");
+  selectedIdRef.current = selectedId;
 
   const loadDetail = useCallback(async (id: string) => {
     if (!id) return;
@@ -244,11 +256,13 @@ export default function StaffContainerLoadingPage() {
     setLoadingDetail(true);
     try {
       const d = await fetchLoadingManifestDetail(id);
+      if (selectedIdRef.current !== id) return; // 用户已点到别的柜子，A 的详情不落地
       setDetail(d);
     } catch (e) {
+      if (selectedIdRef.current !== id) return; // 旧柜子的报错也不弹
       setError(e instanceof Error ? e.message : "详情加载失败");
     } finally {
-      setLoadingDetail(false);
+      if (selectedIdRef.current === id) setLoadingDetail(false); // 别掐掉新柜子的加载态
     }
   }, []);
 
@@ -276,6 +290,8 @@ export default function StaffContainerLoadingPage() {
 
   const handlePushStatus = async (toStatus: string) => {
     if (!selectedId || !detail) return;
+    // 2026-09-01 竞态全扫：刚点了别的柜子、详情还没跟上时，别拿 B 的 id 配 A 的详情去推状态
+    if (detail.id !== selectedId) { setToast("刚切换了柜子，详情还在加载，请稍候再操作"); return; }
     try {
       const result = await updateContainerStatus({ id: selectedId, toStatus, remark: statusRemark.trim() || undefined, date: statusDate || undefined, nextStop: nextStop.trim() || undefined });
       setStatusRemark("");
@@ -292,6 +308,9 @@ export default function StaffContainerLoadingPage() {
   /** 推错了：整柜退回上一步，柜里每张运单那一批轨迹一起删掉 */
   const handleUndoStatus = async () => {
     if (!selectedId || !detail || undoing) return;
+    // 2026-09-01 竞态全扫：确认弹窗里的状态名来自 detail，撤销动的却是 selectedId ——
+    // 详情还没跟上选中柜时两者不是同一个柜子，先拦下
+    if (detail.id !== selectedId) { setToast("刚切换了柜子，详情还在加载，请稍候再操作"); return; }
     const nowLabel = STATUS_LABEL[detail.status] ?? detail.status;
     const ok = window.confirm(
       `确定撤销这个柜子的「${nowLabel}」吗？\n\n` +
@@ -336,6 +355,9 @@ export default function StaffContainerLoadingPage() {
 
   const handleDelete = async () => {
     if (!selectedId || !detail) return;
+    // 2026-09-01 竞态全扫：确认弹窗里的柜号来自 detail，删的却是 selectedId ——
+    // 不核对的话可能「看着 A 的柜号，删了 B 的柜」
+    if (detail.id !== selectedId) { setToast("刚切换了柜子，详情还在加载，请稍候再操作"); return; }
     if (!confirm(`确定删除柜子 ${detail.manifestNo}？\n\n此操作不可撤销。`)) return;
     try {
       await deleteContainer(selectedId);

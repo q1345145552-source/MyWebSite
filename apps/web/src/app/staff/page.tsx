@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, type ReactNode, useEffect, useMemo, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { formatCny } from "../../modules/billing/billing-utils";
 import ShipmentSearch from "../../modules/shipment/ShipmentSearch";
@@ -317,6 +317,11 @@ export default function StaffHomePage() {
     contentBase64: "",
   });
   const [photoList, setPhotoList] = useState<StaffInboundPhotoItem[]>([]);
+  /** 2026-09-01 竞态全扫：入库照片要「认主人」。查 A 的照片期间把输入框改成 B，
+      A 的响应后到会把 A 的照片摆在 B 的单号下面。响应落地时核对「此刻输入框里的
+      运单号」还是不是出发时那个，不是就整段丢弃。每次渲染同步一次最新值。 */
+  const photoShipmentIdRef = useRef("");
+  photoShipmentIdRef.current = photoDraft.shipmentId.trim();
   const [activeSection, setActiveSection] = useState<StaffSectionId>("staff-prealert-review");
 
   const [lmShipments, setLmShipments] = useState<LastmileShipmentOption[]>([]);
@@ -1547,16 +1552,19 @@ export default function StaffHomePage() {
                     return;
                   }
                   setLoading(true);
+                  // 2026-09-01 竞态全扫：记住这次是给哪个运单传的，刷新照片时要认主人
+                  const uploadShipmentId = photoDraft.shipmentId.trim();
                   try {
                     await uploadStaffInboundPhoto({
-                      shipmentId: photoDraft.shipmentId.trim(),
+                      shipmentId: uploadShipmentId,
                       fileName: photoDraft.fileName,
                       mime: photoDraft.mime,
                       contentBase64: photoDraft.contentBase64,
                       note: photoDraft.note.trim() || undefined,
                     });
-                    const items = await fetchStaffInboundPhotos(photoDraft.shipmentId.trim());
-                    setPhotoList(items);
+                    const items = await fetchStaffInboundPhotos(uploadShipmentId);
+                    // 响应回来时输入框已换成别的运单号 → A 的照片不许落到 B 的单号下面
+                    if (photoShipmentIdRef.current === uploadShipmentId) setPhotoList(items);
                     setToast("入库照片已上传");
                   } catch (error) {
                     const text = error instanceof Error ? error.message : "上传失败";
@@ -1575,9 +1583,11 @@ export default function StaffHomePage() {
                 onClick={async () => {
                   if (!photoDraft.shipmentId.trim()) return;
                   setLoading(true);
+                  // 2026-09-01 竞态全扫：查 A 期间把输入框改成 B，A 的响应后到不许落地
+                  const queryShipmentId = photoDraft.shipmentId.trim();
                   try {
-                    const items = await fetchStaffInboundPhotos(photoDraft.shipmentId.trim());
-                    setPhotoList(items);
+                    const items = await fetchStaffInboundPhotos(queryShipmentId);
+                    if (photoShipmentIdRef.current === queryShipmentId) setPhotoList(items);
                   } finally {
                     setLoading(false);
                   }

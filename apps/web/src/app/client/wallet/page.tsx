@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import RoleShell from "../../../modules/layout/RoleShell";
+import { createRequestGate } from "../../../modules/shared/request-gate";
 import {
   fetchClientWalletOverview,
   fetchClientWalletRecharges,
@@ -71,8 +72,16 @@ export default function ClientWalletPage() {
      响应回来时序号已不是最新的就整个丢弃，只让最后一次请求的结果落地。 */
   const ledgerSeqRef = useRef(0);
 
+  /* 2026-09-01 竞态全扫：「余额 + 充值记录」自己的门闩（request-gate 用法一）。
+     和流水的 ledgerSeqRef 是两份独立数据上下文，各配各的门，互不作废。
+     治的病：充值提交后触发的刷新和首次加载并发时，谁先回没有保证——
+     晚到的旧响应会把刚充完值的新余额盖回旧数字。 */
+  const walletGate = useRef(createRequestGate()).current;
+
   const loadData = useCallback(async () => {
     setLoading(true);
+    // 2026-09-01 竞态全扫：余额+充值记录出发时领号
+    const walletTicket = walletGate.begin();
     // 全量刷新也占一个序号：还在路上的翻页旧响应不许盖掉刷新结果
     const seq = ++ledgerSeqRef.current;
     try {
@@ -81,8 +90,11 @@ export default function ClientWalletPage() {
         fetchClientWalletRecharges(),
         fetchConsolidationLedger({ page: 1, pageSize: LEDGER_PAGE_SIZE }),
       ]);
-      setData(overview);
-      setRecharges(recs.recharges);
+      // 2026-09-01 竞态全扫：号作废（期间又发起了新一轮刷新）就整段不落地，旧余额不许盖新余额
+      if (walletGate.isCurrent(walletTicket)) {
+        setData(overview);
+        setRecharges(recs.recharges);
+      }
       if (seq === ledgerSeqRef.current) {
         setLedger(led.items);
         setLedgerTotal(led.total);
@@ -90,12 +102,15 @@ export default function ClientWalletPage() {
         setLedgerPage(led.page);
       }
     } catch (error) {
+      // 2026-09-01 竞态全扫：过期请求的报错也不提示，免得错误提示安在新请求头上
+      if (!walletGate.isCurrent(walletTicket)) return;
       const text = error instanceof Error ? error.message : "加载失败";
       setMessage(`加载失败：${text}`);
     } finally {
-      setLoading(false);
+      // 2026-09-01 竞态全扫：旧请求不许提前掐掉新请求的加载态
+      if (walletGate.isCurrent(walletTicket)) setLoading(false);
     }
-  }, []);
+  }, [walletGate]);
 
   useEffect(() => {
     void loadData();

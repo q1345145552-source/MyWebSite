@@ -19,6 +19,7 @@ import {
   type ConsolidationProductItem,
 } from "../../../services/business-api";
 import { formatBeijingTime } from "../../../modules/staff/utils";
+import { createRequestGate } from "../../../modules/shared/request-gate";
 
 // ============================================================================
 // 状态中文
@@ -97,15 +98,23 @@ export default function StaffConsolidationPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ======== 数据 ========
+  /** 2026-09-01 竞态全扫：状态筛选快速连切会连发请求，旧筛选的响应后到会盖掉新筛选的列表。
+      每次出发领号，回来验号——数据、报错、loading 三个分支都只认最新一次请求。 */
+  const tasksGate = useRef(createRequestGate()).current;
   const loadTasks = useCallback(async () => {
+    const ticket = tasksGate.begin();
     setLoading(true);
     try {
       const data = await fetchStaffConsolidationTasks(statusFilter || undefined);
+      if (!tasksGate.isCurrent(ticket)) return; // 旧筛选的响应后到，丢弃
       setTasks(data);
     } catch (e: any) {
+      if (!tasksGate.isCurrent(ticket)) return; // 旧请求的报错也不弹，别盖住新请求
       setToast(e.message);
-    } finally { setLoading(false); }
-  }, [statusFilter]);
+    } finally {
+      if (tasksGate.isCurrent(ticket)) setLoading(false); // 旧请求不许掐掉新请求的加载态
+    }
+  }, [statusFilter, tasksGate]);
 
   const loadDetail = useCallback(async (taskId: string) => {
     try {

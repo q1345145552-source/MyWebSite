@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { apiBaseUrl, apiRequest } from "../../services/core-api";
+import { createRequestGate } from "../../modules/shared/request-gate";
 
 /* 2026-08-31（Codex 二轮）：列表接口不再下发 certFileBase64 / productImages 大字段
    （表格根本不显示它们），remark 客户角色也拿不到了——类型跟着后端同步。
@@ -46,18 +47,29 @@ export default function FclInquiryPanel(props: ClientFclInquiryProps) {
   const [productPreviews, setProductPreviews] = useState<string[]>([]);
   const [selectedClientId, setSelectedClientId] = useState("");
 
+  // 2026-09-01 竞态全扫：列表自己的门闩——快速翻页/提交后刷新时只认最新一次请求，
+  // 晚到的旧页不许盖新页，页码也只在数据验号通过后才跟着更新
+  const listGate = useRef(createRequestGate()).current;
+
   const loadList = async (page = listPage) => {
+    const ticket = listGate.begin(); // 2026-09-01 竞态全扫：出发时领号
     try {
       // 2026-08-31（Codex 二轮）：带上 page/pageSize，接口只回当前页 + 真实总数
       const data = await apiRequest<{ items: FclInquiryItem[]; total?: number }>(
         `${apiBaseUrl()}/client/fcl-inquiries?page=${page}&pageSize=${listPageSize}`
       );
+      if (!listGate.isCurrent(ticket)) return; // 2026-09-01 竞态全扫：号作废——数据、页码、错误态都不许碰
       setList(data.items ?? []); // 【审查问题 13】接口少了 items 就会让整页崩掉
       setListTotal(data.total ?? (data.items ?? []).length);
-      setListPage(page);
+      setListPage(page); // 页码跟数据同一批更新，不再出现「页码是新的、数据是旧的」
       setListError(false);
-    } catch (e: any) { props.onToast("加载询价记录失败：" + (e.message || "网络错误")); setListError(true); }
-    setListLoaded(true);
+      setListLoaded(true);
+    } catch (e: any) {
+      if (!listGate.isCurrent(ticket)) return; // 2026-09-01 竞态全扫：旧请求的报错不许安到新请求头上
+      props.onToast("加载询价记录失败：" + (e.message || "网络错误"));
+      setListError(true);
+      setListLoaded(true);
+    }
   };
 
   if (!props.visible) return null;
@@ -133,12 +145,13 @@ export default function FclInquiryPanel(props: ClientFclInquiryProps) {
     <section style={{ border: "1px solid var(--l-soft)", borderRadius: 12, padding: 20, background: "var(--white)", marginBottom: 18 }}>
       <h2 style={{ margin: "0 0 16px", fontSize: 18 }}>整柜询价</h2>
 
-      {/* 表单 */}
+      {/* 表单。2026-09-01 竞态全扫：提交期间整个表单加 disabled 上锁——
+          否则提交 A 的等待期里用户接着填 B，A 成功后的「清空表单」会把 B 的输入整个抹掉 */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, maxWidth: 700, marginBottom: 20 }}>
         {props.isStaff && (
           <div style={{ gridColumn: "1/-1" }}>
             <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>选择客户 *</label>
-            <input value={selectedClientId} onChange={e => setSelectedClientId(e.target.value)} placeholder="输入客户ID" list="fcl-client-list"
+            <input disabled={loading} value={selectedClientId} onChange={e => setSelectedClientId(e.target.value)} placeholder="输入客户ID" list="fcl-client-list"
               style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13 }} />
             <datalist id="fcl-client-list">
               {(props.clients ?? []).map(c => (<option key={c.id} value={c.id}>{c.id} - {c.name}</option>))}
@@ -147,27 +160,27 @@ export default function FclInquiryPanel(props: ClientFclInquiryProps) {
         )}
         <div>
           <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>品名 *</label>
-          <input value={productName} onChange={e => setProductName(e.target.value)} placeholder="货物品名"
+          <input disabled={loading} value={productName} onChange={e => setProductName(e.target.value)} placeholder="货物品名"
             style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13 }} />
         </div>
         <div>
           <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>货值</label>
-          <input value={cargoValue} onChange={e => setCargoValue(e.target.value)} placeholder="如 ¥50,000"
+          <input disabled={loading} value={cargoValue} onChange={e => setCargoValue(e.target.value)} placeholder="如 ¥50,000"
             style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13 }} />
         </div>
         <div>
           <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>货重</label>
-          <input value={cargoWeight} onChange={e => setCargoWeight(e.target.value)} placeholder="如 25吨"
+          <input disabled={loading} value={cargoWeight} onChange={e => setCargoWeight(e.target.value)} placeholder="如 25吨"
             style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13 }} />
         </div>
         <div>
           <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>地址 *</label>
-          <input value={address} onChange={e => setAddress(e.target.value)} placeholder="收货/发货地址"
+          <input disabled={loading} value={address} onChange={e => setAddress(e.target.value)} placeholder="收货/发货地址"
             style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13 }} />
         </div>
         <div>
           <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>柜型</label>
-          <select value={containerType} onChange={e => setContainerType(e.target.value)}
+          <select disabled={loading} value={containerType} onChange={e => setContainerType(e.target.value)}
             style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13 }}>
             <option value="1*40HQ">1*40HQ</option>
             <option value="1*20GP">1*20GP</option>
@@ -178,7 +191,7 @@ export default function FclInquiryPanel(props: ClientFclInquiryProps) {
         </div>
         <div>
           <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>清提派/派送</label>
-          <select value={serviceType} onChange={e => setServiceType(e.target.value)}
+          <select disabled={loading} value={serviceType} onChange={e => setServiceType(e.target.value)}
             style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13 }}>
             <option value="清提派">清提派（清关+提货+派送）</option>
             <option value="派送">仅派送</option>
@@ -186,17 +199,17 @@ export default function FclInquiryPanel(props: ClientFclInquiryProps) {
         </div>
         <div>
           <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>装柜时间</label>
-          <input type="date" value={loadingDate} onChange={e => setLoadingDate(e.target.value)}
+          <input disabled={loading} type="date" value={loadingDate} onChange={e => setLoadingDate(e.target.value)}
             style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13 }} />
         </div>
         <div>
           <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>认证文件</label>
-          <input type="file" onChange={e => setCertFile(e.target.files?.[0] || null)}
+          <input disabled={loading} type="file" onChange={e => setCertFile(e.target.files?.[0] || null)}
             style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13 }} />
         </div>
         <div style={{ gridColumn: "1/-1" }}>
           <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>产品图片</label>
-          <input type="file" multiple accept="image/*" onChange={e => handleProductImages(e.target.files)}
+          <input disabled={loading} type="file" multiple accept="image/*" onChange={e => handleProductImages(e.target.files)}
             style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 10px", width: "100%", fontSize: 13, marginBottom: 8 }} />
           {productPreviews.length > 0 && (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>

@@ -1253,8 +1253,12 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
           operatorName: auth.name ?? "",
           fromStatus: "created",
           toStatus: "created",
-          remark: "运单已建立",
-          nextStop: "国内仓",
+          /* 2026-09-02 老板指正：员工建单的业务口径是「货到了国内仓才录单」——
+             录单那一刻货已经在仓里，下一站写「国内仓」等于胡说。
+             改成和确认收货那条轨迹（上面 nextStop:"装柜"）同一口径。
+             ⚠️ 客户报预报单那条路（remark「等待国内仓收货」那处）的「国内仓」是对的，别顺手改。 */
+          remark: "货已到国内仓，等待装柜",
+          nextStop: "装柜",
           changedAt: new Date(),
         },
       }),

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { AdminUserItem } from "../../services/business-api";
 import { updateShippingConfig, fetchClientShippingConfig, saveClientShippingConfig } from "../../services/business-api";
 
@@ -28,15 +28,42 @@ export default function ShippingConfig(props: ShippingConfigProps) {
   const [expandedClientId, setExpandedClientId] = useState<string | null>(null);
   const [clientPrices, setClientPrices] = useState<Record<string, number>>({});
   const [clientMinVolumeDisabled, setClientMinVolumeDisabled] = useState(false);
+  /* 2026-09-01 竞态全扫：clientPrices 是全体客户共用的一份状态，
+     快速切客户时 A 的慢响应会落在 B 名下，保存时还会把 A 的价格存给 B。
+     两个 ref 让数据「认主人」：
+     - expandedClientIdRef：当前展开的是哪个客户（响应回来时核对，不是他就整段丢弃）
+     - pricesOwnerRef：clientPrices 里这份价格属于哪个客户（保存前必须和当前客户一致） */
+  const expandedClientIdRef = useRef<string | null>(null);
+  const pricesOwnerRef = useRef<string | null>(null);
 
   if (!props.visible) return null;
 
   const loadClientPrices = async (clientId: string) => {
     try {
       const result = await fetchClientShippingConfig(clientId);
+      // 2026-09-01 竞态全扫·认主人：响应落地时用户已切到别的客户，这份数据不许上屏
+      if (expandedClientIdRef.current !== clientId) return;
       setClientPrices(result.prices);
       setClientMinVolumeDisabled(result.disableMinVolume ?? false);
-    } catch { /* ignore */ }
+      pricesOwnerRef.current = clientId;
+    } catch {
+      // 2026-09-01 竞态全扫：加载失败要让人知道（否则表单里是默认价，保存也会被拒），但同样要认主人
+      if (expandedClientIdRef.current === clientId) props.onToast("加载该客户价格失败，请收起后重新打开");
+    }
+  };
+
+  /** 展开某个客户（查看或编辑）：先清掉上一位客户的数据再去加载（2026-09-01 竞态全扫，防 A 的价格暂时挂在 B 名下） */
+  const expandClient = (panelId: string, clientId: string) => {
+    setExpandedClientId(panelId);
+    expandedClientIdRef.current = clientId;
+    pricesOwnerRef.current = null;
+    setClientPrices({});
+    setClientMinVolumeDisabled(false);
+    void loadClientPrices(clientId);
+  };
+  const collapseClient = () => {
+    setExpandedClientId(null);
+    expandedClientIdRef.current = null;
   };
 
   const priceDefaults = [
@@ -90,8 +117,8 @@ export default function ShippingConfig(props: ShippingConfigProps) {
                   {hasMinDisabled ? <span style={{ marginLeft: 8, fontSize: 11, color: "#1e3a8a" }}>低消已取消</span> : null}
                 </div>
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                  <button type="button" onClick={() => { if (isView) { setExpandedClientId(null); return; } setExpandedClientId(c.id); loadClientPrices(c.id); }} style={{ border: "1px solid var(--c-blue)", borderRadius: 4, padding: "4px 10px", fontSize: 12, background: "var(--white)", color: "var(--c-blue)", cursor: "pointer" }}>{isView ? "收起" : "查看价格"}</button>
-                  <button type="button" onClick={() => { if (isEdit) { setExpandedClientId(null); return; } setExpandedClientId(`edit-${c.id}`); loadClientPrices(c.id); }} style={{ border: "none", borderRadius: 4, padding: "4px 10px", fontSize: 12, background: "var(--c-blue)", color: "var(--white)", cursor: "pointer" }}>{isEdit ? "收起" : "编辑价格"}</button>
+                  <button type="button" onClick={() => { if (isView) { collapseClient(); return; } expandClient(c.id, c.id); }} style={{ border: "1px solid var(--c-blue)", borderRadius: 4, padding: "4px 10px", fontSize: 12, background: "var(--white)", color: "var(--c-blue)", cursor: "pointer" }}>{isView ? "收起" : "查看价格"}</button>
+                  <button type="button" onClick={() => { if (isEdit) { collapseClient(); return; } expandClient(`edit-${c.id}`, c.id); }} style={{ border: "none", borderRadius: 4, padding: "4px 10px", fontSize: 12, background: "var(--c-blue)", color: "var(--white)", cursor: "pointer" }}>{isEdit ? "收起" : "编辑价格"}</button>
                 </div>
               </div>
               {isView ? (
@@ -130,6 +157,13 @@ export default function ShippingConfig(props: ShippingConfigProps) {
                     );
                   })}
                   <button type="button" onClick={async () => {
+                    // 2026-09-01 竞态全扫：保存前核对「表单里这份价格是给谁的」。
+                    // 价格还没加载完成、加载失败、或刚切换过客户时，这里对不上——拒绝保存，
+                    // 防止把 A 客户的价格存到 B 客户名下。
+                    if (pricesOwnerRef.current !== c.id) {
+                      props.onToast("该客户的价格还没加载完成，请稍候或收起后重新打开再保存");
+                      return;
+                    }
                     try {
                       const chk = document.querySelector(`[data-client="${c.id}"] input[type="checkbox"]`) as HTMLInputElement;
                       const disableMin = chk?.checked ?? clientMinVolumeDisabled;

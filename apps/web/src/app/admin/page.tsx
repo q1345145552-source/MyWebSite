@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { COMPLETED_STATUSES, IN_TRANSIT_STATUSES } from "../../../../../packages/shared-types/shipment-status";
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -35,6 +35,7 @@ import { DEFAULT_SHIPPING_PRICES, INSPECTION_SURCHARGE, SENSITIVE_SURCHARGE } fr
 import { shipmentStatusZh, transportModeLabel, warehouseLabelFromId } from "../../modules/staff/utils";
 import { SHIPMENT_STATUS_FILTER_OPTIONS } from "../../modules/shipment/shipment-status";
 import ShippingConfig from "../../components/admin/ShippingConfig";
+import { createRequestGate } from "../../modules/shared/request-gate";
 import {
   fetchAdminOverview,
   fetchStaffShipmentOverview,
@@ -401,11 +402,18 @@ export default function AdminHomePage() {
   const [rechargeStatusFilter, setRechargeStatusFilter] = useState("");
   const [rejectModalId, setRejectModalId] = useState<string | null>(null);
   const [rejectRemark, setRejectRemark] = useState("");
+  // 2026-09-01 竞态全扫：快速切筛选状态时，先回来的旧响应不许盖掉新筛选的列表
+  const rechargeGate = useRef(createRequestGate()).current;
   const loadRecharges = async () => {
+    const ticket = rechargeGate.begin();
     try {
       const data = await fetchAdminRecharges(rechargeStatusFilter || undefined);
+      if (!rechargeGate.isCurrent(ticket)) return; // 号作废：旧筛选的数据不许上屏
       setRechargeList(data.recharges);
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      if (!rechargeGate.isCurrent(ticket)) return; // 旧请求的报错也不许乱入
+      console.error(e);
+    }
   };
   const [orderImagesCache, setOrderImagesCache] = useState<Record<string, Array<{ id: string; fileName: string; mime: string; contentBase64?: string; filePath?: string | null; imageUrl?: string; createdAt: string }>>>({});
   const [orderEditForm, setOrderEditForm] = useState({
@@ -767,10 +775,14 @@ export default function AdminHomePage() {
     setSessionMemoryList(data.items ?? []); // 【审查问题 13】接口少了 items 就会让整页崩掉
   }, []);
 
+  // 2026-09-01 竞态全扫：快速切「待处理/已处理」时，先回来的旧响应不许盖掉新页签的列表
+  const knowledgeGapGate = useRef(createRequestGate()).current;
   const loadKnowledgeGaps = useCallback(async () => {
+    const ticket = knowledgeGapGate.begin();
     const data = await fetchAdminAiKnowledgeGaps({ status: knowledgeGapStatus });
+    if (!knowledgeGapGate.isCurrent(ticket)) return; // 号作废：旧页签的数据不许上屏
     setKnowledgeGapList(data.items ?? []); // 【审查问题 13】同上
-  }, [knowledgeGapStatus]);
+  }, [knowledgeGapStatus, knowledgeGapGate]);
 
   const loadKnowledge = useCallback(async () => {
     if (!session?.companyId) return;

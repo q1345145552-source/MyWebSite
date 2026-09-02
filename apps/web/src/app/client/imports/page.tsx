@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import RoleShell from "../../../modules/layout/RoleShell";
 import { createClientPrealert, type ClientPrealertPayload } from "../../../services/business-api";
@@ -130,15 +130,28 @@ export default function ClientImportsPage() {
 
   const validCount = useMemo(() => rows.length, [rows]);
 
+  /* 2026-09-01 竞态全扫：记住「当前预览是哪一份」（request-gate 用法二·认主人的快照版）。
+     handleSubmit 的循环拿的是点击那一刻的 rows；万一提交期间预览被换成另一份文件，
+     旧批次的进度/结果就不许再往新预览上写。主防线是提交期间禁用上传入口（见下），
+     这个快照是第二道保险。 */
+  const previewRef = useRef<ImportRow[]>([]);
+
   const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
+    // 2026-09-01 竞态全扫：提交进行中不接受新文件（入口已 disabled，这里再兜一层）
+    if (loading) {
+      event.target.value = "";
+      return;
+    }
     try {
       const buffer = await file.arrayBuffer();
       const wb = XLSX.read(buffer, { type: "array" });
       const ws = wb.Sheets[wb.SheetNames[0]];
       const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: "" });
       const normalized = normalizeRows(raw);
+      // 2026-09-01 竞态全扫：预览换主人，快照同步更新
+      previewRef.current = normalized;
       setRows(normalized);
       setCurrent(0);
       setSuccessCount(0);
@@ -153,6 +166,8 @@ export default function ClientImportsPage() {
   };
 
   const handleSubmit = async () => {
+    // 2026-09-01 竞态全扫：记下这次提交的是哪一份预览（点击那一刻的 rows 快照）
+    const batch = rows;
     setLoading(true);
     setCurrent(0);
     setSuccessCount(0);
@@ -164,9 +179,12 @@ export default function ClientImportsPage() {
     let success = 0;
     const errs: string[] = [];
 
-    for (let i = 0; i < rows.length; i++) {
+    for (let i = 0; i < batch.length; i++) {
+      // 2026-09-01 竞态全扫：预览已不是出发时那份（理论上入口已禁用走不到这，兜底），
+      // 旧批次立即停手，不再提交、也不再往新预览上写任何进度和结果
+      if (previewRef.current !== batch) break;
       setCurrent(i + 1);
-      const row = rows[i];
+      const row = batch[i];
       try {
         const payload: ClientPrealertPayload = {
           warehouseId: row.warehouseId,
@@ -182,17 +200,24 @@ export default function ClientImportsPage() {
         };
         await createClientPrealert(payload);
         success++;
+        // 2026-09-01 竞态全扫：响应回来先认主人，预览换了就不写计数
+        if (previewRef.current !== batch) break;
         setSuccessCount(success);
       } catch (error) {
         const text = error instanceof Error ? error.message : "提交失败";
         errs.push(`第${i + 1}行(${row.itemName}): ${text}`);
+        // 2026-09-01 竞态全扫：失败分支同样认主人，旧批次的报错不许混进新预览
+        if (previewRef.current !== batch) break;
         setFailCount(errs.length);
         setErrors([...errs]);
       }
     }
 
-    setErrors(errs);
-    setDone(true);
+    // 2026-09-01 竞态全扫：只有预览还是出发时那份，才展示这批的完成汇总
+    if (previewRef.current === batch) {
+      setErrors(errs);
+      setDone(true);
+    }
     setLoading(false);
   };
 
@@ -211,18 +236,20 @@ export default function ClientImportsPage() {
           >
             下载模板
           </button>
+          {/* 2026-09-01 竞态全扫：提交期间禁用上传入口——提交中换文件会让 A 批次的
+              后台创建结果和统计混进 B 的预览（复用现成的 loading 态） */}
           <label
             style={{
-              border: "1px solid var(--c-blue)",
+              border: loading ? "1px solid var(--l-strong)" : "1px solid var(--c-blue)",
               borderRadius: 8,
               padding: "8px 12px",
-              background: "var(--c-blue-bg)",
-              color: "#1e3a8a",
-              cursor: "pointer",
+              background: loading ? "var(--s-sunken)" : "var(--c-blue-bg)",
+              color: loading ? "var(--t-faint)" : "#1e3a8a",
+              cursor: loading ? "not-allowed" : "pointer",
             }}
           >
             上传 Excel
-            <input type="file" accept=".xlsx,.xls" style={{ display: "none" }} onChange={handleUpload} />
+            <input type="file" accept=".xlsx,.xls" disabled={loading} style={{ display: "none" }} onChange={handleUpload} />
           </label>
           <button
             type="button"

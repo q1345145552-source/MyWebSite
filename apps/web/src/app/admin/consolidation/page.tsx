@@ -17,6 +17,7 @@ import {
   type ConsolidationProductItem,
 } from "../../../services/business-api";
 import { formatBeijingTime } from "../../../modules/staff/utils";
+import { createRequestGate } from "../../../modules/shared/request-gate";
 
 // ============================================================================
 // 状态中文
@@ -115,23 +116,39 @@ export default function AdminConsolidationPage() {
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   // ======== 数据 ========
+  // 2026-09-01 竞态全扫：快速切状态筛选时，先回来的旧响应不许盖掉新筛选的列表
+  const tasksGate = useRef(createRequestGate()).current;
   const loadTasks = useCallback(async () => {
+    const ticket = tasksGate.begin();
     setLoading(true);
     try {
       const data = await fetchAdminConsolidationTasks(statusFilter || undefined);
+      if (!tasksGate.isCurrent(ticket)) return; // 号作废：旧筛选的数据不许上屏
       setTasks(data);
-    } catch (e: any) { setToast(e.message); } finally { setLoading(false); }
-  }, [statusFilter]);
+    } catch (e: any) {
+      if (!tasksGate.isCurrent(ticket)) return; // 旧请求的报错也不许乱入
+      setToast(e.message);
+    } finally {
+      if (tasksGate.isCurrent(ticket)) setLoading(false); // 旧请求不许提前掐掉新请求的加载态
+    }
+  }, [statusFilter, tasksGate]);
 
+  // 2026-09-01 竞态全扫：详情要认主人——响应回来时核对还是不是当前选中的那个任务
+  const selectedTaskIdRef = useRef<string | null>(null);
   const loadDetail = useCallback(async (taskId: string) => {
     try {
       const data = await fetchStaffConsolidationTaskDetail(taskId);
+      if (selectedTaskIdRef.current !== taskId) return; // 已切走/已返回列表：A 的详情不许挂在 B 名下
       setTaskDetail(data);
-    } catch (e: any) { setToast(e.message); }
+    } catch (e: any) {
+      if (selectedTaskIdRef.current !== taskId) return;
+      setToast(e.message);
+    }
   }, []);
 
   useEffect(() => { loadTasks(); }, [loadTasks]);
   useEffect(() => {
+    selectedTaskIdRef.current = selectedTaskId; // 认主人用：始终指向最新选中的任务
     if (selectedTaskId) loadDetail(selectedTaskId);
     else setTaskDetail(null);
   }, [selectedTaskId, loadDetail]);
@@ -152,17 +169,30 @@ export default function AdminConsolidationPage() {
   const [deletePreview, setDeletePreview] = useState<{ willDelete: Record<string, number>; blockers: string[]; refundTotal?: number; refundCount?: number } | null>(null);
   const [deletePassword, setDeletePassword] = useState("");
   const [deleteError, setDeleteError] = useState("");
+  /* 2026-09-01 竞态全扫：删除预检要认主人。
+     - deleteTaskIdRef：当前删除弹窗对着哪个任务（预检响应回来先核对，不是他就丢弃）
+     - deletePreviewForRef：deletePreview 里这份预检结果属于哪个任务
+       （确认删除前必须和要删的任务一致——展示与执行必须同一个 id，不一致拒绝） */
+  const deleteTaskIdRef = useRef<string | null>(null);
+  const deletePreviewForRef = useRef<string | null>(null);
+  useEffect(() => { deleteTaskIdRef.current = deleteTaskId; }, [deleteTaskId]); // 弹窗在别处被关掉时 ref 也跟上
 
   /** 打开删除弹窗时先问后端：这个任务删了会带走什么、有没有被拦 */
   const openDeleteTask = async (tid: string) => {
     setDeleteTaskId(tid);
+    deleteTaskIdRef.current = tid; // 不等重渲染，立刻指向新任务
     setDeletePreview(null);
+    deletePreviewForRef.current = null;
     setDeletePassword("");
     setDeleteError("");
     try {
       const r = await deleteAdminConsolidationTask(tid, { dryRun: true });
+      // 2026-09-01 竞态全扫·认主人：回来时弹窗已换成别的任务（或已关闭），A 的预检不许挂到 B 的弹窗里
+      if (deleteTaskIdRef.current !== tid) return;
       setDeletePreview({ willDelete: r.willDelete, blockers: r.blockers, refundTotal: r.refundTotal, refundCount: r.refundCount });
+      deletePreviewForRef.current = tid;
     } catch (e: any) {
+      if (deleteTaskIdRef.current !== tid) return; // 旧预检的报错也不许乱入
       setDeleteError(e?.message ?? "预检失败");
     }
   };
@@ -170,6 +200,12 @@ export default function AdminConsolidationPage() {
   const handleDeleteTask = async () => {
     const tid = deleteTaskId;
     if (!tid) return;
+    // 2026-09-01 竞态全扫：确认删除前核对「屏幕上这份预检」和「要删的任务」是同一个 id。
+    // 对不上说明预检数据是别的任务的（或还没回来），拒绝执行，防止看着 A 的清单删了 B。
+    if (deletePreviewForRef.current !== tid) {
+      setDeleteError("预检数据和当前任务对不上，请关闭弹窗后重新点删除");
+      return;
+    }
     setDeleteTaskSubmitting(true);
     setDeleteError("");
     try {

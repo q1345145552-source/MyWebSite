@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import RoleShell from "../../../modules/layout/RoleShell";
 import { apiBaseUrl, apiRequest } from "../../../services/core-api";
 import { formatBeijingTime } from "../../../modules/staff/utils";
 import { base64Bytes, compressImageForUpload, formatBytes } from "../../../modules/shared/image-compress";
+import { createRequestGate } from "../../../modules/shared/request-gate";
 
 // 选文件时的原图上限。超过这个的多半是选错了（视频/超大扫描件），先挡掉再说。
 const MAX_SOURCE_BYTES = 30 * 1024 * 1024;
@@ -250,6 +251,20 @@ export default function StaffWhrConsolidationPage() {
   // ---- 图片预览 ----
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
+  // 2026-09-01 竞态全扫：这几份独立数据各自「认主人」用的 ref。
+  // 病根都是「异步取数在路上、用户换了对象、旧响应回来盖新界面」。
+  // - 计划详情：连点两个计划，旧计划的详情落到新计划头上 → ref + 领号验号；
+  // - 签收/审核弹窗：关 A 开 B，A 的慢详情把 B 的弹窗内容盖掉 → 响应落地时比对当前弹窗的预报单 id；
+  // - 签收/泰国签收照片：压缩是异步的，关 A 开 B 后压完的照片会落进 B 的文件列表 → 回调同样认主人。
+  const selectedPlanIdRef = useRef<string | null>(null);
+  const planDetailGate = useRef(createRequestGate()).current;
+  const signPrealertIdRef = useRef<string | null>(null);
+  const reviewPrealertIdRef = useRef<string | null>(null);
+  const thailandPrealertIdRef = useRef<string | null>(null);
+  useEffect(() => { signPrealertIdRef.current = signTarget?.prealertId ?? null; }, [signTarget]);
+  useEffect(() => { reviewPrealertIdRef.current = reviewTarget?.prealert?.prealertId ?? null; }, [reviewTarget]);
+  useEffect(() => { thailandPrealertIdRef.current = thailandTarget?.prealertId ?? null; }, [thailandTarget]);
+
   // ================================================================
   // 数据加载
   // ================================================================
@@ -281,15 +296,26 @@ export default function StaffWhrConsolidationPage() {
   }, []);
 
   const loadPlanDetail = useCallback(async (planId: string) => {
+    // 2026-09-01 竞态全扫：出发领号，落地验号 + 认主人（成功、失败、finally 三个分支都要验）
+    const ticket = planDetailGate.begin();
     setDetailLoading(true);
     try {
       const data = await apiRequest<PlanDetail>(
         `${apiBaseUrl()}/admin/whr-consolidation/plans/detail?planId=${encodeURIComponent(planId)}`
       );
+      // 号已作废，或用户已换/退出这个计划：旧详情不许落到新计划头上
+      if (!planDetailGate.isCurrent(ticket) || selectedPlanIdRef.current !== planId) return;
       setPlanDetail(data);
-    } catch (e: any) { setToast(e?.message ?? "加载详情失败"); }
-    finally { setDetailLoading(false); }
-  }, []);
+    } catch (e: any) {
+      // 失败分支同样验：旧请求的报错不许安到新界面头上
+      if (!planDetailGate.isCurrent(ticket) || selectedPlanIdRef.current !== planId) return;
+      setToast(e?.message ?? "加载详情失败");
+    }
+    finally {
+      // 旧请求不许提前掐掉新请求的加载态；只要没有更新的请求在跑，加载态就该收掉
+      if (planDetailGate.isCurrent(ticket)) setDetailLoading(false);
+    }
+  }, [planDetailGate]);
 
   // ==========================================================================
   // 新增 / 移除参与客户（2026-08-07）
@@ -402,6 +428,8 @@ export default function StaffWhrConsolidationPage() {
 
   // ---- 仓库签收 ----
   const handleOpenSign = async (pa: any, planId: string) => {
+    // 2026-09-01 竞态全扫：换单先清掉上一单残留的照片，否则给 A 选的照片会跟着签到 B 上
+    setSignFiles([]);
     // 先弹出弹窗显示基本信息 + loading
     setSignTarget({
       planId, prealertId: pa.prealertId, planNo: pa.planNo || "",
@@ -412,6 +440,8 @@ export default function StaffWhrConsolidationPage() {
       const detail = await apiRequest<any>(
         `${apiBaseUrl()}/staff/whr-consolidation/prealert-detail?prealertId=${encodeURIComponent(pa.prealertId)}`
       );
+      // 2026-09-01 竞态全扫·认主人：弹窗已关或已换成别的预报单，A 的晚响应不许盖 B
+      if (signPrealertIdRef.current !== pa.prealertId) return;
       setSignTarget({
         planId, prealertId: pa.prealertId, planNo: pa.planNo || "",
         trackingNo: pa.trackingNo, mark: pa.mark,
@@ -423,6 +453,8 @@ export default function StaffWhrConsolidationPage() {
         loading: false,
       });
     } catch (e: any) {
+      // 失败分支同样认主人：旧请求的报错不许把当前弹窗关掉
+      if (signPrealertIdRef.current !== pa.prealertId) return;
       setToast(e?.message ?? "加载预报单详情失败");
       setSignTarget(null);
     }
@@ -475,6 +507,8 @@ export default function StaffWhrConsolidationPage() {
       const detail = await apiRequest<any>(
         `${apiBaseUrl()}/staff/whr-consolidation/prealert-detail?prealertId=${encodeURIComponent(pa.prealertId)}`
       );
+      // 2026-09-01 竞态全扫·认主人：弹窗已关或已换成别的预报单，A 的晚响应不许把 B 的金额/凭证盖掉
+      if (reviewPrealertIdRef.current !== pa.prealertId) return;
       const unitPrices = {
         unitPriceNormal: detail.unitPriceNormal,
         unitPriceInspection: detail.unitPriceInspection,
@@ -494,6 +528,8 @@ export default function StaffWhrConsolidationPage() {
         loading: false,
       });
     } catch (e: any) {
+      // 失败分支同样认主人：旧请求的报错不许把当前弹窗关掉
+      if (reviewPrealertIdRef.current !== pa.prealertId) return;
       setToast(e?.message ?? "加载货品详情失败");
       setReviewTarget(null);
     }
@@ -772,7 +808,7 @@ export default function StaffWhrConsolidationPage() {
         <div style={{ display: "flex", gap: 4, marginBottom: 20, borderBottom: "2px solid var(--c-blue)" }}>
           <button onClick={() => { setActiveTab("dispatch"); setExpandedPlan(null); setExpandedCustomer(null); }} style={tabBtnStyle("dispatch")}>尾端拆派</button>
           <button onClick={() => setActiveTab("operations")} style={tabBtnStyle("operations")}>操作区</button>
-          <button onClick={() => { setActiveTab("plans"); setSelectedPlanId(null); setPlanDetail(null); }} style={tabBtnStyle("plans")}>拼柜计划</button>
+          <button onClick={() => { setActiveTab("plans"); setSelectedPlanId(null); selectedPlanIdRef.current = null; setPlanDetail(null); }} style={tabBtnStyle("plans")}>拼柜计划</button>
         </div>
 
         {/* ================================================================ */}
@@ -1012,7 +1048,8 @@ export default function StaffWhrConsolidationPage() {
                               : <span style={{ color: "var(--c-red-deep)", background: "var(--c-red-bg)", padding: "1px 6px", borderRadius: 4, marginLeft: 8 }}>⚠ 收货地址未填写</span>}
                           </div>
                           <div style={{ flexShrink: 0 }}>
-                            <button onClick={() => setThailandTarget({ planId: p.planId, prealertId: pa.prealertId, planNo: p.planNo, trackingNo: pa.trackingNo, clientName: pa.clientName, volumeM3: pa.volumeM3 })} style={btnBlue}>上传签收单</button>
+                            {/* 2026-09-01 竞态全扫：换单先清掉上一单残留的照片，防止跟错单 */}
+                            <button onClick={() => { setThailandFiles([]); setThailandTarget({ planId: p.planId, prealertId: pa.prealertId, planNo: p.planNo, trackingNo: pa.trackingNo, clientName: pa.clientName, volumeM3: pa.volumeM3 }); }} style={btnBlue}>上传签收单</button>
                           </div>
                         </div>
                       ))}
@@ -1034,7 +1071,7 @@ export default function StaffWhrConsolidationPage() {
             {planLoading || detailLoading ? <p style={{ color: "var(--t-faint)" }}>加载中...</p> : (
               planDetail ? (
                 <div>
-                  <button onClick={() => { setPlanDetail(null); setSelectedPlanId(null); }} style={{ ...btnGray, marginBottom: 16 }}>← 返回列表</button>
+                  <button onClick={() => { setPlanDetail(null); setSelectedPlanId(null); selectedPlanIdRef.current = null; }} style={{ ...btnGray, marginBottom: 16 }}>← 返回列表</button>
 
                   <div style={{ border: "1px solid var(--l-soft)", borderRadius: 10, padding: 16, marginBottom: 16 }}>
                     <h4 style={{ margin: "0 0 8px" }}>{planDetail.planNo}</h4>
@@ -1142,7 +1179,7 @@ export default function StaffWhrConsolidationPage() {
                         {planList.map(p => {
                           const isSelected = selectedPlanId === p.id;
                           return (
-                          <tr key={p.id} onClick={() => { setSelectedPlanId(p.id); loadPlanDetail(p.id); }} style={{ cursor: "pointer", borderBottom: "1px solid var(--s-sunken)", background: isSelected ? "var(--c-blue-bg)" : "white" }} onMouseEnter={e => (e.currentTarget.style.background = "var(--s-alt)")} onMouseLeave={e => (e.currentTarget.style.background = isSelected ? "var(--c-blue-bg)" : "white")}>
+                          <tr key={p.id} onClick={() => { /* 2026-09-01 竞态全扫：ref 和 state 同步改，详情响应回来按 ref 认主人 */ setSelectedPlanId(p.id); selectedPlanIdRef.current = p.id; loadPlanDetail(p.id); }} style={{ cursor: "pointer", borderBottom: "1px solid var(--s-sunken)", background: isSelected ? "var(--c-blue-bg)" : "white" }} onMouseEnter={e => (e.currentTarget.style.background = "var(--s-alt)")} onMouseLeave={e => (e.currentTarget.style.background = isSelected ? "var(--c-blue-bg)" : "white")}>
                             <td style={{ ...tdS, fontWeight: 600 }}>{p.planNo}</td>
                             <td style={tdS}>{p.warehouse}</td>
                             <td style={tdS}>{p.containerType}</td>
@@ -1230,9 +1267,13 @@ export default function StaffWhrConsolidationPage() {
                 const files = Array.from(e.target.files ?? []);
                 e.target.value = "";
                 if (files.length === 0) return;
+                // 2026-09-01 竞态全扫：记住出发时是给哪张预报单选的照片，压缩回来先认主人
+                const ownerPrealertId = signTarget.prealertId;
                 setSignCompressing(true);
                 try {
                   const { ready, skipped } = await prepareUploadFiles(files);
+                  // 弹窗已关或已换成别的预报单：照片不许落到别的单上
+                  if (signPrealertIdRef.current !== ownerPrealertId) return;
                   if (ready.length > 0) setSignFiles(prev => [...prev, ...ready]);
                   if (skipped.length > 0) setToast(`以下照片没能加进来：${skipped.join("；")}`);
                 } finally { setSignCompressing(false); }
@@ -1378,9 +1419,13 @@ export default function StaffWhrConsolidationPage() {
                 const files = Array.from(e.target.files ?? []);
                 e.target.value = "";
                 if (files.length === 0) return;
+                // 2026-09-01 竞态全扫：记住出发时是给哪张预报单选的照片，压缩回来先认主人
+                const ownerPrealertId = thailandTarget.prealertId;
                 setThailandCompressing(true);
                 try {
                   const { ready, skipped } = await prepareUploadFiles(files);
+                  // 弹窗已关或已换成别的预报单：照片不许落到别的单上
+                  if (thailandPrealertIdRef.current !== ownerPrealertId) return;
                   if (ready.length > 0) setThailandFiles(prev => [...prev, ...ready]);
                   if (skipped.length > 0) setToast(`以下照片没能加进来：${skipped.join("；")}`);
                 } finally { setThailandCompressing(false); }

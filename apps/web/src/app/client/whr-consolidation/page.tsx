@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import RoleShell from "../../../modules/layout/RoleShell";
 import { apiBaseUrl, apiRequest } from "../../../services/core-api";
 import { formatBeijingTime } from "../../../modules/staff/utils";
 import { base64Bytes, compressImageForUpload, formatBytes } from "../../../modules/shared/image-compress";
+import { createRequestGate } from "../../../modules/shared/request-gate";
 
 // 选文件时的原图上限。超过这个的多半是选错了（视频/超大扫描件），先挡掉再说。
 const MAX_SOURCE_BYTES = 30 * 1024 * 1024;
@@ -207,6 +208,11 @@ export default function ClientWhrConsolidationPage() {
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [toast, setToast] = useState("");
+  // 2026-09-01 竞态全扫：详情请求「领号验号 + 认主人」。
+  // 连点计划 A、B 时，A 的旧响应回来晚，不许把 B 的详情/金额/预报单盖掉。
+  // selectedPlanIdRef 在点击处同步赋值（不等 React 提交），响应落地时核对主人用它。
+  const selectedPlanIdRef = useRef<string | null>(null);
+  const detailGate = useRef(createRequestGate()).current;
 
   // 预览
   const [previewImage, setPreviewImage] = useState<string | null>(null);
@@ -230,10 +236,16 @@ export default function ClientWhrConsolidationPage() {
   const [itemFormPrealertId, setItemFormPrealertId] = useState<string | null>(null);
   // 打开弹窗时这张单已有几行货品，用于在弹窗里给出提示
   const [itemFormExistingCount, setItemFormExistingCount] = useState(0);
+  // 2026-09-01 竞态全扫：货品弹窗的「会话号」，每次打开都换一个。
+  // 图片压缩是异步的：压到一半关掉 A 单的弹窗、再打开 B 单，压缩结果只记了行号，
+  // 会原样写进 B 单的同一行。落地前先核对会话号（= 还是那个计划的那张单的那次弹窗），不是就整段作废。
+  const itemFormSessionRef = useRef(0);
 
   /** 打开货品弹窗：始终带上该预报单已有的全部货品；append=true 时末尾再补一行空白 */
   const openItemForm = (prealertId: string, existingItems: any[], append: boolean) => {
     const rows = itemsToFormRows(existingItems);
+    itemFormSessionRef.current += 1; // 2026-09-01 竞态全扫：换弹窗即换号，旧压缩回调作废
+    setCompressingRow(null); // 上一个弹窗残留的「压缩中」标记不许带进新弹窗
     setItemFormPrealertId(prealertId);
     setItemFormExistingCount(rows.length);
     setItemForms(append || rows.length === 0 ? [...rows, emptyItemForm()] : rows);
@@ -278,15 +290,26 @@ export default function ClientWhrConsolidationPage() {
   }, []);
 
   const loadDetail = useCallback(async (planId: string) => {
+    // 2026-09-01 竞态全扫：出发领号，落地验号 + 认主人（成功、失败、finally 三个分支都要验）
+    const ticket = detailGate.begin();
     setDetailLoading(true);
     try {
       const data = await apiRequest<MyDetail>(
         `${apiBaseUrl()}/client/whr-consolidation/my-detail?planId=${encodeURIComponent(planId)}`
       );
+      // 号已作废（后面又发过一次），或用户已换/取消选中计划：旧数据整段作废
+      if (!detailGate.isCurrent(ticket) || selectedPlanIdRef.current !== planId) return;
       setDetail(data);
-    } catch (e: any) { setToast(e?.message ?? "加载详情失败"); }
-    finally { setDetailLoading(false); }
-  }, []);
+    } catch (e: any) {
+      // 失败分支同样验：旧请求的报错不许安到新界面头上
+      if (!detailGate.isCurrent(ticket) || selectedPlanIdRef.current !== planId) return;
+      setToast(e?.message ?? "加载详情失败");
+    }
+    finally {
+      // 旧请求不许提前掐掉新请求的加载态；只要没有更新的请求在跑，加载态就该收掉
+      if (detailGate.isCurrent(ticket)) setDetailLoading(false);
+    }
+  }, [detailGate]);
 
   useEffect(() => { loadPlans(); }, [loadPlans]);
   useEffect(() => { loadBalance(); }, [loadBalance]);
@@ -464,8 +487,10 @@ export default function ClientWhrConsolidationPage() {
                 const barColor = usedPct >= 100 ? "var(--c-green-2)" : usedPct >= 85 ? "var(--c-amber)" : "var(--c-blue)";
                 return (
                   <tr key={p.planId} onClick={() => {
-                    if (isSelected) { setSelectedPlanId(null); setDetail(null); }
-                    else { setSelectedPlanId(p.planId); loadDetail(p.planId); }
+                    // 2026-09-01 竞态全扫：ref 和 state 同步改，详情响应回来按 ref 认主人；
+                    // 换计划时先清掉旧详情，等新的回来，免得 B 高亮着却还挂着 A 的金额和预报单
+                    if (isSelected) { setSelectedPlanId(null); selectedPlanIdRef.current = null; setDetail(null); }
+                    else { setSelectedPlanId(p.planId); selectedPlanIdRef.current = p.planId; setDetail(null); loadDetail(p.planId); }
                   }} style={{ cursor: "pointer", background: isSelected ? "var(--c-blue-bg)" : "white" }}
                     onMouseEnter={e => { e.currentTarget.style.background = isSelected ? "white" : "var(--s-alt)" }}
                     onMouseLeave={e => { e.currentTarget.style.background = isSelected ? "var(--c-blue-bg)" : "white" }}>
@@ -838,7 +863,8 @@ export default function ClientWhrConsolidationPage() {
                           ? <span style={{ fontSize: 11, fontWeight: 400, color: "var(--t-muted)", marginLeft: 6 }}>已有</span>
                           : <span style={{ fontSize: 11, fontWeight: 400, color: "var(--c-green)", marginLeft: 6 }}>新增</span>}
                       </strong>
-                      <button onClick={() => setItemForms(itemForms.filter((_, i) => i !== idx))} style={{ ...btnDanger, padding: "2px 10px", fontSize: 11 }}>移除</button>
+                      {/* 2026-09-01 竞态全扫：压缩中不许删行 —— 删行会让行号错位，压缩结果会落到别的行上 */}
+                      <button onClick={() => setItemForms(itemForms.filter((_, i) => i !== idx))} disabled={compressingRow !== null} style={{ ...btnDanger, padding: "2px 10px", fontSize: 11, opacity: compressingRow !== null ? 0.5 : 1, cursor: compressingRow !== null ? "not-allowed" : "pointer" }}>移除</button>
                     </div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
                       <div><label style={{ fontSize: 11, color: "var(--t-muted)" }}>品名</label><input value={row.productName} onChange={e => { const cp = [...itemForms]; cp[idx] = { ...cp[idx], productName: e.target.value }; setItemForms(cp); }} placeholder="品名 *" style={{ ...fi, marginTop: 2 }} /></div>
@@ -877,9 +903,13 @@ export default function ClientWhrConsolidationPage() {
                           setToast(`图片 ${file.name} 有 ${formatBytes(file.size)}，超过 ${formatBytes(MAX_SOURCE_BYTES)}，请换一张`);
                           return;
                         }
+                        // 2026-09-01 竞态全扫：记住出发时的弹窗会话号，压缩回来先认主人
+                        const ownerSession = itemFormSessionRef.current;
                         setCompressingRow(idx);
                         try {
                           const img = await compressImageForUpload(file);
+                          // 弹窗已经换过（关 A 开 B）：结果不许写进别的单的同一行，提示也不许乱弹
+                          if (itemFormSessionRef.current !== ownerSession) return;
                           if (base64Bytes(img.base64) > MAX_IMAGE_BYTES) {
                             setToast(`图片 ${file.name} 压缩后仍有 ${formatBytes(base64Bytes(img.base64))}，请换一张`);
                             return;
@@ -887,7 +917,12 @@ export default function ClientWhrConsolidationPage() {
                           setItemForms(prev => prev.map((row, i) => (
                             i === idx ? { ...row, imageFile: img, existingImageBase64: undefined } : row
                           )));
-                        } finally { setCompressingRow(null); }
+                        } finally {
+                          // 只清自己那行的「压缩中」标记；弹窗换过的话新弹窗已经清过，别再碰
+                          if (itemFormSessionRef.current === ownerSession) {
+                            setCompressingRow(cur => (cur === idx ? null : cur));
+                          }
+                        }
                       }} style={{ marginTop: 2 }} />
                       {compressingRow === idx && <div style={{ fontSize: 11, color: "var(--t-muted)", marginTop: 2 }}>正在处理图片，请稍候…</div>}
                     </div>
@@ -904,8 +939,10 @@ export default function ClientWhrConsolidationPage() {
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={() => {
                 if (!itemFormPrealertId) { setToast("请先选择预报单"); return; }
+                // 2026-09-01 竞态全扫：图片还在压缩时不许保存，否则这张图会被静默丢掉
+                if (compressingRow !== null) { setToast("图片还在处理中，请稍候再保存"); return; }
                 handleSaveItems(itemFormPrealertId, itemForms);
-              }} disabled={itemSubmitting} style={btnBlue}>{itemSubmitting ? "保存中..." : `保存全部（${itemForms.length} 款）`}</button>
+              }} disabled={itemSubmitting || compressingRow !== null} style={btnBlue}>{itemSubmitting ? "保存中..." : compressingRow !== null ? "图片处理中…" : `保存全部（${itemForms.length} 款）`}</button>
               <button onClick={() => { setShowItemForm(false); setItemFormPrealertId(null); }} style={btnGray}>取消</button>
             </div>
           </Modal>

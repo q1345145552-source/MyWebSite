@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import RoleShell from "../../../modules/layout/RoleShell";
 import {
   fetchClientConsolidationTasks,
@@ -15,6 +15,7 @@ import {
   type ConsolidationProductItem,
   fetchClientWalletOverview,} from "../../../services/business-api";
 import { formatBeijingTime } from "../../../modules/staff/utils";
+import { createRequestGate } from "../../../modules/shared/request-gate";
 
 // ============================================================================
 // 状态中文映射
@@ -141,22 +142,35 @@ export default function ClientConsolidationPage() {
     }
   }, []);
 
+  // 2026-09-01 竞态全扫：详情数据要认主人——快速点 A 又点 B（或点了返回）时，
+  // A 的晚响应不许把 B 的详情盖掉。ref 里永远存「当前选中的任务 id」，
+  // 响应落地前先核对；再叠加详情自己的门闩，防同一任务的新旧两次刷新互盖。
+  const selectedTaskIdRef = useRef<string | null>(null);
+  const detailGate = useRef(createRequestGate()).current;
+
   const loadDetail = useCallback(async (taskId: string) => {
+    const ticket = detailGate.begin(); // 2026-09-01 竞态全扫：出发时领号
     setDetailLoading(true);
     try {
       const data = await fetchClientConsolidationTaskDetail(taskId);
+      // 2026-09-01 竞态全扫：号作废或主人换了（用户切了任务/回了列表），整段丢弃
+      if (!detailGate.isCurrent(ticket) || selectedTaskIdRef.current !== taskId) return;
       setTaskDetail(data);
     } catch (e: any) {
+      // 2026-09-01 竞态全扫：旧请求的报错不许安到新请求头上
+      if (!detailGate.isCurrent(ticket) || selectedTaskIdRef.current !== taskId) return;
       setToast(e.message);
     } finally {
-      setDetailLoading(false);
+      // 2026-09-01 竞态全扫：旧请求不许提前掐掉新请求的加载态
+      if (detailGate.isCurrent(ticket) && selectedTaskIdRef.current === taskId) setDetailLoading(false);
     }
-  }, []);
+  }, [detailGate]);
 
   useEffect(() => { loadTasks(); }, [loadTasks]);
   useEffect(() => { loadBalance(); }, [loadBalance]);
 
   useEffect(() => {
+    selectedTaskIdRef.current = selectedTaskId; // 2026-09-01 竞态全扫：先记下当前主人再取数
     if (selectedTaskId) {
       loadDetail(selectedTaskId);
     } else {
@@ -725,14 +739,22 @@ export default function ClientConsolidationPage() {
                 <input type="file" accept="image/*" onChange={async (e) => {
                   const file = e.target.files?.[0];
                   if (!file) return;
+                  const rowKey = r.key; // 2026-09-01 竞态全扫：记住出发时是哪一行（key 稳定，序号 i 会变）
                   const base64 = await new Promise<string>((resolve) => {
                     const reader = new FileReader();
                     reader.onload = () => resolve((reader.result as string).split(",")[1]);
                     reader.readAsDataURL(file);
                   });
-                  const next = [...productRows];
-                  next[i] = { ...next[i], productImage: { fileName: file.name, mime: file.type, base64 } };
-                  setProductRows(next);
+                  // 2026-09-01 竞态全扫：读图期间用户可能删行/改别的行。
+                  // 不能把出发时抄的旧数组整个写回去（会复活已删的行、抹掉新改的字），
+                  // 改用函数式更新拿最新数组，按 key 找回那一行；行没了就把图丢弃。
+                  setProductRows((rows) => {
+                    const idx = rows.findIndex((row) => row.key === rowKey);
+                    if (idx < 0) return rows; // 这一行已被删，图片作废，别的行一概不碰
+                    const next = [...rows];
+                    next[idx] = { ...next[idx], productImage: { fileName: file.name, mime: file.type, base64 } };
+                    return next;
+                  });
                 }} style={{ fontSize: 11 }} />
               </div>
             ))}
