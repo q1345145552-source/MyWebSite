@@ -379,11 +379,18 @@ export default function ClientHomePage() {
 
     setLoading(true);
     setMessage("");
+    /* 2026-09-01（老板实测抓到的竞态）：出发时记住当时的分组。
+       原来这里没有「过期作废」防线——在「全部订单」下点「执行查询」、
+       紧接着切到「在途」，慢的那个「全部」响应晚到会把在途列表整个盖掉：
+       按钮亮着在途、列表却是 84 条全量（含已签收），要挂到下一轮 10 秒轮询才自愈。
+       其余四个数据入口早都有这道防线，唯独这条路漏了。 */
+    const modeAtStart = queryMode;
     try {
       const baseOrders =
-        queryMode === "all"
+        modeAtStart === "all"
           ? await fetchClientOrders()
-          : await fetchClientOrders({ statusGroup: queryMode });
+          : await fetchClientOrders({ statusGroup: modeAtStart });
+      if (queryModeRef.current !== modeAtStart) return; // 用户已切分组，这份结果作废
       const result = baseOrders
         .filter((item) => !search.batchNo || (item.trackingNo ?? "").toLowerCase().includes(search.batchNo.toLowerCase()))
         .filter((item) => {
@@ -410,7 +417,7 @@ export default function ClientHomePage() {
       setCurrentPage(1);
       setHasQueried(true);
       hasQueriedRef.current = true;
-      if (queryMode === "all" && !search.batchNo && !search.arrivedDateFrom && !search.arrivedDateTo && !search.domesticTrackingNo && !search.status && !search.transportMode && !search.warehouseId) {
+      if (modeAtStart === "all" && !search.batchNo && !search.arrivedDateFrom && !search.arrivedDateTo && !search.domesticTrackingNo && !search.status && !search.transportMode && !search.warehouseId) {
         saveOrdersToCache(result);
       }
     } catch (error) {
@@ -527,8 +534,9 @@ export default function ClientHomePage() {
           const orders = mode === "all"
             ? await fetchClientOrders()
             : await fetchClientOrders({ statusGroup: mode });
-          if (!cancelled) { setQueriedOrders(orders); setHasQueried(true); }
-          if (mode === "all") saveOrdersToCache(orders);
+          // 2026-09-01：除 cancelled 外再核一次分组——极端时序下 cleanup 还没跑、响应先到
+          if (!cancelled && queryModeRef.current === mode) { setQueriedOrders(orders); setHasQueried(true); }
+          if (!cancelled && queryModeRef.current === mode && mode === "all") saveOrdersToCache(orders);
         }
       } catch { /* silent */ }
       if (!cancelled) timer = setTimeout(poll, 10000);
