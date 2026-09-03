@@ -10,7 +10,7 @@ import { CONSOLIDATION_CURRENCY, recordRechargeCredit } from "../wallet/consolid
 import { loadProductImagesForOrders } from "../orders/product-images";
 import { loadOrderProducts } from "../orders/routes";
 import { hashPassword } from "../auth/crypto-utils";
-import { IN_TRANSIT_STATUSES } from "../../../../../packages/shared-types/shipment-status";
+import { countShipmentOverview } from "../shipments/overview-counts";
 // 柜子状态中文名只有这一份（后端 status-flow.ts）。前端管理员页不再自己抄一份，
 // 由接口直接下发中文 —— 抄第二份就一定会漏掉后加的状态。
 import { CONTAINER_STATUS_LABEL } from "../containers/status-flow";
@@ -188,18 +188,20 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
       prisma.order.count({
         where: { companyId: auth.companyId, createdAt: { gte: startOfToday } },
       }),
-      // ⚠️ 2026-08-21 修：原来数的是 currentStatus === "inTransit"，
-      // 但**系统里根本没有 inTransit 这个状态**（合法状态见 shipment-status.ts），
-      // 所以这个数字从上线起一直是 0。生产实测：显示 0，实际在途 366 张。
-      // 现在用从流程表自动推导的 IN_TRANSIT_STATUSES，并且只数父单
-      // （原来连子单一起数，分柜的货会重复计）。
-      prisma.shipment.count({
-        where: {
-          companyId: auth.companyId,
-          parentTrackingNo: null,
-          currentStatus: { in: IN_TRANSIT_STATUSES },
-        },
-      }),
+      /* ⚠️ 2026-08-21 修：原来数的是 currentStatus === "inTransit"，
+         但**系统里根本没有 inTransit 这个状态**，这个数字从上线起一直是 0
+         （生产实测：显示 0，实际在途 366 张）。当时改成 IN_TRANSIT_STATUSES 白名单。
+
+         2026-09-03 再修：白名单跟运单列表顶部那排数字（减法口径）**对不上**——
+         白名单只认流程表里的状态，老数据里的 pickedUp / customsPending / inTransit
+         一张都数不到（测试库实测：这里 14、顶部 17，差的就是那三张老状态）。
+         同一个管理员后台，看板一个「在途」、运单列表另一个「在途」。
+         现在直接调顶部那排数字用的同一个函数，取它算出来的在途 —— 两处不可能再分家。
+         口径：总数 − 未发出 − 已到仓 − 已完成 − 异常，剩下的全算在途（新状态自动跟上）。 */
+      countShipmentOverview({
+        companyId: auth.companyId,
+        parentTrackingNo: null,
+      }).then((o) => o.inTransitCount),
       // ⚠️ 2026-08-21 修：原来是 updatedAt >= 今天，等于「今天被改动过的运单」——
       // 员工改一张三个月前的老单，那单的方数也会加进来，而且父单子单都算、同一批货算两遍。
       // 生产实测：显示 526.478 方，去掉子单只有 295.332 方。

@@ -772,7 +772,12 @@ export default function ClientHomePage() {
                   <XAxis dataKey="name" stroke="#8B94A3" />
                   <YAxis stroke="#8B94A3" />
                   <Tooltip />
-                  <Bar dataKey="value" radius={[6, 6, 0, 0]}>
+                  {/* ⚠️ isAnimationActive={false} 不是可有可无的样式选项 —— recharts 3.8.1 的进场动画
+                  在这里跑不起来，柱子会永远停在动画起始状态（height=0），整张图看着是空的。
+                  2026-09-03 实测：数据完全正确（fiber 里读到 未发出=11/在途=10/…），
+                  但 recharts-inactive-bar 那层里一个图形都没有；关掉动画柱子立刻全出来。
+                  开发模式和生产构建都复现，等于线上一直是张空图。别删这个属性。 */}
+                  <Bar dataKey="value" name="单数" radius={[6, 6, 0, 0]} isAnimationActive={false}>
                     {clientStatusData.map((item) => (
                       <Cell key={item.name} fill={item.color} />
                     ))}

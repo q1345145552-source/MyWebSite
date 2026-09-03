@@ -8,6 +8,10 @@
  *      派送不单独分格，签收了才跳「已签收」。
  * 改一次没测试，下次再改（或有人手滑把 unloading 加回 arrived）没人拦得住。
  *
+ * 2026-09-03 再补：顶部那排数字（GET /staff|client/shipments/overview）现在跟按钮
+ * 共用同一套口径（「已到仓」含预约派送和派送中、「正在卸柜」算在途），也一起盯住——
+ * 这两处历史上就是各写各的，顶部显示 119、点按钮出来 159，同一批货两个数。
+ *
  * 盯三件事：
  *   1. 31 个真实状态逐个映射对（真调 GET /client/orders 路由，看响应里的 statusGroup，
  *      不是 grep 源码 —— 把分类函数包进 if(false) 这个测试会红）
@@ -23,6 +27,7 @@ process.env.NODE_ENV = "test";
 
 import assert from "node:assert/strict";
 import { STATUS_FLOW, STATUS_FLOW_LAND, EXCEPTION_STATUSES } from "../apps/api/src/modules/shipments/status-flow";
+import { IN_TRANSIT_STATUSES, AT_WAREHOUSE_STATUSES, isInTransitStatus } from "../packages/shared-types/shipment-status";
 
 type Handler = (req: any, res: any) => Promise<void> | void;
 type Group = "pending" | "transit" | "arrived" | "delivered" | "closed";
@@ -204,6 +209,124 @@ async function main(): Promise<void> {
     // 反向：期望表里不许有流程里根本不存在的状态（防止照着旧文档抄错状态名）
     const ghost = ALL.filter((s) => !inFlow.has(s));
     assert.equal(ghost.length, 0, `期望表里这些状态在两条流程里都不存在，可能拼错了：${ghost.join(", ")}`);
+  });
+
+  /* ══════════ 顶部那排数字（三端共用 countShipmentOverview）══════════
+     这里换一套假库：按 where.currentStatus 回答条数，真调 overview 路由。 */
+  const DIST: Record<string, number> = {
+    // ⚠️ 这三个都必须非 0：全填 0 的话「未发出 vs 在途」那条边界等于没测——
+    //    后端要是把 inWarehouseCN 漏出「未发出」，减法会把它算进在途而测试照样绿。
+    created: 86, inWarehouseCN: 9, holdLoading: 5,
+    loaded: 100, customsInspectCn: 12, departed: 168, etaUpdated: 28,
+    customsTH: 140, customsCleared: 21, atPortCn: 34, inVietnam: 14,
+    laosCleared: 14, delayDeparted: 4, unloading: 20,
+    inWarehouseTH: 119, deliveryBooked: 7, outForDelivery: 40,
+    delivered: 1558, exception: 3, returned: 2, cancelled: 1,
+  };
+  const TOTAL = Object.values(DIST).reduce((a, b) => a + b, 0);
+
+  function countByWhere(where: any): number {
+    const cs = where?.currentStatus;
+    if (cs === undefined) return TOTAL;
+    const keys: string[] = typeof cs === "string" ? [cs] : (cs.in ?? []);
+    // 「本月已签收」那条额外带 updatedAt；这里全部当成本月内
+    return keys.reduce((sum, k) => sum + (DIST[k] ?? 0), 0);
+  }
+  (globalThis as any).__prisma.shipment.count = async (args: any) => countByWhere(args?.where);
+
+  const shipMod = await import("../apps/api/src/modules/shipments/routes");
+  (shipMod as any).registerShipmentRoutes(fakeApp);
+
+  async function overview(path: string, role: string): Promise<any> {
+    let payload: { data?: any } = {};
+    const res: any = { status() { return res; }, json(v: unknown) { payload = v as typeof payload; } };
+    const h = routes.get(`GET ${path}`);
+    assert.ok(h, `没注册到 GET ${path}`);
+    await h!({ method: "GET", path: "", query: {}, headers: {}, body: undefined,
+      auth: { userId: "CLIENT1", companyId: "c_001", role, name: "测试" } }, res);
+    return payload.data;
+  }
+
+  await check("9) 顶部「已到仓」= 已到仓 + 预约派送 + 派送中（跟按钮一个口径）", async () => {
+    const d = await overview("/staff/shipments/overview", "staff");
+    const want = DIST.inWarehouseTH + DIST.deliveryBooked + DIST.outForDelivery;
+    assert.equal(d.atWarehouseCount, want,
+      `该是 ${want}（119+7+40），实际 ${d.atWarehouseCount}——只数 inWarehouseTH 就会是 119`);
+  });
+
+  await check("10) ⭐ 顶部「在途」和按钮「在途」必须是同一个数（含正在卸柜）", async () => {
+    const d = await overview("/staff/shipments/overview", "staff");
+    /* 按钮口径：从 EXPECT 表取 transit 那批来加。
+       ⚠️ EXPECT 不是凭空写的：第 1 项已经拿它跟**真路由返回的 statusGroup** 逐个比对过，
+       所以「EXPECT = 真分类函数」这一环是被第 1 项钉死的，这里不是自己跟自己比。 */
+    const byButton = Object.entries(DIST)
+      .filter(([st]) => EXPECT[st] === "transit")
+      .reduce((sum, [, n]) => sum + n, 0);
+    assert.equal(d.inTransitCount, byButton,
+      `顶部在途 ${d.inTransitCount} ≠ 按钮在途 ${byButton}，两边口径又分家了`);
+    assert.ok(byButton >= DIST.unloading, "正在卸柜没算进在途");
+  });
+
+  await check("11) 对账等式：未发出 + 已到仓 + 已完成 + 异常 + 在途 = 总数（一张不丢不重）", async () => {
+    const d = await overview("/staff/shipments/overview", "staff");
+    const sum = d.createdCount + d.atWarehouseCount + d.doneCount + d.exceptionCount + d.inTransitCount;
+    assert.equal(sum, d.totalCount,
+      `加起来 ${sum} ≠ 总数 ${d.totalCount}——派送中被减两次的话这里会少 ${DIST.outForDelivery}`);
+    assert.equal(d.totalCount, TOTAL);
+  });
+
+  await check("12) 客户端和员工端顶部口径完全一致（只有 where 不同）", async () => {
+    const a = await overview("/staff/shipments/overview", "staff");
+    const b = await overview("/client/shipments/overview", "client");
+    for (const k of ["inTransitCount", "attentionCount", "atWarehouseCount", "doneCount"]) {
+      assert.equal(a[k], b[k], `${k} 两端不一样：员工 ${a[k]} / 客户 ${b[k]}`);
+    }
+  });
+
+  await check("13) ⭐ 共享清单闸：IN_TRANSIT_STATUSES / AT_WAREHOUSE_STATUSES 必须跟期望表逐字一致", async () => {
+    /* 2026-09-03 复核挖出来的洞：老板拍板后只改了客户端两处，
+       packages/shared-types 里的 IN_TRANSIT_STATUSES 仍把「已到仓/预约派送/派送中」
+       算成在途，而管理员看板 KPI、管理员状态分布图、AI 问答三处都吃这份清单——
+       同一个后台「在途」两个数。现在三处统一从共享清单取，这道闸把清单钉在期望表上：
+       谁再往一边加状态、另一边忘了跟，这里当场红。 */
+    const wantTransit = ALL.filter((s) => EXPECT[s] === "transit").sort();
+    const gotTransit = [...IN_TRANSIT_STATUSES].sort();
+    assert.deepEqual(gotTransit, wantTransit,
+      `共享的「在途」清单跟按钮口径对不上：\n  多了 ${gotTransit.filter((x) => !wantTransit.includes(x)).join(",") || "无"}` +
+      `\n  少了 ${wantTransit.filter((x) => !gotTransit.includes(x as any)).join(",") || "无"}`);
+
+    const wantArrived = ALL.filter((s) => EXPECT[s] === "arrived").sort();
+    assert.deepEqual([...AT_WAREHOUSE_STATUSES].sort(), wantArrived,
+      "共享的「已到仓」清单跟按钮口径对不上");
+
+    assert.ok(IN_TRANSIT_STATUSES.includes("unloading" as any),
+      "「正在卸柜」被从共享的在途清单里拿掉了——老板口径是它算在途");
+    assert.ok(!AT_WAREHOUSE_STATUSES.some((x) => IN_TRANSIT_STATUSES.includes(x)),
+      "「已到仓」的状态同时出现在「在途」清单里，两格会重复计数");
+  });
+
+  await check("14) isInTransitStatus 对 31 个状态的判断必须跟按钮口径一字不差", async () => {
+    const wrong: string[] = [];
+    for (const st of ALL) {
+      const want = EXPECT[st] === "transit";
+      if (isInTransitStatus(st) !== want) {
+        wrong.push(`${st}：按钮说${want ? "在途" : "不在途"}，isInTransitStatus 说${want ? "不在途" : "在途"}`);
+      }
+    }
+    assert.equal(wrong.length, 0, `AI 和按钮会给客户两个数：\n${wrong.join("\n")}`);
+  });
+
+  await check("15) ⭐ 老状态必须兜底进「在途」——白名单会把它们数丢", async () => {
+    /* 2026-09-03 复核实测：管理员 KPI 用 IN_TRANSIT_STATUSES 白名单数出 14，
+       顶部数字用减法数出 17，差的三张就是这几个只在老数据里出现、
+       流程表里查不到的状态。判断单张运单一律用排除法的 isInTransitStatus。 */
+    for (const legacy of ["pickedUp", "customsPending", "inTransit", "receivedCN", "someStatusFromTheFuture"]) {
+      assert.ok(isInTransitStatus(legacy), `老状态「${legacy}」被判成不在途，这批货会从「在途」里消失`);
+      assert.ok(!IN_TRANSIT_STATUSES.includes(legacy as any),
+        `「${legacy}」竟然在白名单里了——这条断言是用来说明「白名单会漏、排除法不会」的，前提变了要重写`);
+    }
+    assert.equal(isInTransitStatus(null), false, "没状态不该算在途");
+    assert.equal(isInTransitStatus(""), false, "空状态不该算在途");
   });
 
   console.log(`\n共 ${totalChecks} 项，失败 ${failures.length} 项`);

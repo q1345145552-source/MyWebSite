@@ -23,7 +23,10 @@ export function ShipmentOverviewStrip({ data }: { data: StaffShipmentOverview | 
   const items = [
     { n: data.inTransitCount, label: "在途", warn: false },
     { n: data.attentionCount, label: "延迟 / 查验", warn: true },
-    { n: data.atWarehouseCount, label: "已到仓待派送", warn: false },
+    /* 2026-09-03 老板拍板：这格改叫「已到仓」，口径 = 进泰国仓到签收之前的整段
+       （已到仓 + 预约派送 + 派送中），跟客户端分组按钮的「已到仓」逐字对齐。
+       原来叫「已到仓待派送」且只数 inWarehouseTH，上下两个数对不上，客户会问。 */
+    { n: data.atWarehouseCount, label: "已到仓", warn: false },
     { n: data.signedThisMonthCount, label: "本月已签收", warn: false },
   ];
 

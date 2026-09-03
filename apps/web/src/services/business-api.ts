@@ -924,11 +924,12 @@ export async function fetchStaffShipments(): Promise<ShipmentItem[]> {
 /** 运单列表顶部那排数字（A3 方案 §3.2）。三端同一套字段，口径一致。
  *  ⚠️ 必须和后端 countShipmentOverview() 的返回逐字对齐 —— TypeScript 不会替你核对。 */
 export interface StaffShipmentOverview {
-  /** 在途：已经发出、还没到泰国仓 */
+  /** 在途：从国内仓发出、还没进泰国仓（含「正在卸柜」）*/
   inTransitCount: number;
   /** 延迟 · 查验：延迟开船 / 海上延误 / 口岸滞留 / 海关查验 / 异常 */
   attentionCount: number;
-  /** 已到仓待派送 */
+  /** 已到仓：进泰国仓到客户签收之前的整段（已到仓 + 预约派送 + 派送中）。
+   *  2026-09-03 起含派送中 —— 原来只数 inWarehouseTH。 */
   atWarehouseCount: number;
   /** 本月已签收 */
   signedThisMonthCount: number;
@@ -939,7 +940,7 @@ export interface StaffShipmentOverview {
   deliveringCount: number;
   doneCount: number;
   /** 异常单数（2026-09-02 复核整改：后端已从「在途」减法里扣掉并单独返回；
-   *  对账等式 = 未发出 + 到仓 + 派送中 + 已完成 + 异常 + 在途。
+   *  对账等式 2026-09-03 起 = 未发出 + 已到仓（含派送中）+ 已完成 + 异常 + 在途。
    *  设成可选：老后端没这字段时前端拿到 undefined 不报错 —— TypeScript 不会替你核对 */
   exceptionCount?: number;
 }

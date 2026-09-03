@@ -4,7 +4,7 @@ import type {
   AiSuggestionResponse,
 } from "../../../../../packages/shared-types/common-response";
 import type { AiKnowledgeItem, AiQueryAuditLog, Shipment } from "../../../../../packages/shared-types/entities";
-import { IN_TRANSIT_STATUSES, type ShipmentStatus } from "../../../../../packages/shared-types/shipment-status";
+import { isInTransitStatus, type ShipmentStatus } from "../../../../../packages/shared-types/shipment-status";
 import { pickSlowestStatus } from "../shipments/parent-status";
 import { logger } from "../core/logger";
 import type {
@@ -1089,7 +1089,11 @@ export class ClientAiService implements AiService {
 
   private matchStatusScope(shipment: Shipment, statusScope: StatusScope): boolean {
     if (statusScope === "all") return true;
-    if (statusScope === "inTransit") return IN_TRANSIT_STATUSES.includes(shipment.currentStatus);
+    /* 2026-09-03：改用排除法的 isInTransitStatus。原来用 IN_TRANSIT_STATUSES 白名单，
+       ① 到了泰国仓的货也被算成在途（老板拍板：到仓不算在途）；
+       ② 老数据里流程表没有的状态一张都数不到。两个毛病都会让 AI 报的数
+       跟客户自己点「在途」按钮查出来的对不上。 */
+    if (statusScope === "inTransit") return isInTransitStatus(shipment.currentStatus);
     if (statusScope === "completed") return COMPLETED_STATUSES.includes(shipment.currentStatus);
     if (statusScope === "unfinished") return !COMPLETED_STATUSES.includes(shipment.currentStatus);
     return EXCEPTION_STATUSES.includes(shipment.currentStatus);
@@ -1237,7 +1241,8 @@ export class ClientAiService implements AiService {
 
     for (const ticket of tickets) {
       totalCount += 1;
-      if (IN_TRANSIT_STATUSES.includes(ticket.currentStatus)) inTransitCount += 1;
+      // 2026-09-03：同上，排除法口径，跟顶部数字/分组按钮一致
+      if (isInTransitStatus(ticket.currentStatus)) inTransitCount += 1;
       if (COMPLETED_STATUSES.includes(ticket.currentStatus)) completedCount += 1;
 
       const orderId = ticket.orderId;

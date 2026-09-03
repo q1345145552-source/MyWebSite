@@ -2,7 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
-import { COMPLETED_STATUSES, IN_TRANSIT_STATUSES } from "../../../../../packages/shared-types/shipment-status";
+import { AT_WAREHOUSE_STATUSES, COMPLETED_STATUSES } from "../../../../../packages/shared-types/shipment-status";
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { AiKnowledgeItem } from "../../../../../packages/shared-types/entities";
 import { getOptionalSession, type AuthSession } from "../../auth/auth-session";
@@ -481,9 +481,11 @@ export default function AdminHomePage() {
    * 所以「已创建 / 暂缓柜」= 货在国内仓还没发走 → 算「处理中」，不算在途。
    */
   const statusDistribution = useMemo(() => {
-    const bucket = { delivered: 0, inTransit: 0, processing: 0, exception: 0 };
-    const inTransit = new Set<string>(IN_TRANSIT_STATUSES);
+    const bucket = { delivered: 0, inTransit: 0, atWarehouse: 0, processing: 0, exception: 0 };
+    const atWarehouse = new Set<string>(AT_WAREHOUSE_STATUSES);
     const completed = new Set<string>(COMPLETED_STATUSES);
+    // 2026-09-03：还没发走的那几个（口径跟后端 classifyClientStatusGroup 的 pending 一致）
+    const notShipped = new Set<string>(["", "created", "inWarehouseCN", "holdLoading"]);
     orderList.forEach((item) => {
       // ⚠️ 不要先按「订单审核状态」分流。原来的写法是「没审核 → 一律处理中」，
       // 结果一张已经在泰国「正在卸柜」的货，因为订单标着未审核，被算成了处理中，
@@ -492,20 +494,34 @@ export default function AdminHomePage() {
       const cur = item.currentStatus ?? "";
       if (cur === "delivered") {
         bucket.delivered += 1;
-      } else if (inTransit.has(cur)) {
-        bucket.inTransit += 1;
-      } else if (completed.has(cur)) {
-        // 退回 / 取消：算结束了，但不是正常送达
+      } else if (notShipped.has(cur)) {
+        // 已创建 / 已入库 / 暂缓柜 / 没状态 —— 货还在国内仓
+        bucket.processing += 1;
+      } else if (atWarehouse.has(cur)) {
+        /* 2026-09-03 老板拍板：到了泰国仓（含预约派送、派送中）单独一格，不算在途。
+           原来这一格不存在，IN_TRANSIT_STATUSES 把它们算成在途；把它们从在途摘掉之后
+           如果不加这一格，这批货会掉进下面的「处理中」，跟「还没发走」混成一堆。 */
+        bucket.atWarehouse += 1;
+      } else if (completed.has(cur) || cur === "exception") {
+        /* 退回 / 取消 / 异常：算结束了，但不是正常送达。
+           2026-09-03 修：exception 原来不在 COMPLETED_STATUSES 里，会掉进「处理中」，
+           跟「还没发走的货」混在一格 —— 异常单在这张图上等于看不见。 */
         bucket.exception += 1;
       } else {
-        // 已创建 / 暂缓柜 / 未审核 / 没认出来的状态 —— 都还没发走
-        bucket.processing += 1;
+        /* 剩下的一律「在途」——**兜底，不要改成白名单**。
+           2026-09-03 修：原来这里用 IN_TRANSIT_STATUSES 白名单判在途、其余掉进「处理中」，
+           结果老数据里流程表没有的状态（pickedUp / customsPending / inTransit 这些）
+           被画成「还没发走」。口径跟后端减法一致：没被上面几格认领的都还在路上。 */
+        bucket.inTransit += 1;
       }
     });
+    /* 按货实际走的顺序排：还没发走 → 路上 → 到仓 → 签收 → 异常。
+       2026-09-03 加「已到仓」这一格（老板口径），颜色跟客户端那张图对齐。 */
     return [
-      { name: "已完成", value: bucket.delivered, color: "#15803D" },
-      { name: "在途", value: bucket.inTransit, color: "#B45309" },
       { name: "处理中", value: bucket.processing, color: "#B45309" },
+      { name: "在途", value: bucket.inTransit, color: "#1e3a8a" },
+      { name: "已到仓", value: bucket.atWarehouse, color: "#0F6E6B" },
+      { name: "已完成", value: bucket.delivered, color: "#15803D" },
       { name: "异常/其他", value: bucket.exception, color: "#4B5462" },
     ];
   }, [orderList]);
@@ -1348,7 +1364,12 @@ export default function AdminHomePage() {
                     <XAxis dataKey="name" stroke="#8B94A3" />
                     <YAxis stroke="#8B94A3" />
                     <Tooltip />
-                    <Bar dataKey="value" radius={[6, 6, 0, 0]}>
+                    {/* ⚠️ isAnimationActive={false} 不是可有可无的样式选项 —— recharts 3.8.1 的进场动画
+                        在这里跑不起来，柱子会永远停在动画起始状态（height=0），整张图看着是空的。
+                        2026-09-03 实测：数据完全正确（客户端那张图 fiber 里读到 未发出=11/在途=10/…），
+                        但 recharts-inactive-bar 那层里一个图形都没有；关掉动画柱子立刻全出来。
+                        开发模式和生产构建都复现，等于线上一直是张空图。别删这个属性。 */}
+                    <Bar dataKey="value" name="单数" radius={[6, 6, 0, 0]} isAnimationActive={false}>
                       {statusDistribution.map((item) => (
                         <Cell key={item.name} fill={item.color} />
                       ))}

@@ -10,6 +10,7 @@ import { checkRateLimit, rateLimitKey } from "../core/rate-limit";
 import { STATUS_FLOW, STATUS_FLOW_LAND, EXCEPTION_STATUSES, SKIP_ON_ADVANCE_STATUSES, COMPLETED_STATUSES } from "./status-flow";
 import { syncParentStatusFromChildren } from "./parent-status";
 import { loadOrderTotalMetrics } from "./total-metrics";
+import { countShipmentOverview } from "./overview-counts";
 
 interface Kuaidi100QueryPayload {
   com?: string;
@@ -748,68 +749,6 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
     });
   });
 
-  /**
-   * 顶部那排数字的统计（2026-08-09，A3 方案 §3.2）。
-   * 2026-08-10 三端共用：员工端/管理员端数全公司，客户端只数自己的，
-   * 差别只有传进来的 where —— 口径必须一模一样，否则三个端对不上数。
-   *
-   * ⚠️ 「在途」用**减法**算，不要列举状态名。理由见下面 /staff 那条注释。
-   */
-  async function countShipmentOverview(where: Record<string, unknown>) {
-    const startOfMonth = new Date();
-    startOfMonth.setDate(1);
-    startOfMonth.setHours(0, 0, 0, 0);
-
-    /** 延迟 / 需要盯的：延迟开船、海上延误、口岸滞留、海关查验、异常 */
-    const ATTENTION = ["delayDeparted", "delayInTransit", "borderDelay", "customsInspect", "exception"];
-
-    const [total, created, atWarehouse, delivering, done, attention, signedThisMonth, exceptionCount] =
-      await Promise.all([
-        prisma.shipment.count({ where }),
-        // 「未发出」：已创建 + 已入库 + 暂缓装柜（2026-09-02 复核对齐：客户端四分类的
-        // pending 就是这三个，暂缓装柜的货同样躺在国内仓，不能掉进减法算出的「在途」。
-        // 货都还在国内仓，绝不能掉进下面减法算出的「在途」里）
-        prisma.shipment.count({ where: { ...where, currentStatus: { in: ["created", "inWarehouseCN", "holdLoading"] } } }),
-        prisma.shipment.count({ where: { ...where, currentStatus: "inWarehouseTH" } }),
-        prisma.shipment.count({ where: { ...where, currentStatus: "outForDelivery" } }),
-        prisma.shipment.count({ where: { ...where, currentStatus: { in: [...COMPLETED_STATUSES] } } }),
-        prisma.shipment.count({ where: { ...where, currentStatus: { in: ATTENTION } } }),
-        prisma.shipment.count({
-          where: { ...where, currentStatus: "delivered", updatedAt: { gte: startOfMonth } },
-        }),
-        // 2026-09-02 终审整改（P2）：异常单单独数出来，从下面「在途」的减法里扣掉
-        prisma.shipment.count({ where: { ...where, currentStatus: "exception" } }),
-      ]);
-
-    /**
-     * 剩下的全算「在途」——任何没被上面几类认领的状态都不会凭空消失。
-     * 2026-09-02 终审整改（P2）：exception 原来没从减法里扣，异常单被同时数进
-     * 「在途」和「延迟/查验」两格。口径写清楚：
-     *   · returned / cancelled 在 COMPLETED_STATUSES（done）里，减法早就扣过了；
-     *   · 延迟/查验类（delayDeparted / delayInTransit / borderDelay / customsInspect）
-     *     货确实还在路上，保留在「在途」里、同时出现在「延迟/查验」是有意为之；
-     *   · exception 是「货不在正常途中」的异常态，只出现在「延迟/查验」那格。
-     * 对账等式从此是：total = 未发出 + 到仓 + 派送中 + 已完成 + 异常 + 在途。
-     */
-    const inTransit = total - created - atWarehouse - delivering - done - exceptionCount;
-
-    return {
-      inTransitCount: Math.max(0, inTransit),
-      attentionCount: attention,
-      atWarehouseCount: atWarehouse,
-      signedThisMonthCount: signedThisMonth,
-      // 下面这几个是给「四段相加等于总数」对账用的，界面上不显示
-      totalCount: total,
-      // ⚠️ 名字叫 createdCount，实际是「未发出」= 已创建 + 已入库（2026-09-02 起）。
-      //    字段名不改 —— 前端 business-api.ts 的接口是逐字对齐的，改名要两边一起。
-      createdCount: created,
-      deliveringCount: delivering,
-      doneCount: done,
-      // 2026-09-02 终审整改：异常单数（对账用，界面不显示）——
-      // 未发出 + 到仓 + 派送中 + 已完成 + 异常 + 在途 = total
-      exceptionCount,
-    };
-  }
 
   /**
    * 客户端「我的订单」顶部那排数字（2026-08-10）。
@@ -830,14 +769,15 @@ export function registerShipmentRoutes(app: MinimalHttpApp): void {
   /**
    * 员工端 / 管理员端运单列表顶部那排数字（2026-08-09，A3 方案 §3.2）。
    *
-   * 用户选定要这四个：在途 / 延迟·查验 / 已到仓待派送 / 本月已签收。
+   * 用户选定要这四个：在途 / 延迟·查验 / 已到仓 / 本月已签收
+   * （2026-09-03 起第三格由「已到仓待派送」改叫「已到仓」，口径含预约派送和派送中）。
    * 为什么值得做：有 7 张预报单从 8-01 挂到现在没人收货、有个柜子被误推成
    * 「延迟运输」也是事后才发现 —— 这排数字就是让这些一进来就看见。
    *
    * ⚠️ 「在途」用**减法**算，不要列举状态名。
    * 2026-08-08 管理员端柜子统计踩过：第一版列举在途状态，测试库 16 个柜子只数到 13 个，
    * 漏了两个老状态名，柜子凭空消失且没人发现。
-   * 这里同理：精确认领「已创建 / 已到仓 / 派送中 / 已完成 / 异常」几类，剩下的一律算在途，
+   * 这里同理：精确认领「未发出 / 已到仓（含预约派送、派送中）/ 已完成 / 异常」几类，剩下的一律算在途，
    * 以后加了新状态也不会漏。返回里带上 total，各段相加应等于 total，一眼能看出有没有漏
    * （2026-09-02 起 exception 也从在途里扣掉了，对账时要把 exceptionCount 一起加上）。
    */

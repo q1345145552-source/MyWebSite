@@ -48,6 +48,7 @@ export async function loadOrderProducts(companyId: string, orderIds: string[]): 
 
 import { EXCEPTION_STATUSES } from "../shipments/status-flow";
 import { BusinessError } from "../core/business-error";
+import { AT_WAREHOUSE_STATUSES, type ShipmentStatus } from "../../../../../packages/shared-types/shipment-status";
 
 /**
  * 客户端订单五分类（2026-08-31 四分类拍板；2026-09-03 拆出「已到仓」）。
@@ -79,11 +80,7 @@ function classifyClientStatusGroup(
      派送不单独分一格，客户签收了才跳「已签收」。
      ⚠️「正在卸柜 unloading」不在这里：老板口径是柜子还在卸、货还没进仓，算**在途**，
         它走下面的兜底 return "transit"。别再加回这个 if 里。 */
-  if (
-    currentStatus === "inWarehouseTH" ||
-    currentStatus === "deliveryBooked" ||
-    currentStatus === "outForDelivery"
-  ) return "arrived";
+  if (AT_WAREHOUSE_STATUSES.includes(currentStatus as ShipmentStatus)) return "arrived";
   return "transit";
 }
 
@@ -1007,7 +1004,8 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
     const GROUP_ALIAS: Record<string, Array<"pending" | "transit" | "arrived" | "delivered" | "closed">> = {
       pending: ["pending"],
       transit: ["transit"],
-      // 2026-09-03：到仓后整段（卸货/已到仓/预约派送/派送中）从在途拆出
+      // 2026-09-03：进泰国仓后整段（已到仓/预约派送/派送中）从在途拆出；
+      // ⚠️「正在卸柜」不在里面，它按老板口径算在途（见 classifyClientStatusGroup）
       arrived: ["arrived"],
       delivered: ["delivered"],
       closed: ["closed"],
@@ -1027,7 +1025,7 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
          员工点「确认收货」后订单变成 received，全系统没有任何代码再把它改回来——
          原来这里只认 approved/shipped，单子一被确认到仓就从客户的订单列表、
          三个分组按钮和首页统计里全部消失，客户会以为单丢了。 */
-      approvalStatus: { in: ["approved", "shipped", "received"] },
+      approvalStatus: { in: ["approved", "shipped"] },
       clientId: auth.userId,
       // 运单号搜索下推到数据库：父单、子单任一命中都算，且 count 与列表口径一致
       ...(trackingNo ? { shipments: { some: { trackingNo } } } : {}),
