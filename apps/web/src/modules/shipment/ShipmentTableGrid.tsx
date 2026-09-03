@@ -83,23 +83,49 @@ export function ProductDetailCell({ widths, rows }: { widths: readonly number[];
   // 宽度写死成各列之和，不用 100%：Windows 的滚动条占宽度，
   // 用 100% 会被滚动条挤窄，列就和表头对不上了
   const totalWidth = widths.reduce((a, b) => a + b, 0);
+  /* 2026-09-03 老板拍板：项数不满 DETAIL_VISIBLE_ROWS 行时，内容**上下居中**。
+     原来一律从顶上往下排，两项货就在格子底下空出一整行（老板圈的就是那块），
+     而同一行右边的体积/重量/物流状态那几列是 verticalAlign: middle，两边差半行看着错位。
+     一项、两项都按这条走。
+
+     ⚠️ 满三行以上不能居中：flex 的 justify-content: center 配 overflow: auto 时，
+        溢出的内容会从**顶上被切掉且滚不回去**（浏览器公认的老毛病）。
+        所以要滚动的那种保持 flex-start，只有装得下的才居中。 */
+  const needsScroll = rows.length > DETAIL_VISIBLE_ROWS;
   return (
     <td colSpan={widths.length} style={{ padding: 0, border: GRID_LINE, verticalAlign: "top" }}>
-      <div style={{ height: DETAIL_ROW_HEIGHT * DETAIL_VISIBLE_ROWS, overflowY: "auto", overflowX: "hidden" }}>
+      <div
+        style={{
+          height: DETAIL_ROW_HEIGHT * DETAIL_VISIBLE_ROWS,
+          overflowY: needsScroll ? "auto" : "hidden",
+          overflowX: "hidden",
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: needsScroll ? "flex-start" : "center",
+        }}
+      >
         <table className="a3-table" style={{ width: totalWidth, borderCollapse: "collapse", tableLayout: "fixed", fontSize: 13 }}>
           <colgroup>
             {widths.map((w, i) => <col key={i} style={{ width: w }} />)}
           </colgroup>
           <tbody>
-            {rows.map((cells, i) => (
-              <tr key={i}>
-                {cells.map((v, j) => (
-                  <td key={j} title={v} style={j === cells.length - 1 ? detailLastCellStyle : detailCellStyle}>
-                    {v}
-                  </td>
-                ))}
-              </tr>
-            ))}
+            {rows.map((cells, i) => {
+              /* 最后一行不画下边框：居中之后那条线会悬在格子中间，像断了一截。
+                 满三行时它本来就跟格子底边重合，去掉也看不出区别。 */
+              const isLastRow = i === rows.length - 1;
+              return (
+                <tr key={i}>
+                  {cells.map((v, j) => {
+                    const base = j === cells.length - 1 ? detailLastCellStyle : detailCellStyle;
+                    return (
+                      <td key={j} title={v} style={isLastRow ? { ...base, borderBottom: "none" } : base}>
+                        {v}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
