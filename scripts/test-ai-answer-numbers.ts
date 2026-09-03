@@ -1577,12 +1577,37 @@ async function main() {
       assert.ok(!answer.includes("未查询到品名"), `真品名被误伤：\n${answer}`);
     });
 
-    await check("68) 说「国内仓」的不算「已到仓」——那是发货前那一头", async () => {
-      const { answer } = await ask({ shipments: arrivedFixture(), message: "到国内仓的有多少单" });
-      assert.ok(
-        !answer.includes("已到仓运单"),
-        `问的是国内仓，却按泰国仓的「已到仓」答了：\n${answer}`,
-      );
+    await check("68) 说「国内仓」的不算「已到仓」，也不许被当成品名", async () => {
+      /* ⚠️ 这条原来只断言「不能算已到仓」—— 太松：被当成品名同样满足这个条件，
+         2026-09-03 自查实测就是这么漏过去的（答「未查询到品名『到国内仓』相关订单」）。
+         两条都得断。 */
+      for (const message of ["到国内仓的有多少单", "国内仓还有多少货"]) {
+        const { answer } = await ask({ shipments: arrivedFixture(), message });
+        assert.ok(!answer.includes("已到仓运单"), `「${message}」按泰国仓的已到仓答了：\n${answer}`);
+        assert.ok(!answer.includes("未查询到品名"), `「${message}」被当成品名查了：\n${answer}`);
+      }
+    });
+
+    await check("69) ⭐ 问「什么时候到仓」要的是日期，不能答成「已到仓几单」", async () => {
+      /* 自查实测：不排掉时间问句的话，客户问「我的货什么时候到仓」，
+         系统答「已到仓运单 3 单」—— 答非所问，比不答更糟。 */
+      for (const message of ["什么时候到仓", "我的货什么时候到仓", "货几号到仓", "哪天到仓"]) {
+        const { answer } = await ask({ shipments: arrivedFixture(), message });
+        assert.ok(
+          !answer.includes("已到仓运单"),
+          `「${message}」问的是时间，却答成了已到仓的单量：\n${answer}`,
+        );
+      }
+    });
+
+    await check("70) 否定 + 别的状态词也不能被当成品名（装柜 / 发出）", async () => {
+      /* 否定闸里写了「装柜/发出」，但品名词表当时没同步，
+         「没装柜的有多少」会被抓成品名「没装柜」，客户收到一句答非所问的话。 */
+      for (const message of ["没装柜的有多少", "还没发出的有几单", "未发出的有几单"]) {
+        const { answer } = await ask({ shipments: arrivedFixture(), message });
+        assert.ok(!answer.includes("未查询到品名"), `「${message}」被当成品名查了：\n${answer}`);
+        assert.ok(!answer.includes("已到仓运单"), `「${message}」按已到仓答了：\n${answer}`);
+      }
     });
   }
 
