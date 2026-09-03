@@ -27,7 +27,9 @@ process.env.NODE_ENV = "test";
 
 import assert from "node:assert/strict";
 import { STATUS_FLOW, STATUS_FLOW_LAND, EXCEPTION_STATUSES } from "../apps/api/src/modules/shipments/status-flow";
-import { IN_TRANSIT_STATUSES, AT_WAREHOUSE_STATUSES, isInTransitStatus } from "../packages/shared-types/shipment-status";
+import { IN_TRANSIT_STATUSES, AT_WAREHOUSE_STATUSES, ATTENTION_STATUSES, isInTransitStatus } from "../packages/shared-types/shipment-status";
+import { AI_STATUS_SCOPES } from "../apps/api/src/modules/ai/ai-types";
+import { readFileSync } from "node:fs";
 
 type Handler = (req: any, res: any) => Promise<void> | void;
 type Group = "pending" | "transit" | "arrived" | "delivered" | "closed";
@@ -327,6 +329,110 @@ async function main(): Promise<void> {
     }
     assert.equal(isInTransitStatus(null), false, "没状态不该算在途");
     assert.equal(isInTransitStatus(""), false, "空状态不该算在途");
+  });
+
+  await check("16) ⭐「延迟/查验」那格必须罩住全部查验类状态（含国内、泰国）", async () => {
+    /* 2026-09-03 复核挖出来的：这份名单原来是手写的
+       [delayDeparted, delayInTransit, borderDelay, customsInspect, exception]，
+       漏掉国内海关查验、泰国海关查验、港口封港。
+       「国内海关查验」是 08-13 加进流程的，加的时候没人回来补这份名单，
+       被扣在国内查验的货因此一直不进这一格 —— 那正是最该提醒的一种货。
+       现在查验类从流程表推导，这道闸盯着它别再漏。 */
+    const allFlow = new Set<string>([...STATUS_FLOW, ...STATUS_FLOW_LAND]);
+    const 全部查验类 = [...allFlow].filter((s) => s.startsWith("customsInspect"));
+    assert.ok(全部查验类.length >= 3, `流程表里查验类只找到 ${全部查验类.length} 个，太少了，推导规则可能失效`);
+    const missing = 全部查验类.filter((s) => !ATTENTION_STATUSES.includes(s as any));
+    assert.equal(missing.length, 0, `这些查验状态没进「延迟/查验」：${missing.join(", ")}`);
+
+    for (const must of ["delayDeparted", "delayInTransit", "borderDelay", "portClosed", "exception"]) {
+      assert.ok(ATTENTION_STATUSES.includes(must as any), `「${must}」不在「延迟/查验」里`);
+    }
+    // 正常在途的货不该被塞进这一格，否则这个数字天天亮着就没人看了
+    for (const normal of ["loaded", "departed", "inWarehouseTH", "delivered", "created"]) {
+      assert.ok(!ATTENTION_STATUSES.includes(normal as any), `「${normal}」是正常状态，不该进「延迟/查验」`);
+    }
+
+    /* ⭐ 关键的一条：上面只证明了「共享清单是对的」，不证明**顶部那格真的在用它**。
+       复核实测：把 overview-counts.ts 改回手写旧清单，上面几条照样全绿。
+       所以这里真调 /staff/shipments/overview，拿返回的 attentionCount 对数。 */
+    const d = await overview("/staff/shipments/overview", "staff");
+    const 应该是 = ATTENTION_STATUSES.reduce((sum, st) => sum + (DIST[st] ?? 0), 0);
+    assert.equal(d.attentionCount, 应该是,
+      `顶部「延迟/查验」返回 ${d.attentionCount}，按共享清单该是 ${应该是}——` +
+      `说明那边没在用 ATTENTION_STATUSES（比如又改回手写清单了）`);
+    assert.ok(DIST.customsInspectCn > 0, "样本里得有国内海关查验的单，不然这条等于没测");
+    assert.ok(d.attentionCount >= DIST.customsInspectCn,
+      `国内海关查验那 ${DIST.customsInspectCn} 张没算进「延迟/查验」`);
+  });
+
+  await check("17) AI 范围清单的接线闸（真问真答在 test-ai-answer-numbers 第 64~68 项）", async () => {
+    /* ⚠️ 这一项只证明「清单和提示词接对了线」，**不证明 AI 真能答对**。
+       复核实测：把 matchStatusScope 里的 arrived 分支删掉，这一项照样绿。
+       客户实际问话的验证在 scripts/test-ai-answer-numbers.ts 第 64~68 项
+       （真造运单、真走 service.chat、看客户收到的那段字），别只靠这一条。 */
+    /* 这串清单原来在 5 个地方各写一遍（类型、解析白名单、给模型看的提示词、
+       两处 as 断言）。加「已到仓」时前三处漏改，提示词那句漏了模型就根本
+       不知道有这个选项。现在都从 AI_STATUS_SCOPES 取，这道闸盯着别再散开。 */
+    assert.ok(AI_STATUS_SCOPES.includes("arrived" as any), "AI 没有「已到仓」这个查询范围");
+    for (const must of ["all", "inTransit", "completed", "unfinished", "exception"]) {
+      assert.ok(AI_STATUS_SCOPES.includes(must as any), `AI 范围清单少了 ${must}`);
+    }
+    // 提示词里给模型的可选值就是这份清单拼出来的，不能再手写
+    const src = readFileSync(new URL("../apps/api/src/modules/ai/ai-service.ts", import.meta.url), "utf8");
+    assert.ok(src.includes("AI_STATUS_SCOPES.join(\"|\")"),
+      "给模型看的提示词没有用 AI_STATUS_SCOPES 拼，又变回手写清单了");
+    assert.ok(!/statusScope: "all\|inTransit\|completed/.test(src),
+      "提示词里还留着写死的旧清单");
+  });
+
+  await check("18) ⭐ 管理员导出的「状态组」是实时算的，不是数据库那个死字段", async () => {
+    /* 2026-09-03 复核挖出来的：这一列原来直接发数据库 orders.status_group，
+       而**全系统没有任何代码更新过它** —— 生产库 1252 张单全是 "unfinished"。
+       管理员导出的 Excel 里那一列因此永远是同一个英文单词，等于废列。
+       这个用例故意让数据库字段和运单真实状态**对着干**：
+       库里写着 unfinished，货其实已经到泰国仓了。要是还读库里那个字段，这里就红。 */
+    const 造假单 = (id: string, currentStatus: string) => ({
+      id, orderId: `o_${id}`, trackingNo: `T-${id}`, parentTrackingNo: null,
+      currentStatus, batchNo: null, containerNo: null, domesticTrackingNo: null,
+      packageCount: 1, weightKg: null, volumeM3: null, remark: null,
+      warehouseId: "wh_yiwu_01", transportMode: "sea",
+      createdAt: new Date(0), updatedAt: new Date(0),
+      order: {
+        id: `o_${id}`, clientId: "CLIENT1", itemName: "测试", productQuantity: 1,
+        packageUnit: "box", cargoType: "normal", approvalStatus: "approved",
+        receivableAmountCny: null, receivableCurrency: "CNY", paymentStatus: "unpaid",
+        paidAt: null, paidBy: null, shipDate: null, weightKg: null, volumeM3: null,
+        createdAt: new Date(0),
+        statusGroup: "unfinished",
+        client: { name: "测试客户" },
+      },
+    });
+    const 样本 = [
+      造假单("a", "inWarehouseTH"), 造假单("b", "unloading"),
+      造假单("c", "created"), 造假单("d", "delivered"), 造假单("e", "outForDelivery"),
+    ];
+    (globalThis as any).__prisma.shipment.count = async () => 样本.length;
+    (globalThis as any).__prisma.shipment.findMany = async () => 样本;
+    (globalThis as any).__prisma.orderProduct = { async findMany() { return []; } };
+
+    const adminMod = await import("../apps/api/src/modules/admin/routes");
+    (adminMod as any).registerAdminRoutes(fakeApp);
+    const h = routes.get("GET /admin/orders");
+    assert.ok(h, "没注册到 GET /admin/orders");
+    let payload: { data?: any } = {};
+    const res: any = { status() { return res; }, json(v: unknown) { payload = v as typeof payload; } };
+    await h!({ method: "GET", path: "", query: {}, headers: {}, body: undefined,
+      auth: { userId: "A1", companyId: "c_001", role: "admin", name: "管理员" } }, res);
+
+    const items = payload.data?.items ?? [];
+    assert.equal(items.length, 5, `应该返回 5 条，实际 ${items.length}`);
+    const got = Object.fromEntries(items.map((x: any) => [x.currentStatus, x.statusGroup]));
+    assert.deepEqual(got, {
+      inWarehouseTH: "arrived", unloading: "transit",
+      created: "pending", delivered: "delivered", outForDelivery: "arrived",
+    }, `状态组算错了（库里那个字段全是 unfinished，如果结果里出现 unfinished 就是还在读死字段）：${JSON.stringify(got)}`);
+    assert.ok(!items.some((x: any) => x.statusGroup === "unfinished"),
+      "还在发数据库那个从没更新过的 status_group 字段");
   });
 
   console.log(`\n共 ${totalChecks} 项，失败 ${failures.length} 项`);

@@ -12,6 +12,17 @@ import type {
 } from "../../../../../packages/shared-types/entities";
 import type { ShipmentStatus } from "../../../../../packages/shared-types/shipment-status";
 
+/**
+ * AI 能识别的「查哪一批运单」范围 —— **全模块唯一一份清单**（2026-09-03 收拢）。
+ *
+ * ⚠️ 加范围之前这串东西在 5 个地方各写了一遍：本文件的类型、ai-service 的
+ * StatusScope、解析模型返回值的白名单、给模型看的提示词、以及 ai-prisma-store
+ * 里两处 as 断言。2026-09-03 加「已到仓」时前三处漏改，TypeScript 只拦住了两处，
+ * 提示词那句漏了模型根本不知道有这个选项。现在一处改，五处跟着走。
+ */
+export const AI_STATUS_SCOPES = ["all", "inTransit", "arrived", "completed", "unfinished", "exception"] as const;
+export type AiStatusScope = (typeof AI_STATUS_SCOPES)[number];
+
 export interface AuthContext {
   userId: string;
   companyId: string;
@@ -103,7 +114,7 @@ export interface AiSessionMemoryRecord {
   sessionId: string;
   intent?: "tracking" | "summary";
   itemName?: string;
-  statusScope?: "all" | "inTransit" | "completed" | "unfinished" | "exception";
+  statusScope?: AiStatusScope;
   timeHint?: string;
   metric?: "count" | "volume" | "weight" | "mixed";
   updatedAt: string;

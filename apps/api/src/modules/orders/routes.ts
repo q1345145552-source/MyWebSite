@@ -48,40 +48,28 @@ export async function loadOrderProducts(companyId: string, orderIds: string[]): 
 
 import { EXCEPTION_STATUSES } from "../shipments/status-flow";
 import { BusinessError } from "../core/business-error";
-import { AT_WAREHOUSE_STATUSES, type ShipmentStatus } from "../../../../../packages/shared-types/shipment-status";
+import { classifyStatusGroup, type ClientStatusGroup } from "../../../../../packages/shared-types/shipment-status";
 
 /**
- * 客户端订单五分类（2026-08-31 四分类拍板；2026-09-03 拆出「已到仓」）。
- * 按运单 currentStatus 算：
- *   · 没有运单，或还在国内仓没发出（created / inWarehouseCN / holdLoading）→ pending（未发出）
- *   · delivered → delivered（已签收）
- *   · returned / cancelled / exception → closed（退回/取消/异常）
- *   · 已到仓 / 预约派送 / 派送中 → arrived（已到仓：进了泰国仓之后、客户签收之前，含尾端派送）
- *   · 其余一律 → transit（在途：从国内仓发出到进泰国仓之前，含「正在卸柜」）
- * 原来只有「完成/没完成」两分：刚建单没发走的、暂缓装柜的全被算成「在途」，
- * 「已完成」又把退回、取消混进去，按钮名字和查出来的东西对不上。
- * ⚠️ 客户首页状态分布图（client/page.tsx 的 clientStatusData）直接按这个字段画，
- *    改这里的口径要两边一起看。
+ * 客户端订单五分类。判断逻辑在 packages/shared-types 的 classifyStatusGroup，
+ * 这里只是个转发（保留这个名字是因为本文件里有多处调用，也方便 grep）。
+ *
+ * 分法（口径唯一权威在共享文件里，改要去那边改）：
+ *   · 没运单，或还在国内仓（created / inWarehouseCN / holdLoading）→ pending 未发出
+ *   · delivered → delivered 已签收
+ *   · returned / cancelled / exception → closed 退回/取消/异常
+ *   · 已到仓 / 预约派送 / 派送中 → arrived 已到仓（进泰国仓到签收之前，含尾端派送）
+ *   · 其余一律 → transit 在途（从国内仓发出到进泰国仓之前，含「正在卸柜」）
+ *
+ * ⚠️ 2026-09-03 之前这份判断在本文件里自己写了一遍，另外三处（管理员看板 KPI、
+ *    管理员状态分布图、AI 问答）各用各的，同一批货能算出三个数。现在统一到共享文件。
+ * ⚠️ 客户首页状态分布图（client/page.tsx 的 clientStatusData）按这个字段画，
+ *    管理员端导出 Excel 的「状态组」列也按它，改口径三处一起看。
  */
 function classifyClientStatusGroup(
   currentStatus: string | null | undefined,
-): "pending" | "transit" | "arrived" | "delivered" | "closed" {
-  if (
-    !currentStatus ||
-    currentStatus === "created" ||
-    // 2026-09-02 新状态「已入库」：货在国内仓，还没发出
-    currentStatus === "inWarehouseCN" ||
-    currentStatus === "holdLoading"
-  ) return "pending";
-  if (currentStatus === "delivered") return "delivered";
-  if (EXCEPTION_STATUSES.has(currentStatus)) return "closed";
-  /* 2026-09-03 老板拍板（当天二次调整，口径以这条为准）：
-     「已到仓」= 货进了泰国仓之后、客户签收之前的**整段**，包含预约派送和尾端派送中——
-     派送不单独分一格，客户签收了才跳「已签收」。
-     ⚠️「正在卸柜 unloading」不在这里：老板口径是柜子还在卸、货还没进仓，算**在途**，
-        它走下面的兜底 return "transit"。别再加回这个 if 里。 */
-  if (AT_WAREHOUSE_STATUSES.includes(currentStatus as ShipmentStatus)) return "arrived";
-  return "transit";
+): ClientStatusGroup {
+  return classifyStatusGroup(currentStatus);
 }
 
 /** Prisma 的 Decimal | null 转 number | null（用于返回前端）。 */

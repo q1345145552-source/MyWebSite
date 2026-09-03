@@ -1,10 +1,11 @@
+import { AI_STATUS_SCOPES, type AiStatusScope } from "./ai-types";
 import type {
   AiChatRequest,
   AiChatResponse,
   AiSuggestionResponse,
 } from "../../../../../packages/shared-types/common-response";
 import type { AiKnowledgeItem, AiQueryAuditLog, Shipment } from "../../../../../packages/shared-types/entities";
-import { isInTransitStatus, type ShipmentStatus } from "../../../../../packages/shared-types/shipment-status";
+import { isInTransitStatus, classifyStatusGroup, type ShipmentStatus } from "../../../../../packages/shared-types/shipment-status";
 import { pickSlowestStatus } from "../shipments/parent-status";
 import { logger } from "../core/logger";
 import type {
@@ -106,7 +107,11 @@ interface TimeWindow {
   label: string;
 }
 
-type StatusScope = "all" | "inTransit" | "completed" | "unfinished" | "exception";
+/* 2026-09-03 加 "arrived"：老板把「已到仓」拆成独立分组后，客户问
+   「我到仓了几单」原来一个词都对不上，会掉进 "all" 当成查全部，答出来的数
+   跟他自己点「已到仓」按钮看到的对不上。
+   清单本体在 ai-types.ts 的 AI_STATUS_SCOPES，这里只取类型。 */
+type StatusScope = AiStatusScope;
 type SummaryMetric = "count" | "volume" | "weight" | "mixed";
 interface ProductScope {
   keyword?: string;
@@ -490,7 +495,8 @@ export class ClientAiService implements AiService {
           intent: "greeting|tracking|summary|unknown",
           trackingNo: "string",
           itemName: "string",
-          statusScope: "all|inTransit|completed|unfinished|exception",
+          // 提示词里的可选值也从同一份清单生成，模型才知道有「已到仓」这个选项
+          statusScope: AI_STATUS_SCOPES.join("|"),
           timeHint: "string",
           metric: "count|volume|weight|mixed",
           confidence: "0~1",
@@ -532,14 +538,11 @@ export class ClientAiService implements AiService {
           ? intentRaw
           : undefined;
       const statusRaw = typeof parsed.statusScope === "string" ? parsed.statusScope : "";
-      const statusScope =
-        statusRaw === "all" ||
-        statusRaw === "inTransit" ||
-        statusRaw === "completed" ||
-        statusRaw === "unfinished" ||
-        statusRaw === "exception"
-          ? statusRaw
-          : undefined;
+      /* 2026-09-03：白名单改成照着 AI_STATUS_SCOPES 查，别再手写一串 ——
+         加范围时这里漏改的话，模型答对了也会被这道闸吞掉，静悄悄退回「查全部」。 */
+      const statusScope = (AI_STATUS_SCOPES as readonly string[]).includes(statusRaw)
+        ? (statusRaw as StatusScope)
+        : undefined;
       const metricRaw = typeof parsed.metric === "string" ? parsed.metric : "";
       const metric =
         metricRaw === "count" || metricRaw === "volume" || metricRaw === "weight" || metricRaw === "mixed"
@@ -632,7 +635,8 @@ export class ClientAiService implements AiService {
   }
 
   private isSummaryIntent(message: string): boolean {
-    return /(统计|汇总|总量|多少|几单|数量|重量|体积|在途|完成|异常|近\d+天|最近\d+天|今天|今日|昨天|昨日|本周|这周|本星期|这星期|本月|这个月|这月|当月)/.test(
+    // 2026-09-03 补「到仓」：「哪些货到仓了」原来不算统计问题，会被反问一句
+    return /(统计|汇总|总量|多少|几单|数量|重量|体积|在途|完成|异常|到仓|近\d+天|最近\d+天|今天|今日|昨天|昨日|本周|这周|本星期|这星期|本月|这个月|这月|当月)/.test(
       message,
     );
   }
@@ -658,9 +662,27 @@ export class ClientAiService implements AiService {
    * 不同步的话这些词会被当成**品名**去查（实测「总计多少单」→「未查询到品名『总计』相关订单」）。
    */
   private resolveStatusScope(message: string): StatusScope | undefined {
+    /* ⚠️ 否定必须**最先判**，否则整句意思会被读反。
+       2026-09-03 复核实测：加了「到仓」这个范围之后，客户问「还有多少单没到仓」
+       会命中下面的「到仓」→ 按**已到仓**去查，把「还没到的」问成「已经到了的」，
+       数字正好是反面那一批；而且这个错范围还会写进会话记忆，接着追问一路错下去。
+       这里返回 undefined（= 当作客户没明确说状态），交给模型判断、兜底走「全部」
+       并附上分项 —— 宁可不精准，也绝不给一个方向相反的数。 */
+    if (/(还没|没有|尚未|未曾|不曾|没|未)\s*(到仓|进仓|到达仓库|到泰国仓|到货|发出|发走|装柜)/.test(message)) {
+      return undefined;
+    }
     if (/(未完成|没完成|未签收|未结束)/.test(message)) return "unfinished";
     if (/(异常|退回|取消)/.test(message)) return "exception";
     if (/(完成|签收|已完成)/.test(message)) return "completed";
+    /* 「到仓」= 到**泰国仓**。客户嘴里的「国内仓」是发货前那一头，带这些词就不算已到仓。
+       ⚠️ 2026-09-03 复核后收窄：原来还认「进仓 / 到货了 / 到了没 / 派送中 / 正在派送」，
+          · 「派送」被 SERVICE_QA_RE 抢在前面截走，那两个词从来走不到这里，是死的；
+          · 「进仓 / 到货了 / 到了没」在客户口语里也可能是在问国内仓，会答反。
+          宁可少认几种说法（退回「查全部」并附分项），也不要认错方向。 */
+    if (
+      !/(国内仓|中国仓|发货仓|国内那个仓)/.test(message) &&
+      /(到仓|已到仓|到达仓库|到泰国仓|到了泰国)/.test(message)
+    ) return "arrived";
     if (/(在途|运输中|在路上|路上)/.test(message)) return "inTransit";
     // 客户明确说了「要全部」——到此为止，模型不许再改成某个状态
     if (/(一共|总共|统共|总计|加起来|全部|所有)/.test(message)) return "all";
@@ -942,7 +964,13 @@ export class ClientAiService implements AiService {
      * 系统把他**全部**的单都报给他，数字大得离谱。
      */
     const looksLikeSentence =
-      /(最近|今天|今日|昨天|昨日|本周|这周|本星期|这星期|这个星期|本月|这个月|这月|当月|在途|路上|运输|完成|未完成|异常|退回|取消|多少|几单|统计|汇总|有多少|还有|查询范围)/.test(
+      /* 2026-09-03 补「到仓|进仓|到达仓库|泰国仓|到货」——
+         加了「已到仓」这个查询范围之后，客户问「已到仓的订单有多少」，
+         品名识别排在状态识别前面，会把「已到仓」当成品名抓走（还会把这几个字
+         从问句里剥掉，状态词跟着没了），最后回一句「未查询到品名『已到仓』相关订单」。
+         跟 2026-08-28 那个「最近3天异常件」→ 品名「天异常件」是同一个坑，
+         这张表必须跟 resolveStatusScope 的词表一起维护。 */
+      /(最近|今天|今日|昨天|昨日|本周|这周|本星期|这星期|这个星期|本月|这个月|这月|当月|在途|路上|运输|完成|未完成|异常|退回|取消|到仓|进仓|到达仓库|泰国仓|到货|多少|几单|统计|汇总|有多少|还有|查询范围)/.test(
         keyword,
       );
     if (fromSentence && looksLikeSentence) return undefined;
@@ -1094,6 +1122,8 @@ export class ClientAiService implements AiService {
        ② 老数据里流程表没有的状态一张都数不到。两个毛病都会让 AI 报的数
        跟客户自己点「在途」按钮查出来的对不上。 */
     if (statusScope === "inTransit") return isInTransitStatus(shipment.currentStatus);
+    // 2026-09-03：走跟客户端分组按钮同一个函数，AI 报的数跟客户点按钮看到的一致
+    if (statusScope === "arrived") return classifyStatusGroup(shipment.currentStatus) === "arrived";
     if (statusScope === "completed") return COMPLETED_STATUSES.includes(shipment.currentStatus);
     if (statusScope === "unfinished") return !COMPLETED_STATUSES.includes(shipment.currentStatus);
     return EXCEPTION_STATUSES.includes(shipment.currentStatus);
@@ -1101,6 +1131,7 @@ export class ClientAiService implements AiService {
 
   private statusScopeLabel(statusScope: StatusScope): string {
     if (statusScope === "inTransit") return "在途运单";
+    if (statusScope === "arrived") return "已到仓运单（含预约派送、派送中）";
     if (statusScope === "completed") return "已完成运单";
     if (statusScope === "unfinished") return "未完成运单";
     if (statusScope === "exception") return "异常/退回/取消运单";

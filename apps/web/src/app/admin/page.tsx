@@ -2,7 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
-import { AT_WAREHOUSE_STATUSES, COMPLETED_STATUSES } from "../../../../../packages/shared-types/shipment-status";
+import { AT_WAREHOUSE_STATUSES, COMPLETED_STATUSES, CLIENT_STATUS_GROUP_ZH } from "../../../../../packages/shared-types/shipment-status";
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { AiKnowledgeItem } from "../../../../../packages/shared-types/entities";
 import { getOptionalSession, type AuthSession } from "../../auth/auth-session";
@@ -1154,7 +1154,10 @@ export default function AdminHomePage() {
       重量: o.weightKg ?? "-", 体积: o.volumeM3 ?? "-",
       // 长宽高来自产品行；一张单有多个不同尺寸时后端会拼成 "60/50"（2026-08-27 加）
       长cm: o.lengthCm ?? "-", 宽cm: o.widthCm ?? "-", 高cm: o.heightCm ?? "-",
-      到仓日期: o.shipDate ?? "-", 状态组: o.statusGroup ?? "-",
+      到仓日期: o.shipDate ?? "-",
+      /* 2026-09-03：这一列原来导的是英文（而且是数据库里从没更新过的死字段，
+         全库都是 unfinished）。现在后端实时算，这里转成中文再导。 */
+      状态组: o.statusGroup ? (CLIENT_STATUS_GROUP_ZH[o.statusGroup] ?? o.statusGroup) : "-",
       创建时间: o.createdAt ?? "-", 更新时间: o.updatedAt ?? "-",
     }));
     const ws = XLSX.utils.json_to_sheet(rows);

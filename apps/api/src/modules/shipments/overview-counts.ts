@@ -1,6 +1,6 @@
 import { prisma } from "../../db/prisma";
 import { COMPLETED_STATUSES } from "./status-flow";
-import { AT_WAREHOUSE_STATUSES } from "../../../../../packages/shared-types/shipment-status";
+import { AT_WAREHOUSE_STATUSES, ATTENTION_STATUSES } from "../../../../../packages/shared-types/shipment-status";
 
 /* ==========================================================================
    运单列表顶部那排数字 —— 全系统唯一一份「在途 / 已到仓」计数口径
@@ -24,8 +24,10 @@ export async function countShipmentOverview(where: Record<string, unknown>) {
   startOfMonth.setDate(1);
   startOfMonth.setHours(0, 0, 0, 0);
 
-  /** 延迟 / 需要盯的：延迟开船、海上延误、口岸滞留、海关查验、异常 */
-  const ATTENTION = ["delayDeparted", "delayInTransit", "borderDelay", "customsInspect", "exception"];
+  /* 延迟 / 需要盯的。2026-09-03 改用共享清单 ATTENTION_STATUSES ——
+     原来手写的那份漏掉了国内海关查验、泰国海关查验、港口封港三个，
+     被扣在国内查验的货一直不进这一格，而那正是最该提醒的一种。
+     查验类现在从流程表推导（customsInspect 开头的全算），以后加环节会自己跟上。 */
 
   const [total, created, atWarehouse, delivering, done, attention, signedThisMonth, exceptionCount] =
     await Promise.all([
@@ -42,7 +44,7 @@ export async function countShipmentOverview(where: Record<string, unknown>) {
       prisma.shipment.count({ where: { ...where, currentStatus: { in: AT_WAREHOUSE_STATUSES } } }),
       prisma.shipment.count({ where: { ...where, currentStatus: "outForDelivery" } }),
       prisma.shipment.count({ where: { ...where, currentStatus: { in: [...COMPLETED_STATUSES] } } }),
-      prisma.shipment.count({ where: { ...where, currentStatus: { in: ATTENTION } } }),
+      prisma.shipment.count({ where: { ...where, currentStatus: { in: ATTENTION_STATUSES } } }),
       prisma.shipment.count({
         where: { ...where, currentStatus: "delivered", updatedAt: { gte: startOfMonth } },
       }),

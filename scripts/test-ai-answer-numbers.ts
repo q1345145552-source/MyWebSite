@@ -305,7 +305,9 @@ function totalCountOf(answer: string): number {
 }
 
 const failures: string[] = [];
+let totalChecks = 0;
 async function check(name: string, body: () => Promise<void>): Promise<void> {
+  totalChecks += 1;
   try {
     await body();
     console.log(`  ✅ ${name}`);
@@ -1503,10 +1505,91 @@ async function main() {
     );
   });
 
-  if (failures.length > 0) {
-    throw new Error(`${failures.length}/63 项不通过（TZ=${TZ_LABEL}）：${failures.join("；")}`);
+  /* ══════════ 「已到仓」查询范围（2026-09-03 加，复核实测出来的坑）══════════
+     这一批全部是**真问真答**：造真运单、走真 service.chat、看客户实际收到的那段字。
+     上一版只断言了「AI_STATUS_SCOPES 数组里有 arrived」和「提示词是拼出来的」，
+     两条都绿，而客户最常问的那几句其实一句都答不对 —— 典型的假绿。 */
+  {
+    const arrivedFixture = () => [
+      shipment({ id: "w1", status: "inWarehouseTH", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs }),
+      shipment({ id: "w2", status: "deliveryBooked", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs }),
+      shipment({ id: "w3", status: "outForDelivery", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs }),
+      shipment({ id: "t1", status: "departed", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs }),
+      shipment({ id: "t2", status: "unloading", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs }),
+      shipment({ id: "p1", status: "created", createdAtMs: nowMs - 86400_000, updatedAtMs: nowMs }),
+    ];
+
+    await check("64) ⭐「已到仓」的常见问法不能被当成品名，而且要答对数（已到仓 3 单）", async () => {
+      /* 复核实测的原始现场：品名识别排在状态识别前面，「已到仓」被当成品名抓走，
+         客户收到的是「未查询到品名『已到仓』相关订单」。 */
+      for (const message of [
+        "已到仓的订单有多少",
+        "到仓的订单有多少",
+        "已到仓有多少单",
+        "到仓的有多少单",
+        "已到仓的货有多少方",
+        "到仓了几单",
+      ]) {
+        const { answer } = await ask({ shipments: arrivedFixture(), message });
+        assert.ok(!answer.includes("未查询到品名"), `「${message}」被当成品名查了：\n${answer}`);
+        assert.ok(answer.includes("已到仓运单"), `「${message}」没按已到仓查：\n${answer}`);
+        assert.equal(totalCountOf(answer), 3, `「${message}」数字不对（该是 3 单）：\n${answer}`);
+      }
+    });
+
+    await check("65) ⭐ 否定句绝不能答成「已到仓」—— 那是方向相反的数", async () => {
+      /* 这是 2026-09-03 加「到仓」时**自己改出来的回归**：
+         客户问「还有多少单没到仓」，系统按已到仓查，答的正好是反面那批货的数量。
+         现在的口径：认不准就退回「全部」并附分项，宁可不精准也不能给反的数。 */
+      for (const message of [
+        "还没到仓的有几单",
+        "没到仓的还有多少单",
+        "还有多少单没到仓",
+        "未到仓的有多少",
+        "还没到泰国仓的有几单",
+      ]) {
+        const { answer } = await ask({ shipments: arrivedFixture(), message });
+        assert.ok(
+          !answer.includes("已到仓运单"),
+          `「${message}」被当成「已到仓」查了，客户拿到的是反面那批的数：\n${answer}`,
+        );
+        assert.ok(!answer.includes("未查询到品名"), `「${message}」被当成品名查了：\n${answer}`);
+        assert.notEqual(totalCountOf(answer), 3, `「${message}」答出了已到仓那批的数（3）：\n${answer}`);
+      }
+    });
+
+    await check("66) 老的问法不受影响（在途 / 异常 / 全部 的回归保护）", async () => {
+      const inTransit = await ask({ shipments: arrivedFixture(), message: "在途的订单有多少" });
+      assert.ok(inTransit.answer.includes("在途运单"), `在途问法坏了：\n${inTransit.answer}`);
+      // 在途 = departed + unloading（正在卸柜按老板口径算在途）
+      assert.equal(totalCountOf(inTransit.answer), 2, `在途该是 2 单：\n${inTransit.answer}`);
+
+      const exception = await ask({ shipments: arrivedFixture(), message: "异常的订单有多少" });
+      assert.ok(exception.answer.includes("异常"), `异常问法坏了：\n${exception.answer}`);
+    });
+
+    await check("67) 加了「到仓」词表之后，真品名还查得到（别误伤客户的货名）", async () => {
+      const ships = arrivedFixture();
+      orderNames.set("w1", { itemName: "耳机", productNames: ["耳机"] });
+      const { answer } = await ask({ shipments: ships, message: "耳机有多少单" });
+      orderNames.delete("w1");
+      assert.ok(answer.includes("品名"), `真品名查不到了：\n${answer}`);
+      assert.ok(!answer.includes("未查询到品名"), `真品名被误伤：\n${answer}`);
+    });
+
+    await check("68) 说「国内仓」的不算「已到仓」——那是发货前那一头", async () => {
+      const { answer } = await ask({ shipments: arrivedFixture(), message: "到国内仓的有多少单" });
+      assert.ok(
+        !answer.includes("已到仓运单"),
+        `问的是国内仓，却按泰国仓的「已到仓」答了：\n${answer}`,
+      );
+    });
   }
-  console.log(`AI 答复数字校验：63 项全部通过（TZ=${TZ_LABEL}）`);
+
+  if (failures.length > 0) {
+    throw new Error(`${failures.length}/${totalChecks} 项不通过（TZ=${TZ_LABEL}）：${failures.join("；")}`);
+  }
+  console.log(`AI 答复数字校验：${totalChecks} 项全部通过（TZ=${TZ_LABEL}）`);
 }
 
 main().catch((error) => {

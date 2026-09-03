@@ -159,11 +159,18 @@ export const AT_WAREHOUSE_STATUSES: ShipmentStatus[] = [
  * 所以 AT_WAREHOUSE_STATUSES 那三个也从这里排除。
  * ⚠️「正在卸柜 unloading」**留在在途里**——柜子还在卸、货还没进仓，这是老板明确要的。
  */
-const NOT_IN_TRANSIT: ShipmentStatus[] = [
+/**
+ * 「未发出」= 货还在国内仓、还没装柜发走（2026-09-03 抽出来）。
+ * 已入库 = 货到了国内仓，口径同「已创建/暂缓柜」，都还没上路。
+ */
+export const PENDING_STATUSES: ShipmentStatus[] = [
   "created",
-  // 已入库 = 货还在国内仓没发走，不算在途（2026-09-02，口径同「已创建/暂缓柜」）
   "inWarehouseCN",
   "holdLoading",
+];
+
+const NOT_IN_TRANSIT: ShipmentStatus[] = [
+  ...PENDING_STATUSES,
   ...COMPLETED_STATUSES,
   ...SHIPMENT_EXCEPTION_STATUSES,
   // 2026-09-03：到了泰国仓（含预约派送、派送中）不再算在途
@@ -188,3 +195,56 @@ export function isInTransitStatus(status: string | null | undefined): boolean {
   if (!status) return false;
   return !NOT_IN_TRANSIT.includes(status as ShipmentStatus);
 }
+
+/**
+ * 顶部「延迟 / 查验」那格 —— 需要有人动手盯的运单（2026-09-03 抽出来并补齐）。
+ *
+ * ⚠️ 原来手写成 [delayDeparted, delayInTransit, borderDelay, customsInspect, exception]，
+ * **漏掉了国内海关查验、泰国海关查验、港口封港**。
+ * 「国内海关查验」是 2026-08-13 加进流程的，加的时候没人回来补这份名单，
+ * 生产上被扣在国内查验的货因此一直不进这一格 —— 正是这份名单该提醒的那种货。
+ *
+ * 查验类**从流程表推导**（凡是 customsInspect 开头的都算），以后再加
+ * 别国的查验环节会自己跟上，不用记得回来改这里。
+ */
+const INSPECT_STATUSES: ShipmentStatus[] = Array.from(
+  new Set([...SHIPMENT_STATUS_FLOW, ...SHIPMENT_STATUS_FLOW_LAND]),
+).filter((s) => s.startsWith("customsInspect"));
+
+/** 延迟类：船没准点开、海上误点、堵在口岸、港口封港停作业 */
+const DELAY_STATUSES: ShipmentStatus[] = [
+  "delayDeparted",
+  "delayInTransit",
+  "borderDelay",
+  "portClosed",
+];
+
+export const ATTENTION_STATUSES: ShipmentStatus[] = Array.from(
+  new Set([...DELAY_STATUSES, ...INSPECT_STATUSES, ...SHIPMENT_EXCEPTION_STATUSES.filter((s) => s === "exception")]),
+);
+
+/** 客户看到的五个分组 */
+export type ClientStatusGroup = "pending" | "transit" | "arrived" | "delivered" | "closed";
+
+/**
+ * 状态 → 客户端五分组（2026-09-03 抽到共享文件，全系统唯一一份）。
+ *
+ * ⚠️ 没被前四类认领的一律 transit（兜底）。**别改成白名单** ——
+ * 老数据里流程表查不到的状态（pickedUp / customsPending / inTransit）会整单消失。
+ */
+export function classifyStatusGroup(status: string | null | undefined): ClientStatusGroup {
+  if (!status || PENDING_STATUSES.includes(status as ShipmentStatus)) return "pending";
+  if (status === "delivered") return "delivered";
+  if (SHIPMENT_EXCEPTION_STATUSES.includes(status as ShipmentStatus)) return "closed";
+  if (AT_WAREHOUSE_STATUSES.includes(status as ShipmentStatus)) return "arrived";
+  return "transit";
+}
+
+/** 五个分组的中文名（导出 Excel、给客户看都用这个，别再漏英文出去） */
+export const CLIENT_STATUS_GROUP_ZH: Record<ClientStatusGroup, string> = {
+  pending: "未发出",
+  transit: "在途",
+  arrived: "已到仓",
+  delivered: "已签收",
+  closed: "退回/取消/异常",
+};

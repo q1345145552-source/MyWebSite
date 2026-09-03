@@ -1,3 +1,4 @@
+import { type AiStatusScope } from "./ai-types";
 // B-8: 已从 node:sqlite 迁移到 Prisma + PostgreSQL（2026-05-20）
 // 把原 SqliteXxxStore 系列重写为 Prisma 版本，保持接口契约完全不变。
 import type {
@@ -244,7 +245,7 @@ export class PrismaAiSessionMemoryStore implements AiSessionMemoryStore {
       intent: (row.intent as "tracking" | "summary" | null) ?? undefined,
       itemName: row.itemName ?? undefined,
       statusScope:
-        (row.statusScope as "all" | "inTransit" | "completed" | "unfinished" | "exception" | null) ??
+        (row.statusScope as AiStatusScope | null) ??
         undefined,
       timeHint: row.timeHint ?? undefined,
       metric: (row.metric as "count" | "volume" | "weight" | "mixed" | null) ?? undefined,
@@ -295,7 +296,7 @@ export class PrismaAiSessionMemoryStore implements AiSessionMemoryStore {
       intent: (row.intent as "tracking" | "summary" | null) ?? undefined,
       itemName: row.itemName ?? undefined,
       statusScope:
-        (row.statusScope as "all" | "inTransit" | "completed" | "unfinished" | "exception" | null) ??
+        (row.statusScope as AiStatusScope | null) ??
         undefined,
       timeHint: row.timeHint ?? undefined,
       metric: (row.metric as "count" | "volume" | "weight" | "mixed" | null) ?? undefined,

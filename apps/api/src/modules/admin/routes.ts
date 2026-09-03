@@ -11,6 +11,7 @@ import { loadProductImagesForOrders } from "../orders/product-images";
 import { loadOrderProducts } from "../orders/routes";
 import { hashPassword } from "../auth/crypto-utils";
 import { countShipmentOverview } from "../shipments/overview-counts";
+import { classifyStatusGroup } from "../../../../../packages/shared-types/shipment-status";
 // 柜子状态中文名只有这一份（后端 status-flow.ts）。前端管理员页不再自己抄一份，
 // 由接口直接下发中文 —— 抄第二份就一定会漏掉后加的状态。
 import { CONTAINER_STATUS_LABEL } from "../containers/status-flow";
@@ -513,7 +514,11 @@ export function registerAdminRoutes(app: MinimalHttpApp): void {
       canEdit: true,
       approvalStatus: r.order?.approvalStatus ?? undefined,
       remark: r.remark ?? undefined,
-      statusGroup: r.order?.statusGroup ?? undefined,
+      /* 2026-09-03 修：原来直接发数据库 orders.status_group 那一列，
+         但**从来没有任何代码更新过它** —— 生产库 1252 张单全是 "unfinished"。
+         管理员导出 Excel 的「状态组」那列因此永远是同一个英文单词，等于废列。
+         现在按运单当前状态实时算，跟客户端分组按钮同一份口径。 */
+      statusGroup: classifyStatusGroup(r.currentStatus),
       paidAt: r.order?.paidAt ? r.order?.paidAt.toISOString() : undefined,
       paidBy: r.order?.paidBy ?? undefined,
       createdAt: r.order?.createdAt.toISOString() ?? r.createdAt.toISOString(),

@@ -1,3 +1,4 @@
+import type { ClientStatusGroup } from "../../../../packages/shared-types/shipment-status";
 import { authHeaders, apiBaseUrl, parseApiResponse, apiRequest } from "./core-api";
 
 export interface StaffCreateOrderPayload {
@@ -361,7 +362,11 @@ export interface AdminOrderItem {
   receivableCurrency?: "CNY" | "THB";
   paymentStatus?: "paid" | "unpaid";
   shipDate: string | null;
-  statusGroup?: string;
+  /* 2026-09-03：收窄成五个分组的联合类型（原来是宽松的 string）。
+     后端已改成按运单当前状态实时算，不再发数据库那个从没更新过的死字段。
+     ⚠️ 必须和 packages/shared-types 的 ClientStatusGroup 对得上 —— 导出 Excel
+     那列靠它查中文名，写成 string 的话拼错一个字母 TypeScript 也不会拦。 */
+  statusGroup?: ClientStatusGroup;
   createdAt: string;
   updatedAt: string;
   productImages?: OrderProductImageItem[];
@@ -926,7 +931,9 @@ export async function fetchStaffShipments(): Promise<ShipmentItem[]> {
 export interface StaffShipmentOverview {
   /** 在途：从国内仓发出、还没进泰国仓（含「正在卸柜」）*/
   inTransitCount: number;
-  /** 延迟 · 查验：延迟开船 / 海上延误 / 口岸滞留 / 海关查验 / 异常 */
+  /** 延迟 · 查验：延迟开船 / 海上延误 / 口岸滞留 / 港口封港 / 三种海关查验（国内·泰国·陆运口岸）/ 异常。
+   *  2026-09-03 从 5 个补到 8 个 —— 清单在 packages/shared-types 的 ATTENTION_STATUSES，
+   *  查验类从流程表推导，别在这条注释里手抄一份，会过期。 */
   attentionCount: number;
   /** 已到仓：进泰国仓到客户签收之前的整段（已到仓 + 预约派送 + 派送中）。
    *  2026-09-03 起含派送中 —— 原来只数 inWarehouseTH。 */
