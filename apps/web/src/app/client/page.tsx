@@ -126,7 +126,7 @@ export default function ClientHomePage() {
   /* 2026-08-31（条目23）：分组从「在途/已完成/全部」改成五个 ——
      全部订单(all=不传) / 未发出(pending) / 在途(transit) / 已签收(delivered) / 退回、取消、异常(closed)，
      值就是后端 /client/orders 的 statusGroup 参数，两边一份口径。 */
-  const [queryMode, setQueryMode] = useState<"all"  |  "pending"  |  "transit"  |  "delivered"  |  "closed"  |  null>("all");
+  const [queryMode, setQueryMode] = useState<"all"  |  "pending"  |  "transit"  |  "arrived"  |  "delivered"  |  "closed"  |  null>("all");
   const [queriedOrders, setQueriedOrders] = useState<OrderItem[]>([]);
   const [hasQueried, setHasQueried] = useState(false);
   /* 2026-09-01 竞态全扫（Codex 复核缺口②）：「运单列表」唯一的门闩（见 modules/shared/request-gate.ts）。
@@ -419,7 +419,7 @@ export default function ClientHomePage() {
 
   const runOrderQuery = async () => {
     if (!queryMode) {
-      setMessage("请先选择“全部订单”“未发出”“在途”“已签收”或“退回/取消/异常”。");
+      setMessage("请先选择“全部订单”“未发出”“在途”“已到仓/派送”“已签收”或“退回/取消/异常”。");
       return;
     }
 
@@ -495,7 +495,7 @@ export default function ClientHomePage() {
    * 响应回来时先核对 queryModeRef：客户连点两个分组时，慢的那个请求作废，
    * 不许拿旧分组的数据盖住新分组。
    */
-  const changeQueryMode = (mode: "all"  |  "pending"  |  "transit"  |  "delivered"  |  "closed") => {
+  const changeQueryMode = (mode: "all"  |  "pending"  |  "transit"  |  "arrived"  |  "delivered"  |  "closed") => {
     setQueryMode(mode);
     setSearch(initialSearch);
     setHasQueried(false);
@@ -693,17 +693,20 @@ export default function ClientHomePage() {
    * 直接按它画，口径和「我的运单查询」的分组按钮一致，别再自己发明算法。
    */
   const clientStatusData = useMemo(() => {
-    const bucket = { pending: 0, transit: 0, delivered: 0, closed: 0 };
+    const bucket = { pending: 0, transit: 0, arrived: 0, delivered: 0, closed: 0 };
     dashboardOrders.forEach((item) => {
       const group = (item.statusGroup ?? "").toLowerCase();
       if (group === "delivered") bucket.delivered += 1;
       else if (group === "closed") bucket.closed += 1;
+      // 2026-09-03 老板拍板：到仓后整段（卸货/已到仓/预约派送/派送中）从在途拆出
+      else if (group === "arrived") bucket.arrived += 1;
       else if (group === "transit") bucket.transit += 1;
       else bucket.pending += 1; // pending 或字段缺失的老数据，都归「未发出」
     });
     return [
       { name: "未发出", value: bucket.pending, color: "#B45309" },
       { name: "在途", value: bucket.transit, color: "#1e3a8a" },
+      { name: "已到仓/派送", value: bucket.arrived, color: "#0F6E6B" },
       { name: "已签收", value: bucket.delivered, color: "#15803D" },
       { name: "退回/取消/异常", value: bucket.closed, color: "#B91C1C" },
     ];
@@ -939,6 +942,7 @@ export default function ClientHomePage() {
                 { mode: "all", label: "全部订单" },
                 { mode: "pending", label: "未发出" },
                 { mode: "transit", label: "在途" },
+                { mode: "arrived", label: "已到仓/派送" },
                 { mode: "delivered", label: "已签收" },
                 { mode: "closed", label: "退回/取消/异常" },
               ] as const).map(({ mode, label }) => (
@@ -962,7 +966,7 @@ export default function ClientHomePage() {
         {/* 折叠按钮已删（2026-08-11），这里不能再说「已折叠」「展开搜索框」——
             现在只是还没选分组，照实说就行 */}
         {!queryMode ? (
-          <EmptyStateCard title="请先选择要看哪些订单" description="点上面的「全部订单」「未发出」「在途」「已签收」或「退回/取消/异常」，下面就会列出来。" />
+          <EmptyStateCard title="请先选择要看哪些订单" description="点上面的「全部订单」「未发出」「在途」「已到仓/派送」「已签收」或「退回/取消/异常」，下面就会列出来。" />
         ) : (
           <>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8, marginBottom: 12 }}>

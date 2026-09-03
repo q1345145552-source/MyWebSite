@@ -245,7 +245,7 @@ export interface OrderItem {
   domesticTrackingNo?: string;
   trackingNo?: string;
   currentStatus?: string;
-  statusGroup?: "pending" | "transit" | "delivered" | "closed";
+  statusGroup?: "pending" | "transit" | "arrived" | "delivered" | "closed";
   productQuantity: number;
   packageCount: number;
   packageUnit: string;
@@ -801,7 +801,7 @@ export async function fetchStaffWalletBalances(): Promise<{ balances: StaffWalle
 
 export async function fetchClientOrders(params?: {
   // 2026-08-31 分组改为四分类：pending=未发出、transit=在途、delivered=已签收、closed=退回/取消/异常
-  statusGroup?: "pending" | "transit" | "delivered" | "closed";
+  statusGroup?: "pending" | "transit" | "arrived" | "delivered" | "closed";
 }): Promise<OrderItem[]> {
   const query = new URLSearchParams();
   if (params?.statusGroup) query.set("statusGroup", params.statusGroup);

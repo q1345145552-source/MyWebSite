@@ -50,12 +50,13 @@ import { EXCEPTION_STATUSES } from "../shipments/status-flow";
 import { BusinessError } from "../core/business-error";
 
 /**
- * 客户端订单四分类（2026-08-31，排查报告第 23 条拍板口径）。
+ * 客户端订单五分类（2026-08-31 四分类拍板；2026-09-03 拆出「已到仓」）。
  * 按运单 currentStatus 算：
  *   · 没有运单，或还在国内仓没发出（created / inWarehouseCN / holdLoading）→ pending（未发出）
  *   · delivered → delivered（已签收）
  *   · returned / cancelled / exception → closed（退回/取消/异常）
- *   · 其余一律 → transit（在途）
+ *   · 到仓卸货 / 已到仓 / 预约派送 / 派送中 → arrived（已到仓/派送）
+ *   · 其余一律 → transit（在途：装柜到清关放行那段真在路上的）
  * 原来只有「完成/没完成」两分：刚建单没发走的、暂缓装柜的全被算成「在途」，
  * 「已完成」又把退回、取消混进去，按钮名字和查出来的东西对不上。
  * ⚠️ 客户首页状态分布图（client/page.tsx 的 clientStatusData）直接按这个字段画，
@@ -63,7 +64,7 @@ import { BusinessError } from "../core/business-error";
  */
 function classifyClientStatusGroup(
   currentStatus: string | null | undefined,
-): "pending" | "transit" | "delivered" | "closed" {
+): "pending" | "transit" | "arrived" | "delivered" | "closed" {
   if (
     !currentStatus ||
     currentStatus === "created" ||
@@ -73,6 +74,15 @@ function classifyClientStatusGroup(
   ) return "pending";
   if (currentStatus === "delivered") return "delivered";
   if (EXCEPTION_STATUSES.has(currentStatus)) return "closed";
+  /* 2026-09-03 老板拍板：「已到仓」的单不能再算「在途」——到泰国仓之后、签收之前
+     整段（到仓卸货/已到仓/预约派送/派送中）拆成独立分组 arrived。
+     顶部四格数字本来就把「已到仓待派送」单独数，下面的分组现在跟它对齐。 */
+  if (
+    currentStatus === "unloading" ||
+    currentStatus === "inWarehouseTH" ||
+    currentStatus === "deliveryBooked" ||
+    currentStatus === "outForDelivery"
+  ) return "arrived";
   return "transit";
 }
 
@@ -992,12 +1002,14 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
        老值兼容：老页面缓存还会发 unfinished / completed ——
        unfinished = pending + transit，completed = delivered + closed。
        不认识的值跟原来一样当「不过滤」。 */
-    const GROUP_ALIAS: Record<string, Array<"pending" | "transit" | "delivered" | "closed">> = {
+    const GROUP_ALIAS: Record<string, Array<"pending" | "transit" | "arrived" | "delivered" | "closed">> = {
       pending: ["pending"],
       transit: ["transit"],
+      // 2026-09-03：到仓后整段（卸货/已到仓/预约派送/派送中）从在途拆出
+      arrived: ["arrived"],
       delivered: ["delivered"],
       closed: ["closed"],
-      unfinished: ["pending", "transit"],
+      unfinished: ["pending", "transit", "arrived"],
       completed: ["delivered", "closed"],
     };
     const wantedGroups = statusGroup ? GROUP_ALIAS[statusGroup] : undefined;
