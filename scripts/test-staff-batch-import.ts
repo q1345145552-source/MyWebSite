@@ -535,12 +535,18 @@ for (const bad of ["2026", "2026-08", "2026-02-31", "29/08/2026", "下周三", "
   assert.ok(r.issues.length > 0, `日期「${bad}」一条错都没报`);
 }
 
-/** ④ 仓库：只认那四个（名字或 id），别的当场报错并列出可选值 */
-for (const good of ["义乌仓", "广州仓", "东莞仓", "深圳仓", "wh_yiwu_01"]) {
+/** ④ 仓库：只认那四个（标准名、裸城市名或 id），别的当场报错并列出可选值。
+ *  2026-09-02（25a613a）加了裸城市名别名——仓库《上传系统数据》真表里写的就是
+ *  不带「仓」字的城市名。当时改了解析器却没改这个测试，"义乌" 还留在下面的
+ *  「该被拒绝」清单里，CI 从那天起一直红着（2026-09-03 发现并修）。 */
+for (const good of ["义乌仓", "广州仓", "东莞仓", "深圳仓", "wh_yiwu_01",
+                    "义乌", "广州", "东莞", "深圳"]) {
   const r = one({ ...FULL, "仓库 *": good });
   assert.equal(r.issues.length, 0, `仓库「${good}」被误伤：${JSON.stringify(r.issues.map((i) => i.message))}`);
 }
-for (const bad of ["义乌", "義烏倉", "杭州仓", "wh_hangzhou_01"]) {
+// 「義烏倉」是繁体、「杭州仓」没这个仓、id 也不存在 —— 这三类照旧当场报错。
+// ⚠️ 别把「义乌」加回来：它是 2026-09-02 拍板收进来的合法别名（见上）。
+for (const bad of ["義烏倉", "杭州仓", "wh_hangzhou_01"]) {
   const r = one({ ...FULL, "仓库 *": bad });
   assert.equal(r.orders.length, 0, `仓库「${bad}」被静默存进去了`);
   assert.ok(r.issues.some((i) => i.message.includes("只能填")), `仓库「${bad}」没列出可选值`);

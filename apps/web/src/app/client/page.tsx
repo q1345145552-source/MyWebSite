@@ -123,8 +123,8 @@ export default function ClientHomePage() {
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [toast, setToast] = useState("");
-  /* 2026-08-31（条目23）：分组从「在途/已完成/全部」改成五个 ——
-     全部订单(all=不传) / 未发出(pending) / 在途(transit) / 已签收(delivered) / 退回、取消、异常(closed)，
+  /* 2026-08-31（条目23）：分组从「在途/已完成/全部」改成五个；2026-09-03 拆出「已到仓」成六个 ——
+     全部订单(all=不传) / 未发出(pending) / 在途(transit) / 已到仓(arrived) / 已签收(delivered) / 退回、取消、异常(closed)，
      值就是后端 /client/orders 的 statusGroup 参数，两边一份口径。 */
   const [queryMode, setQueryMode] = useState<"all"  |  "pending"  |  "transit"  |  "arrived"  |  "delivered"  |  "closed"  |  null>("all");
   const [queriedOrders, setQueriedOrders] = useState<OrderItem[]>([]);
@@ -419,7 +419,7 @@ export default function ClientHomePage() {
 
   const runOrderQuery = async () => {
     if (!queryMode) {
-      setMessage("请先选择“全部订单”“未发出”“在途”“已到仓/派送”“已签收”或“退回/取消/异常”。");
+      setMessage("请先选择“全部订单”“未发出”“在途”“已到仓”“已签收”或“退回/取消/异常”。");
       return;
     }
 
@@ -488,7 +488,7 @@ export default function ClientHomePage() {
 
 
   /**
-   * 切换运单查询分组（全部/未发出/在途/已签收/退回取消异常）。
+   * 切换运单查询分组（全部/未发出/在途/已到仓/已签收/退回取消异常）。
    *
    * 2026-08-31（条目20）：切分组后立刻查一次，别把客户晾着等 10 秒轮询 ——
    * 原来这里只清状态不查数，列表要空白到下一轮自动刷新才出来。
@@ -688,8 +688,8 @@ export default function ClientHomePage() {
    *   ① 「已完成」靠 group === "completed" 判断，但接口那时根本不返回 statusGroup，
    *      永远是 0（旁边「在途运单数」2026-08-07 就为同一个坑修过，这张图漏了）；
    *   ② 还用审批状态分流，已发货、已签收的单全被画成「处理中」。
-   * 现在后端 /client/orders 已在每张单上带算好的 statusGroup 四分类
-   * （pending=未发出 / transit=在途 / delivered=已签收 / closed=退回/取消/异常），
+   * 现在后端 /client/orders 已在每张单上带算好的 statusGroup 分类
+   * （pending=未发出 / transit=在途 / arrived=已到仓 / delivered=已签收 / closed=退回/取消/异常），
    * 直接按它画，口径和「我的运单查询」的分组按钮一致，别再自己发明算法。
    */
   const clientStatusData = useMemo(() => {
@@ -698,7 +698,7 @@ export default function ClientHomePage() {
       const group = (item.statusGroup ?? "").toLowerCase();
       if (group === "delivered") bucket.delivered += 1;
       else if (group === "closed") bucket.closed += 1;
-      // 2026-09-03 老板拍板：到仓后整段（卸货/已到仓/预约派送/派送中）从在途拆出
+      // 2026-09-03 老板拍板：进泰国仓后整段（已到仓/预约派送/派送中）从在途拆出；正在卸柜仍算在途
       else if (group === "arrived") bucket.arrived += 1;
       else if (group === "transit") bucket.transit += 1;
       else bucket.pending += 1; // pending 或字段缺失的老数据，都归「未发出」
@@ -706,7 +706,7 @@ export default function ClientHomePage() {
     return [
       { name: "未发出", value: bucket.pending, color: "#B45309" },
       { name: "在途", value: bucket.transit, color: "#1e3a8a" },
-      { name: "已到仓/派送", value: bucket.arrived, color: "#0F6E6B" },
+      { name: "已到仓", value: bucket.arrived, color: "#0F6E6B" },
       { name: "已签收", value: bucket.delivered, color: "#15803D" },
       { name: "退回/取消/异常", value: bucket.closed, color: "#B91C1C" },
     ];
@@ -936,13 +936,13 @@ export default function ClientHomePage() {
         <>
             {/* 2026-08-31（条目23）：原来是「订单在途/订单已完成/全部订单」三个按钮，
                 名字和实际查的东西对不上（刚创建没发走的也算「在途」，退回/取消算「已完成」）。
-                拍板改成五个分组，值直接用后端的 statusGroup 口径。 */}
+                拍板改成五个分组；2026-09-03 再拆出「已到仓」成六个，值直接用后端的 statusGroup 口径。 */}
             <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
               {([
                 { mode: "all", label: "全部订单" },
                 { mode: "pending", label: "未发出" },
                 { mode: "transit", label: "在途" },
-                { mode: "arrived", label: "已到仓/派送" },
+                { mode: "arrived", label: "已到仓" },
                 { mode: "delivered", label: "已签收" },
                 { mode: "closed", label: "退回/取消/异常" },
               ] as const).map(({ mode, label }) => (
@@ -966,7 +966,7 @@ export default function ClientHomePage() {
         {/* 折叠按钮已删（2026-08-11），这里不能再说「已折叠」「展开搜索框」——
             现在只是还没选分组，照实说就行 */}
         {!queryMode ? (
-          <EmptyStateCard title="请先选择要看哪些订单" description="点上面的「全部订单」「未发出」「在途」「已到仓/派送」「已签收」或「退回/取消/异常」，下面就会列出来。" />
+          <EmptyStateCard title="请先选择要看哪些订单" description="点上面的「全部订单」「未发出」「在途」「已到仓」「已签收」或「退回/取消/异常」，下面就会列出来。" />
         ) : (
           <>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8, marginBottom: 12 }}>

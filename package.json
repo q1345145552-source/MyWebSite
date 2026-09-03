@@ -28,6 +28,7 @@
     "test:lock-order": "tsx scripts/test-lock-order.ts",
     "test:api-response": "tsx scripts/test-api-response-shape.ts",
     "test:fcl-inquiries": "tsx scripts/test-fcl-inquiries.ts",
+    "test:status-group": "tsx scripts/test-client-status-group.ts",
     "test:consolidation-delete": "tsx scripts/test-consolidation-delete-guard.ts",
     "test:lastmile-export": "tsx scripts/test-lastmile-export.ts",
     "test:ai-numbers": "TZ=UTC tsx scripts/test-ai-answer-numbers.ts && TZ=Asia/Shanghai tsx scripts/test-ai-answer-numbers.ts",

@@ -147,6 +147,17 @@ jobs:
       - name: Test DeepSeek timeout
         run: npm run test:ai-timeout
 
+      # 整柜询价列表分页参数（2026-09-01 写的脚本，当时漏了没接进 CI —— 2026-09-03 补）。
+      - name: Test FCL inquiry pagination
+        run: npm run test:fcl-inquiries
+
+      # 客户端订单分组口径（2026-09-03 加）。
+      # 这个口径一天之内被老板改了两次（早上拆出「已到仓」、下午把「正在卸柜」退回在途），
+      # 一个测试都没有。31 个状态逐个真调 GET /client/orders 断言，
+      # 外加一道全覆盖闸：以后往海运/陆运流程加状态却忘了归类，这里当场红。
+      - name: Test client status group
+        run: npm run test:status-group
+
       - name: Build frontend
         run: npm run build --prefix apps/web
         env:

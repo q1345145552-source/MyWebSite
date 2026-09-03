@@ -55,8 +55,8 @@ import { BusinessError } from "../core/business-error";
  *   · 没有运单，或还在国内仓没发出（created / inWarehouseCN / holdLoading）→ pending（未发出）
  *   · delivered → delivered（已签收）
  *   · returned / cancelled / exception → closed（退回/取消/异常）
- *   · 到仓卸货 / 已到仓 / 预约派送 / 派送中 → arrived（已到仓/派送）
- *   · 其余一律 → transit（在途：装柜到清关放行那段真在路上的）
+ *   · 已到仓 / 预约派送 / 派送中 → arrived（已到仓：进了泰国仓之后、客户签收之前，含尾端派送）
+ *   · 其余一律 → transit（在途：从国内仓发出到进泰国仓之前，含「正在卸柜」）
  * 原来只有「完成/没完成」两分：刚建单没发走的、暂缓装柜的全被算成「在途」，
  * 「已完成」又把退回、取消混进去，按钮名字和查出来的东西对不上。
  * ⚠️ 客户首页状态分布图（client/page.tsx 的 clientStatusData）直接按这个字段画，
@@ -74,11 +74,12 @@ function classifyClientStatusGroup(
   ) return "pending";
   if (currentStatus === "delivered") return "delivered";
   if (EXCEPTION_STATUSES.has(currentStatus)) return "closed";
-  /* 2026-09-03 老板拍板：「已到仓」的单不能再算「在途」——到泰国仓之后、签收之前
-     整段（到仓卸货/已到仓/预约派送/派送中）拆成独立分组 arrived。
-     顶部四格数字本来就把「已到仓待派送」单独数，下面的分组现在跟它对齐。 */
+  /* 2026-09-03 老板拍板（当天二次调整，口径以这条为准）：
+     「已到仓」= 货进了泰国仓之后、客户签收之前的**整段**，包含预约派送和尾端派送中——
+     派送不单独分一格，客户签收了才跳「已签收」。
+     ⚠️「正在卸柜 unloading」不在这里：老板口径是柜子还在卸、货还没进仓，算**在途**，
+        它走下面的兜底 return "transit"。别再加回这个 if 里。 */
   if (
-    currentStatus === "unloading" ||
     currentStatus === "inWarehouseTH" ||
     currentStatus === "deliveryBooked" ||
     currentStatus === "outForDelivery"
@@ -998,10 +999,11 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
     const page = parseInt(req.query.page as string) || 1;
     const pageSize = Math.min(parseInt(req.query.pageSize as string) || 50, 500);
     const statusGroup = req.query.statusGroup?.trim();
-    /* 2026-08-31（排查报告第 23 条）：查询参数改收四分类。
+    /* 2026-08-31（排查报告第 23 条）：查询参数改收分组值；2026-09-03 多一个 arrived。
        老值兼容：老页面缓存还会发 unfinished / completed ——
-       unfinished = pending + transit，completed = delivered + closed。
-       不认识的值跟原来一样当「不过滤」。 */
+       unfinished = pending + transit + arrived，completed = delivered + closed。
+       不认识的值跟原来一样当「不过滤」（陌生状态绝不能整单消失）。
+       口径断言见 scripts/test-client-status-group.ts。 */
     const GROUP_ALIAS: Record<string, Array<"pending" | "transit" | "arrived" | "delivered" | "closed">> = {
       pending: ["pending"],
       transit: ["transit"],
@@ -1117,7 +1119,7 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
         approvalStatus: o.approvalStatus,
         trackingNo: ship?.trackingNo ?? null,
         currentStatus: ship?.currentStatus ?? null,
-        // 2026-08-31（排查报告第 23 条）：每张单都带算好的四分类，
+        // 2026-08-31（排查报告第 23 条）：每张单都带算好的分组（2026-09-03 起五个值），
         // 分组按钮和首页状态分布图都按它来，别再各自发明算法。
         // ⚠️ 不是订单表里那个 statusGroup 列（那个只有 unfinished/completed 两种老值）。
         statusGroup: classifyClientStatusGroup(ship?.currentStatus),
