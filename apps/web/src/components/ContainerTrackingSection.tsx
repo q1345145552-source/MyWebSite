@@ -4,14 +4,14 @@
  * 出柜追踪组件 — 客户端"我的订单"卡片里显示该订单运单所属的柜子。
  *
  * 数据来源：GET /client/shipments/track?shipmentId=xxx 或 trackingNo=xxx
- * 拆柜提示：当 splitCount > 1 时自动显示"⚡ 此订单分 N 柜运送"
+ * 拆柜提示：当 splitCount > 1 时自动显示"此订单分 N 柜运送"
  *
  * 用法：
  *   <ContainerTrackingSection shipmentId={item.id} trackingNo={item.trackingNo} />
  */
 
 import { useEffect, useState } from "react";
-import { apiBaseUrl, authHeaders, parseApiResponse } from "../services/core-api";
+import { apiBaseUrl, authHeaders, parseApiResponse, fetchWithSession as fetch } from "../services/core-api";
 
 type ContainerInfo = {
   containerId: string;
@@ -83,6 +83,8 @@ export function ContainerTrackingSection({ shipmentId, trackingNo, hideContainer
     })
       .then(async (resp) => {
         // 【审查问题 3】走 parseApiResponse：401 会自动跳登录页；失败统一走下面的 catch
+        // ⚠️ 前提是上面的 fetch 必须是 `fetchWithSession as fetch`（本文件顶部 import）——
+        //    parseApiResponse 靠它记住请求带的是哪枚令牌，裸 fetch 的 401 只报错、不跳登录（scripts/test-session-api.ts 有扫描）
         const json = await parseApiResponse<TrackData>(resp);
         if (cancelled) return;
         setData(json);
@@ -164,7 +166,7 @@ export function ContainerTrackingSection({ shipmentId, trackingNo, hideContainer
               border: "1px solid #fcd34d",
             }}
           >
-            ⚡ 此订单分 {data.splitCount} 柜运送
+            此订单分 {data.splitCount} 柜运送
           </span>
         ) : null}
       </div>

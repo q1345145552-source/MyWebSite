@@ -56,6 +56,16 @@ jobs:
       - name: Test login throttle
         run: npm run test:login-throttle
 
+      # 打开另一个登录标签页不应注销现有工作台；成功换账号才清旧订单缓存。
+      # 真调浏览器会话模块，用 Map localStorage 覆盖三端、旧 key、异常存储；不连库。
+      - name: Test login session stability
+        run: npm run test:session-stability
+
+      # 真正的受保护请求 401 才结束对应会话，迟到旧请求不得踢掉新登录。
+      # 使用原生 Response + 合成 fetch/localStorage，不发网络请求。
+      - name: Test request-scoped session expiry
+        run: npm run test:session-api
+
       # 从柜子里卸货（2026-08-29 加，上线后排查出的两个老 bug）。
       # ① 卸柜之后父单状态永远冻住 —— 装错柜卸下来，客户还看着「已签收」
       # ② 删柜子把子单变成孤儿、父单件数方数重量永远回不来
@@ -157,6 +167,9 @@ jobs:
       # 外加一道全覆盖闸：以后往海运/陆运流程加状态却忘了归类，这里当场红。
       - name: Test client status group
         run: npm run test:status-group
+
+      - name: Test attention filter and client pagination
+        run: npm run test:attention-filter
 
       - name: Build frontend
         run: npm run build --prefix apps/web

@@ -40,6 +40,8 @@ export interface RequestGate {
   begin(): number;
   /** 响应落地时验号：还是最新一次吗？ */
   isCurrent(ticket: number): boolean;
+  /** 作废在路上的全部请求（关弹窗 / 组件卸载时用）：之后回来的响应一律验号不过 */
+  cancel(): void;
 }
 
 export function createRequestGate(): RequestGate {
@@ -47,5 +49,6 @@ export function createRequestGate(): RequestGate {
   return {
     begin: () => ++seq,
     isCurrent: (ticket: number) => ticket === seq,
+    cancel: () => { seq += 1; },
   };
 }

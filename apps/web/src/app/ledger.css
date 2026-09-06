@@ -1,0 +1,390 @@
+/* Text-first visual layer; existing layout, permissions and table geometry stay intact. */
+.ledger-shell.dashboard-layout {
+  gap: 0;
+  background: var(--ground);
+  font-family: var(--a3-font);
+  animation: none;
+}
+.ledger-shell .dashboard-sidebar {
+  width: 216px;
+  min-width: 216px;
+  height: 100vh;
+  top: 0;
+  padding: 24px 12px 16px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-radius: 0;
+  background: #f1f1ee;
+  box-shadow: none;
+}
+.ledger-shell .dashboard-sidebar-title {
+  margin: 0 0 28px;
+  padding: 0 14px;
+  color: var(--ink);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: .025em;
+}
+.dashboard-brand-caption {
+  display: block;
+  margin-top: 6px;
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: .2em;
+  color: var(--ink-2);
+}
+.ledger-shell .dashboard-sidebar-subtitle {
+  color: var(--ink-2);
+  padding-left: 14px;
+  font-size: 12px;
+}
+.ledger-shell .dashboard-sidebar-group-header {
+  margin-top: 14px;
+  min-height: 36px;
+  padding: 8px 12px;
+  border: 0 !important;
+  border-radius: 0;
+  background: transparent !important;
+  color: var(--ink-2) !important;
+  font-size: 13px;
+  font-weight: 500;
+}
+.ledger-shell .dashboard-sidebar-group-collapsible.is-expanded .dashboard-sidebar-group-header,
+.ledger-shell .dashboard-sidebar-group-header:hover {
+  color: var(--ink) !important;
+  background: transparent !important;
+  border: 0 !important;
+}
+.ledger-shell .dashboard-sidebar-group-arrow,
+.ledger-shell .dashboard-sidebar-group-collapsible.is-expanded .dashboard-sidebar-group-arrow {
+  order: 2;
+  margin-left: auto;
+  color: var(--ink-2);
+}
+.ledger-shell .dashboard-sidebar-group-collapsible .dashboard-sidebar-group-body-inner {
+  margin-left: 0;
+  padding-left: 0;
+  border-left: 0;
+}
+.ledger-shell .dashboard-sidebar-link {
+  min-height: 36px;
+  padding: 8px 14px;
+  color: var(--ink-2) !important;
+  background: transparent;
+  border: 0 !important;
+  border-left: 2px solid transparent !important;
+  border-radius: 0 !important;
+  font-size: 13px;
+  line-height: 20px;
+  animation: none !important;
+  transform: none !important;
+}
+.ledger-shell .dashboard-sidebar-group-collapsible .dashboard-sidebar-link {
+  padding-left: 22px;
+  font-size: 13px;
+}
+.ledger-shell .dashboard-sidebar-link:hover {
+  color: var(--ink) !important;
+  background: #e9eae4 !important;
+}
+.ledger-shell .dashboard-sidebar-link-active,
+.ledger-shell .dashboard-sidebar-link-active:hover {
+  color: var(--ink) !important;
+  background: #e6e7e0 !important;
+  border-left-color: var(--brand) !important;
+  font-weight: 600;
+}
+.ledger-shell .dashboard-sidebar-link::before { content: none; }
+.ledger-shell .dashboard-sidebar-actions {
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.ledger-shell .dashboard-password-button,
+.ledger-shell .dashboard-logout-button {
+  justify-content: flex-start;
+  min-height: 36px;
+  padding: 8px 14px;
+  border: 0 !important;
+  color: var(--ink-2) !important;
+  background: transparent !important;
+  font-size: 13px;
+}
+.ledger-shell .dashboard-password-button:hover,
+.ledger-shell .dashboard-logout-button:hover {
+  color: var(--ink) !important;
+  background: #e9eae4 !important;
+}
+.ledger-shell .dashboard-logout-button:hover { color: var(--danger) !important; }
+.ledger-shell .sidebar-collapse-btn,
+.ledger-shell .sidebar-collapse-btn:hover,
+.ledger-shell .sidebar-close-btn {
+  border-color: var(--line);
+  color: var(--ink-2) !important;
+  background: transparent !important;
+}
+.ledger-shell .dashboard-sidebar :is(a, button):focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+.ledger-shell .dashboard-content {
+  height: 100vh;
+  padding: 0 28px 28px;
+  background: var(--ground);
+}
+/* Keep the established topbar height: container-loading pins columns below it. */
+.ledger-shell .glass-topbar {
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--ground);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+.ledger-shell .glass-topbar-title { color: var(--ink-2); font-weight: 400; }
+.ledger-shell .glass-topbar-meta { color: var(--ink-2); }
+.ledger-shell .dashboard-content > section {
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+.ledger-shell :is(section, header, .table-card):hover {
+  box-shadow: none !important;
+}
+.ledger-shell .dashboard-content > :is(.shipment-workbench, .staff-shipment-workbench) {
+  padding: 12px 0 0;
+}
+.ledger-shell :is(.shipment-heading, .staff-shipment-heading) {
+  align-items: center;
+  margin-bottom: 24px;
+}
+.ledger-shell :is(.shipment-heading, .staff-shipment-heading) h2 {
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -.025em;
+}
+/* Summaries retain their original API meanings, including this month's signed total. */
+.ship-overview-item {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  min-width: 0;
+}
+.ship-overview-label { order: -1; font-size: 13px; color: var(--ink-2); }
+.ledger-shell .ship-overview-strip {
+  justify-content: flex-start;
+  gap: 14px 32px;
+  margin: 0 0 20px;
+  padding: 12px 0 20px;
+}
+.ledger-shell .ship-overview-value { font-size: 20px !important; }
+.ledger-shell .ship-overview-strip .ship-overview-item .ship-overview-label { font-size: 13px !important; }
+.ledger-shell :is(.workbench-button, .staff-workbench-button, .shipment-search-actions button),
+.ledger-shell .lastmile-button {
+  border-radius: 4px;
+  box-shadow: none !important;
+  transform: none !important;
+}
+.ledger-shell .shipment-search-actions .shipment-search-submit {
+  background: var(--panel) !important;
+  color: var(--ink) !important;
+  border-color: #888d81;
+}
+.ledger-shell :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea) {
+  border-radius: 4px !important;
+}
+.ledger-shell :is(input, select, textarea):focus {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+  box-shadow: none !important;
+}
+.ledger-shell input[type="checkbox"] { accent-color: var(--brand); transform: none !important; }
+.ledger-shell :is(button, .row-act):hover,
+.ledger-shell :is(button, .row-act):active {
+  box-shadow: none !important;
+}
+.ledger-shell .row-act { color: var(--ink-2) !important; }
+.ledger-shell :is(.shipment-copy, .staff-shipment-copy) {
+  color: var(--ink) !important;
+  font-weight: 500;
+  font-family: var(--a3-mono);
+}
+.ledger-shell :is(.shipment-table-scroll, .staff-shipment-table-scroll) {
+  border-radius: 0;
+  border-left: 0 !important;
+  border-right: 0 !important;
+  box-shadow: none;
+}
+.ledger-shell :is(.shipment-table-scroll, .staff-shipment-table-scroll) > table > :is(thead, tbody) > tr > :is(th, td) {
+  border-left: 0 !important;
+  border-right: 0 !important;
+}
+.ledger-shell .a3-table thead th {
+  background: var(--line-2) !important;
+  color: var(--ink-2) !important;
+  font-size: 12px !important;
+  letter-spacing: 0;
+  font-weight: 500 !important;
+}
+.ledger-shell .shipment-product-table td { border-right: 0 !important; }
+.ledger-shell :is(.tag, .badge-line, .lastmile-status-badge) {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink-2);
+  padding: 0;
+}
+.ledger-shell .lastmile-status-badge::before { content: none; }
+.empty-card { padding: 28px 16px; border-radius: 4px; background: transparent; }
+.empty-title { font-size: 15px; }
+.empty-desc { color: var(--ink-2); }
+.auth-shell .auth-btn { border-radius: 4px; box-shadow: none; }
+.auth-shell input { border-radius: 4px; }
+.auth-shell input:focus { outline: 2px solid var(--brand); outline-offset: 1px; box-shadow: none; }
+@media (max-width: 1100px) {
+  .ledger-shell .ship-overview-strip { gap: 14px 20px; }
+}
+@media (max-width: 900px) {
+  .ledger-shell .dashboard-sidebar {
+    width: 260px;
+    min-width: 0;
+    max-width: 85vw;
+    height: 100dvh;
+    padding-top: 56px;
+  }
+  .ledger-shell .dashboard-content { height: 100dvh; padding: 0 16px 20px; }
+  .ledger-shell .glass-topbar { padding: 10px 0; }
+  .ledger-shell .dashboard-sidebar :is(.dashboard-sidebar-link, .dashboard-sidebar-group-header) { min-height: 42px; }
+}
+@media (max-width: 600px) {
+  .ledger-shell .dashboard-content { padding: 0 12px 20px; }
+  .ledger-shell :is(.shipment-heading, .staff-shipment-heading) { margin-bottom: 16px; }
+  .ledger-shell :is(.shipment-heading, .staff-shipment-heading) h2 { font-size: 23px; }
+  .ledger-shell .ship-overview-strip { gap: 12px 16px; padding-bottom: 16px; }
+  .ship-overview-item { gap: 8px; }
+}
+
+.ledger-shell .shipment-search-summary[hidden] { display: none; }
+
+.ledger-shell :is(.client-main-section, .client-query-section, .client-secondary-section)::before { content: none; }
+
+/* Operational dashboard: retain metrics and route data, remove decorative containers. */
+.ledger-shell .kpi-flash { animation: none; box-shadow: none; }
+.ledger-shell .ledger-kpi {
+  background: transparent !important;
+  border: 0 !important;
+  border-left: 1px solid var(--line) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+.ledger-shell .ledger-kpi:first-child { border-left: 0 !important; }
+.ledger-shell .dashboard-panel {
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  box-shadow: none;
+}
+.ledger-shell .dashboard-panel-title { color: var(--ink); }
+.ledger-shell .route-visual {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.ledger-shell :is(.route-point, .route-counter) {
+  border: 0;
+  border-radius: 0;
+  background: var(--ground);
+  color: var(--ink-2);
+  box-shadow: none;
+}
+
+.ledger-shell .shipment-classification { margin: 0 0 14px; }
+.ledger-shell .shipment-status-groups {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+}
+.ledger-shell .shipment-status-groups > .shipment-status-group {
+  flex: 0 0 auto;
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent !important;
+  color: var(--ink-2) !important;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  white-space: nowrap;
+  box-shadow: none;
+  transform: none;
+  transition: none;
+}
+.ledger-shell .shipment-status-groups > .shipment-status-group:hover { background: var(--line-2) !important; }
+.ledger-shell .shipment-status-groups > .shipment-status-group[aria-pressed="true"] {
+  border-bottom-color: var(--ink);
+  background: var(--line-2) !important;
+  color: var(--ink) !important;
+  font-weight: 650;
+}
+.ledger-shell .shipment-status-groups > .shipment-status-group:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: -2px;
+}
+@media (max-width: 600px) {
+  .ledger-shell .shipment-status-groups > .shipment-status-group { min-height: 44px; padding: 10px 12px; }
+}
+
+.ledger-shell :is(.shipment-table-scroll, .staff-shipment-table-scroll) > table > tbody > tr > td {
+  border-bottom: 2px solid #dce1d9 !important;
+}
+.ledger-shell .shipment-product-table > tbody > tr:not(:last-child) > td {
+  border-bottom: 1px solid #eff1ed !important;
+}
+.ledger-shell .shipment-product-table > tbody > tr:last-child > td {
+  border-bottom: 0 !important;
+}
+
+
+/* 运单操作收在结果栏；弹层保留原来的导出条件与处理函数。 */
+.ledger-shell .shipment-results-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.ledger-shell .shipment-export-dialog {
+  width: min(520px, calc(100vw - 32px)); max-height: calc(100dvh - 40px);
+  box-sizing: border-box; padding: 24px; margin: auto; overflow: auto;
+  color: var(--ink); background: var(--paper, #fff); border: 1px solid var(--line); border-radius: 6px;
+}
+.ledger-shell .shipment-export-dialog:not([open]) { display: none; }
+.ledger-shell .shipment-export-dialog::backdrop { background: rgb(20 24 20 / 24%); }
+.ledger-shell .shipment-export-dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.ledger-shell .shipment-export-dialog-heading h2 { font-size: 18px; margin: 0; font-weight: 600; }
+.ledger-shell .shipment-export-dialog-intro { font-size: 13px; color: var(--ink-2); margin: 12px 0 20px; }
+.ledger-shell .shipment-export-dialog :is(.shipment-export, .staff-shipment-export) { display: flex; flex-direction: column; align-items: stretch; gap: 16px; margin: 0; padding: 0; border: 0; }
+.ledger-shell .shipment-export-dialog :is(.shipment-export-dates, .staff-shipment-export-dates) { width: 100%; }
+.ledger-shell .shipment-export-dialog :is(.shipment-export-dates, .staff-shipment-export-dates) label { flex: 1; min-width: 0; }
+.ledger-shell .shipment-export-dialog :is(.shipment-export-dates, .staff-shipment-export-dates) input { width: 100%; min-width: 0; box-sizing: border-box; }
+.ledger-shell .shipment-export-dialog :is(.shipment-export-note, .staff-shipment-export-note) { order: -1; font-size: 13px; }
+.ledger-shell .shipment-ledger-table > :is(thead, tbody) > tr > .shipment-metric { text-align: right !important; font-variant-numeric: tabular-nums; }
+.ledger-shell .shipment-ledger-table > tbody > tr > .shipment-pin { background: inherit; }
+/* 窄屏只固定运单号，留出空间查看业务字段。 */
+.ledger-shell .shipment-ledger-table > tbody > tr > .shipment-pin--number { position: sticky; left: 0; z-index: 3; }
+.ledger-shell .shipment-ledger-table > thead > tr > .shipment-pin--number { left: 0; z-index: 5; }
+@media (min-width: 1024px) {
+  .ledger-shell .shipment-ledger-table > tbody > tr > .shipment-pin { position: sticky; z-index: 3; }
+  .ledger-shell .shipment-ledger-table > thead > tr > .shipment-pin { z-index: 5; }
+  .ledger-shell .shipment-ledger-table .shipment-pin--check { left: 0; }
+  .ledger-shell .shipment-ledger-table .shipment-pin--mark { left: 44px; }
+  .ledger-shell .shipment-ledger-table > :is(thead, tbody) > tr > .shipment-pin--number { left: 154px; }
+  .ledger-shell .shipment-ledger-table--client .shipment-pin--mark { left: 0; }
+  .ledger-shell .shipment-ledger-table--client > :is(thead, tbody) > tr > .shipment-pin--number { left: 110px; }
+}
+@media (max-width: 600px) {
+  .ledger-shell .shipment-results-actions { width: 100%; justify-content: space-between; gap: 8px; }
+  .ledger-shell .shipment-export-dialog { padding: 20px; }
+}

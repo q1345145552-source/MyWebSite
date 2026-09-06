@@ -248,3 +248,15 @@ export const CLIENT_STATUS_GROUP_ZH: Record<ClientStatusGroup, string> = {
   delivered: "已签收",
   closed: "退回/取消/异常",
 };
+
+/** 异常是关注维度，不改在途/到仓阶段；历史关闭状态仍可在全部订单中查看。 */
+export type ShipmentListFilter = "all" | Exclude<ClientStatusGroup, "closed"> | "attention";
+
+export function matchesShipmentListFilter(
+  status: string | null | undefined,
+  filter: ShipmentListFilter,
+): boolean {
+  if (filter === "all") return true;
+  if (filter === "attention") return ATTENTION_STATUSES.includes(status as ShipmentStatus);
+  return classifyStatusGroup(status) === filter;
+}

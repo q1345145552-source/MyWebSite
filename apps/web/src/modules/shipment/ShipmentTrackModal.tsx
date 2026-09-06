@@ -2,7 +2,7 @@
 
 import { createRoot } from "react-dom/client";
 import { useCallback, useEffect, useState } from "react";
-import { authHeaders, apiBaseUrl, apiRequest, parseApiResponse } from "../../services/core-api";
+import { authHeaders, apiBaseUrl, apiRequest, parseApiResponse, fetchWithSession as fetch } from "../../services/core-api";
 
 // ── Types ──
 

@@ -1,5 +1,5 @@
-import type { ClientStatusGroup } from "../../../../packages/shared-types/shipment-status";
-import { authHeaders, apiBaseUrl, parseApiResponse, apiRequest } from "./core-api";
+import { matchesShipmentListFilter, type ClientStatusGroup } from "../../../../packages/shared-types/shipment-status";
+import { authHeaders, apiBaseUrl, parseApiResponse, apiRequest, fetchWithSession as fetch } from "./core-api";
 
 export interface StaffCreateOrderPayload {
   clientId: string;
@@ -805,13 +805,18 @@ export async function fetchStaffWalletBalances(): Promise<{ balances: StaffWalle
 }
 
 export async function fetchClientOrders(params?: {
-  // 2026-08-31 分组改为四分类：pending=未发出、transit=在途、delivered=已签收、closed=退回/取消/异常
-  statusGroup?: "pending" | "transit" | "arrived" | "delivered" | "closed";
+  statusGroup?: ClientStatusGroup | "attention";
 }): Promise<OrderItem[]> {
   const query = new URLSearchParams();
   if (params?.statusGroup) query.set("statusGroup", params.statusGroup);
   const suffix = query.size > 0 ? `?${query.toString()}` : "";
-  return fetchAllPages<OrderItem>(`/client/orders${suffix}`);
+  const orders = await fetchAllPages<OrderItem>(`/client/orders${suffix}`);
+  /* 「异常」2026-09-05 起后端也认（每页只回异常单，不再整页拉全量）。
+     这里再筛一道是兜底：万一后端还是老版本、不认 attention 就当「不过滤」把全量回来，
+     前端照样能筛对——两边谁先上线都不会出错。 */
+  return params?.statusGroup === "attention"
+    ? orders.filter((order) => matchesShipmentListFilter(order.currentStatus, "attention"))
+    : orders;
 }
 
 /**

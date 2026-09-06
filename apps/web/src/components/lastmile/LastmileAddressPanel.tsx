@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { apiBaseUrl, authHeaders, parseApiResponse } from "../../services/core-api";
+import { apiBaseUrl, authHeaders, parseApiResponse, fetchWithSession as fetch } from "../../services/core-api";
 import { fetchClientNotes } from "../../services/business-api";
 
 /* ==========================================================================

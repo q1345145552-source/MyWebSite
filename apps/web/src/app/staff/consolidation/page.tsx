@@ -653,7 +653,7 @@ export default function StaffConsolidationPage() {
           {/* 付款审核区域 */}
           {taskDetail.paymentStatus === "pending_review" && (
             <div style={{ marginBottom: 16, padding: "16px", background: "var(--c-amber-bg)", borderRadius: 8, border: "1px solid var(--c-amber)" }}>
-              <div style={{ fontWeight: 700, color: "var(--c-amber-deep)", fontSize: 15, marginBottom: 8 }}>💳 待审核付款</div>
+              <div style={{ fontWeight: 700, color: "var(--c-amber-deep)", fontSize: 15, marginBottom: 8 }}>待审核付款</div>
               {taskDetail.paymentProofBase64 && (
                 <div style={{ marginBottom: 10 }}>
                   <div style={{ fontSize: 12, color: "var(--t-muted)", marginBottom: 4 }}>付款截图</div>

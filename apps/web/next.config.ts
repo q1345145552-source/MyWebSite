@@ -10,6 +10,9 @@ import type { NextConfig } from "next";
 const API_PROXY_TARGET = process.env.API_PROXY_TARGET?.trim() || "http://api:3001";
 
 const nextConfig: NextConfig = {
+  // dev:public listens on 0.0.0.0; the embedded browser uses this loopback origin.
+  // Explicit development-only allowance; API rewrites and production headers stay unchanged.
+  allowedDevOrigins: ["127.0.0.1"],
   turbopack: {
     root: path.join(__dirname, "..", ".."),
   },

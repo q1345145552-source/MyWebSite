@@ -1,5 +1,5 @@
 import JSZip from "jszip";
-import { apiBaseUrl, authHeaders, parseApiResponse } from "../../services/core-api";
+import { apiBaseUrl, authHeaders, parseApiResponse, fetchWithSession as fetch } from "../../services/core-api";
 
 export type LastmileExportShipment = {
   lastmileOrderId: string;

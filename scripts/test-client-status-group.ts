@@ -174,6 +174,20 @@ async function main(): Promise<void> {
     assert.equal(sum, ALL.length, `五个分组加起来 ${sum}，应该正好 ${ALL.length} 张，有单丢了或重了`);
   });
 
+  await check("4b) statusGroup=attention 只放 ATTENTION_STATUSES 的单过（2026-09-05 起后端也认，客户端不再整页拉全量）", async () => {
+    orderRows = ALL.map((s, i) => fakeOrder(`o${i}`, s));
+    const r = await call({ statusGroup: "attention" });
+    const got = r.items.map((x: any) => x.currentStatus).sort();
+    const expected = ALL.filter((s) => (ATTENTION_STATUSES as readonly string[]).includes(s)).sort();
+    assert.ok(expected.length >= 8, `期望表里的异常状态少于 8 个（${expected.length}），夹具本身不对`);
+    assert.deepEqual(got, expected, `「异常」查出来的不对：${JSON.stringify(got)}`);
+    // 异常是关注维度、不改阶段：这些单的 statusGroup 仍是各自的阶段（在途/关闭），不许被改写成别的
+    for (const item of r.items) assert.equal(item.statusGroup, EXPECT[item.currentStatus], `${item.currentStatus} 的阶段被改写成了 ${item.statusGroup}`);
+    // 反向：正常卸柜 / 派送中 / 已签收 不许混进来
+    orderRows = [fakeOrder("n1", "unloading"), fakeOrder("n2", "outForDelivery"), fakeOrder("n3", "delivered")];
+    assert.equal((await call({ statusGroup: "attention" })).items.length, 0, "正常状态混进了「异常」");
+  });
+
   await check("5) 老页面缓存发的 unfinished / completed 还认（unfinished 含已到仓）", async () => {
     orderRows = ALL.map((s, i) => fakeOrder(`o${i}`, s));
     const un = await call({ statusGroup: "unfinished" });

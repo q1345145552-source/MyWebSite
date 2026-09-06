@@ -22,5 +22,14 @@ export default function Toast({ open, message, tone = "success", duration = 2200
   }, [open, message, duration]);
 
   if (!visible) return null;
-  return <div className={`biz-toast ${tone === "error" ? "biz-toast-error" : "biz-toast-success"}`}>{message}</div>;
+  return (
+    <div
+      className={`biz-toast ${tone === "error" ? "biz-toast-error" : "biz-toast-success"}`}
+      role={tone === "error" ? "alert" : "status"}
+      aria-live={tone === "error" ? "assertive" : "polite"}
+      aria-atomic="true"
+    >
+      {message}
+    </div>
+  );
 }

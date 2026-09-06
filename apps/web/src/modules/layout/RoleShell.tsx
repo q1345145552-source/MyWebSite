@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { clearAuthSession, clearClientOrderCaches, getOptionalSession, type AuthRole, type AuthSession } from "../../auth/auth-session";
 import { changeOwnPassword } from "../../services/auth-api";
 import { apiBaseUrl, apiRequest } from "../../services/core-api";
@@ -53,31 +53,56 @@ function saveCollapsed(collapsed: boolean): void {
   }
 }
 
-// 「清运单缓存」直接用 auth-session.ts 导出的那份（2026-08-31 复查 #19）——
-// 原来这里私下抄了一份同名同体的，两套实现改一漏一，删掉本地这份统一走导入。
-
 export default function RoleShell(props: {
   allowedRole: AuthRole | AuthRole[];
   title: string;
   children: ReactNode;
-  /**
-   * 页面外观。默认沿用老样子；传 "a3" 才切成新版（深藏青导航 + 细顶栏）。
-   *
-   * ⚠️ 这个外壳是三端所有页面共用的，直接改样式就是全站一起变。
-   * 用户的要求是「一个页面一个页面来，认可了再铺开」，所以做成开关：
-   * 改造好一个页面就给那个页面加上 variant="a3"。
-   * 等页面全部改完，这个开关和下面的老样式一起删掉。
-   * 2026-08-09 只有员工端工作台（staff/page.tsx）打开了。
-   */
+  /** 保留旧调用方的布局变体；三端视觉统一由 ledger-shell 管理。 */
   variant?: "default" | "a3";
 }) {
   const { allowedRole, title, children, variant = "default" } = props;
   const allowedRoles = Array.isArray(allowedRole) ? allowedRole : [allowedRole];
   const [mounted, setMounted] = useState(false);
   const [session, setSession] = useState<AuthSession | null>(null);
+  const [identityChanging, setIdentityChanging] = useState(false);
+  // 父业务页的查询/地址/图片状态不在 RoleShell 内，换身份必须重建整页。
+  // 一次挂载绑定一次；暂时读到 null 或 Fast Refresh 时都不覆盖旧身份。
+  const boundIdentityRef = useRef<string | null>(null);
+  const identityReloadRef = useRef<AuthSession | null>(null);
+  const acceptSession = useCallback((next: AuthSession | null) => {
+    if (next) {
+      const identity = JSON.stringify([next.userId, next.companyId, next.role]);
+      if (boundIdentityRef.current && boundIdentityRef.current !== identity) {
+        identityReloadRef.current = next;
+        setIdentityChanging(true);
+        return;
+      }
+      boundIdentityRef.current = identity;
+    }
+    setSession((prev) => {
+      if (!next) return null;
+      if (prev && prev.token === next.token && prev.userId === next.userId && prev.companyId === next.companyId && prev.role === next.role) return prev;
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    const next = identityReloadRef.current;
+    if (!identityChanging || !next) return;
+    // 此 effect 在业务 children 已移出 DOM 后运行，不让旧客户数据留在新身份页面。
+    if (allowedRoles.includes(next.role)) window.location.reload();
+    else {
+      const home: Record<string, string> = { admin: "/admin", staff: "/staff", client: "/client" };
+      window.location.replace(home[next.role] || "/login");
+    }
+  }, [identityChanging, allowedRoles.join(",")]);
   const [currentPath, setCurrentPath] = useState("");
   const [currentHash, setCurrentHash] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [mobileNavigation, setMobileNavigation] = useState(false);
+  const navigationId = useId();
+  const sidebarRef = useRef<HTMLElement>(null);
+  const sidebarTriggerRef = useRef<HTMLButtonElement>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(["运单管理", "我的运单"]));
   /**
    * 电脑端把侧边栏整个收起来，把宽度让给表格（运单列表那些表很宽）。
@@ -85,6 +110,56 @@ export default function RoleShell(props: {
    * 服务端渲染读不到 localStorage，直接用它当初值两边对不上会报 hydration 错。
    */
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  // 和 globals.css 的抽屉断点一致。窄屏收起的导航退出键盘顺序，桌面仍是正常导航。
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 900px)");
+    const sync = () => {
+      setMobileNavigation(media.matches);
+      if (!media.matches) setSidebarOpen(false);
+    };
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
+
+  useEffect(() => {
+    const sidebar = sidebarRef.current;
+    if (!mobileNavigation || !sidebarOpen || !sidebar) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const controls = () => Array.from(sidebar.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    )).filter((element) => element.tabIndex >= 0 && element.getClientRects().length > 0 && getComputedStyle(element).visibility !== "hidden");
+    const focusFrame = window.requestAnimationFrame(() => controls()[0]?.focus({ preventScroll: true }));
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (event.key === "Escape" && !event.isComposing && event.keyCode !== 229) {
+        event.preventDefault();
+        setSidebarOpen(false);
+      }
+      if (event.key !== "Tab") return;
+      const items = controls();
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (!first || !last) return;
+      if (event.shiftKey && (document.activeElement === first || !sidebar.contains(document.activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !sidebar.contains(document.activeElement))) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = previousOverflow;
+      // 点击导航/遮罩或 Escape 后回到开关；打开的其它弹窗会自行接管焦点。
+      if (sidebarTriggerRef.current?.getClientRects().length) sidebarTriggerRef.current.focus({ preventScroll: true });
+    };
+  }, [mobileNavigation, sidebarOpen]);
 
   const toggleSidebarCollapsed = () => {
     setSidebarCollapsed((prev) => {
@@ -156,7 +231,7 @@ export default function RoleShell(props: {
 
   useEffect(() => {
     const next = getOptionalSession();
-    setSession(next);
+    acceptSession(next);
     setMounted(true);
     const path = window.location.pathname;
     const hash = window.location.hash;
@@ -182,7 +257,7 @@ export default function RoleShell(props: {
     setSidebarCollapsed(readCollapsed());
     // allowedRoles 已是稳定数组，用 join 避免引用变化导致重复执行
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allowedRoles.join(",")]);
+  }, [allowedRoles.join(","), acceptSession]);
 
   useEffect(() => {
     if (!mounted) return;
@@ -206,15 +281,7 @@ export default function RoleShell(props: {
   useEffect(() => {
     if (!mounted) return;
     const recheck = () => {
-      const next = getOptionalSession();
-      setSession((prev) => {
-        if (!next) return null;
-        // 没变化时返回原对象，避免每次核对都触发重渲染
-        if (prev && prev.token === next.token && prev.userId === next.userId && prev.role === next.role) {
-          return prev;
-        }
-        return next;
-      });
+      acceptSession(getOptionalSession());
     };
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") recheck();
@@ -227,11 +294,18 @@ export default function RoleShell(props: {
       window.removeEventListener("focus", recheck);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [mounted]);
+  }, [mounted, acceptSession]);
 
   useEffect(() => {
-    if (!mounted) return;
+    if (!mounted || identityChanging) return;
     if (!session) {
+      // storage/focus 事件可能先排入旧的 null 状态，随后另一标签已经完成新登录。
+      // 真正跳转前以当前共享存储再核对，避免旧事件把新会话误送回登录页。
+      const latest = getOptionalSession();
+      if (latest) {
+        acceptSession(latest);
+        return;
+      }
       // 2026-08-07：踢人之前把现场记下来。反复出现「所有接口都 200、
       // 却突然被弹回登录页」，没有日志根本查不出是哪一步把登录信息弄丢的。
       // ⚠️ 只记有没有、长度，绝不打印令牌内容。
@@ -269,7 +343,11 @@ export default function RoleShell(props: {
     }
     return;
   // allowedRoles 已提前计算为稳定数组，用 join 避免引用变化导致重复执行
-  }, [allowedRoles.join(","), mounted, session]);
+  }, [allowedRoles.join(","), mounted, session, identityChanging, acceptSession]);
+
+  if (identityChanging) {
+    return <main role="status" style={{ padding: 24 }}>账号已切换，正在重新载入工作台…</main>;
+  }
 
   if (!mounted) {
     return (
@@ -311,23 +389,24 @@ export default function RoleShell(props: {
 
   return (
     <main
-      className={`dashboard-layout${variant === "a3" ? " a3-shell" : ""}${
+      className={`dashboard-layout ledger-shell${variant === "a3" ? " a3-shell" : ""}${
         sidebarCollapsed ? " sidebar-collapsed" : ""
       }`}
     >
       {/* 手机端遮罩 */}
-      <div className={`sidebar-overlay ${sidebarOpen ? "open" : ""}`} onClick={closeSidebar} />
+      <div className={`sidebar-overlay ${sidebarOpen ? "open" : ""}`} onClick={closeSidebar} aria-hidden="true" />
 
-      <aside className={`dashboard-sidebar ${sidebarOpen ? "open" : ""}`}>
-        <button type="button" className="sidebar-close-btn" onClick={closeSidebar}>×</button>
-        {/* 左上角这个位置是放品牌的，原来写「工作台导航」——
-            左边一排链接，本来就看得出是导航，等于一句废话。
-            换成公司名，三端每一页都带着（2026-08-11）。 */}
-        <h2 className="dashboard-sidebar-title">湘泰物流</h2>
-        {/* 电脑端专用：把侧边栏收起来，宽度让给表格。
-            手机端由 CSS 隐藏它（那边已经有汉堡 + 关闭按钮了）。
-            ⚠️ 绝对定位、不放进文档流：包一层 flex 会动到标题的下边距，
-            实测把 a3 品牌标题的 20px 下边距挤成 12px、整排菜单上移 3px。 */}
+      <aside
+        id={navigationId}
+        ref={sidebarRef}
+        className={`dashboard-sidebar ${sidebarOpen ? "open" : ""}`}
+        aria-label="工作台导航"
+        aria-hidden={mobileNavigation && !sidebarOpen ? true : undefined}
+        inert={mobileNavigation && !sidebarOpen}
+      >
+        <button type="button" className="sidebar-close-btn" onClick={closeSidebar} aria-label="关闭导航菜单">×</button>
+        <h2 className="dashboard-sidebar-title">湘泰物流<span className="dashboard-brand-caption">XIANGTAI</span></h2>
+        {/* 桌面收起按钮保持绝对定位，避免影响顶栏及 sticky 列。 */}
         <button
           type="button"
           className="sidebar-collapse-btn"
@@ -342,15 +421,16 @@ export default function RoleShell(props: {
             <a
               key={item.id}
               href={item.href}
-              className={`dashboard-sidebar-link ${currentPath === item.href ? "dashboard-sidebar-link-active" : ""}`}
+              className={`dashboard-sidebar-link ${currentPath === item.href && !currentHash ? "dashboard-sidebar-link-active" : ""}`}
+              aria-current={currentPath === item.href && !currentHash ? "page" : undefined}
               onClick={closeSidebar}
             >
               {item.label}
             </a>
           ))}
         </div>
-        <h3 className="dashboard-sidebar-subtitle">功能分区</h3>
-        {(roleFunctionGroups[allowedRoles[0]] ?? []).map((group) => {
+
+        {(roleFunctionGroups[allowedRoles[0]] ?? []).map((group, groupIndex) => {
           const isExpanded = expandedGroups.has(group.groupLabel);
           return (
             <div
@@ -361,6 +441,7 @@ export default function RoleShell(props: {
                 type="button"
                 className="dashboard-sidebar-group-header"
                 aria-expanded={isExpanded}
+                aria-controls={`${navigationId}-group-${groupIndex}`}
                 onClick={() => {
                   setExpandedGroups((prev) => {
                     const next = new Set(prev);
@@ -377,13 +458,14 @@ export default function RoleShell(props: {
                 {group.groupLabel}
               </button>
               {/* 收起时不摘节点，只把外层高度收到 0：摘掉就没法放收起动画了 */}
-              <div className="dashboard-sidebar-group-body" aria-hidden={!isExpanded}>
+              <div id={`${navigationId}-group-${groupIndex}`} className="dashboard-sidebar-group-body" aria-hidden={!isExpanded}>
                 <div className="dashboard-sidebar-group-body-inner">
                   {group.items.map((item) => (
                     <a
                       key={item.id}
                       href={item.href}
                       className={`dashboard-sidebar-link ${currentPath + currentHash === item.href ? "dashboard-sidebar-link-active" : ""}`}
+                      aria-current={currentPath + currentHash === item.href ? "location" : undefined}
                       tabIndex={isExpanded ? undefined : -1}
                       onClick={closeSidebar}
                     >
@@ -395,13 +477,14 @@ export default function RoleShell(props: {
             </div>
           );
         })}
-        <h3 className="dashboard-sidebar-subtitle">全局菜单</h3>
+        {globalMenus.length > 0 && <h3 className="dashboard-sidebar-subtitle">全局菜单</h3>}
         <div className="dashboard-sidebar-group">
           {globalMenus.map((item) => (
             <a
               key={item.id}
               href={item.href}
-              className={`dashboard-sidebar-link ${currentPath === item.href ? "dashboard-sidebar-link-active" : ""}`}
+              className={`dashboard-sidebar-link ${currentPath === item.href && !currentHash ? "dashboard-sidebar-link-active" : ""}`}
+              aria-current={currentPath === item.href && !currentHash ? "page" : undefined}
               onClick={closeSidebar}
             >
               {item.label}
@@ -451,20 +534,22 @@ export default function RoleShell(props: {
           </button>
         </div>
       </aside>
-      <div className="dashboard-content">
+      <div className="dashboard-content" inert={mobileNavigation && sidebarOpen}>
         <div className="glass-topbar">
-          <button type="button" className="mobile-hamburger" onClick={() => setSidebarOpen(true)}>
-            <span className="hamburger-line" />
-            <span className="hamburger-line" />
-            <span className="hamburger-line" />
+          <button
+            ref={sidebarTriggerRef}
+            type="button"
+            className="mobile-hamburger"
+            onClick={() => setSidebarOpen(true)}
+            aria-label="打开导航菜单"
+            aria-expanded={sidebarOpen}
+            aria-controls={navigationId}
+          >
+            <span className="hamburger-line" aria-hidden="true" />
+            <span className="hamburger-line" aria-hidden="true" />
+            <span className="hamburger-line" aria-hidden="true" />
           </button>
-          {/* 侧边栏收起来之后，把它请回来的按钮。
-              ⚠️ 必须放在顶栏、不能放侧边栏里 —— 放里面的话收起来就再也点不到了。
-              只有收起状态才显示（见 globals.css 的 .sidebar-collapsed）。
-              ⚠️ 也是绝对定位、不进文档流：顶栏是 flex + space-between，
-              多一个子元素会把标题挤到正中间（实测 x 从 208 跳到 654），
-              而且顶栏会从 44px 变高到 53px —— 装柜页那根 sticky 柜号列
-              是按顶栏 42px 高定位的，顶栏一变高就对不齐。 */}
+          {/* 收起后仍须能从侧边栏外展开；保持顶栏高度不变。 */}
           <button
             type="button"
             className="sidebar-expand-btn"
@@ -475,7 +560,7 @@ export default function RoleShell(props: {
             ››
           </button>
           <span className="glass-topbar-title">{title}</span>
-          <span className="glass-topbar-meta">{session.userId} · {session.role}</span>
+          <span className="glass-topbar-meta">{session.userId} · {{ admin: "管理员", staff: "员工", client: "客户" }[session.role]}</span>
         </div>
         {children}
       </div>

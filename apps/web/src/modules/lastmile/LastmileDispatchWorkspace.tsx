@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { apiBaseUrl, authHeaders, parseApiResponse } from "../../services/core-api";
+import { apiBaseUrl, authHeaders, parseApiResponse, fetchWithSession as fetch } from "../../services/core-api";
 import { openShipmentTrack } from "../shipment/ShipmentTrackModal";
 import { createRequestGate } from "../shared/request-gate";
 import { downloadLastmileCustomerWorkbook } from "./exportDispatchWorkbooks";

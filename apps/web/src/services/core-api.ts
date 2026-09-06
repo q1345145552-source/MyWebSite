@@ -1,4 +1,4 @@
-import { getOptionalSession } from "../auth/auth-session";
+import { clearAuthSession, clearClientOrderCaches, getOptionalSession } from "../auth/auth-session";
 
 /**
  * 统一去除 URL 末尾斜杠，避免拼接路径时出现双斜杠。
@@ -34,6 +34,21 @@ export function authHeaders(): Record<string, string> {
   };
 }
 
+// 只关联本次请求实际携带的令牌；元数据不写磁盘、不输出，也不改变 Response。
+const responseTokens = new WeakMap<Response, string | null>();
+
+/** 原样透传 fetch，只为后续解析记录请求身份。旧响应不能清除后来建立的新会话。 */
+export async function fetchWithSession(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const requestHeaders = new Headers(init?.headers ?? (
+    typeof Request !== "undefined" && input instanceof Request ? input.headers : undefined
+  ));
+  const requestToken = requestHeaders.get("Authorization")?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() ?? null;
+  // 使用成员调用，保持浏览器 fetch 的 globalThis binding；不新增请求头、重试或超时。
+  const response = await globalThis.fetch(input, init);
+  responseTokens.set(response, requestToken);
+  return response;
+}
+
 /** 读令牌自带的到期时间（秒）。读不出来返回 null。⚠️ 不返回令牌内容。 */
 function readTokenExp(token: string | undefined): number | null {
   if (!token) return null;
@@ -58,6 +73,7 @@ function goToLogin() {
  */
 const MAX_UNEXPLAINED_401 = 3;
 let unexplained401Count = 0;
+let unexplained401Token: string | null | undefined;
 
 /**
  * 统一解析后端响应并在失败时抛出可读错误。
@@ -69,50 +85,70 @@ let unexplained401Count = 0;
  * 现在只有**本地令牌确实已经过期**（或压根没登录）才跳登录页；
  * 令牌看着还有效的，只报错、不踢人，让用户能把手上的活保住。
  */
-export async function parseApiResponse<T>(response: Response): Promise<T> {
+export async function parseApiResponse<T>(response: Response, sentToken?: string | null): Promise<T> {
+  // undefined 表示未知来源；null 则明确表示请求发出时没有 Bearer 令牌。
+  const requestToken = sentToken !== undefined ? sentToken : responseTokens.get(response);
+  const session = typeof window !== "undefined" ? getOptionalSession() : null;
+  const currentToken = session?.token ?? null;
+  const belongsToCurrentSession = requestToken !== undefined && requestToken === currentToken;
+
   if (response.status === 401) {
-    /**
-     * ⚠️ 登录接口自己也用 401 表示「账号或密码不对」，不能走下面那套「登录过期」的逻辑。
-     * 原来会走 —— 用户在登录页把密码打错，看到的提示是
-     * 「登录失败：登录已过期，请重新登录」。人根本还没登录过，哪来的过期，
-     * 会让人以为是系统坏了而不是自己打错字（2026-08-11 以用户视角走查时发现）。
-     */
+    // 密码校验失败只反馈给登录表单，不退出其它仍在工作的标签。
     if (response.url.includes("/auth/login")) {
       throw new Error("账号或密码不对，请重新输入");
     }
-    const session = typeof window !== "undefined" ? getOptionalSession() : null;
+    if (!belongsToCurrentSession) {
+      // 不知道请求身份，或请求期间已经换号/重新登录：只拒绝这份响应，不计入新会话的 401。
+      // ⚠️ requestToken === undefined 说明这份 Response 没经过 fetchWithSession（裸 fetch）——
+      //    这条路永远不会跳登录页。仓库里所有调用点都用 `fetchWithSession as fetch`，
+      //    scripts/test-session-api.ts 有源码扫描兜底；这里再吼一声，方便开发时当场发现。
+      if (requestToken === undefined && typeof window !== "undefined" && process.env.NODE_ENV !== "production") {
+        console.warn("[接口返回 401] 这份响应没经过 fetchWithSession，无法判断令牌归属，不会自动跳登录页", { 接口: response.url });
+      }
+      throw new Error("这次请求的登录信息已变化或未通过校验，请重新操作");
+    }
+    if (unexplained401Token !== requestToken) {
+      unexplained401Token = requestToken;
+      unexplained401Count = 0;
+    }
     const exp = readTokenExp(session?.token);
     const nowSec = Math.floor(Date.now() / 1000);
-    // 没登录信息、或令牌读不出到期时间、或确实过期了 → 才算「真的该重新登录」
     const reallyExpired = !session?.token || exp == null || nowSec >= exp;
 
     if (typeof window !== "undefined") {
-      // ⚠️ 只记有没有、到期时间，绝不打印令牌本身
       console.warn("[接口返回 401]", {
         接口: response.url,
         本地有没有登录信息: !!session,
         角色: session?.role ?? "无",
         令牌到期: exp == null ? "读不出来" : `${new Date(exp * 1000).toLocaleString()}（${nowSec >= exp ? "已过期" : `还剩 ${Math.round((exp - nowSec) / 60)} 分钟`}）`,
-        处理: reallyExpired ? "确实过期，跳登录页" : `令牌还有效，不踢人（连续第 ${unexplained401Count + 1} 次，满 ${MAX_UNEXPLAINED_401} 次才跳）`,
+        处理: reallyExpired ? "当前请求会话已过期，清理后重新登录" : `同一会话第 ${unexplained401Count + 1} 次校验失败（满 ${MAX_UNEXPLAINED_401} 次才退出）`,
       });
     }
-
+    const rejectCurrentSession = () => {
+      // 登录页不再负责全局退出；在最终失败点再次比对，明确清理仍对应本次请求的会话。
+      if (typeof window === "undefined" || (getOptionalSession()?.token ?? null) !== requestToken) return;
+      clearAuthSession();
+      clearClientOrderCaches();
+      goToLogin();
+    };
     if (reallyExpired) {
       unexplained401Count = 0;
-      goToLogin();
+      rejectCurrentSession();
       throw new Error("登录已过期，请重新登录");
     }
-
     unexplained401Count += 1;
     if (unexplained401Count >= MAX_UNEXPLAINED_401) {
       unexplained401Count = 0;
-      goToLogin();
+      rejectCurrentSession();
       throw new Error("登录状态异常，请重新登录");
     }
     throw new Error("这一步没能通过登录校验，请重试一次；反复出现请重新登录（你填的内容还在）");
   }
-  // 有一次正常响应就说明登录是好的，把连续计数清零
-  unexplained401Count = 0;
+  // 仅当前会话自己的响应能重置其计数；旧会话迟到的成功响应不干扰新会话。
+  if (belongsToCurrentSession) {
+    unexplained401Token = requestToken;
+    unexplained401Count = 0;
+  }
   const text = await response.text();
   let payload: { code?: string; message?: string; data?: T } | null = null;
   try {
@@ -144,7 +180,7 @@ export async function apiRequest<T>(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30_000); // 单次请求 30 秒超时
     try {
-      const response = await fetch(url, {
+      const response = await fetchWithSession(url, {
         ...options,
         signal: controller.signal,
         headers: {

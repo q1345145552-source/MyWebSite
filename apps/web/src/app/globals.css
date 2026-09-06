@@ -1,130 +1,91 @@
+/* Shared geometry and responsive behavior. Visual tokens are shared by all roles. */
 :root {
-  --bg-page: #f4f2ee;
-  --text-main: #1a1a1e;
-  --text-sub: #3d3d42;
+  --bg-page: #fafaf8;
+  --text-main: #252723;
+  --text-sub: #565a53;
   --line-soft: rgba(0, 0, 0, 0.06);
-  --brand: #1e3a8a;
-  --brand-hover: #1a3075;
+  --brand: #a44727;
+  --brand-hover: #84391f;
   --success: #0f766e;
   --processing: #d97706;
   --danger: #b91c1c;
-  /* 原来的 --ink，2026-08-09 让位给 A3 规格里的 --ink（#14171D）。
-     老名字保留，值不变，所以引用它的 11 个地方看起来一模一样。
-     等页面一个个改完 A3，这个就可以删掉。 */
-  --ink-legacy: #1a1a1e;
-  --ink-mute: #3d3d42;
+
+  --ink-legacy: #252723;
+  --ink-mute: #565a53;
   --hairline: rgba(0, 0, 0, 0.06);
   --hairline-cool: rgba(0, 0, 0, 0.05);
-  --canvas: #fbfaf7;
-  --canvas-soft: #f6f5f1;
+  --canvas: #fafaf8;
+  --canvas-soft: #f0f1ed;
   --accent-crimson: #b91c1c;
   --accent-yellow: #d97706;
-  --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --radius-xl: 20px;
-  --shadow-xs: 0 1px 2px rgba(26, 26, 30, 0.04);
-  --shadow-sm: 0 2px 6px rgba(26, 26, 30, 0.05);
-  --shadow-md: 0 6px 16px rgba(26, 26, 30, 0.08);
-  --shadow-lg: 0 12px 28px rgba(26, 26, 30, 0.12);
+  --radius-xs: 3px;
+  --radius-sm: 4px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
+  --radius-xl: 6px;
+  --shadow-xs: none;
+  --shadow-sm: none;
+  --shadow-md: 0 4px 16px rgba(25, 28, 23, 0.08);
+  --shadow-lg: 0 8px 24px rgba(25, 28, 23, 0.12);
 
-  /* ==========================================================================
-     页面实际在用的颜色（2026-08-09 收敛）
-     --------------------------------------------------------------------------
-     背景：页面里写死了 2584 处颜色、115 种，各写各的，所以整体看起来很杂。
-     这一步只做一件事：把用得最多的 33 种颜色起个名字，页面改成引用名字。
-     **每个名字的值就是页面原来在用的值，所以这一步做完页面一模一样，零风险。**
-     （已用 19 个页面的整页截图逐像素比对验证过。）
+  --t-strong: var(--ink);
+  --t-heading: var(--ink);
+  --t-body: var(--ink-2);
 
-     真正改样子是下一步：只改这里的值，全站跟着变，改一处顶原来几百处。
-     上面那批 --brand / --ink / --canvas 是当初定的设计色，页面基本没用上，
-     两套颜色并存正是"塑料感"的根源；下一步就是把下面这批指向上面那批。
-     ========================================================================== */
+  --t-muted: var(--ink-2);
+  --t-faint: #686d64;
+  --white: var(--panel);
 
-  /* ⭐ 2026-08-10 全站换新：把「现在的样子」这批名字，全部指向下面 A3 那批。
-     只改这里的值，2264 处引用一起变，**没有动任何一个页面的排版**。
-     原来的值写在每行注释里，要退回去把值改回来即可。 */
+  --s-alt: var(--ground);
+  --s-sunken: var(--line-2);
+  --s-cool: var(--ground);
+  --s-cool-2: var(--line-2);
 
-  /* ── 文字 ── */
-  --t-strong: var(--ink);    /* 226 处。原 #000000 纯黑 → 近黑带一点蓝 */
-  --t-heading: var(--ink);   /* 27 处。原 #111827 */
-  --t-body: var(--ink-2);    /* 83 处。原 #374151 */
-  /* ⚠️ 这里必须是 --ink-2 不是 --ink-3。
-     先接到 --ink-3(#8B94A3) 时白底对比度只有 3.06，低于「正文至少 4.5」的门槛，
-     248 处次要文字（说明、备注、日期）全都变得发虚看不清。--ink-2 是 7.65，
-     原来的 #6b7280 是 4.83 —— 改完比原来还清楚。
-     真正该用 --ink-3 的是表头和单位，那两处由 .a3-table 和 --t-faint 单独管。 */
-  --t-muted: var(--ink-2);   /* 248 处。原 #6b7280 */
-  --t-faint: #9ca3af;        /* 106 处。占位符，比 --ink-3 更淡，保持原值 */
-  --white: var(--panel);     /* 336 处。原 #ffffff，值不变 */
+  --l-strong: var(--line);
+  --l-soft: var(--line);
+  --l-cool: var(--line);
 
-  /* ── 底色 ── */
-  --s-alt: var(--ground);    /* 31 处。原 #f9fafb */
-  --s-sunken: var(--line-2); /* 49 处。原 #f3f4f6 */
-  --s-cool: var(--ground);   /* 33 处。原 #f8fafc */
-  --s-cool-2: var(--line-2); /* 18 处。原 #f1f5f9 */
+  --c-blue: var(--brand);
+  --c-blue-deep: var(--brand-hover);
+  --c-navy: var(--brand);
+  --c-blue-bg: var(--brand-soft);
+  --c-blue-bg-2: var(--brand-soft);
 
-  /* ── 线条 ── */
-  --l-strong: var(--line);   /* 298 处。原 #d1d5db */
-  --l-soft: var(--line);     /* 202 处。原 #e5e7eb */
-  --l-cool: var(--line);     /* 37 处。原 #e2e8f0 */
+  --c-red: var(--bad);
+  --c-red-2: var(--bad);
+  --c-red-deep: var(--bad);
+  --c-red-dark: var(--bad);
+  --c-red-bg: #f9ece9;
 
-  /* ── 蓝：主按钮、链接、进行中 ── */
-  --c-blue: var(--brand);        /* 141 处。原 #2563eb，用户明确说过不要这个蓝 */
-  --c-blue-deep: var(--brand-hover); /* 17 处。原 #1e40af */
-  --c-navy: var(--brand);        /* 22 处。原 #1e3a8a，本来就是主色 */
-  --c-blue-bg: var(--brand-soft);/* 25 处。原 #eff6ff */
-  --c-blue-bg-2: var(--brand-soft); /* 20 处。原 #dbeafe */
+  --c-green: var(--ok);
+  --c-green-2: var(--ok);
+  --c-green-3: var(--ok);
+  --c-green-deep: var(--ok);
+  --c-green-dark: var(--ok);
+  --c-green-bg: #edf3ed;
 
-  /* ── 红：危险、延迟、错误 ── */
-  --c-red: var(--bad);       /* 36 处。原 #ef4444 */
-  --c-red-2: var(--bad);     /* 30 处。原 #dc2626 */
-  --c-red-deep: var(--bad);  /* 57 处。原 #b91c1c */
-  --c-red-dark: var(--bad);  /* 14 处。原 #991b1b */
-  --c-red-bg: #fee2e2;       /* 20 处。浅红底，保持原值（底色不刺眼，够用） */
+  --c-amber: var(--warn);
+  --c-amber-deep: var(--warn);
+  --c-amber-bg: #f9f1e3;
 
-  /* ── 绿：成功、已完成、已签收 ── */
-  --c-green: var(--ok);      /* 36 处。原 #059669 */
-  --c-green-2: var(--ok);    /* 20 处。原 #10b981 */
-  --c-green-3: var(--ok);    /* 16 处。原 #16a34a */
-  --c-green-deep: var(--ok); /* 29 处。原 #065f46 */
-  --c-green-dark: var(--ok); /* 14 处。原 #166534 */
-  --c-green-bg: #d1fae5;     /* 20 处。浅绿底，保持原值 */
+  --ground: #fafaf8;
+  --panel: #ffffff;
+  --ink: #252723;
+  --ink-2: #565a53;
+  --ink-3: #64685f;
+  --line: #d9dbd4;
+  --line-2: #f0f1ed;
 
-  /* ── 橙黄：处理中、待办、提醒 ── */
-  --c-amber: var(--warn);      /* 18 处。原 #f59e0b */
-  --c-amber-deep: var(--warn); /* 30 处。原 #92400e */
-  --c-amber-bg: #fef3c7;       /* 29 处。浅黄底，保持原值 */
+  --brand-soft: #f1f1eb;
+  --navdark: #141C2E;
+  --navdark-ink: #A6B0C4;
+  --ok: #15803D;
+  --warn: #B45309;
+  --bad: #B02A25;
 
-  /* ==========================================================================
-     A3 设计令牌（2026-08-09）—— 值照抄 docs/ui/方案A3-设计规格.md 第 2 节
-     --------------------------------------------------------------------------
-     这批是「要做成的样子」，上面那两批是「现在的样子」。
-     加进来的时候还没有任何页面用它们，所以页面看起来一模一样。
-     页面按 A3 改造时，改一个页面就把那个页面切到这批变量上。
-     ========================================================================== */
+  --a3-radius: 4px;
+  --a3-radius-lg: 6px;
 
-  --ground: #F6F6F4;      /* 页面底色，微暖灰，不是纯白 */
-  --panel: #FFFFFF;       /* 卡片 / 表格面 */
-  --ink: #14171D;         /* 正文，近黑带一点蓝 */
-  --ink-2: #4B5462;       /* 次要文字 */
-  --ink-3: #8B94A3;       /* 弱化文字、表头、单位 */
-  --line: #E4E6EC;        /* 分隔线 */
-  --line-2: #F0F1F4;      /* 更淡的行分隔 */
-  /* --brand 上面已有，值同为 #1e3a8a，不重复定义 */
-  --brand-soft: #EEF2FB;  /* 行 hover 底色 */
-  --navdark: #141C2E;     /* 左侧导航底色 */
-  --navdark-ink: #A6B0C4; /* 导航未选中文字 */
-  --ok: #15803D;          /* 已完成 */
-  --warn: #B45309;        /* 延迟 / 需要注意 */
-  --bad: #B02A25;         /* 异常 / 查验 */
-
-  /* 圆角统一 6px，卡片外框最大 10px（规格第 2 节，替代现在 3/4/6/8/10/12 混用） */
-  --a3-radius: 6px;
-  --a3-radius-lg: 10px;
-
-  /* 字体：中文系统字体栈，不引网络字体；数字用等宽让上下位数对齐 */
   --a3-font: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB",
     "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
   --a3-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
@@ -134,25 +95,12 @@
   box-sizing: border-box;
 }
 
-/* A3 表格行 hover：整行底色变浅，**文字颜色不变**（规格 §3.3）。
-   不用斑马纹，行之间只有一条 1px 发丝线。
-   2026-08-09 只有员工端运单列表在用。 */
-/* ==========================================================================
-   A3 页面外壳（2026-08-09）
-   --------------------------------------------------------------------------
-   照 docs/ui/方案A-三个版本对比.html 的 A3 标签做。
-   ⚠️ 所有规则都写在 .a3-shell 里面 —— 这个外壳是三端所有页面共用的，
-   写到外面就是全站一起变。用户要求一个页面一个页面来。
-   给页面的 RoleShell 加 variant="a3" 才会套上。
-   ========================================================================== */
-
 .a3-shell {
   gap: 0;
   padding: 0;
   background: var(--ground);
 }
 
-/* ---- 左侧导航：深藏青，172px ---- */
 .a3-shell .dashboard-sidebar {
   width: 172px;
   min-width: 172px;
@@ -164,10 +112,6 @@
   padding: 16px 10px;
 }
 
-/* 左上角的公司名（2026-08-11 由「工作台导航」改成「湘泰物流」）。
-   原来是 13px/600 —— 那是「小标签」的字号，和下面的菜单项一样大，
-   当公司名读起来像多了一行菜单。调到 16px/700，一眼能和菜单分开。
-   只动了字号和粗细，颜色、位置、间距关系没变。 */
 .a3-shell .dashboard-sidebar-title {
   color: #fff;
   font-size: 16px;
@@ -177,7 +121,6 @@
   padding-left: 8px;
 }
 
-/* 分组标题：10.5px、字距 .14em、灰色（规格 §3.1） */
 .a3-shell .dashboard-sidebar-subtitle {
   color: #6E7789;
   font-size: 10.5px;
@@ -200,8 +143,6 @@
   background: rgba(255, 255, 255, 0.04) !important;
 }
 
-/* 当前页：左边一条 2px 亮线 + 白字 + 极淡背景。
-   ❌ 不用蓝色圆角色块 —— 规格 §3.1 特意点名不要那个。 */
 .a3-shell .dashboard-sidebar-link-active {
   color: #fff !important;
   font-weight: 500;
@@ -209,14 +150,6 @@
   border-left: 2px solid #5B8DEF !important;
 }
 
-/* ---- 功能分区的大板块（2026-08-10）----
-   原来板块标题是 10.5px 的小灰字，跟上面「功能分区」那行说明字一模一样，
-   底下的菜单项反而是 12.5px —— 能点开的那一行成了最不起眼的一行，
-   所以看不出哪个板块可以展开。改法：
-     · 板块标题比菜单项更大更亮（13px 白灰、600），说明字仍是 10.5px 小灰字，一眼分得开
-     · 箭头挪到最右边、放大，展开时转 90 度并变白
-     · 展开后板块标题变纯白，子项左边一条竖线串起来，一看就知道是它下面的
-   只动颜色字号线条，菜单项一个没加没减。 */
 .a3-shell .dashboard-sidebar-group-header {
   color: #C7CFDD !important;
   border: none !important;
@@ -234,7 +167,7 @@
   border-left: 2px solid transparent !important;
   background: rgba(255, 255, 255, 0.05) !important;
 }
-/* 箭头：推到最右边（DOM 里它排在文字前面，靠 order 换到后面） */
+
 .a3-shell .dashboard-sidebar-group-arrow {
   color: #6E7789;
   font-size: 11px;
@@ -242,14 +175,14 @@
   margin-left: auto;
   width: auto;
 }
-/* 展开中的板块：标题纯白、箭头变白 —— 一眼看得出现在开着的是哪个 */
+
 .a3-shell .dashboard-sidebar-group-collapsible.is-expanded .dashboard-sidebar-group-header {
   color: #fff !important;
 }
 .a3-shell .dashboard-sidebar-group-collapsible.is-expanded .dashboard-sidebar-group-arrow {
   color: #fff;
 }
-/* 子项：缩进 + 左边一条暗竖线，看得出是挂在这个板块下面的 */
+
 .a3-shell .dashboard-sidebar-group-collapsible .dashboard-sidebar-group-body-inner {
   margin-left: 9px;
   padding-left: 6px;
@@ -259,10 +192,6 @@
   font-size: 12px;
 }
 
-/* 底部两个按钮：深底上用描边，不要实心块。
-   ⚠️ 必须写 !important：这个文件里有一条「所有 button 默认刷成藏青」的通用规则
-   （搜 "override old global button background rule"），它靠 4 个 :not() 把权重抬得很高，
-   普通的 .a3-shell .xxx 压不过它。带行内样式的按钮不受影响（行内样式优先级更高）。 */
 .a3-shell .dashboard-password-button,
 .a3-shell .dashboard-logout-button {
   border: 1px solid rgba(255, 255, 255, 0.14) !important;
@@ -279,14 +208,12 @@
   border-color: rgba(255, 255, 255, 0.28) !important;
 }
 
-/* ---- 右侧内容 ---- */
 .a3-shell .dashboard-content {
   height: 100vh;
   padding: 0 20px 20px;
   background: var(--ground);
 }
 
-/* 顶栏：细、贴顶、不要圆角卡片感 */
 .a3-shell .glass-topbar {
   border: none;
   border-bottom: 1px solid var(--line);
@@ -308,16 +235,10 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* 内容区不要圆角卡片 + 阴影（用户说过不要圆角卡片、不要花里胡哨） */
 .a3-shell .table-card {
   box-shadow: none;
 }
 
-/* ---- A3 表格外观（2026-08-09）----
-   ⚠️ 只换颜色、字号、线条，**不动任何列宽和排版** —— 用户明确说过
-   「运单的排版不要改，现在线上的排版就很好了，只要改 UI 设计」。
-   必须写 !important：表头/单元格是行内样式（三端共用的 gridThStyle / gridTdStyle），
-   行内样式优先级比 CSS 高。直接改那两个对象就是三端一起变，所以只能在这里盖。 */
 .a3-table thead tr {
   background: var(--line-2) !important;
   border-bottom: 1px solid var(--line) !important;
@@ -331,55 +252,28 @@
 .a3-table tbody tr {
   border-bottom: 1px solid var(--line-2) !important;
 }
-/* ⚠️ 只管「自己没指定颜色」的格子。
-   2026-08-10：这条原来是无条件 !important，铺到全站 39 张表之后，
-   把那些**故意写成淡灰**的格子（日期、单位、「暂无数据」）一并刷成了深色，
-   主次就没了。加两个 :not() 排除掉自带 color 的格子 —— 浏览器把行内样式
-   序列化成 "…; color: xxx"，所以按 "; color:" 和开头的 "color:" 两种情况排除。 */
+
 .a3-table tbody td:not([style*="; color:"]):not([style^="color:"]) {
   color: var(--ink) !important;
 }
-/* 整行底色变浅，文字颜色不变；不用斑马纹 */
+
 .a3-table tbody tr:hover td {
   background: var(--brand-soft) !important;
 }
 
-/* 搜索按钮：只在 A3 页面里从亮蓝换成藏青。
-   组件本身（ShipmentSearch）管理员端也在用，那边保持原样。 */
 .a3-shell .ship-search-btn {
   background: var(--brand) !important;
   color: var(--panel) !important;
 }
 
-/* ==========================================================================
-   运单列表顶部那排数字（ShipmentOverviewStrip）
-   --------------------------------------------------------------------------
-   2026-08-29 老板要「均匀铺开，好看点」。原来是 `display:flex; gap:40`，
-   四个数字全挤在最左边，右边空掉四分之三 —— 宽屏（实测管理员端 1460px、
-   员工端 1666px）尤其明显。
-
-   改成 space-between：四个间距相等，最后一个「本月已签收」的右边缘正好落在
-   容器右边，跟下面那排搜索框的右边缘对齐，整行不留空带。
-
-   ⚠️ 为什么写在 css 里而不是继续用内联 style：
-      内联 style 写不了 @media。手机上一行塞四个会挤（数字变成四位数时更挤），
-      必须能单独给窄屏换成 2×2，所以只能落到样式表里。
-   ⚠️ 故意不加 .a3-shell 前缀。三端目前都是 variant="a3"（RoleShell.tsx:307
-      才挂那个 class），所以加不加都生效 —— 但这个组件是三端共用的，
-      哪天有页面不是 a3 变体，带前缀就会只在部分端生效，
-      而「改一个漏另外两个」正是这个组件当初被抽出来要避免的事。
-   ========================================================================== */
 .ship-overview-strip {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
-  gap: 14px 24px;   /* 行距 14 / 列距 24。space-between 会把多余空间摊进列距，
-                       这个 24 是「挤到放不下时」的最小列距 */
+  gap: 14px 24px;
   margin: 2px 0 14px;
 }
 
-/* 窄屏：一行四个会挤成一团，换成 2×2 的格子，左对齐更好读。
-   820px 这个断点是跟着本文件里已有的两处 @media (max-width: 820px) 走的。 */
 @media (max-width: 820px) {
   .ship-overview-strip {
     display: grid;
@@ -388,25 +282,10 @@
   }
 }
 
-/* ==========================================================================
-   A3 交互反馈（2026-08-09）
-   --------------------------------------------------------------------------
-   用户要「互动感更强，但保留流畅度」。所以这里只做**你动它就有回应**的反馈，
-   不做花式动画：
-     · 全部 ≤ 160ms，鼠标抬起来动画就结束了，不会挡着你干活
-     · 只动 background / border / color / transform 这几样（不触发重排，不掉帧）
-     · 一个像素的位移都不产生布局变化，表格不会抖
-   ⚠️ 只写在 .a3-shell 里，且只挑具体元素 —— 批量导入那块用户说过不要动画，
-   这里的选择器碰不到它。
-   ⚠️ 系统开了「减弱动态效果」全部自动关掉，见文件末尾那个 media 块。
-   ========================================================================== */
-
-/* 表格行：鼠标划过整行变浅，淡入淡出而不是硬切 */
 .a3-table tbody tr td {
   transition: background-color 130ms ease-out;
 }
 
-/* 行里的「详情 / 物流轨迹 / 打印」：下划线从中间展开，不是一下子冒出来 */
 .a3-shell .row-act {
   position: relative;
   transition: color 130ms ease-out;
@@ -434,8 +313,6 @@
   transform: translateY(1px);
 }
 
-/* 工具栏按钮（导出 Excel / 批量创建 / 创建订单 / 搜索）：
-   悬停微微抬起，按下去沉一下 —— 手感来自这一下「沉」 */
 .a3-shell .table-card ~ * button,
 .a3-shell .ship-search-btn,
 .a3-shell section > div > div > button {
@@ -452,7 +329,6 @@
   box-shadow: none;
 }
 
-/* 左侧导航：那条亮线从上往下拉出来，不是硬闪 */
 .a3-shell .dashboard-sidebar-link {
   transition: color 140ms ease-out, background-color 140ms ease-out;
   position: relative;
@@ -480,7 +356,6 @@
   background: #5b8def;
 }
 
-/* 输入框 / 下拉：点进去有一圈藏青的光，知道自己在哪一格 */
 .a3-shell input:not([type="checkbox"]):not([type="radio"]),
 .a3-shell select {
   transition: border-color 140ms ease-out, box-shadow 140ms ease-out;
@@ -492,7 +367,6 @@
   box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.12);
 }
 
-/* 勾选框：点中时轻轻放大一下再回来 */
 .a3-shell input[type="checkbox"] {
   transition: transform 110ms cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -502,7 +376,6 @@
 .a3-shell input[type="checkbox"]:checked {
   transform: scale(1.08);
 }
-
 
 @media (prefers-reduced-motion: reduce) {
   .a3-table tbody tr td,
@@ -529,9 +402,6 @@
   background: var(--brand-soft) !important;
 }
 
-/* 「详情 物流轨迹 打印」三个按钮按 14px 间距会把「打印」挤出格子，这里收到 10px。
-   ⚠️ 必须写成 .a3-row 里面才生效 —— .row-act 本身是管理员端和客户端一起在用的，
-   直接改那个就是三端一起变，这一轮说好只改运单列表一个页面。 */
 .a3-row .row-act {
   margin-right: 10px !important;
 }
@@ -551,17 +421,6 @@ body {
   font-family: "Inter", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
   background: var(--bg-page);
   -webkit-font-smoothing: antialiased;
-}
-
-/* grain texture */
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  opacity: 0.02;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
 main.dashboard-layout {
@@ -637,13 +496,7 @@ main {
 .dashboard-layout {
   display: flex;
   gap: 16px;
-  /* 2026-08-11：原来是 padding: 24px，四周留一圈空白，深色侧边栏贴不到浏览器边上，
-     看着像没铺满。改成 0 让外壳撑满整个窗口。
-     ⚠️ 只去掉**最外面**这一圈：
-       - gap: 16px 保留 —— 侧边栏和内容之间的间距不变
-       - .dashboard-content 自己的 padding（0 20px 20px）保留 —— 内容不会贴边
-     所以内部排版一点没动，只是整体往外撑了 24px。
-     手机端本来就是 padding: 0（见文件末尾的 @media），这下两边一致了。 */
+
   padding: 0;
   max-width: none;
   width: 100%;
@@ -716,9 +569,6 @@ main {
   transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-/* ---- 功能分区：展开 / 收起 ---- */
-
-/* 可折叠分组自己管间距：靠父级 gap 的话，收起时头和空内容之间还会留一道缝 */
 .dashboard-sidebar-group-collapsible {
   gap: 0;
 }
@@ -731,8 +581,7 @@ main {
   overflow: hidden;
   max-height: 0;
   opacity: 0;
-  /* 360px 足够放下最长的分组（7 项约 215px）；留余量但别太大，
-     太大收起时前半段会像卡住不动 */
+
   transition: max-height 220ms cubic-bezier(0.22, 1, 0.36, 1), opacity 140ms ease-out;
 }
 
@@ -748,10 +597,6 @@ main {
   padding-top: 4px;
 }
 
-/* 展开时菜单项依次滑进来，每项晚 25ms，最后一项也就晚 150ms，不拖沓。
-   位移用独立的 translate 属性、不用 transform：
-   动画 fill 到最后会一直占着 transform，鼠标悬停的放大就被压掉了。
-   translate 和 scale 是两个属性，互不打架。 */
 @keyframes sidebarItemIn {
   from { opacity: 0; translate: -6px 0; }
   to   { opacity: 1; translate: none; }
@@ -769,8 +614,6 @@ main {
 .dashboard-sidebar-group-collapsible.is-expanded .dashboard-sidebar-link:nth-child(6) { animation-delay: 125ms; }
 .dashboard-sidebar-group-collapsible.is-expanded .dashboard-sidebar-link:nth-child(n + 7) { animation-delay: 150ms; }
 
-/* 鼠标放上去轻微放大。
-   从左边缘放大，不然右侧会顶出侧边栏；幅度只有 2%，多了就晃眼。 */
 .dashboard-sidebar-group-collapsible .dashboard-sidebar-group-header,
 .dashboard-sidebar-group-collapsible .dashboard-sidebar-link {
   transform-origin: left center;
@@ -782,18 +625,16 @@ main {
 }
 
 .dashboard-sidebar-group-collapsible .dashboard-sidebar-group-header:hover {
-  /* 分区标题是整行宽度，放太多会顶到边框，1.5% 够了 */
+
   scale: 1.015;
 }
 
-/* 按下去回弹一点，手感上有「点到了」的反馈 */
 .dashboard-sidebar-group-collapsible .dashboard-sidebar-link:active,
 .dashboard-sidebar-group-collapsible .dashboard-sidebar-group-header:active {
   scale: 0.99;
   transition-duration: 80ms;
 }
 
-/* 系统开了「减弱动态效果」就直接不放动画 */
 @media (prefers-reduced-motion: reduce) {
   .dashboard-sidebar-group-arrow,
   .dashboard-sidebar-group-body { transition: none; }
@@ -854,7 +695,6 @@ main {
   color: var(--danger);
 }
 
-/* 「修改密码」按钮：跟退出账号同样的形状，只是 hover 不是红色 */
 .dashboard-password-button {
   width: 100%;
   border: 1px solid var(--hairline);
@@ -886,11 +726,7 @@ main {
 
 .glass-topbar {
   position: sticky;
-  /* 2026-08-07：原来是 top:12px —— 滚动时顶栏停在距容器顶 12px 处，
-     那 12px 是空的，表格内容从这条缝里穿过去，看着像顶栏「镂空」了。
-     实测：缝里露出的就是表格单元格（"10箱"）。改成 0 贴顶，缝没了。
-     ⚠️ 改这个数字会连带影响 staff/container-loading 那个 sticky 柜号列
-     （它靠顶栏底边定位），那边的 top 也要一起调。顶栏实测高 42px。 */
+
   top: 0;
   z-index: 20;
   border: 1px solid var(--hairline);
@@ -916,27 +752,10 @@ main {
   color: var(--text-sub);
 }
 
-/* 桌面端隐藏手机元素 */
 .mobile-hamburger,
 .sidebar-close-btn,
 .sidebar-overlay { display: none; }
 
-/* ── 电脑端：收起 / 展开侧边栏 ─────────────────────────────────────────────
-   运单列表那些表很宽，收起侧边栏能多出 296px（280 宽 + 16 间距）。
-   记住选择：localStorage 的 xt_sidebar_collapsed（RoleShell.tsx）。
-
-   ⚠️ 整段包在 min-width:901px 里，**绝不能拿到手机端去**：
-   手机端侧边栏是抽屉（position:fixed + translateX），靠 .open 推出来。
-   要是收起状态在那边也 display:none，用户在电脑上收过一次，
-   换手机打开时点汉堡就什么都不出来 —— 而且他不会知道是为什么。 */
-/* ⚠️ 两个按钮都用**绝对定位**，一个都不许进文档流。
-   第一版把它们当普通子元素放进去，实测（a3 外观、1440px）三处排版被改掉：
-     · 侧边栏：给标题包一层 flex → a3 品牌标题的 20px 下边距被挤成 12px，
-       整排菜单跟着上移 3px；
-     · 顶栏：多一个 flex 子元素 → space-between 把标题挤到正中间（x 从 208 跳到 654）；
-     · 顶栏高度 44px → 53px —— 装柜页（staff/container-loading）那根 sticky 柜号列
-       是按「顶栏高 42px」定位的，顶栏一变高就对不齐。
-   绝对定位之后这三处的数字和改动前一模一样（有前后对比实测）。 */
 .sidebar-collapse-btn,
 .sidebar-expand-btn {
   display: none;
@@ -948,12 +767,7 @@ main {
   padding: 0;
   border: 1px solid var(--hairline);
   border-radius: 6px;
-  /* ⚠️ 这个 !important 不能省。第 1216 行有条兜底规则
-     `button:not([style*="background: transparent"]) { background: var(--brand); color: var(--white) }`，
-     它把页面上**每一个** button 都刷成品牌蓝，而且选择器特异性比类名高。
-     不躲开的话，这两个小按钮会长成两颗实心蓝主按钮
-     （A3 规格是「一个页面只留一个实心主按钮」）。
-     旁边的 .mobile-hamburger 躲的是同一条规则，写法一致。 */
+
   background: transparent !important;
   color: var(--ink-mute) !important;
   font-size: 12px;
@@ -967,8 +781,6 @@ main {
   color: var(--brand) !important;
 }
 
-/* A3 的侧边栏是深藏青，收起按钮得用浅色，否则深灰字贴在深底上看不见。
-   展开按钮在顶栏（浅底），沿用上面的深灰即可，不用改。 */
 .a3-shell .sidebar-collapse-btn {
   border-color: rgba(255, 255, 255, 0.22);
   color: var(--navdark-ink) !important;
@@ -977,12 +789,12 @@ main {
   border-color: rgba(255, 255, 255, 0.45);
   color: #fff !important;
 }
-/* 侧边栏是 position:sticky（手机端是 fixed），本身就是绝对定位的参照物 */
+
 .sidebar-collapse-btn {
   top: 12px;
   right: 8px;
 }
-/* 顶栏是 position:sticky，同理 */
+
 .sidebar-expand-btn {
   left: 2px;
   top: 50%;
@@ -993,17 +805,14 @@ main {
   .sidebar-collapse-btn {
     display: inline-flex;
   }
-  /* 收起来之后，侧边栏整个不占位。
-     .dashboard-layout 的 gap 只作用在「还在的」子元素之间，
-     所以这里不用另外去掉那 16px 间距。 */
+
   .dashboard-layout.sidebar-collapsed .dashboard-sidebar {
     display: none;
   }
   .dashboard-layout.sidebar-collapsed .sidebar-expand-btn {
     display: inline-flex;
   }
-  /* 给那个绝对定位的展开按钮腾出位置，免得压住标题。
-     只在收起时加，展开时顶栏的内边距一点不变。 */
+
   .dashboard-layout.sidebar-collapsed .glass-topbar {
     padding-left: 32px;
   }
@@ -1185,7 +994,6 @@ select:focus {
   box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.12);
 }
 
-/* ---- buttons ---- */
 button {
   position: relative;
   transition: background-color 0.14s ease, box-shadow 0.14s ease;
@@ -1209,7 +1017,6 @@ button:disabled {
   opacity: 0.55;
 }
 
-/* primary button — only one per page */
 .btn-primary {
   border: none;
   background: var(--brand);
@@ -1222,7 +1029,6 @@ button:disabled {
   box-shadow: var(--shadow-sm);
 }
 
-/* secondary button — white bg + grey border */
 .btn-secondary {
   border: 1px solid var(--hairline);
   background: var(--canvas);
@@ -1235,7 +1041,6 @@ button:disabled {
   box-shadow: var(--shadow-xs);
 }
 
-/* ghost button — transparent */
 .btn-ghost {
   border: 1px solid transparent;
   background: transparent;
@@ -1246,7 +1051,6 @@ button:disabled {
   background: rgba(0, 0, 0, 0.03);
 }
 
-/* link button — used for table action links */
 .btn-link {
   border: none;
   background: transparent;
@@ -1266,7 +1070,6 @@ button:disabled {
   background: rgba(185, 28, 28, 0.06);
 }
 
-/* override old global button background rule */
 button:not([style*="background: var(--white)"]):not([style*="background:var(--white)"]):not([style*="background: transparent"]):not([style*="background:transparent"]) {
   background: var(--brand);
   color: var(--white);
@@ -1285,7 +1088,6 @@ pre {
   overflow-x: auto;
 }
 
-/* ---- typography ---- */
 .biz-title {
   letter-spacing: 0.2px;
   text-wrap: balance;
@@ -1304,7 +1106,6 @@ p {
   text-wrap: pretty;
 }
 
-/* ---- tags / badges ---- */
 .badge-line {
   display: inline-flex;
   align-items: center;
@@ -1318,7 +1119,6 @@ p {
   font-weight: 500;
 }
 
-/* tag variants */
 .tag {
   display: inline-flex;
   align-items: center;
@@ -1349,7 +1149,6 @@ p {
   border-color: rgba(6, 95, 70, 0.12);
 }
 
-/* ---- search card ---- */
 .search-card {
   border: 1px solid var(--hairline);
   border-radius: 12px;
@@ -1383,7 +1182,6 @@ p {
   margin-top: 12px;
 }
 
-/* ---- table card ---- */
 .table-card {
   border: 1px solid var(--hairline);
   border-radius: 12px;
@@ -1418,13 +1216,11 @@ table tbody tr:hover {
   background: rgba(0, 0, 0, 0.02);
 }
 
-/* numbers: right-align */
 .col-num {
   text-align: right !important;
   font-variant-numeric: tabular-nums;
 }
 
-/* ---- panels ---- */
 .step-guide {
   display: flex;
   flex-wrap: wrap;
@@ -1592,7 +1388,6 @@ table tbody tr:hover {
   animation-delay: 0.3s;
 }
 
-/* ---- loading / empty ---- */
 .shell-skeleton {
   display: grid;
   gap: 12px;
@@ -1629,80 +1424,6 @@ table tbody tr:hover {
   text-align: center;
 }
 
-.empty-ill {
-  margin: 0 auto 10px auto;
-  width: 170px;
-  border-radius: 10px;
-  background: rgba(30, 58, 138, 0.04);
-  border: 1px solid rgba(30, 58, 138, 0.08);
-  padding: 10px;
-}
-
-.empty-truck {
-  position: relative;
-  width: 92px;
-  height: 34px;
-  margin: 0 auto 10px auto;
-}
-
-.empty-truck-cabin {
-  position: absolute;
-  left: 0;
-  top: 8px;
-  width: 24px;
-  height: 16px;
-  border-radius: 5px;
-  background: var(--brand);
-}
-
-.empty-truck-body {
-  position: absolute;
-  left: 20px;
-  top: 4px;
-  width: 60px;
-  height: 20px;
-  border-radius: 6px;
-  background: #1e3a8a;
-}
-
-.empty-truck-wheel {
-  position: absolute;
-  bottom: 0;
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  background: #14171D;
-}
-
-.empty-truck-wheel-left {
-  left: 20px;
-}
-
-.empty-truck-wheel-right {
-  right: 10px;
-}
-
-.empty-route {
-  width: 120px;
-  height: 4px;
-  border-radius: 999px;
-  background: #E4E6EC;
-  margin: 0 auto 8px auto;
-}
-
-.empty-line {
-  height: 8px;
-  border-radius: 999px;
-  background: #E4E6EC;
-  margin: 6px 0 0 0;
-}
-
-.empty-line.short {
-  width: 70%;
-  margin-left: auto;
-  margin-right: auto;
-}
-
 .empty-title {
   font-weight: 600;
   color: var(--brand);
@@ -1714,7 +1435,6 @@ table tbody tr:hover {
   font-size: 13px;
 }
 
-/* ---- toast ---- */
 .biz-toast {
   position: fixed;
   top: 18px;
@@ -1737,7 +1457,6 @@ table tbody tr:hover {
   background: var(--danger);
 }
 
-/* ---- order cards ---- */
 .order-card {
   border: 1px solid var(--hairline);
   border-radius: 12px;
@@ -1930,7 +1649,6 @@ table tbody tr:hover {
   color: var(--text-sub);
 }
 
-/* ---- prealert ---- */
 .prealert-card {
   border: 1px solid rgba(146, 64, 14, 0.15);
   border-radius: 10px;
@@ -1985,7 +1703,6 @@ table tbody tr:hover {
   word-break: break-word;
 }
 
-/* ---- client sections ---- */
 .client-main-section {
   position: relative;
   overflow: hidden;
@@ -2045,43 +1762,8 @@ table tbody tr:hover {
   background: var(--brand);
 }
 
-.section-divider {
-  height: 12px;
-  margin: 14px 0 16px 0;
-  border-radius: 999px;
-  background: var(--hairline);
-}
+/* .section-divider / .section-label* 已删（2026-09-06）：客户页那块分区 JSX 09-05 拆掉后没人再用 */
 
-.section-label {
-  display: inline-flex;
-  align-items: center;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 700;
-  padding: 4px 10px;
-  margin-bottom: 10px;
-  letter-spacing: 0.2px;
-}
-
-.section-label-primary {
-  background: rgba(30, 58, 138, 0.06);
-  color: var(--brand);
-  border: 1px solid rgba(30, 58, 138, 0.12);
-}
-
-.section-label-secondary {
-  background: rgba(0, 0, 0, 0.03);
-  color: var(--text-sub);
-  border: 1px solid var(--hairline);
-}
-
-.section-label-query {
-  background: rgba(217, 119, 6, 0.06);
-  color: var(--c-amber-deep);
-  border: 1px solid rgba(217, 119, 6, 0.12);
-}
-
-/* ---- keyframes ---- */
 @keyframes toastSlide {
   from {
     opacity: 0;
@@ -2147,7 +1829,6 @@ table tbody tr:hover {
   }
 }
 
-/* calendar icon hide */
 .client-arrived-date-input::-webkit-calendar-picker-indicator {
   display: none;
   -webkit-appearance: none;
@@ -2175,12 +1856,6 @@ button:disabled {
   cursor: not-allowed !important;
 }
 
-/* ==========================================================================
-   登录 / 注册页（UI 改版样板）
-   左图右表的分栏结构，窄屏自动堆叠。颜色一律取 :root 里的标准色，
-   不再各页面手写色值。
-   ========================================================================== */
-
 .auth-shell {
   min-height: 100vh;
   display: grid;
@@ -2188,7 +1863,6 @@ button:disabled {
   background: var(--white);
 }
 
-/* 左侧图片：只取图片左半边，避开素材本身的拼接缝 */
 .auth-visual {
   position: relative;
   background-image: url(/images/login-bg.jpg);
@@ -2226,7 +1900,6 @@ button:disabled {
   line-height: 1.7;
 }
 
-/* 右侧表单区 */
 .auth-panel {
   display: flex;
   align-items: center;
@@ -2339,7 +2012,6 @@ button:disabled {
   font-weight: 600;
 }
 
-/* 已登录提示卡 */
 .auth-resume {
   border: 1px solid var(--hairline);
   border-radius: var(--radius-md);
@@ -2354,7 +2026,6 @@ button:disabled {
   color: var(--ink-legacy);
 }
 
-/* 窄屏：图片收成顶部横幅 */
 @media (max-width: 820px) {
   .auth-shell {
     grid-template-columns: 1fr;
@@ -2363,8 +2034,7 @@ button:disabled {
   .auth-visual {
     min-height: 170px;
     padding: 22px;
-    /* 素材本身是两张图拼的，中间有缝。竖屏时整张图会被完整显示出来，
-       所以放大到 2.3 倍并靠左，只露出左半边的货轮，把接缝裁掉 */
+
     background-size: 230% auto;
     background-position: 8% center;
   }
@@ -2374,20 +2044,12 @@ button:disabled {
   .auth-visual-text p {
     font-size: 13px;
   }
-  /* 表单顶到图片下方，别在中间留一大块空白 */
+
   .auth-panel {
     align-items: flex-start;
     padding: 28px 22px 44px;
   }
 }
-
-/* ==========================================================================
-   数据表格统一观感（UI 改版）
-   页面里每个 th/td 都写死了行内样式，行内样式优先级高于普通 CSS，
-   所以这里只能用 !important 才盖得住。好处是不必去改几百个格子，
-   真出问题删掉这一段就能完全还原。
-   ⚠️ 只改观感：列的顺序、宽度、内容一律不动。
-   ========================================================================== */
 
 .table-card {
   border: none !important;
@@ -2396,7 +2058,6 @@ button:disabled {
   box-shadow: none !important;
 }
 
-/* 表头：去掉灰底和粗分割线，只留一条细线 */
 .table-card table thead tr {
   background: transparent !important;
   border-bottom: 1px solid var(--line-soft) !important;
@@ -2411,9 +2072,6 @@ button:disabled {
   border-bottom: none !important;
 }
 
-/* 数据行：只用一条细横线分隔，行距放松一点。
-   :not([colspan]) 很关键 —— 展开的详情面板是一个跨列的大格子，
-   它自己要 padding:0 来放内部布局，不能被这里的内边距覆盖掉。 */
 .table-card table tbody td:not([colspan]) {
   border-bottom: 1px solid #eceae6 !important;
   padding: 11px 10px 11px 0 !important;
@@ -2427,7 +2085,6 @@ button:disabled {
   background: #fcfbf9 !important;
 }
 
-/* 数字列右对齐 + 等宽数字，一列扫下来能比大小 */
 .table-card table td.col-num,
 .table-card table th.col-num {
   text-align: right !important;
@@ -2435,7 +2092,6 @@ button:disabled {
   font-variant-numeric: tabular-nums;
 }
 
-/* 操作列的按钮：统一成黑色文字链接，不要各种描边和底色 */
 .table-card table td .row-act,
 .row-act {
   border: none !important;
@@ -2457,19 +2113,13 @@ button:disabled {
   margin-right: 0 !important;
 }
 
-/* ==========================================================================
-   运单详情：全屏弹窗
-   挂载点在表格的跨列格子里，靠 position:fixed 脱离表格布局铺满屏幕，
-   所以那一行不会被撑高。
-   ========================================================================== */
-
 .detail-overlay {
   position: fixed;
   inset: 0;
   z-index: 9998;
-  /* 翻书效果要看得见，底色必须比"页面"暗，不然白纸翻在白底上没有立体感 */
+
   background: rgba(18, 18, 24, 0.38);
-  /* 透视距离：越小翻转越夸张，1800px 是比较克制的角度 */
+
   perspective: 1800px;
 }
 
@@ -2480,7 +2130,6 @@ button:disabled {
   background: var(--white);
 }
 
-/* 标题栏吸顶，往下滚也能随时关掉 */
 .detail-head {
   position: sticky;
   top: 0;
@@ -2529,9 +2178,6 @@ button:disabled {
   .detail-head { padding: 12px 16px; }
 }
 
-/* 弹窗进出场：翻书
-   页面绕左边缘转进来，像翻开一页。遮罩自己只做淡入，
-   真正在转的是 .detail-panel。全程只用 opacity + transform，走显卡合成。 */
 @keyframes overlayFadeIn {
   from { opacity: 0; }
   to   { opacity: 1; }
@@ -2560,7 +2206,7 @@ button:disabled {
   transform-origin: left center;
   backface-visibility: hidden;
   animation: pageTurnIn 320ms cubic-bezier(0.22, 1, 0.36, 1);
-  /* 翻转时左边缘投一道阴影，像书页离开书脊 */
+
   box-shadow: -18px 0 40px rgba(0, 0, 0, 0.18);
 }
 
@@ -2573,7 +2219,6 @@ button:disabled {
   animation: pageTurnOut 200ms cubic-bezier(0.55, 0, 1, 0.45) forwards;
 }
 
-/* 系统开了「减弱动态效果」就直接不放动画 */
 @media (prefers-reduced-motion: reduce) {
   .detail-overlay,
   .detail-overlay .detail-panel,
@@ -2581,7 +2226,6 @@ button:disabled {
   .detail-overlay.is-closing .detail-panel { animation: none; }
 }
 
-/* 物流轨迹弹窗：居中的卡片，进场用同一条曲线，但加一点缩放更贴合「弹出」的感觉 */
 @keyframes trackPanelIn {
   from { opacity: 0; transform: translateY(8px) scale(0.985); }
   to   { opacity: 1; transform: none; }
@@ -2595,10 +2239,6 @@ button:disabled {
   .track-overlay { animation: none; }
 }
 
-/* ==========================================================================
-   尾端派送工作台
-   只在 .lastmile-workspace 下生效，避免影响其他 A3 页面。
-   ========================================================================== */
 .a3-shell .lastmile-workspace {
   color: var(--ink);
   font-family: var(--a3-font);
@@ -3167,7 +2807,6 @@ button:disabled {
   background: #9ca3af;
 }
 
-/* 2026-08-26：进度条已删（旁边就写着 3/5）。那条 margin-bottom 是给进度条留的位置，一并去掉。 */
 .a3-shell .lastmile-wd-progress > div:first-child {
   display: flex;
   justify-content: space-between;
@@ -3180,7 +2819,6 @@ button:disabled {
   color: var(--ink-2);
   font-family: var(--a3-mono);
 }
-
 
 .a3-shell .lastmile-trip-meta {
   display: grid;
@@ -3587,8 +3225,6 @@ button:disabled {
   min-width: 0;
 }
 
-
-/* 全站旧规则会给每个 header/section 强制加边框和阴影；尾端内部是语义分组，在本工作台内局部复位。 */
 .a3-shell section.lastmile-workspace,
 .a3-shell .lastmile-workspace section,
 .a3-shell .lastmile-workspace header,
@@ -3622,11 +3258,859 @@ button:disabled {
   background: var(--panel) !important;
 }
 
-/* 全局 reset 用了 !important；把工作台真正需要的层级分隔线明确补回来。 */
 .a3-shell .lastmile-workspace .lastmile-wd-header {
   border-bottom: 1px solid var(--line) !important;
 }
 
 .a3-shell .lastmile-workspace .lastmile-customer-group + .lastmile-customer-group {
   border-top: 1px solid var(--line) !important;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) {
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-heading, .shipment-heading) {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-heading, .shipment-heading) h2 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.4;
+  font-weight: 650;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-heading, .shipment-heading) p {
+  margin: 6px 0 0;
+  color: var(--ink-2);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-primary-actions, .shipment-primary-actions),
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-pagination, .shipment-pagination) {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-workbench-button, .workbench-button),
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-page-size, .shipment-page-size) select,
+:is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-actions button {
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel) !important;
+  padding: 7px 12px;
+  color: var(--ink-2) !important;
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-workbench-button--primary, .workbench-button--primary),
+:is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-actions .shipment-search-submit {
+  border-color: var(--brand);
+  background: var(--brand) !important;
+  color: #fff !important;
+}
+
+/* 「清空条件」：身板跟上面 .shipment-search-actions button 同一套，没条件可清时压淡（2026-09-05 复查补：原来没写禁用态） */
+:is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-actions .shipment-search-reset:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 筛选摘要右侧的操作提示：比计数弱一档 */
+:is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-hint {
+  color: var(--ink-3, var(--ink-2));
+  font-size: 12px;
+  font-weight: 400;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-workbench-button, .workbench-button):hover:not(:disabled),
+:is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-actions button:hover:not(:disabled) {
+  border-color: var(--brand);
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-workbench-button, .workbench-button):disabled,
+:is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-actions button:disabled {
+  color: var(--ink-2) !important;
+  background: var(--line-2) !important;
+  opacity: .65;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) button:focus-visible,
+:is(.staff-shipment-workbench, .shipment-workbench) input:focus-visible,
+:is(.staff-shipment-workbench, .shipment-workbench) select:focus-visible,
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-table-scroll, .shipment-table-scroll):focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) .ship-overview-strip {
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) .ship-overview-strip > div > div:last-child {
+  color: var(--ink-2) !important;
+  font-size: 12px !important;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-basic {
+  display: grid;
+  grid-template-columns: repeat(4,minmax(0,1fr)) auto;
+  align-items: end;
+  gap: 10px;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-label,
+:is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-date-range > span {
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-field input,
+:is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-field select {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  box-sizing: border-box;
+  border: 1px solid var(--line) !important;
+  border-radius: 6px !important;
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 20px;
+  padding: 7px 10px !important;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  grid-column: auto;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-advanced {
+  display: grid;
+  grid-template-columns: repeat(4,minmax(0,1fr));
+  gap: 12px;
+  padding: 14px 0;
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-date-range {
+  grid-column: span 2;
+  min-width: 0;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-date-pair {
+  display: grid;
+  grid-template-columns: repeat(2,minmax(0,1fr));
+  align-items: end;
+  gap: 8px;
+  margin-top: 5px;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-date-pair > span {
+  padding-bottom: 10px;
+  color: var(--ink-2);
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-summary {
+  margin-top: 8px;
+  padding: 0;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-summary-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
+  line-height: 1.6;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-summary-count {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-filter-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-filter {
+  min-width: 0;
+  max-width: 100%;
+  line-height: 1.7;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-filter-label {
+  margin-right: 4px;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-filter-value {
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-results, .shipment-results) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 16px 0 12px;
+  scroll-margin-top: 64px;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-results-meta, .shipment-results-meta) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  font-size: 13px;
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-selection, .shipment-selection) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--brand);
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-selection, .shipment-selection) button {
+  border: 0;
+  background: transparent !important;
+  color: var(--brand) !important;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  padding: 6px 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-page-number, .shipment-page-number) {
+  color: var(--ink-2);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-export, .shipment-export) {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-export-dates, .shipment-export-dates) {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-export-dates, .shipment-export-dates) > span {
+  padding-bottom: 9px;
+  color: var(--ink-2);
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-export-dates, .shipment-export-dates) label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-export-dates, .shipment-export-dates) input {
+  box-sizing: border-box;
+  min-width: 0;
+  width: 144px;
+  min-height: 36px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  line-height: 20px;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-export-note, .shipment-export-note) {
+  padding-bottom: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-scroll-hint, .shipment-scroll-hint) {
+  margin: 12px 0 8px;
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-copy-notice, .shipment-copy-notice) {
+  font-size: 12px;
+  color: var(--brand);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-copy-notice, .shipment-copy-notice):not(:empty) {
+  margin-bottom: 8px;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-table-scroll, .shipment-table-scroll) {
+  max-width: 100%;
+  max-height: min(68vh,720px);
+  overflow: auto;
+  border: 1px solid var(--line) !important;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-table-scroll, .shipment-table-scroll) > table > thead > tr > th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #f5f6f8 !important;
+  color: var(--ink-2) !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  padding: 10px 6px !important;
+  box-shadow: inset 0 -1px var(--line);
+  letter-spacing: 0;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-table-scroll, .shipment-table-scroll) > table > tbody > tr[data-selected] > td {
+  background: var(--brand-soft) !important;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-table-scroll, .shipment-table-scroll) > table > tbody > tr > td:last-child > .row-act {
+  min-height: 32px;
+  margin-right: 10px;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-table-scroll, .shipment-table-scroll) input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 4px;
+  accent-color: var(--brand);
+  vertical-align: middle;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-copy, .shipment-copy) {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0;
+  border: 0;
+  background: transparent !important;
+  color: var(--brand) !important;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: copy;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-copy, .shipment-copy):hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-product-count, .shipment-product-count) {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-workbench-sr-only, .workbench-sr-only) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0,0,0,0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (min-width:1600px) {
+  :is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-basic {
+    grid-template-columns: repeat(4,minmax(0,1fr)) auto;
+  }
+
+  :is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-actions {
+    grid-column: auto;
+  }
+
+}
+
+@media (max-width:1100px) {
+  :is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-actions {
+    grid-column: 1/-1;
+  }
+
+  :is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-basic,
+  :is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-advanced {
+    grid-template-columns: repeat(2,minmax(0,1fr));
+  }
+
+}
+
+@media (max-width:600px) {
+  :is(.staff-shipment-workbench, .shipment-workbench) {
+    padding: 12px;
+  }
+
+  :is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-heading, .shipment-heading) {
+    gap: 12px;
+  }
+
+  :is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-primary-actions, .shipment-primary-actions) {
+    width: 100%;
+  }
+
+  :is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-primary-actions, .shipment-primary-actions) > button {
+    flex: 1;
+  }
+
+  :is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-workbench-button, .workbench-button),
+  :is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-page-size, .shipment-page-size) select,
+  :is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-actions button {
+    min-height: 42px;
+  }
+
+  :is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-pagination, .shipment-pagination) {
+    gap: 6px;
+    width: 100%;
+  }
+
+  :is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-page-number, .shipment-page-number) {
+    display: none;
+  }
+
+  :is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-pagination, .shipment-pagination) > button {
+    flex: 1;
+    padding: 7px 8px;
+  }
+
+  :is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-page-size, .shipment-page-size) select {
+    padding: 7px 4px;
+  }
+
+  :is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-export-dates, .shipment-export-dates) {
+    width: 100%;
+  }
+
+  :is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-export-dates, .shipment-export-dates) label {
+    flex: 1;
+  }
+
+  :is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-export-dates, .shipment-export-dates) input {
+    width: 100%;
+    min-height: 42px;
+  }
+
+  :is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-export-note, .shipment-export-note) {
+    flex: 1;
+    padding-bottom: 0;
+  }
+
+}
+
+@media (max-width:520px) {
+  :is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-basic,
+  :is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-advanced {
+    grid-template-columns: minmax(0,1fr);
+  }
+
+  :is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-date-range {
+    grid-column: span 1;
+  }
+
+  :is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-field input,
+  :is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-field select {
+    min-height: 42px;
+    font-size: 16px;
+  }
+
+  :is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-actions {
+    gap: 6px;
+  }
+
+  :is(.staff-shipment-workbench, .shipment-workbench) .shipment-search-actions button {
+    padding: 7px 8px;
+    font-size: 12px;
+  }
+
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-table-scroll, .shipment-table-scroll) > table {
+  display: table;
+  overflow: visible;
+}
+
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-export-error, .shipment-export-error) {
+  margin: 8px 0;
+  color: var(--bad);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.shipment-product-table {
+  display: table;
+  overflow: visible;
+  flex-shrink: 0;
+}
+table.a3-table.shipment-product-table > tbody > tr > td {
+  padding: 2px 6px !important;
+  height: 24px;
+  line-height: 19px;
+  box-sizing: border-box;
+}
+:is(.staff-shipment-workbench, .shipment-workbench) :is(.staff-shipment-table-scroll, .shipment-table-scroll) > table > tbody > tr[data-selected] .shipment-product-table td {
+  background: var(--brand-soft) !important;
+}
+:is(.staff-shipment-workbench, .shipment-workbench) .workbench-button--danger {
+  color: var(--bad) !important;
+  background: var(--panel) !important;
+  border-color: var(--bad);
+}
+:is(.staff-shipment-workbench, .shipment-workbench) .workbench-button--danger:disabled {
+  color: var(--ink-2) !important;
+  background: var(--line-2) !important;
+  border-color: var(--line);
+}
+
+.dashboard-layout .dashboard-sidebar :is(a, button):focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+.dashboard-layout .glass-topbar button:focus-visible,
+.detail-panel :is(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 3px;
+}
+.detail-panel {
+  min-width: 0;
+  outline: none;
+}
+.detail-body {
+  padding: 18px 24px 28px;
+  overflow-wrap: anywhere;
+}
+.detail-panel .detail-close {
+  min-width: 36px;
+  min-height: 36px;
+  background: var(--panel) !important;
+  color: var(--ink-2) !important;
+}
+
+.auth-shell {
+  min-width: 0;
+  min-height: 100dvh;
+}
+.auth-panel, .auth-form, .auth-field {
+  min-width: 0;
+}
+.auth-shell .auth-btn:disabled {
+  background: var(--line-2) !important;
+  color: var(--ink-2) !important;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+.auth-shell :is(button, a):focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 3px;
+}
+.auth-password-field {
+  position: relative;
+}
+.auth-password-field input {
+  padding-right: 76px;
+}
+.auth-shell .auth-password-toggle {
+  position: absolute;
+  right: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  min-height: 36px;
+  min-width: 60px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent !important;
+  color: var(--brand) !important;
+  font-size: 13px;
+  cursor: pointer;
+}
+.auth-shell .auth-error {
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+/* 大写锁定提示：小字、弱色、贴在密码框底下（2026-09-05 复查补：原来没写样式，是裸段落） */
+.auth-shell .auth-field-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+@media (max-width: 900px) {
+  .dashboard-layout .mobile-hamburger,
+  .dashboard-layout .sidebar-close-btn {
+    min-width: 42px;
+    min-height: 42px;
+  }
+}
+@media (max-width: 600px) {
+  .detail-body {
+    padding: 14px 12px 24px;
+  }
+  .detail-panel .detail-close {
+    min-width: 42px;
+    min-height: 42px;
+  }
+  .auth-field input {
+    min-height: 46px;
+    font-size: 16px;
+  }
+}
+
+.shipment-workbench .client-status-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0 16px;
+}
+.shipment-workbench .client-status-groups > button[aria-pressed="true"] {
+  border-color: var(--brand);
+  background: var(--brand) !important;
+  color: var(--panel) !important;
+  font-weight: 600;
+}
+.shipment-workbench .client-order-search {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: end;
+  gap: 10px;
+}
+.shipment-workbench .client-search-field,
+.client-prealert-dialog .client-prealert-field {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 5px;
+}
+.shipment-workbench .client-search-field > span,
+.client-prealert-dialog .client-prealert-field > span {
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.shipment-workbench .client-search-field :is(input, select),
+.client-prealert-dialog .client-prealert-field :is(input, select) {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  margin: 0;
+  padding: 7px 10px !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 6px !important;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px !important;
+  line-height: 20px;
+}
+.shipment-workbench .client-order-search-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.shipment-workbench .client-order-search-hint {
+  margin: 8px 0 14px;
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.client-prealert-dialog {
+  overscroll-behavior: contain;
+}
+.client-prealert-dialog fieldset {
+  min-width: 0;
+}
+.client-prealert-dialog .client-prealert-products {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--ground);
+}
+.client-prealert-dialog .client-prealert-product {
+  position: relative;
+  min-width: 0;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.client-prealert-dialog .client-prealert-product-heading {
+  min-height: 30px;
+  padding-right: 44px;
+  margin-bottom: 8px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.7;
+}
+.client-prealert-dialog .client-prealert-product-fields {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  align-items: end;
+  gap: 10px;
+}
+.client-prealert-dialog .client-prealert-field--wide {
+  grid-column: span 2;
+}
+.client-prealert-dialog .client-prealert-field output {
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--ground);
+  color: var(--ink-2);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.client-prealert-dialog .client-prealert-product > button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  min-width: 36px;
+  min-height: 36px;
+  background: var(--panel) !important;
+  color: var(--bad) !important;
+  font-size: 18px !important;
+}
+.client-prealert-dialog .client-prealert-products > button {
+  min-height: 36px;
+  padding: 7px 12px !important;
+}
+.client-prealert-dialog .client-prealert-dimensions,
+.client-prealert-dialog .client-prealert-totals {
+  display: grid;
+  gap: 10px;
+  align-items: end;
+  min-width: 0;
+}
+.client-prealert-dialog .client-prealert-dimensions {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.client-prealert-dialog .client-prealert-totals {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+@media (max-width: 1100px) {
+  .shipment-workbench .client-order-search {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .client-prealert-dialog .client-prealert-product-fields {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 600px) {
+  .shipment-workbench .client-status-groups {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+  .shipment-workbench .client-status-groups > button {
+    min-width: 0;
+    padding: 7px 8px;
+  }
+  .client-prealert-dialog.shipment-workbench {
+    padding: 14px !important;
+    max-height: 92dvh !important;
+  }
+  .client-prealert-dialog .client-prealert-products,
+  .client-prealert-dialog .client-prealert-product {
+    padding: 10px;
+  }
+  .client-prealert-dialog .client-prealert-product-heading {
+    min-height: 36px;
+  }
+  .client-prealert-dialog .client-prealert-product-fields,
+  .client-prealert-dialog .client-prealert-totals {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .client-prealert-dialog :is(.client-prealert-product, .client-prealert-products) > button {
+    min-width: 42px;
+    min-height: 42px;
+  }
+  .client-prealert-dialog .client-prealert-field :is(input, select) {
+    min-height: 42px;
+    font-size: 16px !important;
+  }
+}
+@media (max-width: 520px) {
+  .shipment-workbench .client-order-search {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .shipment-workbench .client-search-field :is(input, select) {
+    min-height: 42px;
+    font-size: 16px !important;
+  }
+  .shipment-workbench .client-order-search-actions > button {
+    flex: 1;
+  }
 }

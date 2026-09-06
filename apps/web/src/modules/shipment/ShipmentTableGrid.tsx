@@ -1,20 +1,4 @@
-/* ==========================================================================
-   运单列表的表格排版（员工端 / 管理员端 / 客户端共用）
-   ------------------------------------------------------------------------
-   问题：品名、箱数、长宽高这些列都是「一个产品一行」，生产库里最多的一张运单
-   有 43 个产品，整行会被撑成 43 行高；各列行高又不完全一样，越往下越错位。
-
-   做法：
-     1. 跟着产品走的那几列合并成一个跨列格子，里面放一张固定列宽的小表，
-        整块一起滚 —— 分开写就会各滚各的，滚两下就对不上了；
-     2. 这一块固定高度（DETAIL_VISIBLE_ROWS 行），所有运单行高度一致；
-     3. 外层表格用 table-layout: fixed + colgroup，外层列宽和小表列宽用同一组
-        数字，两边永远对齐；
-     4. 留一列不写宽度当「弹性列」，屏幕比表格宽时多出来的空间全给它，
-        其余列宽度就永远是写死的那几个数，小表才对得死。
-
-   ⚠️ 三端都从这里取样式。要改排版就改这个文件，别在各自页面里另写一套。
-   ========================================================================== */
+/* 产品列共用固定宽度及 24px 行高；三行以内居中，更多产品由同一内表滚动。 */
 
 import type { OrderProductItem } from "../../services/business-api";
 
@@ -104,7 +88,7 @@ export function ProductDetailCell({ widths, rows }: { widths: readonly number[];
           justifyContent: needsScroll ? "flex-start" : "center",
         }}
       >
-        <table className="a3-table" style={{ width: totalWidth, borderCollapse: "collapse", tableLayout: "fixed", fontSize: 13 }}>
+        <table className="a3-table shipment-product-table" style={{ width: totalWidth, borderCollapse: "collapse", tableLayout: "fixed", fontSize: 13 }}>
           <colgroup>
             {widths.map((w, i) => <col key={i} style={{ width: w }} />)}
           </colgroup>

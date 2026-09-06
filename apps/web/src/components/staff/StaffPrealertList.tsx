@@ -2,7 +2,7 @@
 
 import type { OrderItem, OrderProductImageItem } from "../../services/business-api";
 import type { PrealertEditDraft } from "../../modules/staff/types";
-import { buildPrealertDraft } from "../../modules/staff/utils";
+import { buildPrealertDraft, formatMetric } from "../../modules/staff/utils";
 import { formatCny } from "../../modules/billing/billing-utils";
 import EmptyStateCard from "../../modules/layout/EmptyStateCard";
 import PrealertSearch from "../../modules/shipment/PrealertSearch";
@@ -196,8 +196,8 @@ export default function StaffPrealertList(props: StaffPrealertListProps) {
                         <InfoItem label="仓库" value={props.warehouseOptions.find((w) => w.id === displayDraft.warehouseId)?.label ?? displayDraft.warehouseId ?? "-"} />
                         <InfoItem label="箱数/袋数" value={`${displayDraft.packageCount} ${displayDraft.packageUnit}`} />
                         <InfoItem label="产品数量" value={String(displayDraft.productQuantity)} />
-                        <InfoItem label="重量" value={`${displayDraft.weightKg ?? "-"} kg`} />
-                        <InfoItem label="体积" value={`${displayDraft.volumeM3 ?? "-"} m3`} />
+                        <InfoItem label="重量" value={`${formatMetric(displayDraft.weightKg, 2)} kg`} />
+                        <InfoItem label="体积" value={`${formatMetric(displayDraft.volumeM3, 3)} m3`} />
                         <InfoItem label="国内快递单号" value={displayDraft.domesticTrackingNo ?? "-"} />
                         <InfoItem label="运输方式" value={displayDraft.transportMode === "sea" ? "海运" : "陆运"} />
                         <InfoItem label="发货日期" value={displayDraft.shipDate} />

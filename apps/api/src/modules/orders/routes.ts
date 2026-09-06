@@ -48,7 +48,7 @@ export async function loadOrderProducts(companyId: string, orderIds: string[]): 
 
 import { EXCEPTION_STATUSES } from "../shipments/status-flow";
 import { BusinessError } from "../core/business-error";
-import { classifyStatusGroup, type ClientStatusGroup } from "../../../../../packages/shared-types/shipment-status";
+import { classifyStatusGroup, matchesShipmentListFilter, type ClientStatusGroup } from "../../../../../packages/shared-types/shipment-status";
 
 /**
  * 客户端订单五分类。判断逻辑在 packages/shared-types 的 classifyStatusGroup，
@@ -1001,6 +1001,10 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       completed: ["delivered", "closed"],
     };
     const wantedGroups = statusGroup ? GROUP_ALIAS[statusGroup] : undefined;
+    /* 2026-09-05：「异常」是关注维度不是分组（和在途可重叠），单独认。
+       原先客户端为了不依赖后端重启，整页拉全量再前端筛——每 10 秒轮询几 MB 白传。
+       这里认了之后每页只回异常单；客户端仍保留一道前端筛，老后端不认这个参数时结果也对。 */
+    const wantAttention = statusGroup === "attention";
     const itemName = req.query.itemName?.trim();
     const transportMode = req.query.transportMode?.trim();
     const trackingNo = req.query.trackingNo?.trim();
@@ -1070,6 +1074,7 @@ export function registerOrderRoutes(app: MinimalHttpApp): void {
       .filter((o) => !domesticTrackingNo || o.domesticTrackingNo === domesticTrackingNo)
       .filter((o) => {
         // shipments 已用 take:1 限制为 1 条（父单优先），直接取其状态算四分类
+        if (wantAttention) return matchesShipmentListFilter(o.shipments[0]?.currentStatus, "attention");
         if (!wantedGroups) return true;
         return wantedGroups.includes(classifyClientStatusGroup(o.shipments[0]?.currentStatus));
       });

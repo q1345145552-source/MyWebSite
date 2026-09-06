@@ -2,6 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
+import { matchesShipmentListFilter } from "../../../../../packages/shared-types/shipment-status";
 import { AT_WAREHOUSE_STATUSES, COMPLETED_STATUSES, CLIENT_STATUS_GROUP_ZH } from "../../../../../packages/shared-types/shipment-status";
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { AiKnowledgeItem } from "../../../../../packages/shared-types/entities";
@@ -16,6 +17,8 @@ import { openPrintLabel } from "../../modules/shipment/ShipmentPrintLabel";
 import { openShipmentTrack } from "../../modules/shipment/ShipmentTrackModal";
 import LastmileDispatchWorkspace from "../../modules/lastmile/LastmileDispatchWorkspace";
 import type { LastmileOrderItem, LastmileShipmentOption } from "../../modules/lastmile/types";
+import ShipmentExportPanel from "../../modules/shipment/ShipmentExportPanel";
+import ShipmentStatusGroups, { type ShipmentGroupFilter } from "../../modules/shipment/ShipmentStatusGroups";
 import { ShipmentOverviewStrip } from "../../modules/shipment/ShipmentOverviewStrip";
 import LastmileAddressPanel from "../../components/lastmile/LastmileAddressPanel";
 import DetailModal from "../../modules/layout/DetailModal";
@@ -30,9 +33,9 @@ import {
   gridThStyle,
   gridTdStyle,
 } from "../../modules/shipment/ShipmentTableGrid";
-import { apiBaseUrl, authHeaders, parseApiResponse } from "../../services/core-api";
+import { apiBaseUrl, authHeaders, parseApiResponse, fetchWithSession as fetch } from "../../services/core-api";
 import { DEFAULT_SHIPPING_PRICES, INSPECTION_SURCHARGE, SENSITIVE_SURCHARGE } from "../../../../../packages/shared-types/constants";
-import { shipmentStatusZh, transportModeLabel, warehouseLabelFromId } from "../../modules/staff/utils";
+import { formatMetric, shipmentStatusZh, transportModeLabel, warehouseLabelFromId } from "../../modules/staff/utils";
 import { SHIPMENT_STATUS_FILTER_OPTIONS } from "../../modules/shipment/shipment-status";
 import ShippingConfig from "../../components/admin/ShippingConfig";
 import { createRequestGate } from "../../modules/shared/request-gate";
@@ -188,6 +191,14 @@ const ORDER_TABLE_MIN_WIDTH = ORDER_COL_WIDTHS.reduce((a, b) => a + b, 0);
 /** 弹性列＝「备注」（表头第 15 个）。操作列有 5 个按钮，宽度必须写死。 */
 const ORDER_FLEX_COL_INDEX = 14;
 
+const EMPTY_ORDER_SEARCH = {
+  trackingNo: "", domesticTrackingNo: "", clientName: "", warehouseId: "",
+  batchNo: "", itemName: "", packageCount: "", productQuantity: "",
+  weightKg: "", volumeM3: "", arrivedAtFrom: "", arrivedAtTo: "", logisticsStatus: "",
+  containerNo: "", transportMode: "", receiverAddress: "", shipDateFrom: "", shipDateTo: "",
+  receivableAmount: "", statusRaw: "",
+};
+
 /**
  * 编辑运单时「总重量/总体积到底听谁的」的裁决（2026-08-31，排查报告第22条）。
  * 老毛病：只要任何一行产品填了尺寸，手填的总体积就被静默扔掉 —— 三行货仓库只量了
@@ -314,18 +325,56 @@ export default function AdminHomePage() {
   const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set());
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
-  const [orderSearch, setOrderSearch] = useState({
-    trackingNo: "", domesticTrackingNo: "", clientName: "", warehouseId: "",
-    batchNo: "", itemName: "", packageCount: "", productQuantity: "",
-    weightKg: "", volumeM3: "", arrivedAtFrom: "", arrivedAtTo: "", logisticsStatus: "",
-    containerNo: "", transportMode: "", receiverAddress: "", shipDateFrom: "", shipDateTo: "",
-    receivableAmount: "", statusRaw: "",
-  });
+  const [orderSearch, setOrderSearch] = useState(EMPTY_ORDER_SEARCH);
+  const [shipmentGroup, setShipmentGroup] = useState<ShipmentGroupFilter>("all");
+  const [orderCopyNotice, setOrderCopyNotice] = useState("");
+  const [orderExporting, setOrderExporting] = useState(false);
+  const orderExportInFlight = useRef(false);
+  const [orderRefreshing, setOrderRefreshing] = useState(false);
+  const orderRefreshInFlight = useRef(false);
   const [editingOrderId, setEditingOrderId] = useState("");
   const [expandedOrderId, setExpandedOrderId] = useState("");
 
   const [showCreateOrderModal, setShowCreateOrderModal] = useState(false);
   const [showBatchImport, setShowBatchImport] = useState(false);
+  // 读 Excel 的门闩：换文件 / 关弹窗 / 卸载后，慢文件晚到的结果不许回填（2026-09-05 复查：原来手写序号，改用统一门闩）
+  const batchReadGate = useRef(createRequestGate()).current;
+  const [batchFileReading, setBatchFileReading] = useState(false);
+  const [batchFileError, setBatchFileError] = useState("");
+  useEffect(() => () => { batchReadGate.cancel(); }, [batchReadGate]);
+  const [batchTemplateDownloading, setBatchTemplateDownloading] = useState(false);
+  async function downloadAdminBatchTemplate() {
+    if (batchTemplateDownloading) return;
+    setBatchTemplateDownloading(true);
+    try {
+      const XLSX = await import("xlsx");
+      const headers = ["客户ID", "仓库ID", "品名", "箱数", "包装单位", "运输方式", "到仓日期", "国内单号", "泰国收货人", "泰国收货电话", "泰国收货地址"];
+      const ws = XLSX.utils.aoa_to_sheet([headers]);
+      ws["!cols"] = [18, 24, 24, 10, 14, 14, 18, 24, 20, 24, 45].map((wch) => ({ wch }));
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "运单导入模板");
+      const notes = XLSX.utils.aoa_to_sheet([
+        ["管理员批量导入填写说明"],
+        ["填写第一个工作表；每行创建一张运单，请勿修改表头。空白行不会导入，模板不含可误导入的示例订单。"],
+        ["客户ID填写系统已有的客户ID；品名和箱数请填写完整，箱数为正整数。"],
+        ["仓库ID：" + warehouseOptions.map((w) => `${w.label} = ${w.id}`).join("；")],
+        ["包装单位填写 box（箱）或 bag（袋）；运输方式填写 sea（海运）或 land（陆运），不要填写中文代替这些值。"],
+        ["到仓日期按文本填写 YYYY-MM-DD，例如 2026-09-05；不要将单元格改成Excel日期格式。"],
+        ["填写前，请将客户ID、国内单号、电话和到仓日期的单元格格式设为“文本”，保留开头的0与日期原文。"],
+        ["国内单号、泰国收货人、泰国收货电话、泰国收货地址按实际信息填写。"],
+        ["此模板仅用于管理员当前11列导入；员工的多产品批量创建请使用员工端模板，两者不可混用。"],
+        ["填写后上传，先核对预览再确认导入；已成功导入的行请勿重复提交。"],
+      ]);
+      notes["!cols"] = [{ wch: 110 }];
+      XLSX.utils.book_append_sheet(wb, notes, "填写说明");
+      XLSX.writeFile(wb, "管理员运单导入模板.xlsx");
+    } catch (error) {
+      setToast(`模板下载失败：${error instanceof Error ? error.message : "请稍后重试"}`);
+    } finally {
+      setBatchTemplateDownloading(false);
+    }
+  }
+
   const [staffClients, setStaffClients] = useState<Array<{ id: string; name: string }>>([]);
   const [createForm, setCreateForm] = useState({
     clientId: "", warehouseId: "wh_yiwu_01", arrivedAt: new Date().toISOString().slice(0, 10),
@@ -594,8 +643,23 @@ export default function AdminHomePage() {
     );
   }, [clientList, clientSearchQuery]);
 
-  const loadOrders = useCallback(async () => {
-    const list = await fetchAdminOrders();
+  // 运单列表的门闩：10 秒轮询和手动「刷新」都走 loadOrders，慢的旧响应不许盖掉快的新响应（2026-09-05 复查补）
+  const orderListGate = useRef(createRequestGate()).current;
+  /**
+   * 返回值告诉调用方这次结果有没有真的写进列表（Codex 2026-09-06 复核 P2-1）：
+   *   applied = 写了；stale = 被更新的一次请求作废了（数据没写、失败也不抛）。
+   * 手动「刷新」只有 applied 才许说「已刷新」；作废那次的失败也不许冒充新结果的失败。
+   */
+  const loadOrders = useCallback(async (): Promise<"applied" | "stale"> => {
+    const ticket = orderListGate.begin();
+    let list: Awaited<ReturnType<typeof fetchAdminOrders>>;
+    try {
+      list = await fetchAdminOrders();
+    } catch (error) {
+      if (!orderListGate.isCurrent(ticket)) return "stale"; // 旧请求的失败不许污染新结果
+      throw error;
+    }
+    if (!orderListGate.isCurrent(ticket)) return "stale";
     // 按运单号数字降序：YW0001220 > YW0001219
     // 【审查问题 10】原来用 Number() 比大小，超过 15 位会丢精度导致排序乱。
     // 改成先按位数、再按字符串比 —— 纯数字字符串等长时字典序就是数值序，不受长度限制。
@@ -606,6 +670,7 @@ export default function AdminHomePage() {
       return bn.localeCompare(an);
     });
     setOrderList(list);
+    return "applied";
   }, []);
 
   /**
@@ -1082,6 +1147,7 @@ export default function AdminHomePage() {
   const filteredOrderList = useMemo(() => {
     const s = orderSearch;
     return orderList.filter((item) => {
+      if (!matchesShipmentListFilter(item.currentStatus, shipmentGroup)) return false;
       const trackingNo = (item.trackingNo ?? "").toLowerCase();
       const dn = (item.domesticTrackingNo ?? "").toLowerCase();
       const cn = `${item.clientName ?? ""} ${item.clientId ?? ""}`.toLowerCase();
@@ -1121,31 +1187,75 @@ export default function AdminHomePage() {
       if (s.statusRaw && !sr.includes(s.statusRaw.toLowerCase())) return false;
       return true;
     });
-  }, [orderList, orderSearch]);
+  }, [orderList, orderSearch, shipmentGroup]);
+
+  // 按当前结果计数；刷新后失去的勾选项不参与导出，也不回退成「导出全部」。
+  const selectedResultOrders = useMemo(
+    () => filteredOrderList.filter((order) => selectedOrders.has(order.id)),
+    [filteredOrderList, selectedOrders],
+  );
+  const allResultOrdersSelected = filteredOrderList.length > 0 && selectedResultOrders.length === filteredOrderList.length;
+
+  const runOrderSearch = () => {
+    setToast(`共 ${filteredOrderList.length} 条运单`);
+    document.getElementById("admin-order-list-results")?.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+      block: "nearest",
+    });
+  };
+
+  const copyOrderNumber = async (number: string) => {
+    setOrderCopyNotice("");
+    try {
+      await navigator.clipboard.writeText(number);
+      setOrderCopyNotice(`已复制单号 ${number}`);
+    } catch {
+      setOrderCopyNotice(`复制未完成，请手动选择并复制单号 ${number}`);
+    }
+  };
+
+  const refreshOrderList = async () => {
+    if (orderRefreshInFlight.current) return;
+    orderRefreshInFlight.current = true;
+    setOrderRefreshing(true);
+    try {
+      const outcome = await loadOrders();
+      // 被更新的一次请求作废时，只说「被替代」——那次请求可能还没回来、也可能失败，这里不许替它宣布「已更新」
+      // （Codex 2026-09-06 第二轮：R1 手动→R2 轮询→R1 作废→R2 失败，全程列表没变，不能提示更新完成）
+      setToast(outcome === "applied" ? "运单列表已刷新" : "本次刷新已被较新的请求替代");
+    } catch (error) {
+      setMessage(`刷新失败，已保留上次结果：${error instanceof Error ? error.message : "请稍后重试"}`);
+    } finally {
+      orderRefreshInFlight.current = false;
+      setOrderRefreshing(false);
+    }
+  };
 
   const toggleSelectOrder = (id: string) => {
     setSelectedOrders((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   };
   const totalPages = Math.max(1, Math.ceil(filteredOrderList.length / pageSize));
+  useEffect(() => { setCurrentPage((page) => Math.min(page, totalPages)); }, [totalPages]);
   const pagedOrders = useMemo(() => {
     const offset = (currentPage - 1) * pageSize;
     return filteredOrderList.slice(offset, offset + pageSize);
   }, [filteredOrderList, pageSize, currentPage]);
 
   const toggleSelectAllOrders = () => {
-    if (selectedOrders.size === filteredOrderList.length) setSelectedOrders(new Set());
+    if (allResultOrdersSelected) setSelectedOrders(new Set());
     else setSelectedOrders(new Set(filteredOrderList.map((o) => o.id)));
   };
 
+  const [orderExportFeedback, setOrderExportFeedback] = useState("");
   const [exportDateFrom, setExportDateFrom] = useState("");
   const [exportDateTo, setExportDateTo] = useState("");
 
   const exportOrdersToExcel = () => {
-    let source = selectedOrders.size > 0 ? filteredOrderList.filter((o) => selectedOrders.has(o.id)) : filteredOrderList;
-    if (source.length === 0) { setMessage("当前没有可导出的订单数据。"); return; }
+    let source = selectedOrders.size > 0 ? selectedResultOrders : filteredOrderList;
+    if (source.length === 0) { setMessage("当前没有可导出的订单数据。"); setOrderExportFeedback("当前没有可导出的订单数据。"); return; }
     if (exportDateFrom) source = source.filter((o) => (o.shipDate ?? "").slice(0,10) >= exportDateFrom);
     if (exportDateTo) source = source.filter((o) => (o.shipDate ?? "").slice(0,10) <= exportDateTo);
-    if (source.length === 0) { setMessage("所选日期范围内没有订单。"); return; }
+    if (source.length === 0) { setMessage("所选日期范围内没有订单。"); setOrderExportFeedback("所选日期范围内没有订单。"); return; }
     const rows = source.map((o) => ({
       运单号: o.trackingNo ?? "-", 客户: o.clientId ?? "-", 品名: o.itemName,
       运输方式: o.transportMode, 国内单号: o.domesticTrackingNo ?? "-", 柜号: o.batchNo ?? "-",
@@ -1165,6 +1275,26 @@ export default function AdminHomePage() {
     XLSX.utils.book_append_sheet(wb, ws, "订单列表");
     XLSX.writeFile(wb, `订单数据_${new Date().toISOString().slice(0,10)}.xlsx`);
     setToast(`已导出 ${rows.length} 条`);
+    setOrderExportFeedback(`已导出 ${rows.length} 条`);
+  };
+
+  const orderExportDateInvalid = !!(exportDateFrom && exportDateTo && exportDateFrom > exportDateTo);
+  const handleOrderExport = async () => {
+    if (orderExportInFlight.current || orderExportDateInvalid) return;
+    orderExportInFlight.current = true;
+    setOrderExporting(true);
+    setOrderExportFeedback("");
+    try {
+      // 文件生成推迟到下一轮，按钮先进入忙碌状态；同轮点击共用 ref。
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+      exportOrdersToExcel();
+    } catch (error) {
+      setMessage(`导出失败：${error instanceof Error ? error.message : "请稍后重试"}`);
+      setOrderExportFeedback(`导出失败：${error instanceof Error ? error.message : "请稍后重试"}`);
+    } finally {
+      orderExportInFlight.current = false;
+      setOrderExporting(false);
+    }
   };
 
   // 根据导航切换当前显示的功能分区。
@@ -1296,31 +1426,31 @@ export default function AdminHomePage() {
               gap: 12,
             }}
           >
-            <div className={overviewFlash ? "kpi-flash" : ""} style={cardStyle}>
+            <div className={overviewFlash ? "ledger-kpi kpi-flash" : "ledger-kpi"} style={cardStyle}>
               <div style={{ color: "var(--t-strong)", fontSize: 12 }}>员工账号总人数</div>
               <div style={{ fontSize: 22, fontWeight: 700 }}>
                 <CountUpNumber value={overview.staffAccountCount} />
               </div>
             </div>
-            <div className={overviewFlash ? "kpi-flash" : ""} style={cardStyle}>
+            <div className={overviewFlash ? "ledger-kpi kpi-flash" : "ledger-kpi"} style={cardStyle}>
               <div style={{ color: "var(--t-strong)", fontSize: 12 }}>客户账号</div>
               <div style={{ fontSize: 22, fontWeight: 700 }}>
                 <CountUpNumber value={overview.clientAccountCount} />
               </div>
             </div>
-            <div className={overviewFlash ? "kpi-flash" : ""} style={cardStyle}>
+            <div className={overviewFlash ? "ledger-kpi kpi-flash" : "ledger-kpi"} style={cardStyle}>
               <div style={{ color: "var(--t-strong)", fontSize: 12 }}>今日新增订单</div>
               <div style={{ fontSize: 22, fontWeight: 700 }}>
                 <CountUpNumber value={overview.newOrderCountToday} />
               </div>
             </div>
-            <div className={overviewFlash ? "kpi-flash" : ""} style={cardStyle}>
+            <div className={overviewFlash ? "ledger-kpi kpi-flash" : "ledger-kpi"} style={cardStyle}>
               <div style={{ color: "var(--t-strong)", fontSize: 12 }}>在途运单</div>
               <div style={{ fontSize: 22, fontWeight: 700 }}>
                 <CountUpNumber value={overview.inTransitOrderCount} />
               </div>
             </div>
-            <div className={overviewFlash ? "kpi-flash" : ""} style={cardStyle}>
+            <div className={overviewFlash ? "ledger-kpi kpi-flash" : "ledger-kpi"} style={cardStyle}>
               <div style={{ color: "var(--t-strong)", fontSize: 12 }}>当日收货总方数</div>
               <div style={{ fontSize: 22, fontWeight: 700 }}>
                 <CountUpNumber value={overview.receivedVolumeM3Today} decimals={1} />
@@ -1720,125 +1850,165 @@ export default function AdminHomePage() {
       </section>
 
       {/* 4. 运单管理 */}
-      <section id="orders" style={{ ...sectionStyle, display: activeSection === "orders" ? "block" : "none" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-          <h2 style={{ margin: 0, fontSize: 18 }}>{SECTION_LABELS.orders}</h2>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+      <section id="orders" className="shipment-workbench" aria-labelledby="admin-orders-heading" style={{ display: activeSection === "orders" ? "block" : "none" }}>
+        <div className="shipment-heading">
+          <div>
+            <h2 id="admin-orders-heading">{SECTION_LABELS.orders}</h2>
+          </div>
+          <div className="shipment-primary-actions">
             <button
               type="button"
               onClick={() => setOrdersPanelCollapsed((v) => !v)}
-              style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "6px 10px", background: "var(--white)", fontWeight: 600, cursor: "pointer", color: "var(--t-strong)" }}
+              className="workbench-button"
+              aria-expanded={!ordersPanelCollapsed}
+              aria-controls="admin-orders-panel"
             >
-              {ordersPanelCollapsed ? "展开" : "折叠"}
+              {ordersPanelCollapsed ? "展开列表" : "收起列表"}
             </button>
             <button
               type="button"
               onClick={async () => { const clients = await fetchStaffClients(); setStaffClients(clients); setShowCreateOrderModal(true); }}
-              style={{ border: "none", borderRadius: 8, padding: "6px 12px", color: "var(--white)", background: "var(--c-green-3)", cursor: "pointer", fontWeight: 600 }}
+              className="workbench-button workbench-button--primary"
             >
               创建订单
             </button>
             <button
               type="button"
               onClick={() => setShowBatchImport(true)}
-              style={{ border: "1px solid #B45309", borderRadius: 8, padding: "6px 12px", color: "#B45309", background: "#fffbeb", cursor: "pointer", fontWeight: 600 }}
+              className="workbench-button"
             >
-              📥 批量导入
-            </button>
-            <input type="date" value={exportDateFrom} onChange={e => setExportDateFrom(e.target.value)}
-              style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "5px 6px", fontSize: 11 }} title="导出日期从" />
-            <span style={{ fontSize: 11, color: "var(--t-faint)" }}>至</span>
-            <input type="date" value={exportDateTo} onChange={e => setExportDateTo(e.target.value)}
-              style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "5px 6px", fontSize: 11 }} title="导出日期到" />
-            <button type="button" onClick={exportOrdersToExcel}
-              style={{ border: "none", borderRadius: 8, padding: "6px 12px", color: "var(--white)", background: "var(--c-blue)", cursor: "pointer", fontSize: 13 }}>
-              导出Excel
+              批量导入
             </button>
             <button
               type="button"
-              onClick={() => void loadOrders()}
-              disabled={loading}
-              style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "6px 12px", background: "var(--white)", cursor: "pointer", color: "var(--t-strong)" }}
+              onClick={() => void refreshOrderList()}
+              disabled={loading || orderRefreshing}
+              className="workbench-button"
             >
-              刷新
+              {orderRefreshing ? "刷新中…" : "刷新"}
             </button>
           </div>
         </div>
         {/* 顶部一排数字（2026-08-10 用户要三端都有，且「跟员工端一模一样」）。
             用的是员工端同一个接口、同一套口径，三个端对得上数。 */}
         <ShipmentOverviewStrip data={shipmentOverview} />
-        {!ordersPanelCollapsed ? (
+        {ordersPanelCollapsed && <p className="shipment-scroll-hint">列表已收起，点击「展开列表」继续查看、筛选和导出。</p>}
+        <div id="admin-orders-panel" hidden={ordersPanelCollapsed}>
+        <ShipmentStatusGroups
+          value={shipmentGroup}
+          onChange={(group) => {
+            setShipmentGroup(group);
+            setCurrentPage(1);
+            setSelectedOrders(new Set());
+          }}
+        />
           <ShipmentSearch
+            variant="workbench"
             value={orderSearch}
             onChange={(key, val) => {
               /* 换筛选条件必须回到第 1 页（2026-08-31，排查报告第19条）：
                  翻到第 3 页再改条件，新结果只剩 1 页时页面会停在第 3 页，
                  标题写着「共 20 条」表格却一行都没有，像数据丢了。 */
               setCurrentPage(1);
+              setSelectedOrders(new Set());
               setOrderSearch((prev) => ({ ...prev, [key]: val }));
             }}
-            onSearch={() => {}}
+            onSearch={runOrderSearch}
+            onReset={() => {
+              setCurrentPage(1);
+              setSelectedOrders(new Set());
+              setOrderSearch({ ...EMPTY_ORDER_SEARCH });
+            }}
             warehouseOptions={warehouseOptions}
-            logisticsStatusOptions={logisticsStatusOptions as unknown as string[]}
+            logisticsStatusOptions={logisticsStatusOptions}
             inputStyle={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 10px", fontSize: 13 }}
           />
-        ) : null}
-        {ordersPanelCollapsed ? (
-          <p style={{ color: "var(--t-strong)", fontSize: 13, margin: 0 }}>已折叠。点击「展开」可查看订单列表并导出 Excel。</p>
-        ) : filteredOrderList.length === 0 ? (
-          <EmptyStateCard title="暂无匹配订单" description="无匹配结果" />
-        ) : (
-          <>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, padding: "0 8px" }}>
-            <span style={{ fontSize: 13, color: "var(--t-heading)", fontWeight: 500 }}>共 {filteredOrderList.length} 条 · 第 {currentPage}/{totalPages} 页</span>
-            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <button onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} disabled={currentPage <= 1} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 12px", background: currentPage <= 1 ? "var(--s-sunken)" : "var(--white)", color: currentPage <= 1 ? "var(--t-faint)" : "var(--t-heading)", cursor: currentPage <= 1 ? "default" : "pointer", fontSize: 13, fontWeight: 500 }}>上一页</button>
-              <button onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 12px", background: currentPage >= totalPages ? "var(--s-sunken)" : "var(--white)", color: currentPage >= totalPages ? "var(--t-faint)" : "var(--t-heading)", cursor: currentPage >= totalPages ? "default" : "pointer", fontSize: 13, fontWeight: 500 }}>下一页</button>
-              <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 8px", fontSize: 13, color: "var(--t-heading)" }}>
-                {[20, 50, 100, 200].map((n) => <option key={n} value={n}>{n}条/页</option>)}
-              </select>
+          <div className="shipment-results" id="admin-order-list-results">
+            <div className="shipment-results-meta">
+              <span role="status" aria-live="polite">共 <strong>{filteredOrderList.length}</strong> 条 · 第 {currentPage}/{totalPages} 页</span>
+              {selectedOrders.size > 0 && (
+                <span className="shipment-selection">
+                  已选 {selectedResultOrders.length} 条（含其他页）
+                  {selectedOrders.size > selectedResultOrders.length && <span>另有 {selectedOrders.size - selectedResultOrders.length} 条已不在当前结果，不参与导出</span>}
+                  <button type="button" onClick={() => setSelectedOrders(new Set())}>取消选择</button>
+                </span>
+              )}
+            </div>
+            <div className="shipment-results-actions">
+              <ShipmentExportPanel onOpen={() => setOrderExportFeedback("")}>
+                <div className="shipment-export" role="group" aria-label="导出 Excel">
+                  <div className="shipment-export-dates">
+                    <label>导出起始日期<input type="date" value={exportDateFrom} onChange={(e) => { setExportDateFrom(e.target.value); setOrderExportFeedback(""); }} /></label>
+                    <span aria-hidden="true">—</span>
+                    <label>导出截止日期<input type="date" value={exportDateTo} onChange={(e) => { setExportDateTo(e.target.value); setOrderExportFeedback(""); }} /></label>
+                  </div>
+                  <button type="button" className="workbench-button" disabled={filteredOrderList.length === 0 || (selectedOrders.size > 0 && selectedResultOrders.length === 0) || orderExporting || orderExportDateInvalid} aria-describedby="admin-export-note" onClick={() => void handleOrderExport()}>{orderExporting ? "导出中…" : "导出 Excel"}</button>
+                  <span className="shipment-export-note" id="admin-export-note">{selectedOrders.size > 0 ? "仅导出当前结果中的已选运单，再按导出日期筛选" : "未勾选时导出全部筛选结果，再按导出日期筛选"}</span>
+                </div>
+                {orderExportDateInvalid && <p className="shipment-export-error" role="alert">导出起始日期晚于截止日期，请调整日期范围。</p>}
+                <p role="status" aria-live="polite" aria-atomic="true" style={{ margin: orderExportFeedback ? "12px 0 0" : 0, fontSize: 13 }}>{orderExportFeedback}</p>
+              </ShipmentExportPanel>
+              <nav className="shipment-pagination" aria-label="运单列表分页">
+                <button type="button" className="workbench-button" onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} disabled={currentPage <= 1}>上一页</button>
+                <span className="shipment-page-number" aria-hidden="true">{currentPage} / {totalPages}</span>
+                <button type="button" className="workbench-button" onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages}>下一页</button>
+                <label className="shipment-page-size">
+                  <span className="workbench-sr-only">每页条数</span>
+                  <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}>
+                    {[20, 50, 100, 200].map((n) => <option key={n} value={n}>{n} 条/页</option>)}
+                  </select>
+                </label>
+              </nav>
             </div>
           </div>
-          <div style={{ overflowX: "auto" }}>
-            <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed", minWidth: ORDER_TABLE_MIN_WIDTH }}>
+          <p className="shipment-scroll-hint" id="admin-order-scroll-hint">宽表可左右滚动查看完整列；产品超过 3 项时，在产品明细区域上下滚动。调整查询条件会清空勾选并回到第 1 页。</p>
+          <div className="shipment-copy-notice" role="status" aria-live="polite" aria-atomic="true">{orderCopyNotice}</div>
+        {orderList.length === 0 ? (
+          <EmptyStateCard title="暂无运单数据" description="创建订单或刷新后，这里会展示运单记录。" />
+        ) : filteredOrderList.length === 0 ? (
+          <EmptyStateCard title="没有匹配结果" description="请调整查询条件，或点击「清空条件」重新查看全部运单。" />
+        ) : (
+          <div className="table-card shipment-table-scroll" tabIndex={0} role="region" aria-label="运单列表，可横向与纵向滚动" aria-describedby="admin-order-scroll-hint">
+            <table className="a3-table shipment-ledger-table shipment-ledger-table--admin" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed", minWidth: ORDER_TABLE_MIN_WIDTH }}>
               <GridColgroup widths={ORDER_COL_WIDTHS} flexIndex={ORDER_FLEX_COL_INDEX} />
               <thead>
                 <tr style={{ borderBottom: "2px solid var(--l-cool)", textAlign: "left", background: "var(--s-cool-2)" }}>
                   {/* 货型跟着产品走，必须紧挨着国内单号，才能和上面 5 列绑成同一块一起滚 */}
-                  <th style={gridThStyle}>
-                    <input type="checkbox" checked={selectedOrders.size === filteredOrderList.length && filteredOrderList.length > 0} onChange={toggleSelectAllOrders} style={{ cursor: "pointer" }} />
+                  <th className="shipment-pin shipment-pin--check" scope="col" style={gridThStyle}>
+                    <input type="checkbox" aria-label="选择全部筛选结果（包含其他页）" title="选择全部筛选结果，不限当前页" ref={(node) => { if (node) node.indeterminate = selectedResultOrders.length > 0 && !allResultOrdersSelected; }} checked={allResultOrdersSelected} onChange={toggleSelectAllOrders} style={{ cursor: "pointer" }} />
                   </th>
-                  <th style={gridThStyle}>唛头</th>
-                  <th style={gridThStyle}>运单号</th>
-                  <th style={gridThStyle}>到仓日期</th>
-                  <th style={gridThStyle}>品名</th>
-                  <th style={gridThStyle}>箱数</th>
-                  <th style={gridThStyle}>单箱数量</th>
-                  <th style={gridThStyle}>长宽高(cm)</th>
-                  <th style={gridThStyle}>国内单号</th>
-                  <th style={gridThStyle}>货型</th>
-                  <th style={gridThStyle}>总箱数</th>
-                  <th style={gridThStyle}>体积</th>
-                  <th style={gridThStyle}>重量</th>
-                  <th style={gridThStyle}>运输方式</th>
-                  <th style={gridThStyle}>备注</th>
-                  <th style={gridThStyle}>操作</th>
+                  <th className="shipment-pin shipment-pin--mark" scope="col" style={gridThStyle}>唛头</th>
+                  <th className="shipment-pin shipment-pin--number" scope="col" style={gridThStyle}>运单号</th>
+                  <th scope="col" style={gridThStyle}>到仓日期</th>
+                  <th scope="col" style={gridThStyle}>品名</th>
+                  <th scope="col" style={gridThStyle}>箱数</th>
+                  <th scope="col" style={gridThStyle}>单箱数量</th>
+                  <th scope="col" style={gridThStyle}>长宽高(cm)</th>
+                  <th scope="col" style={gridThStyle}>国内单号</th>
+                  <th scope="col" style={gridThStyle}>货型</th>
+                  <th scope="col" style={gridThStyle}>总箱数</th>
+                  <th scope="col" className="shipment-metric" style={gridThStyle}>体积（m³）</th>
+                  <th scope="col" className="shipment-metric" style={gridThStyle}>重量（kg）</th>
+                  <th scope="col" style={gridThStyle}>运输方式</th>
+                  <th scope="col" style={gridThStyle}>备注</th>
+                  <th scope="col" style={gridThStyle}>操作</th>
                 </tr>
               </thead>
               <tbody>
                 {pagedOrders.map((o) => {
                   const detailRows = buildProductDetailRows(o);
+                  const trackingNumber = o.trackingNo;
                   return (
                   <Fragment key={o.id}>
-                  <tr style={{ borderBottom: "1px solid var(--l-cool)", background: expandedOrderId === o.id ? "var(--c-blue-bg)" : "var(--white)" }}>
-                    <td style={gridTdStyle}>
-                      <input type="checkbox" checked={selectedOrders.has(o.id)} onChange={() => toggleSelectOrder(o.id)} style={{ cursor: "pointer" }} />
+                  <tr data-selected={selectedOrders.has(o.id) || undefined} style={{ borderBottom: "1px solid var(--l-cool)", background: expandedOrderId === o.id ? "var(--c-blue-bg)" : "var(--white)" }}>
+                    <td className="shipment-pin shipment-pin--check" style={gridTdStyle}>
+                      <input type="checkbox" aria-label={`选择运单 ${o.trackingNo ?? o.id}`} checked={selectedOrders.has(o.id)} onChange={() => toggleSelectOrder(o.id)} style={{ cursor: "pointer" }} />
                     </td>
-                    <td style={{ ...gridTdStyle, color: "var(--t-strong)", fontWeight: 600 }}>{o.clientId ?? "—"}</td>
-                    <td style={gridTdStyle}>
-                      <div style={{ fontWeight: 600, color: "var(--c-navy)" }}>{o.trackingNo ?? "—"}</div>
+                    <td className="shipment-pin shipment-pin--mark" style={{ ...gridTdStyle, color: "var(--t-strong)", fontWeight: 600 }}>{o.clientId ?? "—"}</td>
+                    <td className="shipment-pin shipment-pin--number" style={gridTdStyle}>
+                      {trackingNumber ? <button type="button" className="shipment-copy" title={`点击复制：${trackingNumber}`} aria-label={`复制单号 ${trackingNumber}`} onClick={() => void copyOrderNumber(trackingNumber)}>{trackingNumber}</button> : <span>{trackingNumber ?? "—"}</span>}
                       {/* 明细块只露 3 行，这里写清楚一共几项，免得漏看 */}
-                      <div style={{ fontSize: 11, color: "#8B94A3", marginTop: 3 }}>共 {detailRows.length} 项</div>
+                      <div className="shipment-product-count">共 {detailRows.length} 项</div>
                     </td>
                     <td style={{ ...gridTdStyle, color: "var(--t-strong)" }}>
                       {o.shipDate ?? o.createdAt.slice(0, 10)}
@@ -1852,8 +2022,8 @@ export default function AdminHomePage() {
                         return total != null ? `${total} 箱` : "—";
                       })()}
                     </td>
-                    <td style={gridTdStyle}>{totalVolumeOf(o) ?? "—"}</td>
-                    <td style={gridTdStyle}>{totalWeightOf(o) ?? "—"}</td>
+                    <td style={gridTdStyle} className="shipment-metric">{formatMetric(totalVolumeOf(o), 3)}</td>
+                    <td style={gridTdStyle} className="shipment-metric">{formatMetric(totalWeightOf(o), 2)}</td>
                     <td style={gridTdStyle}>{transportModeLabel(o.transportMode)}</td>
                     <td style={{ ...gridTdStyle, fontSize: 12 }} title={o.remark || ""}>{o.remark || ""}</td>
                     <td style={gridTdStyle}>
@@ -1905,14 +2075,14 @@ export default function AdminHomePage() {
                       <button
                         type="button"
                         onClick={() => openShipmentTrack(o.trackingNo ?? o.id)}
-                        style={{ border: "none", background: "transparent", color: "var(--c-blue)", cursor: "pointer", fontWeight: 600, padding: 0, marginLeft: 8 }}
+                        className="row-act"
                       >
                         物流轨迹
                       </button>
                       <button
                         type="button"
                         onClick={() => openPrintLabel({ marks: o.clientName ?? o.clientId ?? "—", packageCount: o.packageCount ?? "—", trackingNo: o.trackingNo ?? "", itemName: o.itemName, productQuantity: o.productQuantity, transportMode: o.transportMode, products: (o.products ?? []).map(p => ({ itemName: p.itemName, packageCount: p.packageCount })) })}
-                        style={{ border: "none", background: "transparent", color: "var(--c-green-3)", cursor: "pointer", fontWeight: 600, padding: 0, marginLeft: 8 }}
+                        className="row-act"
                       >
                         打印
                       </button>
@@ -2050,8 +2220,8 @@ export default function AdminHomePage() {
               </tbody>
             </table>
           </div>
-          </>
         )}
+        </div>
       </section>
 
       {/* 入库与标签工具 */}
@@ -2077,7 +2247,7 @@ export default function AdminHomePage() {
                   if (!l || !w || !h) { setCalcResult("请填写长宽高"); return; }
                   const volM3 = (l * w * h * q) / 1_000_000;
                   const weightEst = volM3 * 167;
-                  setCalcResult(`${volM3.toFixed(3)} m³（≈ ${weightEst.toFixed(1)} kg）`);
+                  setCalcResult(`${volM3.toFixed(3)} m³（≈ ${weightEst.toFixed(2)} kg）`);
                 }} style={{ border: "none", borderRadius: 6, padding: "6px 12px", background: "var(--c-blue)", color: "var(--white)", cursor: "pointer", fontSize: 12 }}>计算</button>
               </div>
               {calcResult && <div style={{ fontSize: 14, fontWeight: 600, color: "var(--c-green-3)" }}>{calcResult}</div>}
@@ -2741,17 +2911,40 @@ export default function AdminHomePage() {
             </div>
             {!batchConfirmed ? (
               <>
+                <div style={{ marginBottom: 12 }}>
+                  <button type="button" className="workbench-button" style={{ minHeight: 40, border: "1px solid var(--l-strong)", borderRadius: 4, padding: "8px 12px", background: "var(--white)", color: "var(--t-strong)", fontSize: 13, cursor: "pointer" }} disabled={batchTemplateDownloading} onClick={() => void downloadAdminBatchTemplate()}>{batchTemplateDownloading ? "下载中…" : "下载模板"}</button>
+                </div>
                 <input type="file" accept=".xlsx,.xls,.csv" onChange={async (e) => {
-                  const f = e.target.files?.[0]; if (!f) return;
-                  setBatchFileName(f.name);
-                  const XLSX = await import("xlsx");
-                  const data = await f.arrayBuffer();
-                  const wb = XLSX.read(data);
-                  const ws = wb.Sheets[wb.SheetNames[0]];
-                  const rows = XLSX.utils.sheet_to_json<any>(ws);
-                  setBatchRows(rows);
+                  const file = e.currentTarget.files?.[0];
+                  if (!file) return;
+                  e.currentTarget.value = "";
+                  const readTicket = batchReadGate.begin();
+                  setBatchFileName(file.name);
+                  setBatchRows([]);
+                  setBatchConfirmed(false);
+                  setBatchFileError("");
+                  setBatchFileReading(true);
+                  try {
+                    const XLSX = await import("xlsx");
+                    const data = await file.arrayBuffer();
+                    if (!batchReadGate.isCurrent(readTicket)) return;
+                    const wb = XLSX.read(data);
+                    const ws = wb.Sheets[wb.SheetNames[0]];
+                    if (!ws) throw new Error("文件中没有工作表");
+                    const rows = XLSX.utils.sheet_to_json<any>(ws);
+                    setBatchRows(rows);
+                    if (rows.length === 0) setBatchFileError("文件中没有可导入的数据，请填写模板后重新上传。");
+                  } catch {
+                    if (!batchReadGate.isCurrent(readTicket)) return;
+                    setBatchRows([]);
+                    setBatchFileError("文件读取失败，请检查文件内容并使用系统模板重新上传。");
+                  } finally {
+                    if (batchReadGate.isCurrent(readTicket)) setBatchFileReading(false);
+                  }
                 }} style={{ marginBottom: 12, fontSize: 12 }} />
-                {batchRows.length > 0 && (
+                {batchFileReading && <p role="status" style={{ fontSize: 13 }}>正在读取 {batchFileName}，读取完成后再确认导入。</p>}
+                {batchFileError && <p role="alert" style={{ fontSize: 13, color: "var(--c-red-deep)" }}>{batchFileError}</p>}
+                {!batchFileReading && batchRows.length > 0 && (
                   <div style={{ marginBottom: 12 }}>
                     <div style={{ fontSize: 12, marginBottom: 4 }}>预览（{batchRows.length} 条）：</div>
                     <div style={{ maxHeight: 200, overflow: "auto", fontSize: 11, border: "1px solid var(--l-soft)", borderRadius: 6 }}>
@@ -2805,7 +2998,7 @@ export default function AdminHomePage() {
               </div>
             )}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-              <button onClick={() => { setShowBatchImport(false); setBatchRows([]); setBatchConfirmed(false); setBatchFileName(""); setBatchDone(false); setBatchFailures([]); setBatchProgress({ current: 0, success: 0, fail: 0 }); }} style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 14px", background: "var(--white)", cursor: "pointer" }}>{batchDone ? "关闭" : "取消"}</button>
+              <button onClick={() => { batchReadGate.cancel(); setBatchFileReading(false); setBatchFileError(""); setShowBatchImport(false); setBatchRows([]); setBatchConfirmed(false); setBatchFileName(""); setBatchDone(false); setBatchFailures([]); setBatchProgress({ current: 0, success: 0, fail: 0 }); }} style={{ border: "1px solid var(--l-strong)", borderRadius: 8, padding: "8px 14px", background: "var(--white)", cursor: "pointer" }}>{batchDone ? "关闭" : "取消"}</button>
               {/* 导入跑完就把「开始导入」收起来，防止手抖再点一次把成功的整批建重 */}
               {batchConfirmed && !batchDone && (
                 <button disabled={batchLoading} onClick={async () => {

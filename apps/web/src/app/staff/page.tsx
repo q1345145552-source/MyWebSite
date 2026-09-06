@@ -1,11 +1,14 @@
 "use client";
 
+import { matchesShipmentListFilter } from "../../../../../packages/shared-types/shipment-status";
 import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { formatCny } from "../../modules/billing/billing-utils";
 import ShipmentSearch from "../../modules/shipment/ShipmentSearch";
 import { openPrintLabel } from "../../modules/shipment/ShipmentPrintLabel";
 import { openShipmentTrack } from "../../modules/shipment/ShipmentTrackModal";
+import ShipmentExportPanel from "../../modules/shipment/ShipmentExportPanel";
+import ShipmentStatusGroups, { type ShipmentGroupFilter } from "../../modules/shipment/ShipmentStatusGroups";
 import { ShipmentOverviewStrip } from "../../modules/shipment/ShipmentOverviewStrip";
 import {
   GridColgroup,
@@ -25,7 +28,7 @@ import EmptyStateCard from "../../modules/layout/EmptyStateCard";
 import RoleShell from "../../modules/layout/RoleShell";
 import DetailModal from "../../modules/layout/DetailModal";
 import Toast from "../../modules/layout/Toast";
-import { apiBaseUrl, authHeaders, parseApiResponse } from "../../services/core-api";
+import { apiBaseUrl, authHeaders, parseApiResponse, fetchWithSession as fetch } from "../../services/core-api";
 import { createRequestGate } from "../../modules/shared/request-gate";
 import LastmileAddressPanel from "../../components/lastmile/LastmileAddressPanel";
 import {
@@ -124,6 +127,30 @@ const BATCH_MAX_ROWS = 2000;
 /** 错误清单最多显示多少条（其余靠「复制全部」带走）。2026-08-29 加 */
 const BATCH_MAX_SHOWN_ERRORS = 200;
 
+/** 清空查询只重置现有筛选字段，不改日期或运输状态口径。 */
+const EMPTY_SHIPMENT_SEARCH = {
+    batchNo: "",
+    clientName: "",
+    itemName: "",
+    trackingNo: "",
+    domesticTrackingNo: "",
+    packageCount: "",
+    productQuantity: "",
+    weightKg: "",
+    volumeM3: "",
+    arrivedAtFrom: "",
+    arrivedAtTo: "",
+    warehouseId: "",
+    logisticsStatus: "",
+    containerNo: "",
+    transportMode: "",
+    receiverAddress: "",
+    shipDateFrom: "",
+    shipDateTo: "",
+    receivableAmount: "",
+    statusRaw: "",
+  };
+
 function productDim(
   products: Array<{ lengthCm?: number | null; widthCm?: number | null; heightCm?: number | null }> | undefined,
   key: "lengthCm" | "widthCm" | "heightCm",
@@ -174,30 +201,17 @@ export default function StaffHomePage() {
   const [prealertConfirmedDrafts, setPrealertConfirmedDrafts] = useState<Record<string, PrealertEditDraft>>({});
   const [editingPrealertId, setEditingPrealertId] = useState<string | null>(null);
   const [createStepDone, setCreateStepDone] = useState(false);
-  const [shipmentSearch, setShipmentSearch] = useState({
-    batchNo: "",
-    clientName: "",
-    itemName: "",
-    trackingNo: "",
-    domesticTrackingNo: "",
-    packageCount: "",
-    productQuantity: "",
-    weightKg: "",
-    volumeM3: "",
-    arrivedAtFrom: "",
-    arrivedAtTo: "",
-    warehouseId: "",
-    logisticsStatus: "",
-    containerNo: "",
-    transportMode: "",
-    receiverAddress: "",
-    shipDateFrom: "",
-    shipDateTo: "",
-    receivableAmount: "",
-    statusRaw: "",
-  });
+  const [shipmentSearch, setShipmentSearch] = useState(EMPTY_SHIPMENT_SEARCH);
+  const [shipmentGroup, setShipmentGroup] = useState<ShipmentGroupFilter>("all");
+  const [copyNotice, setCopyNotice] = useState("");
+  const [exporting, setExporting] = useState(false);
+  const exportInFlight = useRef(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showBatchImport, setShowBatchImport] = useState(false);
+  // 读 Excel 的门闩：换文件 / 关弹窗 / 卸载后，慢文件晚到的结果不许回填（2026-09-05 复查：原来手写序号，改用统一门闩）
+  const batchReadGate = useRef(createRequestGate()).current;
+  const [batchFileReading, setBatchFileReading] = useState(false);
+  useEffect(() => () => { batchReadGate.cancel(); }, [batchReadGate]);
   const [batchRows, setBatchRows] = useState<StaffBatchOrder[]>([]);
   const [batchSourceRowCount, setBatchSourceRowCount] = useState(0);
   /**
@@ -1078,6 +1092,7 @@ export default function StaffHomePage() {
     const statusRawKeyword = shipmentSearch.statusRaw.trim().toLowerCase();
 
     return shipments.filter((item) => {
+      if (!matchesShipmentListFilter(item.currentStatus, shipmentGroup)) return false;
       const batchNo = (item.batchNo ?? "").toLowerCase();
       const clientName = `${item.clientName ?? ""} ${item.clientId ?? ""}`.toLowerCase();
       const itemName = (item.itemName ?? "").toLowerCase();
@@ -1122,14 +1137,34 @@ export default function StaffHomePage() {
       if (statusRawKeyword && !statusRaw.includes(statusRawKeyword)) return false;
       return true;
     });
-  }, [shipments, shipmentSearch]);
+  }, [shipments, shipmentSearch, shipmentGroup]);
+
+  // 按当前结果计数；刷新后失去的勾选项不参与导出，也不回退成「导出全部」（2026-09-05 复查：跟管理员端同一道）
+  const selectedResultShipments = useMemo(
+    () => filteredShipmentList.filter((s) => selectedForExport.has(s.trackingNo)),
+    [filteredShipmentList, selectedForExport],
+  );
+  const allResultShipmentsSelected = filteredShipmentList.length > 0 && selectedResultShipments.length === filteredShipmentList.length;
 
   /**
    * 运单列表：点击「搜索」后提示当前筛选条数并滚动至结果表格。
    */
   const runShipmentListSearch = () => {
     setToast(`共 ${filteredShipmentList.length} 条运单`);
-    document.getElementById("staff-shipment-list-table-wrap")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    document.getElementById("staff-shipment-list-table-wrap")?.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+      block: "nearest",
+    });
+  };
+
+  const copyShipmentNumber = async (number: string) => {
+    setCopyNotice("");
+    try {
+      await navigator.clipboard.writeText(number);
+      setCopyNotice(`已复制单号 ${number}`);
+    } catch {
+      setCopyNotice(`复制未完成，请手动选择并复制单号 ${number}`);
+    }
   };
 
   const orderCreateInputStyle = {
@@ -1156,7 +1191,7 @@ export default function StaffHomePage() {
   };
 
   const toggleSelectAll = () => {
-    if (selectedForExport.size === filteredShipmentList.length) {
+    if (allResultShipmentsSelected) {
       setSelectedForExport(new Set());
     } else {
       setSelectedForExport(new Set(filteredShipmentList.map((s) => s.trackingNo)));
@@ -1164,6 +1199,8 @@ export default function StaffHomePage() {
   };
 
   const totalPages = Math.max(1, Math.ceil(filteredShipmentList.length / pageSize));
+  // 列表刷新后变短（比如翻到第 5 页时改了一条状态、分组只剩 2 页），页码要跟着回夹，否则显示「第 5/2 页」空表。跟管理员端同一道。
+  useEffect(() => { setCurrentPage((page) => Math.min(page, totalPages)); }, [totalPages]);
   const pagedShipments = useMemo(() => {
     const offset = (currentPage - 1) * pageSize;
     return filteredShipmentList.slice(offset, offset + pageSize);
@@ -1172,18 +1209,17 @@ export default function StaffHomePage() {
   // 搜索条件变化时清空选中并重置页码
   useEffect(() => { setSelectedForExport(new Set()); setCurrentPage(1); }, [shipmentSearch]);
 
+  const [shipmentExportFeedback, setShipmentExportFeedback] = useState("");
   const [exportDateFrom, setExportDateFrom] = useState("");
   const [exportDateTo, setExportDateTo] = useState("");
 
   const exportShipmentsToExcel = async () => {
-    let source = selectedForExport.size > 0
-      ? filteredShipmentList.filter((s) => selectedForExport.has(s.trackingNo))
-      : filteredShipmentList;
-    if (source.length === 0) { setMessage("当前没有可导出的运单数据。"); return; }
+    let source = selectedForExport.size > 0 ? selectedResultShipments : filteredShipmentList;
+    if (source.length === 0) { setMessage("当前没有可导出的运单数据。"); setShipmentExportFeedback("当前没有可导出的运单数据。"); return; }
     // 日期筛选
     if (exportDateFrom) source = source.filter((s) => (s.shipDate ?? s.arrivedAt ?? "").slice(0,10) >= exportDateFrom);
     if (exportDateTo) source = source.filter((s) => (s.shipDate ?? s.arrivedAt ?? "").slice(0,10) <= exportDateTo);
-    if (source.length === 0) { setMessage("所选日期范围内没有运单。"); return; }
+    if (source.length === 0) { setMessage("所选日期范围内没有运单。"); setShipmentExportFeedback("所选日期范围内没有运单。"); return; }
     /* 2026-08-31（排查报告 24）：「计费体积」的低消原来写死海运 0.5 / 陆运 0.2，
        跟管理员「运费配置」里填的数对不上（配置默认陆运就是 0.3，改过就差更多）。
        改成导出前读一次配置（/admin/shipping/config，staff 也有权限）；
@@ -1223,19 +1259,33 @@ export default function StaffHomePage() {
     XLSX.utils.book_append_sheet(wb, ws, "运单列表");
     XLSX.writeFile(wb, `运单列表_${new Date().toISOString().slice(0,10)}.xlsx`);
     setToast(`已导出 ${rows.length} 条`);
+    setShipmentExportFeedback(`已导出 ${rows.length} 条`);
   };
 
-  // variant="a3" 只换外观（深藏青导航 + 细顶栏），不动任何排版。
-  // 外壳是三端共用的，所以做成开关：改好一个页面才给那个页面加上。
+  const exportDateInvalid = !!(exportDateFrom && exportDateTo && exportDateFrom > exportDateTo);
+  const handleShipmentExport = async () => {
+    // 同一轮渲染连续点击也只生成一次文件；不改原来的选中/日期取数规则。
+    if (exportInFlight.current || exportDateInvalid) return;
+    exportInFlight.current = true;
+    setExporting(true);
+    setShipmentExportFeedback("");
+    try {
+      await exportShipmentsToExcel();
+    } catch (error) {
+      setMessage(`导出失败：${error instanceof Error ? error.message : "请稍后重试"}`);
+      setShipmentExportFeedback(`导出失败：${error instanceof Error ? error.message : "请稍后重试"}`);
+    } finally {
+      exportInFlight.current = false;
+      setExporting(false);
+    }
+  };
+
   // ⚠️ allowedRole 必须带 admin。管理员菜单里的「整柜询价」指向 /staff#staff-fcl，
   // 这一页原来写死只准 staff，管理员一点就被弹回管理员工作台，等于按钮是死的。
   // 员工端另外三页（装柜管理、集货拼柜、集货拼柜仓库版）本来就是 ["staff","admin"]，
   // 后端那 37 个 /staff 接口也全是 ["staff","admin"] —— 只有这一页漏了（2026-08-11 修）。
   return (
     <RoleShell allowedRole={["staff", "admin"]} title="员工工作台" variant="a3">
-      <p style={{ color: "#4B5462", marginBottom: 16 }}>
-        员工可创建订单、查看运单列表中的订单信息（只读），并按状态流转规则更新物流状态；订单金额、付款及产品图（已审核订单）请在管理端维护。
-      </p>
 
       {/*
         2026-08-07 补回：a661165「运单不再涉及金额」那次清理，把这块「预报单审核」
@@ -1352,7 +1402,7 @@ export default function StaffHomePage() {
                 </select>
                 <input value={p.domesticTrackingNo || ""} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], domesticTrackingNo: e.target.value }; setStaffFormProducts(n); }} placeholder="货拉拉" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "3px 4px", fontSize: 11, minWidth: 0 }} />
                 <span style={{ fontSize: 10, color: prodVol > 0 ? "var(--c-blue)" : "var(--t-faint)", textAlign: "right", padding: "0 2px", whiteSpace: "nowrap" }}>{prodVol > 0 ? prodVol.toFixed(3) + "m³" : "—"}</span>
-                <span style={{ fontSize: 10, color: prodWt > 0 ? "var(--c-blue)" : "var(--t-faint)", textAlign: "right", padding: "0 2px", whiteSpace: "nowrap" }}>{prodWt > 0 ? prodWt.toFixed(1) + "kg" : "—"}</span>
+                <span style={{ fontSize: 10, color: prodWt > 0 ? "var(--c-blue)" : "var(--t-faint)", textAlign: "right", padding: "0 2px", whiteSpace: "nowrap" }}>{prodWt > 0 ? prodWt.toFixed(2) + "kg" : "—"}</span>
                 <button type="button" onClick={() => setStaffFormProducts((v) => v.filter((_, j) => j !== i))} style={{ border: "1px solid #fca5a5", borderRadius: 4, padding: "2px 4px", fontSize: 10, background: "var(--white)", color: "var(--c-red-2)", cursor: "pointer", minWidth: 20 }}>×</button>
               </div>
             );})}
@@ -1371,7 +1421,7 @@ export default function StaffHomePage() {
               }, 0);
               return (
                 <div style={{ fontSize: 12, fontWeight: 600, padding: "4px 0", color: "var(--c-blue)", textAlign: "right" }}>
-                  合计：总体积 {totalVol.toFixed(6)}m³  |  总重量 {totalWt.toFixed(2)}kg
+                  合计：总体积 {totalVol.toFixed(3)}m³  |  总重量 {totalWt.toFixed(2)}kg
                 </div>
               );
             })()}
@@ -1461,8 +1511,8 @@ export default function StaffHomePage() {
               <input value={sizeDraft.actualWeightKg} onChange={(e) => setSizeDraft((v) => ({ ...v, actualWeightKg: e.target.value }))} placeholder="实重(kg)" style={orderCreateInputStyle} />
             </div>
             <div style={{ marginTop: 6, fontSize: 13, color: "var(--c-green-deep)" }}>
-              体积重 = L×W×H/6000 = {volumetricWeightKg.toFixed(3)} kg；计费重 = Max(实重, 体积重) ={" "}
-              <strong>{chargeableWeightKg.toFixed(3)} kg</strong>
+              体积重 = L×W×H/6000 = {volumetricWeightKg.toFixed(2)} kg；计费重 = Max(实重, 体积重) ={" "}
+              <strong>{chargeableWeightKg.toFixed(2)} kg</strong>
             </div>
           </div>
 
@@ -1656,71 +1706,82 @@ export default function StaffHomePage() {
 
       <section
         id="staff-order-shipment"
-        style={{
-          display: activeSection === "staff-order-shipment" ? "block" : "none",
-          border: "1px solid var(--l-soft)",
-          borderLeft: "4px solid var(--l-strong)",
-          borderRadius: 12,
-          padding: 16,
-          background: "#F0F1F4",
-          boxShadow: "0 1px 3px rgba(15,23,42,0.06)",
-        }}
+        className="staff-shipment-workbench"
+        aria-labelledby="staff-shipment-heading"
+        style={{ display: activeSection === "staff-order-shipment" ? "block" : "none" }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10, gap: 12 }}>
-          <div style={{ flex: 1 }}>
-            <h2 style={{ margin: 0, fontSize: 18, color: "var(--t-heading)" }}>运单管理</h2>
-            <p style={{ margin: "6px 0 8px", fontSize: 12, color: "var(--t-strong)" }}>
-              表格展示运单号、用户、状态、加收金额、运输方式、发货时间、件重体、仓库与地址；点击「详情」打开运单详情与物流轨迹。
-            </p>
+        <div className="staff-shipment-heading">
+          <div>
+            <h2 id="staff-shipment-heading">运单管理</h2>
           </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 2, flexWrap: "wrap" }}>
-            <input type="date" value={exportDateFrom} onChange={e => setExportDateFrom(e.target.value)}
-              style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "6px 8px", fontSize: 12 }} title="导出日期从" />
-            <span style={{ fontSize: 12, color: "var(--t-faint)" }}>至</span>
-            <input type="date" value={exportDateTo} onChange={e => setExportDateTo(e.target.value)}
-              style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "6px 8px", fontSize: 12 }} title="导出日期到" />
-            <button type="button" onClick={() => void exportShipmentsToExcel()}
-              style={{ border: "1px solid var(--line)", borderRadius: 8, padding: "8px 16px", color: "var(--ink-2)", background: "var(--panel)", cursor: "pointer", fontWeight: 500, whiteSpace: "nowrap", fontSize: 14 }}>
-              导出Excel
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowCreateModal(true)}
-              style={{ border: "1px solid var(--brand)", borderRadius: 8, padding: "8px 16px", color: "var(--panel)", background: "var(--brand)", cursor: "pointer", fontWeight: 500, whiteSpace: "nowrap", fontSize: 14 }}
-            >
+          <div className="staff-shipment-primary-actions">
+            <button type="button" className="staff-workbench-button staff-workbench-button--primary" onClick={() => setShowCreateModal(true)}>
               创建订单
             </button>
-            <button
-              type="button"
-              onClick={() => setShowBatchImport(true)}
-              style={{ border: "1px solid var(--line)", borderRadius: 8, padding: "8px 16px", color: "var(--ink-2)", background: "var(--panel)", cursor: "pointer", fontWeight: 500, whiteSpace: "nowrap", fontSize: 14 }}
-            >
+            <button type="button" className="staff-workbench-button" onClick={() => setShowBatchImport(true)}>
               批量创建
             </button>
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <span style={{ fontSize: 13, color: "var(--t-heading)", fontWeight: 500 }}>
-              共 {filteredShipmentList.length} 条 · 第 {currentPage}/{totalPages} 页
-            </span>
-            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <button onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} disabled={currentPage <= 1} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 12px", background: currentPage <= 1 ? "var(--s-sunken)" : "var(--white)", color: currentPage <= 1 ? "var(--t-faint)" : "var(--t-heading)", cursor: currentPage <= 1 ? "default" : "pointer", fontSize: 13, fontWeight: 500 }}>上一页</button>
-              <button onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 12px", background: currentPage >= totalPages ? "var(--s-sunken)" : "var(--white)", color: currentPage >= totalPages ? "var(--t-faint)" : "var(--t-heading)", cursor: currentPage >= totalPages ? "default" : "pointer", fontSize: 13, fontWeight: 500 }}>下一页</button>
-              <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }} style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "4px 8px", fontSize: 13, color: "var(--t-heading)" }}>
-                {[20, 50, 100, 200].map((n) => <option key={n} value={n}>{n}条/页</option>)}
-              </select>
-            </div>
+        </div>
+        <ShipmentOverviewStrip data={shipmentOverview} />
+        <ShipmentStatusGroups
+          value={shipmentGroup}
+          onChange={(group) => {
+            setShipmentGroup(group);
+            setCurrentPage(1);
+            setSelectedForExport(new Set());
+          }}
+        />
+        <ShipmentSearch
+          variant="workbench"
+          value={shipmentSearch}
+          onChange={(key, val) => setShipmentSearch((prev) => ({ ...prev, [key]: val }))}
+          onSearch={runShipmentListSearch}
+          onReset={() => setShipmentSearch({ ...EMPTY_SHIPMENT_SEARCH })}
+          warehouseOptions={warehouseOptions}
+          logisticsStatusOptions={logisticsStatusOptions}
+          inputStyle={orderCreateInputStyle}
+        />
+        <div className="staff-shipment-results" id="staff-shipment-list-table-wrap">
+          <div className="staff-shipment-results-meta">
+            <span role="status" aria-live="polite">共 <strong>{filteredShipmentList.length}</strong> 条 · 第 {currentPage}/{totalPages} 页</span>
+            {selectedForExport.size > 0 && (
+              <span className="staff-shipment-selection">
+                已选 {selectedResultShipments.length} 条（含其他页）
+                {selectedForExport.size > selectedResultShipments.length && <span>另有 {selectedForExport.size - selectedResultShipments.length} 条已不在当前结果，不参与导出</span>}
+                <button type="button" onClick={() => setSelectedForExport(new Set())}>取消选择</button>
+              </span>
+            )}
+          </div>
+          <div className="shipment-results-actions">
+            <ShipmentExportPanel onOpen={() => setShipmentExportFeedback("")}>
+              <div className="staff-shipment-export" role="group" aria-label="导出 Excel">
+                <div className="staff-shipment-export-dates">
+                  <label>导出起始日期<input type="date" value={exportDateFrom} onChange={(e) => { setExportDateFrom(e.target.value); setShipmentExportFeedback(""); }} /></label>
+                  <span aria-hidden="true">—</span>
+                  <label>导出截止日期<input type="date" value={exportDateTo} onChange={(e) => { setExportDateTo(e.target.value); setShipmentExportFeedback(""); }} /></label>
+                </div>
+                <button type="button" className="staff-workbench-button" disabled={filteredShipmentList.length === 0 || (selectedForExport.size > 0 && selectedResultShipments.length === 0) || exporting || exportDateInvalid} aria-describedby="staff-export-note" onClick={() => void handleShipmentExport()}>{exporting ? "导出中…" : "导出 Excel"}</button>
+                <span className="staff-shipment-export-note" id="staff-export-note">{selectedForExport.size > 0 ? "仅导出当前结果中的已选运单，再按导出日期筛选" : "未勾选时导出全部筛选结果，再按导出日期筛选"}</span>
+              </div>
+              {exportDateInvalid && <p className="staff-shipment-export-error" role="alert">导出起始日期晚于截止日期，请调整日期范围。</p>}
+                <p role="status" aria-live="polite" aria-atomic="true" style={{ margin: shipmentExportFeedback ? "12px 0 0" : 0, fontSize: 13 }}>{shipmentExportFeedback}</p>
+            </ShipmentExportPanel>
+            <nav className="staff-shipment-pagination" aria-label="运单列表分页">
+              <button type="button" className="staff-workbench-button" onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} disabled={currentPage <= 1}>上一页</button>
+              <span className="staff-shipment-page-number" aria-hidden="true">{currentPage} / {totalPages}</span>
+              <button type="button" className="staff-workbench-button" onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages}>下一页</button>
+              <label className="staff-shipment-page-size">
+                <span className="staff-workbench-sr-only">每页条数</span>
+                <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}>
+                  {[20, 50, 100, 200].map((n) => <option key={n} value={n}>{n} 条/页</option>)}
+                </select>
+              </label>
+            </nav>
           </div>
         </div>
-        {/* ⚠️ 顶部数字和搜索条**必须放在标题那一行的外面**（2026-08-29 改）。
-            原来它们被塞在 `<div style={{flex:1}}>` 里面 —— 那是「标题 + 右侧按钮」
-            那个 space-between 弹性行的**左半边**，于是这两块只能用一半宽度：
-            四个数字被挤成 2×2，搜索框（运单号/国内单号/客户名/仓库）竖着排成一条，
-            右边空一大片。老板截图反馈「空太多了」说的就是这个。
-            挪出来之后它们吃满整行宽度，ShipmentSearch 里那个
-            `repeat(auto-fit, minmax(180px, 1fr))` 网格就会自己横着铺开。
-            ⚠️ 只动了位置，没改任何一个组件里面的东西。 */}
-        <ShipmentOverviewStrip data={shipmentOverview} />
-        <ShipmentSearch value={shipmentSearch} onChange={(key, val) => setShipmentSearch((prev) => ({ ...prev, [key]: val }))} onSearch={runShipmentListSearch} warehouseOptions={warehouseOptions} logisticsStatusOptions={logisticsStatusOptions} inputStyle={orderCreateInputStyle} />
+        <p className="staff-shipment-scroll-hint" id="staff-shipment-scroll-hint">宽表可左右滚动查看完整列；产品超过 3 项时，在产品明细区域上下滚动。</p>
+        <div className="staff-shipment-copy-notice" role="status" aria-live="polite" aria-atomic="true">{copyNotice}</div>
           <>
             {shipments.length === 0 ? (
               <EmptyStateCard title="暂无运单数据" description="先创建订单或等待系统分配运单后，这里会展示可操作记录。" />
@@ -1728,36 +1789,39 @@ export default function StaffHomePage() {
               <EmptyStateCard title="没有匹配结果" description="请调整搜索条件后重试。" />
             ) : (
               <div
-                className="table-card"
-                style={{ overflowX: "auto", border: "1px solid var(--line)", borderRadius: "var(--a3-radius-lg)", background: "var(--panel)" }}
+                className="table-card staff-shipment-table-scroll"
+                tabIndex={0}
+                role="region"
+                aria-label="运单列表，可横向与纵向滚动"
+                aria-describedby="staff-shipment-scroll-hint"
               >
                 {/* a3-table 只换外观（表头颜色、发丝分隔线、行 hover），**列和顺序一个不动**。
                     ⚠️ 表头/单元格用的 gridThStyle / gridTdStyle 是三端共用的行内样式，
                     不能直接改（改了管理员端和客户端一起变），所以在 globals.css 里
                     用 .a3-table 覆盖，行内样式优先级高，那边必须写 !important。 */}
-                <table className="a3-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed", minWidth: SHIPMENT_TABLE_MIN_WIDTH }}>
+                <table className="a3-table shipment-ledger-table shipment-ledger-table--staff" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed", minWidth: SHIPMENT_TABLE_MIN_WIDTH }}>
                   <GridColgroup widths={SHIPMENT_COL_WIDTHS} flexIndex={SHIPMENT_FLEX_COL_INDEX} />
                   <thead>
                     <tr style={{ background: "var(--s-cool-2)", textAlign: "left", borderBottom: "2px solid var(--l-cool)" }}>
                       {/* 货型跟着产品走，必须紧挨着国内单号，才能和上面 5 列绑成同一块一起滚 */}
-                      <th style={gridThStyle}>
-                        <input type="checkbox" checked={selectedForExport.size === filteredShipmentList.length && filteredShipmentList.length > 0} onChange={toggleSelectAll} style={{ cursor: "pointer" }} />
+                      <th className="shipment-pin shipment-pin--check" scope="col" style={gridThStyle}>
+                        <input type="checkbox" aria-label="选择全部筛选结果（包含其他页）" title="选择全部筛选结果，不限当前页" ref={(node) => { if (node) node.indeterminate = selectedResultShipments.length > 0 && !allResultShipmentsSelected; }} checked={allResultShipmentsSelected} onChange={toggleSelectAll} style={{ cursor: "pointer" }} />
                       </th>
-                      <th style={gridThStyle}>唛头</th>
-                      <th style={gridThStyle}>运单号</th>
-                      <th style={gridThStyle}>品名</th>
-                      <th style={gridThStyle}>箱数</th>
-                      <th style={gridThStyle}>单箱数量</th>
-                      <th style={gridThStyle}>长宽高(cm)</th>
-                      <th style={gridThStyle}>国内单号</th>
-                      <th style={gridThStyle}>货型</th>
-                      <th style={gridThStyle}>总箱数</th>
-                      <th style={gridThStyle}>体积</th>
-                      <th style={gridThStyle}>重量</th>
-                      <th style={gridThStyle}>运输方式</th>
-                      <th style={gridThStyle}>到仓日期</th>
-                      <th style={gridThStyle}>备注</th>
-                      <th style={gridThStyle}>操作</th>
+                      <th className="shipment-pin shipment-pin--mark" scope="col" style={gridThStyle}>唛头</th>
+                      <th className="shipment-pin shipment-pin--number" scope="col" style={gridThStyle}>运单号</th>
+                      <th scope="col" style={gridThStyle}>品名</th>
+                      <th scope="col" style={gridThStyle}>箱数</th>
+                      <th scope="col" style={gridThStyle}>单箱数量</th>
+                      <th scope="col" style={gridThStyle}>长宽高(cm)</th>
+                      <th scope="col" style={gridThStyle}>国内单号</th>
+                      <th scope="col" style={gridThStyle}>货型</th>
+                      <th scope="col" style={gridThStyle}>总箱数</th>
+                      <th scope="col" className="shipment-metric" style={gridThStyle}>体积（m³）</th>
+                      <th scope="col" className="shipment-metric" style={gridThStyle}>重量（kg）</th>
+                      <th scope="col" style={gridThStyle}>运输方式</th>
+                      <th scope="col" style={gridThStyle}>到仓日期</th>
+                      <th scope="col" style={gridThStyle}>备注</th>
+                      <th scope="col" style={gridThStyle}>操作</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1765,15 +1829,17 @@ export default function StaffHomePage() {
                       const detailRows = buildProductDetailRows(item);
                       return (
                       <Fragment key={item.id}>
-                        <tr style={{ borderBottom: "1px solid var(--l-cool)", background: shipmentTableExpandedId === item.id ? "var(--c-blue-bg)" : "var(--white)" }}>
-                          <td style={gridTdStyle}>
-                            <input type="checkbox" checked={selectedForExport.has(item.trackingNo)} onChange={() => toggleSelectShipment(item.trackingNo)} style={{ cursor: "pointer" }} />
+                        <tr data-selected={selectedForExport.has(item.trackingNo) || undefined} style={{ borderBottom: "1px solid var(--l-cool)", background: shipmentTableExpandedId === item.id ? "var(--c-blue-bg)" : "var(--white)" }}>
+                          <td className="shipment-pin shipment-pin--check" style={gridTdStyle}>
+                            <input type="checkbox" aria-label={`选择运单 ${item.trackingNo}`} checked={selectedForExport.has(item.trackingNo)} onChange={() => toggleSelectShipment(item.trackingNo)} style={{ cursor: "pointer" }} />
                           </td>
-                          <td style={{ ...gridTdStyle, fontWeight: 600, color: "#14171D", fontFamily: "monospace", fontSize: 12 }}>{item.clientId ?? "—"}</td>
-                          <td style={gridTdStyle}>
-                            <div style={{ fontWeight: 600, color: "var(--c-navy)" }}>{item.orderNo || item.trackingNo}</div>
+                          <td className="shipment-pin shipment-pin--mark" style={{ ...gridTdStyle, fontWeight: 600, color: "#14171D", fontFamily: "monospace", fontSize: 12 }}>{item.clientId ?? "—"}</td>
+                          <td className="shipment-pin shipment-pin--number" style={gridTdStyle}>
+                            <button type="button" className="staff-shipment-copy" title={`点击复制：${item.orderNo || item.trackingNo}`} aria-label={`复制单号 ${item.orderNo || item.trackingNo}`} onClick={() => void copyShipmentNumber(item.orderNo || item.trackingNo)}>
+                              {item.orderNo || item.trackingNo}
+                            </button>
                             {/* 明细块只露 3 行，这里写清楚一共几项，免得员工不知道下面还有货 */}
-                            <div style={{ fontSize: 11, color: "#8B94A3", marginTop: 3 }}>共 {detailRows.length} 项</div>
+                            <div className="staff-shipment-product-count">共 {detailRows.length} 项</div>
                           </td>
                           {/* 品名 / 箱数 / 单箱数量 / 长宽高 / 国内单号 / 货型：合并成一块，固定高度一起滚 */}
                           <ProductDetailCell widths={PRODUCT_DETAIL_COL_WIDTHS} rows={detailRows} />
@@ -1784,8 +1850,8 @@ export default function StaffHomePage() {
                               return total != null ? `${total} 箱` : "—";
                             })()}
                           </td>
-                          <td style={gridTdStyle}>{formatMetric(totalVolumeOf(item), 6)}</td>
-                          <td style={gridTdStyle}>{formatMetric(totalWeightOf(item), 2)}</td>
+                          <td style={gridTdStyle} className="shipment-metric">{formatMetric(totalVolumeOf(item), 3)}</td>
+                          <td style={gridTdStyle} className="shipment-metric">{formatMetric(totalWeightOf(item), 2)}</td>
                           <td style={gridTdStyle}>{transportModeLabel(item.transportMode)}</td>
                           <td style={{ ...gridTdStyle, color: "var(--t-strong)" }}>
                             {item.shipDate ?? formatDateTime(item.arrivedAt)}
@@ -2340,8 +2406,8 @@ export default function StaffHomePage() {
               <div>品名：{prealertEditDrafts[approvingPrealert.id]?.itemName ?? approvingPrealert.itemName}</div>
               <div>件数：{prealertEditDrafts[approvingPrealert.id]?.packageCount ?? approvingPrealert.packageCount} {prealertEditDrafts[approvingPrealert.id]?.packageUnit ?? approvingPrealert.packageUnit}</div>
               <div>产品数量：{prealertEditDrafts[approvingPrealert.id]?.productQuantity ?? approvingPrealert.productQuantity}</div>
-              <div>重量：{prealertEditDrafts[approvingPrealert.id]?.weightKg ?? approvingPrealert.weightKg ?? "-"} kg</div>
-              <div>体积：{prealertEditDrafts[approvingPrealert.id]?.volumeM3 ?? approvingPrealert.volumeM3 ?? "-"} m³</div>
+              <div>重量：{formatMetric(prealertEditDrafts[approvingPrealert.id]?.weightKg ?? approvingPrealert.weightKg, 2)} kg</div>
+              <div>体积：{formatMetric(prealertEditDrafts[approvingPrealert.id]?.volumeM3 ?? approvingPrealert.volumeM3, 3)} m³</div>
               <div>国内单号：{prealertEditDrafts[approvingPrealert.id]?.domesticTrackingNo ?? approvingPrealert.domesticTrackingNo ?? "-"}</div>
               <div>运输方式：{(prealertEditDrafts[approvingPrealert.id]?.transportMode ?? approvingPrealert.transportMode) === "sea" ? "海运" : "陆运"}</div>
               <div>发货日期：{prealertEditDrafts[approvingPrealert.id]?.shipDate ?? approvingPrealert.shipDate ?? approvingPrealert.createdAt.slice(0, 10)}</div>
@@ -2465,7 +2531,7 @@ export default function StaffHomePage() {
                     </select>
                     <input value={p.domesticTrackingNo || ""} onChange={(e) => { const n = [...staffFormProducts]; n[i] = { ...n[i], domesticTrackingNo: e.target.value }; setStaffFormProducts(n); }} placeholder="货拉拉" style={{ border: "1px solid var(--l-strong)", borderRadius: 4, padding: "3px 4px", fontSize: 11, minWidth: 0 }} />
                     <span style={{ fontSize: 10, color: prodVol > 0 ? "var(--c-blue)" : "var(--t-faint)", textAlign: "right", padding: "0 2px", whiteSpace: "nowrap" }}>{prodVol > 0 ? prodVol.toFixed(3) + "m³" : "—"}</span>
-                    <span style={{ fontSize: 10, color: prodWt > 0 ? "var(--c-blue)" : "var(--t-faint)", textAlign: "right", padding: "0 2px", whiteSpace: "nowrap" }}>{prodWt > 0 ? prodWt.toFixed(1) + "kg" : "—"}</span>
+                    <span style={{ fontSize: 10, color: prodWt > 0 ? "var(--c-blue)" : "var(--t-faint)", textAlign: "right", padding: "0 2px", whiteSpace: "nowrap" }}>{prodWt > 0 ? prodWt.toFixed(2) + "kg" : "—"}</span>
                     <button type="button" onClick={() => setStaffFormProducts((v) => v.filter((_, j) => j !== i))} style={{ border: "1px solid #fca5a5", borderRadius: 4, padding: "2px 4px", fontSize: 10, background: "var(--white)", color: "var(--c-red-2)", cursor: "pointer", minWidth: 20 }}>×</button>
                   </div>
                 );})}
@@ -2484,7 +2550,7 @@ export default function StaffHomePage() {
                   }, 0);
                   return (
                     <div style={{ fontSize: 12, fontWeight: 600, padding: "4px 0", color: "var(--c-blue)", textAlign: "right" }}>
-                      合计：总体积 {totalVol.toFixed(6)}m³  |  总重量 {totalWt.toFixed(2)}kg
+                      合计：总体积 {totalVol.toFixed(3)}m³  |  总重量 {totalWt.toFixed(2)}kg
                     </div>
                   );
                 })()}
@@ -2581,7 +2647,7 @@ export default function StaffHomePage() {
             <p style={{ fontSize: 13, color: "var(--t-strong)", margin: "0 0 12px" }}>
               Excel 每行填写一种产品或尺寸；相同运单号会合并成一张运单。建议先下载模板查看填写说明。
             </p>
-            {batchFileName && (
+            {batchFileName && !batchFileReading && (
               <div style={{ marginBottom: 12, padding: "10px 14px", background: "var(--white)", border: "1px solid var(--l-soft)", borderRadius: 8, fontSize: 14, color: "var(--t-strong)" }}>
                 已上传: <strong>{batchFileName}</strong> — 读取 <strong>{batchSourceRowCount}</strong> 行，合并为 <strong>{batchRows.length}</strong> 个运单
                 {batchRows.length === 0 && <span style={{ color: "var(--c-red-2)", marginLeft: 8 }}>无有效数据，请检查模板格式</span>}
@@ -2597,6 +2663,13 @@ export default function StaffHomePage() {
                 <input type="file" accept=".xlsx,.xls" disabled={batchLoading} style={{ display: "none" }} onChange={async (e) => {
                   const file = e.target.files?.[0];
                   if (!file) return;
+                  e.currentTarget.value = "";
+                  const readTicket = batchReadGate.begin();
+                  setBatchFileReading(true);
+                  setBatchRows([]);
+                  setBatchSourceRowCount(0);
+                  setBatchErrors([]);
+                  setBatchProgress({ current: 0, success: 0, fail: 0 });
                   setBatchFileName(file.name);
                   setBatchConfirmed(false);
                   setBatchDoneNos(new Set());   // 换文件了，重新记
@@ -2608,11 +2681,12 @@ export default function StaffHomePage() {
                   if (file.size > BATCH_MAX_FILE_BYTES) {
                     setBatchRows([]); setBatchSourceRowCount(0); setBatchProgress({ current: 0, success: 0, fail: 0 });
                     setBatchErrors([`文件 ${(file.size / 1024 / 1024).toFixed(1)}MB，超过 ${BATCH_MAX_FILE_MB}MB 上限。请拆成几份分批上传。`]);
-                    e.target.value = "";
+                    setBatchFileReading(false);
                     return;
                   }
                   try {
                     const buf = await file.arrayBuffer();
+                    if (!batchReadGate.isCurrent(readTicket)) return;
                     const wb = XLSX.read(buf, { type: "array" });
                     const ws = wb.Sheets[wb.SheetNames[0]];
                     /**
@@ -2645,7 +2719,7 @@ export default function StaffHomePage() {
                     if (filledRowCount > BATCH_MAX_ROWS) {
                       setBatchRows([]); setBatchSourceRowCount(0); setBatchProgress({ current: 0, success: 0, fail: 0 });
                       setBatchErrors([`这份表有 ${filledRowCount} 行数据，超过 ${BATCH_MAX_ROWS} 行上限。请拆成几份分批上传。`]);
-                      e.target.value = "";
+
                       return;
                     }
                     const parsed = parseStaffBatchRows(raw);
@@ -2664,14 +2738,17 @@ export default function StaffHomePage() {
                     }));
                     setBatchProgress({ current: 0, success: 0, fail: 0 });
                   } catch {
+                    if (!batchReadGate.isCurrent(readTicket)) return;
                     setBatchRows([]);
                     setBatchSourceRowCount(0);
                     setBatchErrors(["Excel 解析失败，请使用系统模板并检查文件内容"]);
+                  } finally {
+                    if (batchReadGate.isCurrent(readTicket)) setBatchFileReading(false);
                   }
-                  e.target.value = "";
                 }} />
               </label>
-              {!batchConfirmed && batchRows.length > 0 && batchErrors.length === 0 && !batchLoading && batchProgress.current === 0 && (
+              {batchFileReading && <p role="status" style={{ fontSize: 13 }}>正在读取 {batchFileName}，读取完成后再确认创建。</p>}
+              {!batchFileReading && !batchConfirmed && batchRows.length > 0 && batchErrors.length === 0 && !batchLoading && batchProgress.current === 0 && (
                 <button type="button" onClick={() => { setBatchConfirmed(true); void submitStaffBatch(); }} style={{ border: "none", borderRadius: 8, padding: "8px 16px", background: "var(--c-blue)", color: "var(--white)", cursor: "pointer", fontWeight: 600, fontSize: 14 }}>
                   确认创建 {batchRows.length} 个运单
                 </button>
@@ -2794,7 +2871,7 @@ export default function StaffHomePage() {
                 type="button"
                 disabled={batchLoading}
                 title={batchLoading ? "正在创建，关掉也不会停下来，请等它跑完" : undefined}
-                onClick={() => { setShowBatchImport(false); setBatchRows([]); setBatchSourceRowCount(0); setBatchErrors([]); setBatchProgress({ current: 0, success: 0, fail: 0 }); setBatchFileName(""); setBatchConfirmed(false); }}
+                onClick={() => { batchReadGate.cancel(); setBatchFileReading(false); setShowBatchImport(false); setBatchRows([]); setBatchSourceRowCount(0); setBatchErrors([]); setBatchProgress({ current: 0, success: 0, fail: 0 }); setBatchFileName(""); setBatchConfirmed(false); }}
                 style={{ border: "1px solid var(--l-strong)", borderRadius: 6, padding: "8px 16px", fontSize: 13, background: "var(--white)", cursor: batchLoading ? "not-allowed" : "pointer", color: batchLoading ? "var(--t-faint)" : "var(--t-strong)" }}
               >{batchLoading ? "创建中，请勿关闭" : "关闭"}</button>
             </div>

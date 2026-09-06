@@ -21,15 +21,12 @@ export interface MenuGroup {
 export const roleMenus: Record<AuthRole, MenuItem[]> = {
   client: [
     { id: "client-home", label: "客户端工作台", href: "/client" },
-    { id: "client-orders", label: "我的订单", href: "/client" },
   ],
   staff: [
     { id: "staff-home", label: "员工工作台", href: "/staff" },
-    { id: "staff-shipments", label: "运单处理", href: "/staff" },
   ],
   admin: [
     { id: "admin-home", label: "管理员工作台", href: "/admin" },
-    { id: "admin-config", label: "配置与看板", href: "/admin" },
   ],
 };
 

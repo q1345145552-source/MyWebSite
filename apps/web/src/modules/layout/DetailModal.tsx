@@ -1,6 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
+
+// 详情之间可能叠加打开；只有最上层接管键盘，最后一个关闭后才恢复页面滚动。
+const openPanels: HTMLDivElement[] = [];
+let previousBodyOverflow = "";
+
+function focusableElements(panel: HTMLElement): HTMLElement[] {
+  return Array.from(panel.querySelectorAll<HTMLElement>(
+    'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+  )).filter((element) => element.tabIndex >= 0 && !element.matches(":disabled") && !element.closest('[inert]') && element.getClientRects().length > 0 && getComputedStyle(element).visibility !== "hidden");
+}
 
 /**
  * 全屏详情弹窗。
@@ -20,6 +30,9 @@ export default function DetailModal(props: {
 }) {
   const { title, subtitle, onClose, closeOnEsc = true, children } = props;
   const [closing, setClosing] = useState(false);
+  const titleId = useId();
+  const subtitleId = useId();
+  const panelRef = useRef<HTMLDivElement>(null);
   const closedRef = useRef(false);
   const closeTimerRef = useRef<number | null>(null);
 
@@ -33,16 +46,64 @@ export default function DetailModal(props: {
   }, [onClose]);
 
   useEffect(() => {
-    const prevOverflow = document.body.style.overflow;
+    const panel = panelRef.current;
+    if (!panel) return;
+    const returnTarget = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (openPanels.length === 0) previousBodyOverflow = document.body.style.overflow;
+    openPanels.push(panel);
     document.body.style.overflow = "hidden";
-    const onKey = (e: KeyboardEvent) => {
-      if (closeOnEsc && e.key === "Escape") requestClose();
+    const focusFrame = window.requestAnimationFrame(() => {
+      if (openPanels[openPanels.length - 1] === panel) {
+        (focusableElements(panel)[0] ?? panel).focus({ preventScroll: true });
+      }
+    });
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      const wasTop = openPanels[openPanels.length - 1] === panel;
+      const index = openPanels.indexOf(panel);
+      if (index !== -1) openPanels.splice(index, 1);
+      if (openPanels.length === 0) document.body.style.overflow = previousBodyOverflow;
+      if (wasTop) {
+        if (returnTarget?.isConnected && returnTarget.getClientRects().length > 0) {
+          returnTarget.focus({ preventScroll: true });
+        } else {
+          const nextPanel = openPanels[openPanels.length - 1];
+          if (nextPanel) (focusableElements(nextPanel)[0] ?? nextPanel).focus({ preventScroll: true });
+        }
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const panel = panelRef.current;
+      if (!panel || openPanels[openPanels.length - 1] !== panel || event.defaultPrevented) return;
+      if (event.key === "Escape" && !event.isComposing && event.keyCode !== 229) {
+        // 填表类 closeOnEsc=false 仍然保留输入，不让 Escape 落到下层窗口。
+        event.stopImmediatePropagation();
+        if (closeOnEsc) {
+          event.preventDefault();
+          requestClose();
+        }
+      }
+      if (event.key !== "Tab") return;
+      const controls = focusableElements(panel);
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      const active = document.activeElement;
+      if (!first || !last) {
+        event.preventDefault();
+        panel.focus({ preventScroll: true });
+      } else if (event.shiftKey && (active === first || active === panel || !panel.contains(active))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (active === last || active === panel || !panel.contains(active))) {
+        event.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prevOverflow;
-    };
+    return () => window.removeEventListener("keydown", onKey);
   }, [closeOnEsc, requestClose]);
 
   // 【审查问题 8】关闭动画的定时器原来没人清：
@@ -59,17 +120,25 @@ export default function DetailModal(props: {
 
   return (
     <div className={`detail-overlay${closing ? " is-closing" : ""}`}>
-      <div className="detail-panel">
+      <div
+        ref={panelRef}
+        className="detail-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={subtitle ? subtitleId : undefined}
+        tabIndex={-1}
+      >
         <div className="detail-head">
           <div>
-            <div className="detail-title">{title}</div>
-            {subtitle ? <div className="detail-sub">{subtitle}</div> : null}
+            <div id={titleId} className="detail-title">{title}</div>
+            {subtitle ? <div id={subtitleId} className="detail-sub">{subtitle}</div> : null}
           </div>
           <button type="button" className="detail-close" onClick={requestClose} aria-label="关闭">
             ✕
           </button>
         </div>
-        <div style={{ padding: "18px 24px 28px" }}>{children}</div>
+        <div className="detail-body">{children}</div>
       </div>
     </div>
   );
